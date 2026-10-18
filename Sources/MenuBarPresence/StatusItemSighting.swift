@@ -6,13 +6,18 @@
 /// included. One kept out never reads visible: macOS 26 parks it off screen while the row it
 /// is filed under is off in System Settings > Menu Bar, and Bartender 5 parks the items it
 /// hides the same way. A shown item also never reads visible while nobody can see the menu
-/// bar at all, which `MenuBarUnseen` names so it is not taken for a hidden icon.
-public struct StatusItemSighting: Equatable, Sendable {
+/// bar at all, which `MenuBarUnseen` names so it is not taken for a hidden icon, nor in the
+/// moments after the menu bar comes back into view, which `placing` allows for.
+public struct StatusItemSighting: Sendable {
     /// How long a new status item is given to come on screen before it is judged. Twenty-five
     /// times the slowest placing measured, for a launch at login on a busy Mac.
     /// [LAW:no-ambient-temporal-coupling] A stated deadline the verdict is taken at, not a
     /// delay waiting for something to settle: nothing seen after it changes the verdict.
     public static let deadline: Duration = .seconds(10)
+    /// How long before the deadline the menu bar is read as well as at it, so an icon never
+    /// seen is judged hidden only when the menu bar was in view that long. Five times the
+    /// slowest placing measured.
+    public static let placing: Duration = .seconds(2)
 
     /// When the item was made, which every reading is timed from.
     public let made: ContinuousClock.Instant
@@ -29,11 +34,11 @@ public struct StatusItemSighting: Equatable, Sendable {
         shownAfter = moment - made
     }
 
-    /// - Parameter menuBarUnseen: why nobody could see the menu bar at the deadline, or nil
-    ///   when it was in view.
-    public func verdict(menuBarUnseen: MenuBarUnseen?) -> Verdict {
+    /// - Parameter menuBar: the readings of the menu bar taken `placing` before the deadline
+    ///   and at it, each why nobody could see it, or nil when it was in view.
+    public func verdict(menuBar: [MenuBarUnseen?]) -> Verdict {
         if let shownAfter { return .shown(after: shownAfter) }
-        if let menuBarUnseen { return .unjudged(menuBarUnseen) }
+        if let why = menuBar.compactMap({ $0 }).last { return .unjudged(why) }
         return .hidden
     }
 

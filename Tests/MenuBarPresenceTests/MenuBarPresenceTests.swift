@@ -65,18 +65,22 @@ import Testing
         sighting.saw(onScreen: true, at: made + .milliseconds(390))
         sighting.saw(onScreen: false, at: made + .milliseconds(1100))
         sighting.saw(onScreen: true, at: made + .milliseconds(3300))
-        #expect(sighting.verdict(menuBarUnseen: nil) == .shown(after: .milliseconds(390)))
-        #expect(sighting.verdict(menuBarUnseen: .screenLocked) == .shown(after: .milliseconds(390)))
-        #expect(sighting.verdict(menuBarUnseen: nil).description == "icon shown 390 ms after it was made")
+        #expect(sighting.verdict(menuBar: [nil, nil]) == .shown(after: .milliseconds(390)))
+        #expect(sighting.verdict(menuBar: [.screenLocked, .screenLocked]) == .shown(after: .milliseconds(390)))
+        #expect(sighting.verdict(menuBar: [nil, nil]).description == "icon shown 390 ms after it was made")
     }
 
-    @Test func anIconNeverOnScreenIsHiddenOnlyWhileTheMenuBarIsInView() {
+    @Test func anIconNeverOnScreenIsHiddenOnlyWhileTheMenuBarWasInViewThroughTheLastStretch() {
         var sighting = StatusItemSighting(made: made)
         sighting.saw(onScreen: false, at: made + .milliseconds(10))
-        #expect(sighting.verdict(menuBarUnseen: nil) == .hidden)
+        #expect(sighting.verdict(menuBar: [nil, nil]) == .hidden)
         #expect(StatusItemSighting.Verdict.hidden.description == "icon not shown in the 10 s after it was made, while the menu bar was in view")
         let unseen: [MenuBarUnseen] = [.sessionNotOnConsole, .screenLocked, .displayAsleep, .menuBarHidden]
-        for why in unseen { #expect(sighting.verdict(menuBarUnseen: why) == .unjudged(why)) }
+        for why in unseen { #expect(sighting.verdict(menuBar: [nil, why]) == .unjudged(why)) }
+        // Out of view at the start of the last stretch and in view at the deadline: the
+        // icon may still have been coming on screen.
+        #expect(sighting.verdict(menuBar: [.screenLocked, nil]) == .unjudged(.screenLocked))
+        #expect(sighting.verdict(menuBar: [.screenLocked, .displayAsleep]) == .unjudged(.displayAsleep))
         #expect(StatusItemSighting.Verdict.unjudged(.displayAsleep).description == "icon not shown in the 10 s after it was made, but the display was asleep, so it was not judged")
     }
 }

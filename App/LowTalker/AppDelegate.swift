@@ -500,15 +500,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // stack, so the main actor's work and the quit's reply would wait on the person
         // (measured 2026-10-18: a SIGTERM under the alert hung the quit). The run loop serves
         // the main queue inside a modal it is called out from. [LAW:no-ambient-temporal-coupling]
-        RunLoop.main.add(Timer(timeInterval: StatusItemSighting.deadline / .seconds(1), repeats: false) { _ in
-            MainActor.assumeIsolated {
+        after(StatusItemSighting.deadline - StatusItemSighting.placing) {
+            let early = MenuBarUnseen.now()
+            self.after(StatusItemSighting.placing) {
                 NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
                 // A last reading of whatever window holds the button now, in case a change was
                 // never posted.
                 self.sawStatusItem()
-                self.judge(self.sighting.verdict(menuBarUnseen: .now()))
+                self.judge(self.sighting.verdict(menuBar: [early, .now()]))
             }
-        }, forMode: .common)
+        }
+    }
+
+    private func after(_ delay: Duration, _ work: @escaping @MainActor () -> Void) {
+        RunLoop.main.add(Timer(timeInterval: delay / .seconds(1), repeats: false) { _ in MainActor.assumeIsolated(work) }, forMode: .common)
     }
 
     @objc private func sawStatusItem() {
