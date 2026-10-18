@@ -86,6 +86,10 @@ targets:
       # guided setup walks. One list, two views. [LAW:one-source-of-truth]
       - package: low-talker
         product: Onboarding
+      # Whether the app's icon is in the menu bar as its own: main.swift hands a launch a
+      # terminal made to LaunchServices, and the delegate says when the icon never showed.
+      - package: low-talker
+        product: MenuBarPresence
       - package: low-talker
         product: Signals
       - package: low-talker

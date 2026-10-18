@@ -7,6 +7,7 @@ import Grants
 import InputSource
 import Insertion
 import LowTalkerCore
+import MenuBarPresence
 import Onboarding
 import ServiceManagement
 import Serve
@@ -113,12 +114,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// cannot run while another main-queue block is still on the stack. A handler that
     /// called `terminate` itself would hang the app it was trying to end. Every other way
     /// in reaches `terminate` from the run loop, and so does this - in the common modes,
-    /// so an open menu is not a signal ignored. [LAW:no-ambient-temporal-coupling]
+    /// so an open menu or alert is not a signal ignored, and with the run loop woken, since
+    /// a performed block waits for the loop's next wake (CFRunLoopPerformBlock) and an idle
+    /// alert has nothing else to wake it. [LAW:no-ambient-temporal-coupling]
     ///
     /// Held from the moment the delegate exists, which is before the run loop starts: a
     /// signal arriving in that window is answered as the first thing the running app does.
     private let signals = SignalWatch { _ in
         RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     /// The engine, from the moment launch starts loading it. Awaiting the task is how
@@ -476,11 +480,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // MARK: - whether the icon is in the menu bar
+
+    /// What has been seen of the status item since it was made, judged once at
+    /// `StatusItemSighting.deadline`. Lazy so it is timed from its first reading, which
+    /// `watchStatusItem` takes as the item is made.
+    private lazy var sighting = StatusItemSighting(made: .now)
+    private let menuBarLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "menubar")
+
+    /// Reads the status item's window now and at every change of what of it is on screen, and
+    /// at the deadline says how it went: in the log every time, and to the person when macOS
+    /// is not showing the icon at all, since the icon is the app's only way in and an app
+    /// running with none shows no sign of running. [LAW:no-silent-failure] [LAW:nothing-unseen]
+    private func watchStatusItem() {
+        sawStatusItem()
+        NotificationCenter.default.addObserver(self, selector: #selector(sawStatusItem), name: NSWindow.didChangeOcclusionStateNotification, object: statusItem.button!.window!)
+        // A run loop timer and not a sleeping Task, because the judging can raise a modal
+        // alert: a Task runs as a main-queue block, and none other runs while it is on the
+        // stack, so the main actor's work and the quit's reply would wait on the person
+        // (measured 2026-10-18: a SIGTERM under the alert hung the quit). The run loop serves
+        // the main queue inside a modal it is called out from. [LAW:no-ambient-temporal-coupling]
+        after(StatusItemSighting.deadline - StatusItemSighting.placing) {
+            let early = MenuBarUnseen.now()
+            self.after(StatusItemSighting.placing) {
+                NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+                // A last reading of whatever window holds the button now, in case a change was
+                // never posted.
+                self.sawStatusItem()
+                self.judge(self.sighting.verdict(menuBar: [early, .now()]))
+            }
+        }
+    }
+
+    private func after(_ delay: Duration, _ work: @escaping @MainActor () -> Void) {
+        RunLoop.main.add(Timer(timeInterval: delay / .seconds(1), repeats: false) { _ in MainActor.assumeIsolated(work) }, forMode: .common)
+    }
+
+    @objc private func sawStatusItem() {
+        sighting.saw(onScreen: statusItem.button!.window!.occlusionState.contains(.visible), at: .now)
+    }
+
+    private func judge(_ verdict: StatusItemSighting.Verdict) {
+        let notice = HiddenIconNotice.forThisMac()
+        // Where the window stands, which is where a hidden one is parked.
+        let seen = "\(verdict), its window at \(NSStringFromRect(statusItem.button!.window!.frame))"
+        guard verdict == .hidden else {
+            menuBarLog.notice("menu bar: \(seen, privacy: .public)")
+            return
+        }
+        // Asking whether to keep running means nothing to an app already on its way out.
+        guard !quitting else {
+            menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as \(AppIdentity.displayName, privacy: .public) is quitting")
+            return
+        }
+        guard !notice.silenced else {
+            menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as the person asked")
+            return
+        }
+        menuBarLog.notice("menu bar: \(seen, privacy: .public); told the person")
+        let alert = NSAlert()
+        alert.messageText = notice.title
+        alert.informativeText = notice.body
+        for answer in notice.answers { alert.addButton(withTitle: answer.title) }
+        alert.showsSuppressionButton = true
+        NSApp.activate()
+        let response = alert.runModal()
+        if alert.suppressionButton!.state == .on { notice.silence() }
+        let silenced = notice.silenced ? ", and not to be told again" : ""
+        guard let chosen = notice.answer(to: response) else {
+            menuBarLog.error("menu bar: the alert ended with response \(response.rawValue) before the person chose\(silenced, privacy: .public)")
+            return
+        }
+        menuBarLog.notice("menu bar: the person chose \(chosen.title, privacy: .public)\(silenced, privacy: .public)")
+        switch chosen {
+        case .openMenuBarSettings(let settings):
+            if !NSWorkspace.shared.open(settings) { menuBarLog.error("menu bar: System Settings did not open \(settings, privacy: .public)") }
+        case .keepRunning: break
+        case .quit: NSApp.terminate(nil)
+        }
+    }
+
     // MARK: - launch and quit
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         show(.preparing(nil, since: launched))
         statusItem.isVisible = true
+        watchStatusItem()
         _ = engine
         // Listening from launch when the person last chose to, answering 503 until the model
         // is resident, so a client started beside the app is told to wait rather than refused.
