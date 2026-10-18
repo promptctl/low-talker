@@ -114,12 +114,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// cannot run while another main-queue block is still on the stack. A handler that
     /// called `terminate` itself would hang the app it was trying to end. Every other way
     /// in reaches `terminate` from the run loop, and so does this - in the common modes,
-    /// so an open menu is not a signal ignored. [LAW:no-ambient-temporal-coupling]
+    /// so an open menu or alert is not a signal ignored, and with the run loop woken, since
+    /// a performed block waits for the loop's next wake (CFRunLoopPerformBlock) and an idle
+    /// alert has nothing else to wake it. [LAW:no-ambient-temporal-coupling]
     ///
     /// Held from the moment the delegate exists, which is before the run loop starts: a
     /// signal arriving in that window is answered as the first thing the running app does.
     private let signals = SignalWatch { _ in
         RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     /// The engine, from the moment launch starts loading it. Awaiting the task is how
@@ -492,12 +495,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func watchStatusItem() {
         sawStatusItem()
         NotificationCenter.default.addObserver(self, selector: #selector(sawStatusItem), name: NSWindow.didChangeOcclusionStateNotification, object: statusItem.button!.window!)
-        Task {
-            // Never cancelled: nothing holds this task.
-            try? await Task.sleep(for: StatusItemSighting.deadline)
-            NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
-            judge(sighting.verdict(menuBarShown: NSMenu.menuBarVisible()))
-        }
+        // A run loop timer and not a sleeping Task, because the judging can raise a modal
+        // alert: a Task runs as a main-queue block, and none other runs while it is on the
+        // stack, so the main actor's work and the quit's reply would wait on the person
+        // (measured 2026-10-18: a SIGTERM under the alert hung the quit). The run loop serves
+        // the main queue inside a modal it is called out from. [LAW:no-ambient-temporal-coupling]
+        RunLoop.main.add(Timer(timeInterval: StatusItemSighting.deadline / .seconds(1), repeats: false) { _ in
+            MainActor.assumeIsolated {
+                NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+                // A last reading of whatever window holds the button now, in case a change was
+                // never posted.
+                self.sawStatusItem()
+                self.judge(self.sighting.verdict(menuBarUnseen: .now()))
+            }
+        }, forMode: .common)
     }
 
     @objc private func sawStatusItem() {
@@ -512,6 +523,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menuBarLog.notice("menu bar: \(seen, privacy: .public)")
             return
         }
+        // Asking whether to keep running means nothing to an app already on its way out.
+        guard !quitting else {
+            menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as \(AppIdentity.displayName, privacy: .public) is quitting")
+            return
+        }
         guard !notice.silenced else {
             menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as the person asked")
             return
@@ -523,10 +539,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for answer in notice.answers { alert.addButton(withTitle: answer.title) }
         alert.showsSuppressionButton = true
         NSApp.activate()
-        // The buttons are numbered from the first in the order they were added.
-        let chosen = notice.answers[alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue]
+        let response = alert.runModal()
         if alert.suppressionButton!.state == .on { notice.silence() }
-        menuBarLog.notice("menu bar: the person chose \(chosen.title, privacy: .public)\(notice.silenced ? ", and not to be told again" : "", privacy: .public)")
+        let silenced = notice.silenced ? ", and not to be told again" : ""
+        guard let chosen = notice.answer(to: response) else {
+            menuBarLog.error("menu bar: the alert ended with response \(response.rawValue) before the person chose\(silenced, privacy: .public)")
+            return
+        }
+        menuBarLog.notice("menu bar: the person chose \(chosen.title, privacy: .public)\(silenced, privacy: .public)")
         switch chosen {
         case .openMenuBarSettings(let settings):
             if !NSWorkspace.shared.open(settings) { menuBarLog.error("menu bar: System Settings did not open \(settings, privacy: .public)") }

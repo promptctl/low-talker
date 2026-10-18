@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Identity
 
 /// What the app tells a person whose menu bar is not showing its icon, which is the app's
@@ -40,12 +40,21 @@ public struct HiddenIconNotice {
             "Its menu is the only way to reach \(name)'s settings, its setup and Quit.",
             allowList ? "macOS shows it only while \(name) is switched on under Allow in the Menu Bar, in System Settings > Menu Bar." : nil,
             "If an app that manages your menu bar is hiding it, show it there.",
+            "On a screen with a notch, an icon the menu bar has no room for sits behind it. Quitting other menu bar apps makes room.",
         ]
         body = lines.compactMap { $0 }.joined(separator: "\n\n")
         // macOS 26 lists every app under Allow in the Menu Bar in its Menu Bar pane, whose
         // identifier this is. macOS 15 has no such list, so no pane to send anyone to.
         let settings: Answer? = allowList ? .openMenuBarSettings(URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension")!) : nil
         answers = [settings, .keepRunning, .quit].compactMap { $0 }
+    }
+
+    /// The answer whose button ended the alert with `response`, or nil when something other
+    /// than a button ended it.
+    public func answer(to response: NSApplication.ModalResponse) -> Answer? {
+        // The buttons are numbered from the first in the order they were added.
+        let button = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        return answers.indices.contains(button) ? answers[button] : nil
     }
 
     /// This Mac's notice.
