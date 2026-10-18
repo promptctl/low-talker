@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "Grants", targets: ["Grants"]),
         .library(name: "Identity", targets: ["Identity"]),
         .library(name: "Onboarding", targets: ["Onboarding"]),
+        .library(name: "MenuBarPresence", targets: ["MenuBarPresence"]),
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "Dictation", targets: ["Dictation"]),
         .library(name: "InputMethod", targets: ["InputMethod"]),
@@ -80,6 +81,12 @@ let package = Package(
         // The steps are what a person acts on, so they are asserted as values rather
         // than scraped off a terminal.
         .testTarget(name: "OnboardingTests", dependencies: ["Onboarding", "Identity", "Grants"]),
+        // Whether the app's icon is in the menu bar as its own: how the process was started,
+        // which decides whose row in the menu bar's allow list it is filed under, and whether
+        // the icon came on screen. Out of the app target so `make test` runs it.
+        // [LAW:decomposition]
+        .target(name: "MenuBarPresence", dependencies: ["Identity"]),
+        .testTarget(name: "MenuBarPresenceTests", dependencies: ["MenuBarPresence"]),
         .testTarget(name: "SignalsTests", dependencies: ["Signals", "LowTalkerCore", "TestProbes"]),
         // The loop from a press to inserted text, with every collaborator taken as a value.
         // Its own target rather than app code so the loop runs under `swift test`; the

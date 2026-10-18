@@ -7,6 +7,7 @@ import Grants
 import InputSource
 import Insertion
 import LowTalkerCore
+import MenuBarPresence
 import Onboarding
 import ServiceManagement
 import Serve
@@ -476,11 +477,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // MARK: - whether the icon is in the menu bar
+
+    /// What has been seen of the status item since it was made, judged once at
+    /// `StatusItemSighting.deadline`. Lazy so it is timed from its first reading, which
+    /// `watchStatusItem` takes as the item is made.
+    private lazy var sighting = StatusItemSighting(made: .now)
+    private let menuBarLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "menubar")
+
+    /// Reads the status item's window now and at every change of what of it is on screen, and
+    /// at the deadline says how it went: in the log every time, and to the person when macOS
+    /// is not showing the icon at all, since the icon is the app's only way in and an app
+    /// running with none shows no sign of running. [LAW:no-silent-failure] [LAW:nothing-unseen]
+    private func watchStatusItem() {
+        sawStatusItem()
+        NotificationCenter.default.addObserver(self, selector: #selector(sawStatusItem), name: NSWindow.didChangeOcclusionStateNotification, object: statusItem.button!.window!)
+        Task {
+            // Never cancelled: nothing holds this task.
+            try? await Task.sleep(for: StatusItemSighting.deadline)
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+            judge(sighting.verdict(menuBarShown: NSMenu.menuBarVisible()))
+        }
+    }
+
+    @objc private func sawStatusItem() {
+        sighting.saw(onScreen: statusItem.button!.window!.occlusionState.contains(.visible), at: .now)
+    }
+
+    private func judge(_ verdict: StatusItemSighting.Verdict) {
+        let notice = HiddenIconNotice.forThisMac()
+        // Where the window stands, which is where a hidden one is parked.
+        let seen = "\(verdict), its window at \(NSStringFromRect(statusItem.button!.window!.frame))"
+        guard verdict == .hidden else {
+            menuBarLog.notice("menu bar: \(seen, privacy: .public)")
+            return
+        }
+        guard !notice.silenced else {
+            menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as the person asked")
+            return
+        }
+        menuBarLog.notice("menu bar: \(seen, privacy: .public); told the person")
+        let alert = NSAlert()
+        alert.messageText = notice.title
+        alert.informativeText = notice.body
+        for answer in notice.answers { alert.addButton(withTitle: answer.title) }
+        alert.showsSuppressionButton = true
+        NSApp.activate()
+        // The buttons are numbered from the first in the order they were added.
+        let chosen = notice.answers[alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue]
+        if alert.suppressionButton!.state == .on { notice.silence() }
+        menuBarLog.notice("menu bar: the person chose \(chosen.title, privacy: .public)\(notice.silenced ? ", and not to be told again" : "", privacy: .public)")
+        switch chosen {
+        case .openMenuBarSettings(let settings):
+            if !NSWorkspace.shared.open(settings) { menuBarLog.error("menu bar: System Settings did not open \(settings, privacy: .public)") }
+        case .keepRunning: break
+        case .quit: NSApp.terminate(nil)
+        }
+    }
+
     // MARK: - launch and quit
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         show(.preparing(nil, since: launched))
         statusItem.isVisible = true
+        watchStatusItem()
         _ = engine
         // Listening from launch when the person last chose to, answering 503 until the model
         // is resident, so a client started beside the app is told to wait rather than refused.
