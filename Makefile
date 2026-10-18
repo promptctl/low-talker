@@ -177,9 +177,11 @@ check-licenses: check-sbom
 # The dev identity, made ready before anything signs with it: `make app` when it signs with
 # project.yml's identity, and `make test`, whose insertion tests sign a probe with it. Every
 # run leaves it usable, so it runs every time rather than once per Mac.
-# [LAW:dataflow-not-control-flow]
+# [LAW:dataflow-not-control-flow] Builds in other worktrees run it at the same moment, so it
+# holds a per-user lock, which the kernel drops if the holder dies, or two would both make one.
 signing-identity:
-	scripts/make-signing-identity "$$(scripts/signing-identity)"
+	lockf -k "$$(getconf DARWIN_USER_TEMP_DIR)lowtalker-signing-identity.lock" \
+		scripts/make-signing-identity "$$(scripts/signing-identity)"
 
 clean:
 	rm -rf LowTalker.xcodeproj $(DERIVED_DATA) .build

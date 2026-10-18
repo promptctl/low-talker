@@ -17,8 +17,10 @@
 # "codesign wants to sign using key ... in your keychain" and waits: the build hangs
 # rather than fails. `security set-key-partition-list` fills the list, and it needs the
 # password of the keychain holding the key. No build can hand over the login password;
-# this keychain's is written below. It protects nothing: the key signs only builds this
-# Mac's user already runs, and no Mac trusts it.
+# this keychain's is written below. So anything running as this user can sign as the dev
+# build, and what it signs meets the designated requirement the dev build's grants are
+# keyed to. That is the price of signing with nobody at the screen. Release builds sign
+# with Developer ID and do not pay it.
 #
 # [LAW:dataflow-not-control-flow] Every run ends with the identity usable, whether this
 # run made it or found it, so the build runs this every time rather than asking first.
@@ -50,9 +52,6 @@ matching() {
 keychain_ready() {
   if [ ! -e "$keychain" ]; then
     security create-keychain -p "$keychain_password" "$keychain_name"
-    # A new keychain locks on sleep and after five minutes idle, and signing with a key
-    # in a locked one raises a password dialog. Settings given with no options clear both.
-    security set-keychain-settings "$keychain_name"
   fi
 
   # Every keychain locks at a restart, so it is opened on every run.
@@ -61,6 +60,10 @@ keychain_ready() {
          "delete it and run this again: security delete-keychain $keychain_name" >&2
     return 1
   }
+  # A new keychain locks on sleep and after five minutes idle, and signing with a key in a
+  # locked one raises a password dialog. Settings given with no options clear both. Like
+  # the partition list, they are set on every run, so an interrupted run leaves nothing.
+  security set-keychain-settings "$keychain_name"
 
   # codesign finds an identity only in a keychain on the user search list, --keychain
   # or not, so this one is appended. Appended: `list-keychains -s` writes the whole list,
@@ -82,18 +85,26 @@ keychain_ready() {
   security list-keychains -d user -s "${searched[@]}" "$keychain"
 }
 
+# Lets codesign use the key in this keychain without a dialog. Set on every run that finds
+# the key here and not only after an import: an import interrupted before this step leaves
+# an identity that exists and hangs.
+partitioned() {
+  security set-key-partition-list -S apple-tool:,apple:,codesign: \
+    -s -k "$keychain_password" "$keychain" >/dev/null
+}
+
 keychain_ready
 everywhere=$(matching)
 here=$(matching "$keychain")
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+remedy="delete $keychain_name and run this again: security delete-keychain $keychain_name"
 
 # Where the identity is decides what happens: nowhere, here, elsewhere, or in several
 # places. Two of one name make every build fail as ambiguous, and which one a grant hangs
 # off cannot be told afterwards, so no case deletes one.
 case "$everywhere:$here" in
   0:0)
-    work=$(mktemp -d)
-    trap 'rm -rf "$work"' EXIT
-
     /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$identity" \
       -addext "keyUsage=critical,digitalSignature" \
       -addext "extendedKeyUsage=critical,codeSigning" \
@@ -107,20 +118,22 @@ case "$everywhere:$here" in
       -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
       -inkey "$work/key.pem" -in "$work/cert.pem" -out "$work/identity.p12"
 
-    # -T writes the key's access control list; the partition list below is the other half.
+    # -T writes the key's access control list; the partition list is the other half.
     security import "$work/identity.p12" -k "$keychain" -P identity -T /usr/bin/codesign
-    how=made
+    partitioned
+    where="made in $keychain_name"
     ;;
-  1:1) how=found ;;
+  1:1)
+    partitioned
+    where="found in $keychain_name"
+    ;;
   1:0)
     # An identity made before this keychain existed, in the login keychain. Its partition
     # list cannot be set from here; it signs without a dialog only where someone once
-    # answered Always Allow.
-    echo "make-signing-identity: '$identity' is in a keychain other than $keychain_name," \
-         "where codesign may stop on a dialog. To move it, delete it in Keychain Access and" \
-         "run this again; the new certificate is a new signature, so the app's permissions" \
-         "are granted again." >&2
-    exit 0
+    # answered Always Allow, and the trial signature below finds out which.
+    where="found outside $keychain_name"
+    remedy="delete it in Keychain Access and run this again to make one in $keychain_name;"
+    remedy+=" the new certificate is a new signature, so the app's permissions are granted again"
     ;;
   *)
     echo "make-signing-identity: $everywhere identities are named '$identity'," \
@@ -129,13 +142,13 @@ case "$everywhere:$here" in
     ;;
 esac
 
-# Set on every run and not only after an import: an import interrupted before this step
-# leaves an identity that exists and hangs, and a check for existence alone would call
-# that Mac finished forever.
-security set-key-partition-list -S apple-tool:,apple:,codesign: \
-  -s -k "$keychain_password" "$keychain" >/dev/null
-
-# [LAW:verifiable-goals] Prove the identity is usable before anything builds on it.
-[ "$(matching "$keychain")" = 1 ] \
-  || { echo "make-signing-identity: '$identity' is not in $keychain after being made ready" >&2; exit 1; }
-echo "make-signing-identity: '$identity' ($how) is ready in $keychain"
+# [LAW:verifiable-goals] Ready means codesign signs with the identity now, with nobody at
+# the screen. A key it may not use without a dialog hangs codesign rather than failing it,
+# so the trial signature runs under a deadline; the alarm survives perl's exec.
+printf 'trial' >"$work/trial"
+/usr/bin/perl -e 'alarm 20; exec @ARGV' /usr/bin/codesign --force --sign "$identity" "$work/trial" || {
+  echo "make-signing-identity: codesign could not sign with '$identity' ($where) within" \
+       "20 seconds, and a build would stop at the same place; $remedy" >&2
+  exit 1
+}
+echo "make-signing-identity: '$identity' ($where) is ready"
