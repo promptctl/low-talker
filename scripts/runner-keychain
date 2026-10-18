@@ -3,12 +3,11 @@
 #
 #   scripts/runner-keychain <name>
 #
-# `make signing-identity` imports into the default keychain, and codesign finds identities
-# through the keychain search list. The runner's login keychain has a password no job knows,
-# so it cannot be unlocked or given a key partition list; a keychain made here, with its name
-# as its password, can. The password protects nothing: the keychain dies with the VM.
-# [LAW:dataflow-not-control-flow] The signing scripts are unchanged; only which keychain is
-# "default" differs between a developer's Mac and a runner.
+# The release workflow imports the Developer ID identities into it, and codesign finds
+# identities through the keychain search list. The runner's login keychain has a password no
+# job knows, so it cannot be unlocked or given a key partition list; a keychain made here,
+# with its name as its password, can. The password protects nothing: the keychain dies with
+# the VM.
 set -euo pipefail
 
 name=${1:?usage: scripts/runner-keychain <name>}

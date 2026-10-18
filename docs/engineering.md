@@ -10,15 +10,15 @@ LowTalker is one app. A development build and a release build are the same app u
 
 You need Xcode 16 or later plus `xcodegen` and `jq`, both from Homebrew.
 
-- `make app` generates the Xcode project from `project.yml` with XcodeGen and builds `LowTalker.app` into `DerivedData/`, printing the path, with its input method, `LowTalker Input Method.app`, beside it. It is signed with the development identity ("One-time setup" below) unless `SIGNING_IDENTITY` names another certificate.
+- `make app` generates the Xcode project from `project.yml` with XcodeGen and builds `LowTalker.app` into `DerivedData/`, printing the path, with its input method, `LowTalker Input Method.app`, beside it. It is signed with the development identity ("The development signing identity" below), which it makes first on a Mac that has none, unless `SIGNING_IDENTITY` names another certificate.
 - `make package` wraps the app and its input method in an installer package, `LowTalker-offline.pkg`, beside them ("The installer package" below).
 - Every build is one of two variants, and `VARIANT` picks which: `offline`, the default, whose app carries exactly the sandbox's entitlements and so cannot reach the network, or `network`, whose app also carries `com.apple.security.network.server` so its server can listen (`make package VARIANT=network`). Nothing else differs, and the input method is the same in both. They share one bundle identifier, so installing either replaces the other; the package's name, read off the app's signed entitlements, says which it is.
 - `make install` builds the package and installs it with `sudo installer`: the app into `/Applications` and its input method into `/Library/Input Methods`, replacing whatever LowTalker stood there. A package is the only way the app is installed, since it does not install its own input method.
 - `make run` installs the app and launches it.
-- `make test` runs `xcodegen generate`, then `swift test` and the license gates ("What a release ships, and under what license" below). Generating comes first because the suite reads the project and the plists XcodeGen writes rather than generating them itself, so a bare `swift test` on a fresh clone fails those cases.
+- `make test` makes the development identity ready, since the insertion tests sign with it, then runs `xcodegen generate`, `swift test` and the license gates ("What a release ships, and under what license" below). Generating comes first because the suite reads the project and the plists XcodeGen writes rather than generating them itself, so a bare `swift test` on a fresh clone fails those cases.
 - `make clean` removes the generated project, `DerivedData/`, and `.build/`.
 
-CI runs `make signing-identity`, `make test`, and `make app` on a macos-15 runner for every pull request to master and every push to master; the workflow is `.github/workflows/ci.yml`.
+CI runs `make test` and `make app` on a macos-15 runner for every pull request to master and every push to master; the workflow is `.github/workflows/ci.yml`.
 
 Before the first `make app`, do the one-time setup below.
 
@@ -254,13 +254,9 @@ Nothing. The app links no code of ours that reaches the network; the only code i
 
 `silentOnTheWireAt` in `sbom/rules.json` is the argmax-oss-swift revision the check last passed at, and `make sbom` stops on any other, so a bump fails `make test` until someone re-runs the check on a build of it and records the new revision. Measured on 2026-09-29 at 1.1.0 (`1e2a163`) against the installed development build.
 
-## One-time setup: signing identity
+## The development signing identity
 
-Run once after cloning:
-
-    make signing-identity
-
-Without it, `make app` fails with an xcodebuild error beginning `No certificate matching 'LowTalker Dev' found`.
+`make app` and `make test` run `make signing-identity` before they sign, so a fresh clone needs no setup step.
 
 ### Why a certificate
 
@@ -268,7 +264,9 @@ macOS keys the Microphone grant to the app's code signature, its "designated req
 
 ### What the command does
 
-`make signing-identity` creates a self-signed code-signing certificate named `LowTalker Dev`, valid for ten years, and imports it into the login keychain pre-authorized for `codesign`. It shows no dialogs and asks for no password. It sets no trust settings on purpose; `codesign` does not need them. Running it a second time refuses with an error, since two certificates with the same name would make builds ambiguous.
+`make signing-identity` leaves a self-signed code-signing certificate named `LowTalker Dev` usable by `codesign` with nobody at the screen. On a Mac without one it creates it, valid for ten years. It keeps it in a keychain of its own, `lowtalker-dev.keychain`, whose password `scripts/make-signing-identity` holds, and on every run it unlocks that keychain, adds it to the user's keychain search list, and sets the key's partition list. A key in the login keychain has an empty partition list, so its first signature waits on a "codesign wants to sign using key" dialog: the build hangs rather than fails, and no build can supply the login password that would clear it. It sets no trust settings on purpose; `codesign` does not need them. It refuses to run when two identities share the name, since that makes every build ambiguous.
+
+A `LowTalker Dev` made before 2026-10-18 lives in the login keychain. The command leaves it there and says so, and it signs without a dialog only where someone once answered Always Allow.
 
 The name lives in one place: `project.yml` sets `CODE_SIGN_IDENTITY` to `LowTalker Dev`, and the Makefile reads it from there.
 
@@ -335,6 +333,6 @@ Moving from a build before the package, which kept its input method in `~/Librar
 
 ### Starting over
 
-To recreate the certificate, delete `LowTalker Dev` and its private key in Keychain Access (login keychain, My Certificates), then run `make signing-identity` again. The new certificate is a new signature, so re-grant the app's permissions in System Settings.
+To recreate the certificate, run `security delete-keychain lowtalker-dev.keychain`, which also takes it off the search list; the next build makes a new one. An identity in the login keychain is deleted in Keychain Access instead (My Certificates, with its private key). The new certificate is a new signature, so re-grant the app's permissions in System Settings.
 
 This certificate is for local development only. Nobody trusts it and it cannot distribute the app; release builds sign with Developer ID instead, as "Signing for release" above describes.

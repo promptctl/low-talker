@@ -65,7 +65,7 @@ enum Probe {
 
     /// A copy of the probe signed as `identifier` by the dev identity, and the identity the
     /// kernel will read off it. The dev identity is the one `make signing-identity` makes,
-    /// which `make test` already needs; it is a real certificate, which no ad hoc signature
+    /// which `make test` makes ready first; it is a real certificate, which no ad hoc signature
     /// can stand in for. [LAW:verifiable-goals]
     static func signed(as identifier: String, hardened: Bool = true) async throws -> (url: URL, identity: PeerIdentity, certificate: String) {
         try await onAThreadOfItsOwn { try signing(as: identifier, hardened: hardened) }
