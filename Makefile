@@ -98,7 +98,7 @@ $(CARRIED_MODEL_STORE):
 	$(MAKE) --no-print-directory model-tool >/dev/null
 	"$(MODEL_TOOL)" download --models-dir "$@" --from "$(MODEL_SOURCE)"
 
-app: $(BUNDLED_MODEL_STORE)
+app: $(BUNDLED_MODEL_STORE) $(if $(SIGNING_IDENTITY),,signing-identity)
 	$(build_app)
 	@echo "$(APP)"
 
@@ -129,7 +129,7 @@ variants:
 # would be doing it underneath any build already running in this tree.
 # [LAW:effects-at-boundaries] Unconditional and idempotent, for the reason given above
 # `build_app`, and it is the same command.
-test:
+test: signing-identity
 	xcodegen generate
 	swift test
 	$(MAKE) check-licenses
@@ -174,9 +174,14 @@ check-licenses: check-sbom
 	scripts/check-licenses sbom/lowtalker.cdx.json
 	scripts/notices sbom/lowtalker.cdx.json .build/notices.txt
 
-# Once per Mac. Until it has run, `make app` stops with "No certificate matching".
+# The dev identity, made ready before anything signs with it: `make app` when it signs with
+# project.yml's identity, and `make test`, whose insertion tests sign a probe with it. Every
+# run leaves it usable, so it runs every time rather than once per Mac.
+# [LAW:dataflow-not-control-flow] Builds in other worktrees run it at the same moment, so it
+# holds a per-user lock, which the kernel drops if the holder dies, or two would both make one.
 signing-identity:
-	scripts/make-signing-identity "$$(scripts/signing-identity)"
+	lockf -k "$$(getconf DARWIN_USER_TEMP_DIR)lowtalker-signing-identity.lock" \
+		scripts/make-signing-identity "$$(scripts/signing-identity)"
 
 clean:
 	rm -rf LowTalker.xcodeproj $(DERIVED_DATA) .build

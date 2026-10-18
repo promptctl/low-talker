@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Creates the self-signed identity that signs dev builds, in the login keychain.
+# Makes sure this Mac holds the self-signed identity that signs dev builds, and that
+# codesign can sign with it while nobody is at the screen. `make app` and `make test` run
+# it before they sign.
 #
 #   make-signing-identity <identity-name>
 #
@@ -9,42 +11,144 @@
 # one is enough: the dev signature has to be stable, never trusted. The certificate
 # gets no trust settings on purpose; codesign does not need them, and granting them
 # is the one step that would raise a password dialog.
+#
+# The identity lives in a keychain of its own, not the login keychain. A freshly imported
+# key has an empty partition list, so the first codesign that reaches for it raises
+# "codesign wants to sign using key ... in your keychain" and waits: the build hangs
+# rather than fails. `security set-key-partition-list` fills the list, and it needs the
+# password of the keychain holding the key. No build can hand over the login password;
+# this keychain's is written below. So anything running as this user can sign as the dev
+# build, and what it signs meets the designated requirement the dev build's grants are
+# keyed to. That is the price of signing with nobody at the screen. Release builds sign
+# with Developer ID and do not pay it.
+#
+# [LAW:dataflow-not-control-flow] Every run ends with the identity usable, whether this
+# run made it or found it, so the build runs this every time rather than asking first.
+#
+# Undoing it is one command, which also takes the keychain off the search list:
+#
+#   security delete-keychain lowtalker-dev.keychain
 set -euo pipefail
 
 identity=${1:?usage: make-signing-identity <identity-name>}
+keychain_name=lowtalker-dev.keychain
+keychain_password=lowtalker-dev
+keychain="$HOME/Library/Keychains/$keychain_name-db"
 
-# [LAW:no-silent-failure] A second identity with the same name would make every build
-# fail as ambiguous, so refuse to import a duplicate. The listing goes through a
-# variable so a failing `security` aborts with its own error instead of reading as
-# "no match".
-existing=$(security find-identity -p codesigning)
-if grep -qF "\"$identity\"" <<<"$existing"; then
-  echo "make-signing-identity: an identity named '$identity' already exists;" \
-       "delete it in Keychain Access to start over (every permission grant goes with it)" >&2
-  exit 1
-fi
+# Prints how many code-signing identities named $identity are in the keychains named, or
+# in every searched keychain when none is. The listing names each identity once under
+# "Matching identities" and again under "Valid identities only" when it is trusted, so
+# only the first section is counted.
+# [LAW:no-silent-failure] A failed lookup returns failure rather than printing 0, which
+# would read as "no such identity" and import a duplicate.
+matching() {
+  local listing
+  listing=$(security find-identity -p codesigning "$@") || return 1
+  awk -v name="\"$identity\"" '/Valid identities only/ { exit }
+    /^ *[0-9]+\) [0-9A-F]+ "/ && index($0, name) { n++ } END { print n + 0 }' <<<"$listing"
+}
 
+# Leaves the keychain existing, unlocked and searched, whatever state it was in.
+keychain_ready() {
+  if [ ! -e "$keychain" ]; then
+    security create-keychain -p "$keychain_password" "$keychain_name"
+  fi
+
+  # Every keychain locks at a restart, so it is opened on every run.
+  security unlock-keychain -p "$keychain_password" "$keychain_name" || {
+    echo "make-signing-identity: $keychain did not open with the password in this script;" \
+         "delete it and run this again: security delete-keychain $keychain_name" >&2
+    return 1
+  }
+  # A new keychain locks on sleep and after five minutes idle, and signing with a key in a
+  # locked one raises a password dialog. Settings given with no options clear both. Like
+  # the partition list, they are set on every run, so an interrupted run leaves nothing.
+  security set-keychain-settings "$keychain_name"
+
+  # codesign finds an identity only in a keychain on the user search list, --keychain
+  # or not, so this one is appended. Appended: `list-keychains -s` writes the whole list,
+  # and naming this keychain alone would take the login keychain off it.
+  local listing line searched=()
+  listing=$(security list-keychains -d user)
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ "$line" = "$keychain" ]; then return 0; fi
+    searched+=("$line")
+  done < <(sed 's/^[[:space:]]*"//;s/"$//' <<<"$listing")
+  # [LAW:no-silent-failure] A list read as empty cannot be told from one this script
+  # misread, and writing either back drops every keychain on it.
+  if [ ${#searched[@]} -eq 0 ]; then
+    echo "make-signing-identity: the user keychain search list read as empty, so it was left" \
+         "alone; add $keychain to it and run this again" >&2
+    return 1
+  fi
+  security list-keychains -d user -s "${searched[@]}" "$keychain"
+}
+
+# Lets codesign use the key in this keychain without a dialog. Set on every run that finds
+# the key here and not only after an import: an import interrupted before this step leaves
+# an identity that exists and hangs.
+partitioned() {
+  security set-key-partition-list -S apple-tool:,apple:,codesign: \
+    -s -k "$keychain_password" "$keychain" >/dev/null
+}
+
+keychain_ready
+everywhere=$(matching)
+here=$(matching "$keychain")
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+remedy="delete $keychain_name and run this again: security delete-keychain $keychain_name"
 
-/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$identity" \
-  -addext "keyUsage=critical,digitalSignature" \
-  -addext "extendedKeyUsage=critical,codeSigning" \
-  -addext "basicConstraints=critical,CA:FALSE" \
-  -keyout "$work/key.pem" -out "$work/cert.pem"
+# Where the identity is decides what happens: nowhere, here, elsewhere, or in several
+# places. Two of one name make every build fail as ambiguous, and which one a grant hangs
+# off cannot be told afterwards, so no case deletes one.
+case "$everywhere:$here" in
+  0:0)
+    /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$identity" \
+      -addext "keyUsage=critical,digitalSignature" \
+      -addext "extendedKeyUsage=critical,codeSigning" \
+      -addext "basicConstraints=critical,CA:FALSE" \
+      -keyout "$work/key.pem" -out "$work/cert.pem"
 
-# The PKCS#12 file lives only until the import below reads it, so its password is a
-# fixed word: `security import` rejects an empty one. The cipher flags pin the
-# pre-OpenSSL-3 algorithms, the only ones `security import` can read.
-/usr/bin/openssl pkcs12 -export -name "$identity" -passout pass:identity \
-  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
-  -inkey "$work/key.pem" -in "$work/cert.pem" -out "$work/identity.p12"
+    # The PKCS#12 file lives only until the import below reads it, so its password is a
+    # fixed word: `security import` rejects an empty one. The cipher flags pin the
+    # pre-OpenSSL-3 algorithms, the only ones `security import` can read.
+    /usr/bin/openssl pkcs12 -export -name "$identity" -passout pass:identity \
+      -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+      -inkey "$work/key.pem" -in "$work/cert.pem" -out "$work/identity.p12"
 
-# No -k: the default keychain is the one xcodebuild searches and the one macOS
-# unlocks at login. -T lets codesign use the key without a dialog on every build.
-security import "$work/identity.p12" -P identity -T /usr/bin/codesign
+    # -T writes the key's access control list; the partition list is the other half.
+    security import "$work/identity.p12" -k "$keychain" -P identity -T /usr/bin/codesign
+    partitioned
+    where="made in $keychain_name"
+    ;;
+  1:1)
+    partitioned
+    where="found in $keychain_name"
+    ;;
+  1:0)
+    # An identity made before this keychain existed, in the login keychain. Its partition
+    # list cannot be set from here; it signs without a dialog only where someone once
+    # answered Always Allow, and the trial signature below finds out which.
+    where="found outside $keychain_name"
+    remedy="delete it in Keychain Access and run this again to make one in $keychain_name;"
+    remedy+=" the new certificate is a new signature, so the app's permissions are granted again"
+    ;;
+  *)
+    echo "make-signing-identity: $everywhere identities are named '$identity'," \
+         "which makes every build ambiguous; delete all but one in Keychain Access" >&2
+    exit 1
+    ;;
+esac
 
-# [LAW:verifiable-goals] Prove the identity is usable before anything builds on it.
-imported=$(security find-identity -p codesigning)
-grep -F "\"$identity\"" <<<"$imported" \
-  || { echo "make-signing-identity: '$identity' not found after import" >&2; exit 1; }
+# [LAW:verifiable-goals] Ready means codesign signs with the identity now, with nobody at
+# the screen. A key it may not use without a dialog hangs codesign rather than failing it,
+# so the trial signature runs under a deadline; the alarm survives perl's exec.
+printf 'trial' >"$work/trial"
+/usr/bin/perl -e 'alarm 20; exec @ARGV' /usr/bin/codesign --force --sign "$identity" "$work/trial" || {
+  echo "make-signing-identity: codesign could not sign with '$identity' ($where) within" \
+       "20 seconds, and a build would stop at the same place; $remedy" >&2
+  exit 1
+}
+echo "make-signing-identity: '$identity' ($where) is ready"

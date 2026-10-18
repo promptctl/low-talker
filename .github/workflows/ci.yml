@@ -37,12 +37,6 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Create an unlocked default keychain
-        run: scripts/runner-keychain ci
-
-      - name: Create the dev signing identity
-        run: make signing-identity
-
       - name: Build and test the package
         run: make test
 

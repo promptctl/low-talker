@@ -17,7 +17,7 @@ configs:
   Release: release
 
 # Shared by every target. macOS keys the Microphone grant to the signing certificate, so
-# builds carry a self-signed identity that `make signing-identity` creates once per Mac.
+# builds carry a self-signed identity that `make signing-identity` creates on a Mac's first build.
 # Ad hoc signing would key the grant to each build's own hash and lose it on every
 # rebuild. scripts/signing-identity reads it for `make signing-identity`.
 #

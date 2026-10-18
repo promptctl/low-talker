@@ -66,7 +66,6 @@ The network build can share the model it already holds. Turn on **Serve Transcri
 You need Xcode 16 or later, plus `xcodegen` and `jq` from Homebrew.
 
 ```sh
-make signing-identity   # once: a local code-signing certificate
 make app                # builds LowTalker.app and its input method
 make test               # the test suite and the license gates
 make install            # builds the installer package and installs it
