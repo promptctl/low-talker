@@ -5,3 +5,7 @@
 # notarytool takes the team alone, beside an Apple ID.
 developer_team=6R988MUU27
 developer_id="Brandon Fryslie ($developer_team)"
+# The authority both certificates are issued under: Apple's G2 Developer ID intermediate, as
+# served at https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer. macOS does not
+# carry it, and a signature has to chain through it.
+developer_id_ca="$(dirname "${BASH_SOURCE[0]}")/DeveloperIDG2CA.cer"
