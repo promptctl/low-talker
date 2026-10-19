@@ -24,7 +24,11 @@ import Testing
         /// What the client answers when asked, which a window with no field focused
         /// answers no to. Isolated to the main actor, where it is asked, so a case can
         /// change it between inserts and the cursor stays Sendable.
-        @MainActor final class Answer { var givesDocumentAccess: Bool; nonisolated init(_ gives: Bool) { givesDocumentAccess = gives } }
+        @MainActor final class Answer {
+            var givesDocumentAccess: Bool
+            var asked = 0
+            nonisolated init(_ gives: Bool) { givesDocumentAccess = gives }
+        }
         let answer: Answer
 
         init(in application: String = "com.example.editor", givingDocumentAccess: Bool = true) {
@@ -32,7 +36,10 @@ import Testing
             answer = Answer(givingDocumentAccess)
         }
 
-        @MainActor var givesDocumentAccess: Bool { answer.givesDocumentAccess }
+        @MainActor var givesDocumentAccess: Bool {
+            answer.asked += 1
+            return answer.givesDocumentAccess
+        }
 
         func commit(_ text: String) { Issue.record("the decision committed \(text.debugDescription)") }
     }
@@ -100,6 +107,41 @@ import Testing
         #expect(throws: Refusal.noTextFieldHasFocus) {
             try client.cursor(for: .cursorInFront, whileInFrontIs: "com.google.Chrome", secureInputIsOn: false).get()
         }
+    }
+
+    /// Document access is a call into the cursor's app, which may be hung, so it is asked
+    /// only of the cursor the words would go to: never of one left in an app the person
+    /// has moved away from, under secure input, or after the dictation moved apps.
+    @Test func documentAccessIsAskedOnlyOfTheCursorTheWordsWouldGoTo() {
+        let client = FocusedClient()
+        let cursor = Cursor(in: "com.apple.TextEdit")
+        client.took(cursor)
+
+        _ = client.cursor(for: .cursorInFront, whileInFrontIs: "com.apple.finder", secureInputIsOn: false)
+        _ = client.cursor(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputIsOn: true)
+        _ = client.cursor(for: .app("com.apple.finder"), whileInFrontIs: "com.apple.TextEdit", secureInputIsOn: false)
+        #expect(cursor.answer.asked == 0)
+
+        _ = client.cursor(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputIsOn: false)
+        #expect(cursor.answer.asked == 1)
+    }
+
+    /// The insert's log line tells the two ways into `noTextFieldHasFocus` apart: no cursor
+    /// at all, or a cursor in the app in front whose client gave no document access.
+    @Test func whatTheInsertSawNamesTheCursorHeld() {
+        let client = FocusedClient()
+        let none = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.calculator", secureInputHeldBy: nil)
+        #expect(throws: Refusal.noTextFieldHasFocus) { try none.cursor.get() }
+        #expect(none.description == "with com.apple.calculator in front and no cursor")
+
+        client.took(Cursor(in: "com.apple.calculator", givingDocumentAccess: false))
+        let held = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.calculator", secureInputHeldBy: nil)
+        #expect(throws: Refusal.noTextFieldHasFocus) { try held.cursor.get() }
+        #expect(held.description == "with com.apple.calculator in front and the cursor in com.apple.calculator")
+
+        let securing = client.inFront(for: .cursorInFront, whileInFrontIs: nil, secureInputHeldBy: "iTerm2")
+        #expect(throws: Refusal.secureInputIsOn) { try securing.cursor.get() }
+        #expect(securing.description == "with nothing in front and the cursor in com.apple.calculator, secure input held by iTerm2")
     }
 
     /// A cursor does not outlive the app it belongs to. Without this the person could

@@ -54,8 +54,9 @@ public final class Committer: Sendable {
     /// Runs `look` on `queue` and hands back what it saw, or nothing once `bound` has passed.
     ///
     /// How an insert asks the main actor which cursor is in front without waiting on it
-    /// past the bound: the main thread is where IMK makes its own calls into apps, and a
-    /// hung app holds it there for up to 3 s on each. Nothing at all is an answer the
+    /// past the bound: the main thread is where IMK makes its own calls into apps, and where
+    /// the cursor is asked whether it gives document access, and a hung app holds it there
+    /// for up to 3 s on each. Nothing at all is an answer the
     /// caller refuses by name, and `look` runs late or never; what it saw is thrown away.
     /// [LAW:parse-dont-validate] The typed absence is the whole failure arm.
     public func ask<Seen: Sendable>(on queue: DispatchQueue, _ look: @escaping @Sendable () -> Seen) -> Seen? {

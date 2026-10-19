@@ -63,8 +63,9 @@ let committer = Committer(label: "\(AppIdentity.inputMethodPortName).commits")
 ///
 /// Answered on a queue of its own and never on the main one, which is where every key this
 /// source passes through is handled. An insert asks the main actor only which cursor is in
-/// front - where `FocusedClient` and every `IMKInputController` callback already run, so
-/// the two never race - and then hands the words to the `Committer`, off the main thread.
+/// front and whether its client gives document access - where `FocusedClient` and every
+/// `IMKInputController` callback already run, so the two never race - and then hands the
+/// words to the `Committer`, off the main thread.
 /// Both waits are bounded by the committer, so a hung app costs the person an insert
 /// answered by name and not a dead keyboard. [LAW:no-ambient-temporal-coupling]
 /// `assumeIsolated` inside the ask is that sentence made checkable.
@@ -88,24 +89,15 @@ let insertions: InsertionPort? = {
             // the commit, so the whole answer is one this process keeps.
             let seen = committer.ask(on: .main) {
                 MainActor.assumeIsolated {
-                    let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-                    let securing = secureInputHolder()
-                    return (frontmost: frontmost, securing: securing, held: FocusedClient.shared.cursorApplication,
-                            cursor: FocusedClient.shared.cursor(for: request.destination, whileInFrontIs: frontmost, secureInputIsOn: securing != nil))
+                    FocusedClient.shared.inFront(for: request.destination,
+                                                 whileInFrontIs: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                                                 secureInputHeldBy: secureInputHolder())
                 }
             }
             let answer = committer.answer(request.text, at: seen?.cursor)
-            // The app in front is named because the refusal that matters here is the one
-            // where it is not the app holding the cursor, and a line saying only the outcome
-            // leaves a reader with the question it was written to answer. The cursor held is
-            // named too, which is what tells a no-text-field refusal with no client from one
-            // whose client in front gave no document access. A main thread that did not look
-            // is said as not knowing, never as nothing in front. [LAW:no-silent-failure]
-            let context = seen.map { seen in
-                "with \(seen.frontmost ?? "nothing") in front and "
-                    + (seen.held.map { "the cursor in \($0)" } ?? "no cursor")
-                    + (seen.securing.map { ", secure input held by \($0)" } ?? "")
-            } ?? "without knowing what is in front, since the main thread did not look in time"
+            // A main thread that did not look is said as not knowing, never as nothing in
+            // front. [LAW:no-silent-failure]
+            let context = seen?.description ?? "without knowing what is in front, since the main thread did not look in time"
             logger.notice("""
                 insert of \(request.text.count, privacy: .public) characters into \(request.destination, privacy: .public): \
                 \(String(describing: answer), privacy: .public), \(context, privacy: .public)

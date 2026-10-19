@@ -124,7 +124,7 @@ public final class FocusedClient {
     /// into such a client goes nowhere while the commit returns as if it landed. So the
     /// client's own answer is asked, and only of the one cursor the words would go to.
     /// [LAW:no-silent-failure]
-    public func cursor(for destination: Destination, whileInFrontIs frontmost: String?, secureInputIsOn: Bool) -> Result<any TextCursor, Refusal> {
+    func cursor(for destination: Destination, whileInFrontIs frontmost: String?, secureInputIsOn: Bool) -> Result<any TextCursor, Refusal> {
         guard destination.admits(frontmost) else { return .failure(.dictationIsInAnotherApp) }
         guard !secureInputIsOn else { return .failure(.secureInputIsOn) }
         guard let focus else { return .failure(.noTextFieldHasFocus) }
@@ -133,9 +133,34 @@ public final class FocusedClient {
         return .success(focus)
     }
 
-    /// The app whose cursor is held, for the log line that has to tell a refusal with no
-    /// client from one whose client gave no document access.
-    public var cursorApplication: String? { focus?.application }
+    /// The decision for an insert, with the facts it was made from, in one turn on this
+    /// actor, so the insert's log line names what the decision saw rather than reading it
+    /// again. [LAW:one-source-of-truth]
+    public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?) -> InFront {
+        InFront(frontmost: frontmost, secureInputHolder: holder, cursorApplication: focus?.application,
+                cursor: cursor(for: destination, whileInFrontIs: frontmost, secureInputIsOn: holder != nil))
+    }
+}
+
+/// What an insert saw on the main actor: the app in front, the app holding secure input,
+/// the cursor held, and the decision made from them.
+///
+/// The app in front is named because the refusal that matters most is the one where it is
+/// not the app holding the cursor, and a line saying only the outcome leaves a reader with
+/// the question it was written to answer. The cursor held is named because it is what tells
+/// a no-text-field refusal with no client from one whose client in front gave no document
+/// access. [LAW:no-silent-failure]
+public struct InFront: Sendable, CustomStringConvertible {
+    let frontmost: String?
+    let secureInputHolder: String?
+    let cursorApplication: String?
+    public let cursor: Result<any TextCursor, Refusal>
+
+    public var description: String {
+        "with \(frontmost ?? "nothing") in front and "
+            + (cursorApplication.map { "the cursor in \($0)" } ?? "no cursor")
+            + (secureInputHolder.map { ", secure input held by \($0)" } ?? "")
+    }
 }
 
 /// The text input system's client, as the one thing this process asks of it.
