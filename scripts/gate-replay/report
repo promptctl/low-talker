@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""What a change to the speech gate does, against master's gate.
+
+    scripts/gate-replay/report <baseline.tsv> <measured.tsv>
+
+Both files are rows the gate replay (Tests/GateReplayTests) wrote: a case's `key=value`
+id, the count and hash of the samples its last pass is handed, and the 10 ms windows of
+its signal they came from. The baseline is master's; the measured rows are the tree's.
+Four reports, each against the baseline:
+
+- speech lost after inserted transients, beyond what as much digital silence loses: the
+  windows master hands without the transient that the tree's silence control keeps and its
+  transient case does not;
+- background talk let in under a speaker, and speech lost there;
+- bench variants whose handed samples changed;
+- a tap left open in a room, where what it keeps changed.
+
+Two files that do not hold the same cases are no comparison, and the report stops naming
+them. Differences are the report, not a failure: it exits 0 whatever it finds.
+"""
+import sys
+from collections import defaultdict
+
+WINDOW = 0.01
+
+
+def fail(message):
+    print(f"gate-replay report: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def windows(runs):
+    if runs == "-":
+        return frozenset()
+    found = set()
+    for run in runs.split(","):
+        first, last = run.split("-")
+        found.update(range(int(first), int(last) + 1))
+    return frozenset(found)
+
+
+def load(path):
+    """Rows by id: the id's fields, and what the pass was handed."""
+    rows = {}
+    with open(path) as file:
+        for number, line in enumerate(file, 1):
+            columns = line.rstrip("\n").split("\t")
+            if len(columns) != 4:
+                fail(f"{path}:{number}: {len(columns)} columns, not 4")
+            case, count, digest, runs = columns
+            fields = dict(field.split("=", 1) for field in case.split(" "))
+            rows[case] = {"fields": fields, "samples": (int(count), digest), "windows": windows(runs)}
+    return rows
+
+
+def case_id(fields):
+    return " ".join(f"{key}={value}" for key, value in fields.items())
+
+
+def label(fields):
+    return " ".join(f"{key}={value}" for key, value in fields.items() if key != "family")
+
+
+def seconds(count):
+    return f"{count * WINDOW:.2f} s"
+
+
+def family(rows, name):
+    return {case: row for case, row in rows.items() if row["fields"]["family"] == name}
+
+
+def transients(baseline, measured):
+    """Per source and run length: the cases losing speech beyond the silence control."""
+    def lost(rows, fields):
+        alone = baseline[case_id({**{k: fields[k] for k in ("family", "fixture", "shape", "room")}, "source": "none"})]["windows"]
+        control = rows[case_id({**fields, "source": "silence"})]["windows"]
+        return len((alone & control) - rows[case_id(fields)]["windows"])
+
+    groups = defaultdict(list)
+    for row in family(measured, "transient").values():
+        fields = row["fields"]
+        if fields["source"] in ("none", "silence"):
+            continue
+        source = fields["source"].split("/")[0]
+        groups[(source, int(fields["runs"]))].append((fields, lost(measured, fields), lost(baseline, fields)))
+    lines = ["speech lost after transients, beyond as much digital silence",
+             f"  {'source':<16} {'runs':>4} {'cases':>6} {'losing':>7} {'worst':>8}   {'master losing':>13} {'worst':>8}"]
+    worse = []
+    for (source, runs), cases in sorted(groups.items()):
+        now, then = max(cases, key=lambda c: c[1]), max(cases, key=lambda c: c[2])
+        lines.append(f"  {source:<16} {runs:>4} {len(cases):>6} {sum(1 for c in cases if c[1]):>7} {seconds(now[1]):>8}"
+                     f"   {sum(1 for c in cases if c[2]):>13} {seconds(then[2]):>8}")
+        worse += [f"    {label(fields)}: {seconds(was)} on master, {seconds(now)}" for fields, now, was in cases if now > was]
+    lines.append(f"  cases losing more than on master: {len(worse) or 'none'}")
+    return lines + sorted(worse)
+
+
+def changes(baseline, measured, name):
+    """The cases of a family whose handed samples changed, with the windows let in and lost."""
+    changed = []
+    for case, row in sorted(family(measured, name).items()):
+        was = baseline[case]
+        if row["samples"] != was["samples"]:
+            changed.append((row["fields"], len(row["windows"] - was["windows"]), len(was["windows"] - row["windows"])))
+    return changed
+
+
+def talk(baseline, measured):
+    changed = changes(baseline, measured, "talk")
+    cases = defaultdict(int)
+    for row in family(measured, "talk").values():
+        cases[(row["fields"]["press"], int(row["fields"]["db"]))] += 1
+    lines = ["background talk let in, beyond master",
+             f"  {'press':<6} {'dB':>4} {'cases':>6} {'letting in':>11} {'worst':>8} {'losing':>7} {'worst':>8}"]
+    for (press, db), count in sorted(cases.items(), key=lambda item: (item[0][0], -item[0][1])):
+        group = [c for c in changed if (c[0]["press"], int(c[0]["db"])) == (press, db)]
+        lines.append(f"  {press:<6} {db:>4} {count:>6} {sum(1 for c in group if c[1]):>11} {seconds(max([c[1] for c in group], default=0)):>8}"
+                     f" {sum(1 for c in group if c[2]):>7} {seconds(max([c[2] for c in group], default=0)):>8}")
+    return lines + listed(changed)
+
+
+def listed(changed):
+    return [f"  changed: {len(changed) or 'none'}"] + [
+        f"    {label(fields)}: let in {seconds(added)}, lost {seconds(lost)}" for fields, added, lost in changed]
+
+
+def main(baseline_path, measured_path):
+    baseline, measured = load(baseline_path), load(measured_path)
+    missing, extra = sorted(baseline.keys() - measured.keys()), sorted(measured.keys() - baseline.keys())
+    if missing or extra:
+        fail(f"{measured_path} and {baseline_path} hold different cases: {len(missing)} only in the baseline, "
+             f"{len(extra)} only measured; record the baseline again with make gate-replay-baseline on master\n"
+             + "\n".join([f"  only in the baseline: {case}" for case in missing[:10]] + [f"  only measured: {case}" for case in extra[:10]]))
+    clips = {row["fields"]["source"] for row in family(measured, "transient").values() if "/" in row["fields"]["source"]}
+    report = [f"gate replay: {len(measured)} cases against {baseline_path}; {len(clips)} ESC-50 clips", ""]
+    report += transients(baseline, measured) + [""]
+    report += talk(baseline, measured) + [""]
+    report += [f"bench variants whose handed samples changed, of {len(family(measured, 'bench'))}"] + listed(changes(baseline, measured, "bench")) + [""]
+    report += [f"a tap left open in a room, of {len(family(measured, 'tap'))}"] + listed(changes(baseline, measured, "tap"))
+    print("\n".join(report))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        fail("usage: report <baseline.tsv> <measured.tsv>")
+    main(sys.argv[1], sys.argv[2])

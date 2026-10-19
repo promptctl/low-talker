@@ -178,5 +178,8 @@ let package = Package(
             ],
             resources: [.copy("Fixtures")]
         ),
+        // The speech gate replayed over the bench, for `make gate-replay`; `make test` builds it
+        // and skips it. Its own target so nothing in the core's suite or Sources knows of it.
+        .testTarget(name: "GateReplayTests", dependencies: ["LowTalkerCore"]),
     ]
 )
