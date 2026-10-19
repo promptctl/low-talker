@@ -1,13 +1,14 @@
-# The body of the package's postinstall. scripts/make-pkg writes the lines above this one,
-# naming what it acts on from the bundles it packed: input_method_name,
-# input_method_executable, app, app_executable and family. It runs as root once the payload
-# stands, and everything it says goes to /var/log/install.log.
+# The body of the package's postinstall. scripts/make-pkg writes the lines above this one:
+# the names of what it acts on, from the bundles it packed (input_method_name,
+# input_method_executable, app, app_executable and family), then scripts/pkg/functions. It
+# runs as root once the payload stands, and everything it says goes to /var/log/install.log.
 #
-# The package has just replaced the app and its input method on disk. What still runs is the
-# code that stood there before, so this retires it: the app first, since an app from before
-# the package copied its own input method into the home folder of whoever ran it, and would
-# copy it back; then the app and input method of an installation from before LowTalker was
-# one app; then those copies, which the text input system would go on launching; then,
+# The package has just replaced the app and its input method on disk. The preinstall has
+# already stopped the app, which an app from before the package needed, since it copied its own
+# input method into the home folder of whoever ran it and would copy it back. What still runs
+# is the code that stood there before, so this retires it: the app and input method of an
+# installation from before LowTalker was one app; then those copies, which the text input
+# system would go on launching; then,
 # for each person logged in, the new bundles are registered and the input methods whose
 # bundles are gone are switched off; then every person's input source caches, which predate
 # the new bundles; then every input method process, which the text input system relaunches
@@ -16,31 +17,10 @@ set -euo pipefail
 # Bytewise, the order make-pkg sorted the payload list in, for every sort and comm below.
 export LC_ALL=C
 
-say() { echo "postinstall: $*"; }
-lines() { if [ -n "$1" ]; then wc -l <<<"$1" | tr -d ' '; else echo 0; fi; }
 # Runs a command as this uid, inside that person's login session.
 as_user() { launchctl asuser "$1" sudo -u "#$1" "${@:2}"; }
 # The bundle identifier of the bundle at this path; fails for a bundle with none readable.
 identifier() { /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$1/Contents/Info.plist" 2>/dev/null; }
-
-# The processes running this executable name from any bundle, as "pid uid" lines. By path
-# and not by process name, which macOS cuts to 16 characters.
-running() {
-  local found
-  found=$(pgrep -f "/Contents/MacOS/$1\$") || [ $? -eq 1 ] || { say "pgrep failed looking for $1"; exit 1; }
-  for pid in $found; do echo "$pid $(ps -o uid= -p "$pid" | tr -d ' ')"; done
-}
-
-# Ends each process and waits for it to go, forcing one that has not gone in five seconds.
-stop() {
-  local pid
-  for pid in "$@"; do
-    kill "$pid" 2>/dev/null || continue
-    for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-    # A process that ends between the last look and the KILL is gone, which is the point.
-    if kill -KILL "$pid" 2>/dev/null; then say "forced $pid, which did not end within 5 s"; fi
-  done
-}
 
 # Written over in place (scripts/make-pkg says why), so a file an older build had and this
 # one does not is still there. Each bundle is cut back to the paths the package wrote, listed
@@ -61,9 +41,12 @@ for bundle in "$app" "/Library/Input Methods/$input_method_name"; do
   codesign --verify --deep --strict "$bundle" || { say "$bundle does not verify; remove it and install again"; exit 1; }
 done
 
-apps=$(running "$app_executable")
-stop $(cut -d ' ' -f 1 <<<"$apps")
-say "stopped $(lines "$apps") running $app_executable"
+# A step that fails for one person is said and fails the install at the end, once every other
+# step has run, so no one else is left with the app stopped and the old input method running.
+failed=0
+
+# The apps the preinstall stopped, as "pid uid" lines.
+apps=$(<"$(dirname "$0")/stopped")
 
 # LowTalker was once installed as two apps side by side, the second under identifiers of its
 # own, "dev" after the family and "dev.inputmethod.dictation" (low-build-41v). Whatever of
@@ -80,13 +63,13 @@ for bundle in /Applications/*.app "/Library/Input Methods"/*.app; do
   older=
   if executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$bundle/Contents/Info.plist" 2>/dev/null); then
     older=$(running "$executable")
-    stop $(cut -d ' ' -f 1 <<<"$older")
+    stop $(cut -d ' ' -f 1 <<<"$older") || failed=1
   else
     say "$bundle names no executable, so no process of it was looked for"
   fi
   case "$bundle" in /Applications/*) apps+=$'\n'"$older" ;; esac
   rm -rf "$bundle"
-  say "removed $bundle ($id), an installation from before LowTalker was one app, and stopped $(lines "$older") running from it"
+  say "removed $bundle ($id), an installation from before LowTalker was one app, which had $(lines "$older") running"
 done
 
 # No build installs into a home folder any more, so every LowTalker input method there is one
@@ -106,10 +89,6 @@ for home in /Users/*; do
     say "removed $bundle, which an older build of the app put there"
   done
 done
-
-# A step that fails for one person is said and fails the install at the end, once every other
-# step has run, so no one else is left with the app stopped and the old input method running.
-failed=0
 
 # Each person with a login session now, by the uid their loginwindow runs as (root's is the
 # login screen's, and no one's), gets the two bundles registered with LaunchServices and their
@@ -201,8 +180,8 @@ for uid in $(dscl . -list /Users UniqueID | awk '$2 >= 501 { print $2 }'); do
 done
 
 methods=$(running "$input_method_executable")
-stop $(cut -d ' ' -f 1 <<<"$methods")
-say "stopped $(lines "$methods") running $input_method_executable"
+say "found $(lines "$methods") running $input_method_executable"
+stop $(cut -d ' ' -f 1 <<<"$methods") || failed=1
 
 for uid in $(cut -s -d ' ' -f 2 <<<"$apps" | sort -u); do
   # The files are installed whether or not this start takes, so a failed one is said and

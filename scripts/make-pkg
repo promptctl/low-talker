@@ -88,18 +88,21 @@ cat >"$components" <<'EOF'
 <plist version="1.0"><array/></plist>
 EOF
 
-# The postinstall, with the names it acts on written in from the bundles themselves. %q
-# quotes each for bash, so a name with a space in it is one word.
-{
-  echo '#!/bin/bash'
-  printf 'input_method_name=%q\n' "$(basename "$input_method")"
-  printf 'input_method_executable=%q\n' "$(plist "$input_method" CFBundleExecutable)"
-  printf 'app=%q\n' "$app_path"
-  printf 'app_executable=%q\n' "$(plist "$app" CFBundleExecutable)"
-  printf 'family=%q\n' "$family"
-  cat "$(dirname "$0")/pkg/postinstall"
-} >"$staging/scripts/postinstall"
-chmod 755 "$staging/scripts/postinstall"
+# The preinstall and the postinstall, each with the names the package acts on written in from
+# the bundles themselves, then the functions its body calls. %q quotes each name for bash, so
+# a name with a space in it is one word.
+for script in preinstall postinstall; do
+  {
+    echo '#!/bin/bash'
+    printf 'input_method_name=%q\n' "$(basename "$input_method")"
+    printf 'input_method_executable=%q\n' "$(plist "$input_method" CFBundleExecutable)"
+    printf 'app=%q\n' "$app_path"
+    printf 'app_executable=%q\n' "$(plist "$app" CFBundleExecutable)"
+    printf 'family=%q\n' "$family"
+    cat "$(dirname "$0")/pkg/functions" "$(dirname "$0")/pkg/$script"
+  } >"$staging/scripts/$script"
+  chmod 755 "$staging/scripts/$script"
+done
 # Every path the package writes inside the two bundles, which is all either may hold once it
 # is installed. Sorted bytewise, as the postinstall sorts what it finds, for comm.
 (cd "$root" && find ".$app_path" ".$input_method_path") | LC_ALL=C sort >"$staging/scripts/payload"

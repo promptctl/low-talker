@@ -1,0 +1,58 @@
+# What the package's scripts say, and how they find and end the processes they replace.
+# scripts/make-pkg writes this into the preinstall and the postinstall ahead of each body, and
+# scripts/tests/test_stop.py sources it whole, so the lines the test reads are the ones
+# /var/log/install.log gets.
+
+# Each line is told by the script that said it.
+say() { echo "${0##*/}: $*"; }
+lines() { if [ -n "$1" ]; then wc -l <<<"$1" | tr -d ' '; else echo 0; fi; }
+
+# The processes running this executable name from any bundle, as "pid uid" lines. By path
+# and not by process name, which macOS cuts to 16 characters.
+running() {
+  local found
+  found=$(pgrep -f "/Contents/MacOS/$1\$") || [ $? -eq 1 ] || { say "pgrep failed looking for $1"; exit 1; }
+  for pid in $found; do echo "$pid $(ps -o uid= -p "$pid" | tr -d ' ')"; done
+}
+
+# How often, in seconds, `stop` says which process it is still waiting on.
+stop_every=10
+
+# Asks each process to quit, every one before waiting on any, and waits until each has ended,
+# however long that takes. The app's answer to TERM is its quit, which first places or holds
+# the words of every press it has heard: decoding them, through a cold model load if it must,
+# can run for minutes, and only the app knows when it is done, so nothing here ends it sooner.
+# [LAW:single-enforcer] [LAW:no-ambient-temporal-coupling] Above this wait is the installer's
+# own: since macOS 15 it ends a package script after 600 s, which fails the install and leaves
+# the app draining, since launchd runs it and this only signalled it.
+#
+# Every process gets a line: already gone, still being waited on, or ended and after how long,
+# so a long drain or a process that never ends is in the log by its pid. [LAW:nothing-unseen]
+# A process this cannot signal is said and left out of the wait, and fails the call once every
+# other one has ended. [LAW:no-silent-failure]
+stop() {
+  local pid refusal said start=$SECONDS failed=0 asked=()
+  for pid in "$@"; do
+    if refusal=$(kill "$pid" 2>&1); then
+      asked+=("$pid")
+    elif [[ $refusal == *"No such process"* ]]; then
+      say "$pid had already ended"
+    else
+      say "could not ask $pid to quit: $refusal"
+      failed=1
+    fi
+  done
+  # The expansion bash 3.2, which runs the scripts, needs to read an empty array under set -u.
+  for pid in ${asked[@]+"${asked[@]}"}; do
+    said=$start
+    while ps -p "$pid" >/dev/null; do
+      if ((SECONDS - said >= stop_every)); then
+        say "still waiting on $pid, $((SECONDS - start)) s in"
+        said=$SECONDS
+      fi
+      sleep 0.1
+    done
+    say "$pid ended $((SECONDS - start)) s after it was asked to quit"
+  done
+  return "$failed"
+}
