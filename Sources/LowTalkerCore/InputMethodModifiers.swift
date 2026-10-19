@@ -20,11 +20,19 @@ import os
 ///
 /// The input method tells a cursor arriving on the same port, since it is the one name its
 /// sandbox lets it reach the app on; that notice is no key, and goes to `cursorArrived`.
+///
+/// An input method whose process has ended tells nothing, and nothing but the app starts it
+/// again, so while the feed is open its process is supervised by `superviseInputMethod`,
+/// which answers how to stop. [LAW:no-silent-failure] [LAW:effects-at-boundaries] The
+/// supervision is the app's to bring: launching a process is no part of hearing keys.
 public struct InputMethodModifiers: ModifierFeed {
     private let cursorArrived: @MainActor () -> Void
+    private let superviseInputMethod: @MainActor () -> Disposal
 
-    public init(cursorArrived: @escaping @MainActor () -> Void) {
+    public init(cursorArrived: @escaping @MainActor () -> Void,
+                superviseInputMethod: @escaping @MainActor () -> Disposal) {
         self.cursorArrived = cursorArrived
+        self.superviseInputMethod = superviseInputMethod
     }
 
     /// How often a held key is looked for in the session: how late, at most, a release the
@@ -135,8 +143,13 @@ public struct InputMethodModifiers: ModifierFeed {
                 }
             })
         installed.open = (port, handle)
+        // Supervised only once the port is hosted, so its first notice has somewhere to go.
+        let unsupervise = superviseInputMethod()
         // Closed here and now, so a hotkey rebuilt straight after hosts the name again.
-        return { installed.open = nil }
+        return {
+            installed.open = nil
+            unsupervise()
+        }
     }
 }
 

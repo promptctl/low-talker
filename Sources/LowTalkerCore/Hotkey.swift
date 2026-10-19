@@ -38,9 +38,15 @@ public final class Hotkey {
     }
 
     /// The app's hotkey: the chords `config` names, heard through the input method, which
-    /// also tells each cursor it is given focus in to `cursorArrived` while this is watching.
-    public convenience init(listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold, cursorArrived: @escaping @MainActor () -> Void) {
-        self.init(chords: config.chords, tapThreshold: tapThreshold, feed: InputMethodModifiers(cursorArrived: cursorArrived))
+    /// also tells each cursor it is given focus in to `cursorArrived` while this is watching,
+    /// and whose process `superviseInputMethod` supervises meanwhile.
+    public convenience init(
+        listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold,
+        cursorArrived: @escaping @MainActor () -> Void,
+        superviseInputMethod: @escaping @MainActor () -> Disposal
+    ) {
+        self.init(chords: config.chords, tapThreshold: tapThreshold,
+                  feed: InputMethodModifiers(cursorArrived: cursorArrived, superviseInputMethod: superviseInputMethod))
     }
 
     public var phase: HotkeyDetector.Phase { detector.phase }
