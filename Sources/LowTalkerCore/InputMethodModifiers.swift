@@ -11,8 +11,8 @@ import os
 /// The input method is handed keys only by an app in front that takes typing, and by none
 /// under Secure Event Input, so a press anywhere else never arrives. It never keeps a key
 /// back, since the input method hands every key back. It is handed no typed key at all, so
-/// every reading of the session, the input method's and the app's, carries when it last saw
-/// one, which is how a chord held as a modifier is told from one pressed alone.
+/// each change it tells carries when the session last saw one, which is how a chord held as a
+/// modifier is told from one pressed alone.
 ///
 /// A release is the one change it cannot wait to be told. One made where the input method
 /// is handed nothing, or told while the app's port was full, would leave the microphone open
@@ -60,7 +60,8 @@ public struct InputMethodModifiers: ModifierFeed {
         /// The port's queue, where the session is read too.
         private let hearing: DispatchQueue
         /// [LAW:effects-at-boundaries] The reading of the session, the one the input method
-        /// sends.
+        /// sends. It answers no change, so it places no typed key, and a release only it saw is
+        /// told by its length.
         private let session: @Sendable () -> HeldModifiers
 
         init(told: ToldModifiers, hearing: DispatchQueue, session: @escaping @Sendable () -> HeldModifiers) {
@@ -225,11 +226,6 @@ extension HeldModifiers {
     /// When they changed to what the reading shows.
     var changed: HostTime { HostTime(uptime: .nanoseconds(uptimeNanoseconds)) }
 
-    /// When a key was last typed, if that was before the change: the session keeps only its
-    /// latest key, so one typed after the change hides any typed before. A reading the app
-    /// takes itself is dated by the session's last change, so a release only the app saw is
-    /// judged at the release and not at the reading, up to `confirming` later.
-    var lastTyped: HostTime? {
-        typedUptimeNanoseconds <= uptimeNanoseconds ? HostTime(uptime: .nanoseconds(typedUptimeNanoseconds)) : nil
-    }
+    /// When a key was last typed before the change the reading answers.
+    var lastTyped: HostTime? { typedUptimeNanoseconds.map { HostTime(uptime: .nanoseconds($0)) } }
 }

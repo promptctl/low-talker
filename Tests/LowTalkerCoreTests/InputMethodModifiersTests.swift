@@ -11,8 +11,8 @@ import Testing
 private struct Told {
     var detector: HotkeyDetector
     private var told = ToldModifiers(held: [])
-    /// When the session last saw a key typed, which every reading carries: as the machine came
-    /// up, until the test types one.
+    /// When the session last saw a key typed, which every reading the input method sends
+    /// carries: as the machine came up, until the test types one.
     private var typed = HostTime(uptime: .zero)
 
     init(listeningFor mode: Mode) {
@@ -21,20 +21,15 @@ private struct Told {
 
     /// The input method telling the app that `modifiers` are held, `ms` into the run.
     mutating func holding(_ modifiers: Set<Modifier>, at ms: Int64) -> [HotkeyDetector.Transition] {
-        let reading = reading(modifiers, changedAt: ms)
+        let reading = HeldModifiers(flags: modifiers.reduce(0) { $0 | $1.mask }, uptimeNanoseconds: nanoseconds(at(ms)),
+                                    typedUptimeNanoseconds: nanoseconds(typed))
         return heard(told.take(reading.held, at: reading.changed, lastTyped: reading.lastTyped))
     }
 
-    /// The app reading the session's modifier keys itself, `ms` into the run, the session's
-    /// last change at `changed`: at the read, unless the test says.
-    mutating func session(_ modifiers: Set<Modifier>, at ms: Int64, changed: Int64? = nil) -> [HotkeyDetector.Transition] {
-        let reading = reading(modifiers, changedAt: changed ?? ms)
-        return heard(told.confirm(session: reading.held, at: at(ms), lastTyped: reading.lastTyped))
-    }
-
-    private func reading(_ modifiers: Set<Modifier>, changedAt ms: Int64) -> HeldModifiers {
-        HeldModifiers(flags: modifiers.reduce(0) { $0 | $1.mask }, uptimeNanoseconds: nanoseconds(at(ms)),
-                      typedUptimeNanoseconds: nanoseconds(typed))
+    /// The app reading the session's modifier keys itself, `ms` into the run: a reading that
+    /// answers no change, and so places no typed key.
+    mutating func session(_ modifiers: Set<Modifier>, at ms: Int64) -> [HotkeyDetector.Transition] {
+        heard(told.confirm(session: modifiers, at: at(ms), lastTyped: nil))
     }
 
     /// A key that is not a modifier typed `ms` into the run, which the input method is
@@ -182,16 +177,13 @@ private let twoKeys = Mode(name: "notes", chord: KeyChord(modifiers: .rightOptio
 
     /// A key held past `InputMethodModifiers.confirming` is looked for in the session, on
     /// the port's queue, and the release the input method never told is heard from it, no
-    /// sooner than one interval after the press. The session's reading says when a key was
-    /// last typed too, judged at the release it shows: a key typed under the chord makes it a
-    /// modifier, and one typed after the release, before the read, leaves a hold.
-    @MainActor @Test(.timeLimit(.minutes(1)), arguments: [(typed: 40, usedAsModifier: true), (typed: 150, usedAsModifier: false)])
-    func aHoldOutlastingTheConfirmingIntervalIsReadFromTheSession(typed: Int, usedAsModifier: Bool) async {
+    /// sooner than one interval after the press.
+    @MainActor @Test(.timeLimit(.minutes(1)))
+    func aHoldOutlastingTheConfirmingIntervalIsReadFromTheSession() async {
         let (moves, heard) = AsyncStream<KeyEvent>.makeStream()
         let pressedAt = DispatchTime.now().uptimeNanoseconds
         let pressed = HostTime(uptime: .nanoseconds(pressedAt))
-        let released = HeldModifiers(flags: 0, uptimeNanoseconds: pressedAt + 100_000_000,
-                                     typedUptimeNanoseconds: pressedAt + UInt64(typed) * 1_000_000)
+        let released = HeldModifiers(flags: 0, uptimeNanoseconds: pressedAt + 100_000_000, typedUptimeNanoseconds: nil)
         let installed = InputMethodModifiers.Installed<Void>(told: ToldModifiers(held: []), hearing: DispatchQueue(label: #function),
                                                              session: { released })
         installed.open = ((), { heard.yield($0) })
@@ -204,14 +196,14 @@ private let twoKeys = Mode(name: "notes", chord: KeyChord(modifiers: .rightOptio
         #expect(pressAndRelease[1].time - pressAndRelease[0].time >= .milliseconds(200))
         // A threshold under the interval, so the release read from the session is a hold.
         var detector = HotkeyDetector(modes: Config.default.modes, tapThreshold: .milliseconds(100))
-        let ending: HotkeyDetector.Ending = usedAsModifier ? .usedAsModifier : .released(.hold, at: pressAndRelease[1].time)
-        #expect(pressAndRelease.compactMap { detector.handle($0) } == [.began(.dictation, at: pressed), .ended(ending)])
+        #expect(pressAndRelease.compactMap { detector.handle($0) }
+            == [.began(.dictation, at: pressed), .ended(.released(.hold, at: pressAndRelease[1].time))])
     }
 
     /// A cursor arriving is passed on while the feed is open, and not once it has stopped.
     @MainActor @Test func aCursorArrivingIsPassedOnOnlyWhileTheFeedIsOpen() {
         let installed = InputMethodModifiers.Installed<Void>(told: ToldModifiers(held: []), hearing: DispatchQueue(label: #function),
-                                                             session: { HeldModifiers(flags: 0, uptimeNanoseconds: 0, typedUptimeNanoseconds: 0) })
+                                                             session: { HeldModifiers(flags: 0, uptimeNanoseconds: 0, typedUptimeNanoseconds: nil) })
         var arrivals = 0
         installed.open = ((), { _ in })
         installed.heard(cursorArrivedTo: { arrivals += 1 })
@@ -234,32 +226,13 @@ private let twoKeys = Mode(name: "notes", chord: KeyChord(modifiers: .rightOptio
         #expect(told.detector.phase == .idle)
     }
 
-    /// The same press with its release only the session saw, read 300 ms in: it is judged at
-    /// the release the reading shows, not at the read.
-    @Test func aKeyTypedUnderTheChordEndsAReleaseOnlyTheSessionSaw() {
+    /// A hold let go of where the input method is told nothing, with keys typed under it and
+    /// after: the app's own reading cannot say which came before the release, so the press is
+    /// told by its length, and the hold is the dictation it was.
+    @Test func aReleaseOnlyTheSessionSawIsToldByItsLength() {
         var told = Told(listeningFor: oneKey)
         #expect(told.holding([.rightOption], at: 0) == [.began(oneKey, at: at(0))])
         told.typed(at: 40)
-        #expect(told.session([], at: 300, changed: 110) == [.ended(.usedAsModifier)])
-    }
-
-    /// A hold let go of where the input method is told nothing, and Return typed before the
-    /// session is read: the Return came after the release, so the hold is the dictation it was.
-    @Test func aKeyTypedAfterAReleaseOnlyTheSessionSawLeavesTheHold() {
-        var told = Told(listeningFor: oneKey)
-        #expect(told.holding([.rightOption], at: 0) == [.began(oneKey, at: at(0))])
-        told.typed(at: 8_100)
-        #expect(told.session([], at: 8_200, changed: 8_000) == [.ended(.released(.hold, at: at(8_200)))])
-    }
-
-    /// A key typed after the release, before the input method read the session, hides any
-    /// typed under the chord, since the session keeps only the latest: the press is told by
-    /// its length, as every press was before the record was read.
-    @Test func aKeyTypedAfterTheChangeHidesAnyTypedUnderTheChord() {
-        var told = Told(listeningFor: oneKey)
-        #expect(told.holding([.rightOption], at: 0) == [.began(oneKey, at: at(0))])
-        told.typed(at: 112)
-        #expect(told.holding([], at: 110).isEmpty)
-        #expect(told.detector.phase == .latched(oneKey.chord))
+        #expect(told.session([], at: 8_200) == [.ended(.released(.hold, at: at(8_200)))])
     }
 }

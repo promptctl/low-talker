@@ -18,8 +18,9 @@ public struct KeyEvent: Hashable, Sendable {
     public let time: HostTime
     /// When a key that is not a modifier last went down before this key moved: what tells a
     /// chord pressed alone from a chord held as the modifier of a typed key, which the input
-    /// method is never handed. Nil when the session's record is of a key typed after the move,
-    /// since it keeps only the latest and that one hides any typed before.
+    /// method is never handed. Nil when the reading cannot place one before the move: the
+    /// session keeps only its latest key, so one typed since hides any before, and the app's
+    /// own reading answers no move.
     public let lastTyped: HostTime?
 
     public init(key: Modifier, direction: Direction, modifiers: Set<Modifier>, time: HostTime, lastTyped: HostTime?) {
