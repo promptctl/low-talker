@@ -50,7 +50,7 @@ public extension Config {
         try self.init(
             model: file.model ?? Config.default.model,
             microphone: file.microphone?.atRest ?? Config.default.microphone,
-            modes: file.modes?.map { $0.mode } ?? Config.default.modes,
+            modes: file.modes?.map { $0.mode } ?? Array(Config.default.modes),
             serve: try file.serve.map { entry throws(ConfigError) in try entry.binding } ?? Config.default.serve
         )
     }

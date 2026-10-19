@@ -32,7 +32,7 @@ public final class Hotkey {
     /// press still open when the feed stops is ended at that same handler.
     private var installed: (dispose: Disposal, onTransition: @MainActor (HotkeyDetector.Transition) -> Void)?
 
-    public init(modes: [Mode], tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed) {
+    public init(modes: Modes, tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed) {
         self.feed = feed
         detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
@@ -69,7 +69,7 @@ public final class Hotkey {
 
     /// Listens for `modes` from the next press on, without stopping the feed or ending a
     /// press already open; see `HotkeyDetector.listen(for:)`.
-    public func listen(for modes: [Mode]) {
+    public func listen(for modes: Modes) {
         detector.listen(for: modes)
     }
 

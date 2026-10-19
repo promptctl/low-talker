@@ -133,7 +133,7 @@ import Testing
         try Self.onLeftControl.write(to: file, atomically: true, encoding: .utf8)
 
         let reload = try #require(await reloads.next())
-        #expect(try reload.config.get().chords == [KeyChord(modifiers: .leftControl)])
+        #expect(try reload.config.get().modes.chords == [KeyChord(modifiers: .leftControl)])
     }
 
     /// A syntax error saved mid-edit leaves the app on the config it already had, and names

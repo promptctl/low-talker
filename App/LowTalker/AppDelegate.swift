@@ -149,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - the loop
 
     /// The config this app runs on, read the first time it is asked for and again at every
-    /// save: what the microphone does at rest, the chords the hotkey listens for and where
+    /// save: what the microphone does at rest, the modes the hotkey listens for and where
     /// the server listens, from one reading, so none of them comes from a different version
     /// of the file. The menu's names for the chords read it too, so what the menu says to
     /// hold is what is heard. Only `follow` changes it once it is read. [LAW:one-source-of-truth]
@@ -161,8 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// new value, and the rest are left alone. A save the file refused leaves every one where
     /// it was, and the menu says why. [LAW:no-silent-failure]
     ///
-    /// Nothing here ends a press. A chord moved mid-hold leaves the hold to end at its own
-    /// release, and a resting mode moved mid-hold is taken up at the key-up.
+    /// Nothing here ends a press. A mode moved mid-hold leaves the hold to end at its own
+    /// chord's release, heard in the mode it began in, and a resting mode moved mid-hold is
+    /// taken up at the key-up.
     private func follow(_ next: RunningConfig) {
         let was = try? config.get()
         running = next
@@ -184,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // Only a line that says how to press is rewritten: one that says why nothing is
                 // heard still says so. [LAW:no-silent-failure]
                 if case .listening = hotkeyStatus { showHotkeyStatus(.listening(listeningStatus)) }
-                return "modes [\(now.modes.map(\.description).joined(separator: ", "))]"
+                return "modes \(now.modes)"
             case .microphone:
                 capture.rest(as: now.microphone)
                 return "microphone \(capture.doing)"
@@ -789,7 +790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func report(_ press: Dictation.Report) {
         switch press.outcome {
         case .success(let session):
-            sessions.notice("\(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcript.text, privacy: .private)")
+            sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcript.text, privacy: .private)")
         case .failure(let failed):
             reportFailure(failed, of: press)
         }
@@ -805,12 +806,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // that did: the facts in the clear and any words it carries private, as its type
         // declares them.
         let account = failed.failure.account
+        let mode = press.map { " in \($0.mode)" } ?? ""
         let microphone = press.map { "; microphone: \($0.microphone)" } ?? ""
         switch account.dictated {
         case nil:
-            sessions.error("session failed: \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public)")
+            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public)")
         case let dictated?:
-            sessions.error("session failed: \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public); dictated: \(dictated, privacy: .private)")
+            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public); dictated: \(dictated, privacy: .private)")
         }
     }
 
@@ -863,7 +865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let stored = CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString) as? Int
         let action = GlobeKeyAction(appleFnUsageType: stored)
         let clash: String? = switch config {
-        case .success(let config): action.clash(with: config.chords)
+        case .success(let config): action.clash(with: config.modes.chords)
         // The status line already says why no chord is heard.
         case .failure: nil
         }
