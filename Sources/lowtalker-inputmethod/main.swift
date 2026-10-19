@@ -63,7 +63,7 @@ let committer = Committer(label: "\(AppIdentity.inputMethodPortName).commits")
 ///
 /// Answered on a queue of its own and never on the main one, which is where every key this
 /// source passes through is handled. An insert asks the main actor only which cursor is in
-/// front and whether its client gives document access - where `FocusedClient` and every
+/// front and whether its client is a text field on a screen - where `FocusedClient` and every
 /// `IMKInputController` callback already run, so the two never race - and then hands the
 /// words to the `Committer`, off the main thread.
 /// Both waits are bounded by the committer, so a hung app costs the person an insert
@@ -91,7 +91,8 @@ let insertions: InsertionPort? = {
                 MainActor.assumeIsolated {
                     FocusedClient.shared.inFront(for: request.destination,
                                                  whileInFrontIs: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-                                                 secureInputHeldBy: secureInputHolder())
+                                                 secureInputHeldBy: secureInputHolder(),
+                                                 screens: NSScreen.screens.map(\.frame))
                 }
             }
             let answer = committer.answer(request.text, at: seen?.cursor)
