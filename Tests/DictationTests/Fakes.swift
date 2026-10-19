@@ -1,9 +1,42 @@
 import AVFoundation
+import Dictation
 import Dispatch
 import Grants
 import Insertion
 import LowTalkerCore
 import Synchronization
+
+/// A store kept in memory, outliving the rigs built over it as a file outlives the app, and
+/// keeping the store's contract.
+@MainActor
+final class FakeHeldStore: HeldStore {
+    private(set) var kept: Held?
+    /// Every write, in order.
+    private(set) var written: [Held?] = []
+    /// What every read throws, when set.
+    var unreadable: HeldUnreadable?
+    /// What every write throws, when set; `.lost` keeps nothing, `.stale` leaves what was kept.
+    var failing: HeldUnkept?
+
+    init(keeping kept: Held? = nil) {
+        self.kept = kept
+    }
+
+    func read() throws(HeldUnreadable) -> Held? {
+        if let unreadable { throw unreadable }
+        return kept
+    }
+
+    func write(_ held: Held?) throws(HeldUnkept) {
+        written.append(held)
+        switch failing {
+        case nil: kept = held
+        case .lost?: kept = nil
+        case .stale?: break
+        }
+        if let failing { throw failing }
+    }
+}
 
 /// Hardware a test feeds: one engine per opening, its samples the test's to append.
 @MainActor

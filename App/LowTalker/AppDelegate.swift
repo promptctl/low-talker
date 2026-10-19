@@ -57,9 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The loop's activity again, floating over the app being dictated into, with the words
     /// no cursor took.
     private lazy var hud: HUD = HUD { [unowned self] in hold.dismiss() }
-    /// The words no cursor took, for the life of the app: a loop rebuilt over a new config
-    /// keeps offering them.
-    private lazy var hold: Hold = Hold { [unowned self] held in
+    /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
+    /// new config keeps offering them, and so does the next launch.
+    private lazy var hold: Hold = Hold(store: HeldFile.app, failedToKeep: { [unowned self] unkept in
+        sessions.fault("held words: \(unkept, privacy: .public)")
+    }) { [unowned self] held in
         hud.show(activity, held: held)
         // [LAW:nothing-unseen] Counted, never the words themselves: they are what the user dictated.
         sessions.notice("held: \(held.map { "\($0.words.words.count) words, \($0.warnings.joined(separator: " "))" } ?? "nothing", privacy: .public)")
@@ -571,6 +573,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.isVisible = true
         watchStatusItem()
         _ = engine
+        // What the last run held is shown from launch, not from the first loop, which waits on
+        // the microphone grant. [LAW:nothing-unseen] So is a store that could not be read.
+        hold.unrestored.map { sessions.fault("held words: \($0, privacy: .public)") }
         // Listening from launch when the person last chose to, answering 503 until the model
         // is resident, so a client started beside the app is told to wait rather than refused.
         serving?.resume(at: config.map(\.serve))
@@ -840,6 +845,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for reason in unheard { menu.addItem(readout("    Not heard now: \(reason)")) }
         globeKey.map { menu.addItem(readout("    \($0)")) }
         lastFailure.map { menu.addItem(errorRow($0, .lastDictation)) }
+        // What keeping the held words for the next launch failed at: a fact about the store,
+        // not the words, and one the panel has nothing to show for when nothing is held.
+        // [LAW:no-silent-failure]
+        for trouble in [hold.unrestored?.description, hold.unkept?.description].compactMap({ $0 }) {
+            menu.addItem(errorRow("Held words: \(trouble)", .heldWords))
+        }
         if running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
         if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: presses are refused until it ends")) }
         // Every requirement, met or not, and its step under it as the lines it was
@@ -882,7 +893,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Which of the menu's lines failed, as the log names it when that line is copied.
     private enum FailedLine: String {
-        case model, server, microphone, hotkey, lastDictation, config
+        case model, server, microphone, hotkey, lastDictation, heldWords, config
     }
 
     /// A line that says what failed, which a click copies whole to the clipboard.

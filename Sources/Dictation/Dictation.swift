@@ -621,7 +621,7 @@ public final class Dictation {
     /// the loop makes passes through here, so held words land ahead of every word said after
     /// them, and a failed insert's words are held rather than lost. Throws as the executor does.
     private func place(_ words: Transcript, following last: Executor.Performed?, since: Executor.Since) async throws(InsertFailure) -> Placed {
-        let offered = hold.offering(words)
+        let offered = hold.sending(words)
         do throws(InsertFailure) {
             let performed = try await executor.insert(offered, following: last, since: since)
             // An insert of nothing is no proof a cursor takes words, so a warning stands.
