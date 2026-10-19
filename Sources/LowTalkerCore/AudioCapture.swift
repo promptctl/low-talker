@@ -297,9 +297,12 @@ public final class AudioCapture {
     public var doing: Doing {
         guard case .started(let started) = phase else { return .notCaptured }
         switch started.engine {
-        // Held open by nothing and asked to be: `rest()` launches under `open` whenever it
-        // runs, so this is a launch still waiting for the input a press would open.
-        case .shut where started.atRest == .open && !started.sessionIsOpen: return .opening
+        // `rest()` leaves the engine as the mode asks whenever it runs, so an engine at odds
+        // with the mode while no press holds it is a move that has not landed: a launch
+        // waiting for its input, or a close one main-actor turn away.
+        case .shut where started.atRest == .open && !started.sessionIsOpen,
+             .running where started.atRest == .shut && !started.sessionIsOpen:
+            return .moving(to: started.atRest)
         case .shut, .running: return .keeping(started.atRest)
         case .failed(let error, _, _): return .stopped(started.atRest, error)
         }
@@ -308,8 +311,8 @@ public final class AudioCapture {
     /// What `doing` reads, which says itself as the sentence.
     public enum Doing: CustomStringConvertible {
         case notCaptured
-        /// Asked to hold the microphone open, which it does once its input is reached.
-        case opening
+        /// Asked for a resting mode the microphone is not in yet, on its way there.
+        case moving(to: MicrophoneAtRest)
         /// Doing what the resting mode asks.
         case keeping(MicrophoneAtRest)
         /// Asked to keep to the resting mode, and the device stopped, for this reason.
@@ -318,7 +321,8 @@ public final class AudioCapture {
         public var description: String {
             switch self {
             case .notCaptured: "not being captured"
-            case .opening: "held open once its input is reached"
+            case .moving(to: .open): "held open once its input is reached"
+            case .moving(to: .shut): "being shut"
             case .keeping(let atRest): "\(atRest)"
             case .stopped(let atRest, let error): "\(atRest), but it stopped: \(error)"
             }

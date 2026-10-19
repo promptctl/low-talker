@@ -631,7 +631,10 @@ private struct Authorized: MicrophoneAuthority {
         #expect(!hardware.engines[0].disposed)
         capture.rest(as: .shut)
         #expect(capture.atRest == .shut)
+        // The close lands a main-actor turn later, and a reading before it is not told shut.
+        #expect("\(capture.doing)" == "being shut")
         try await untilItHolds { hardware.engines[0].disposed }
+        #expect("\(capture.doing)" == "\(MicrophoneAtRest.shut)")
         #expect(isListening(capture))
         #expect(reports.said == ["rest open: reached", "rest shut: reached"])
     }
