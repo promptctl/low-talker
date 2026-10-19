@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 
@@ -111,6 +112,7 @@ actor Utterance {
         /// peaking at or above `gate` runs on, and any other breaks the run.
         func sounding(_ clip: AudioClip, through end: Int, gate: Float) -> Burst {
             var next = self
+            if ProcessInfo.processInfo.environment["GATE_FOLLOW"] != nil { next.speechPeak = 0 }
             next.through = end
             for start in stride(from: 0, to: clip.samples.count, by: Utterance.envelope) {
                 let window = clip.samples[start..<min(start + Utterance.envelope, clip.samples.count)]
@@ -126,7 +128,9 @@ actor Utterance {
         /// The burst carried on through a clip that did not sound, which breaks its run.
         var broken: Burst {
             var next = self
+            if ProcessInfo.processInfo.environment["GATE_FOLLOW"] != nil { next.speechPeak = 0 }
             (next.run, next.runPeak) = (0, 0)
+            if ProcessInfo.processInfo.environment["GATE_FOLLOW"] != nil { next.speechPeak = 0 }
             return next
         }
     }
@@ -139,6 +143,7 @@ actor Utterance {
     /// short of a syllable, so a click sets no range unless nothing breaks it from the speech
     /// after it, and a soft speaker after one is heard.
     private var loudestSpeech: Float = 0
+    private var speaker: Float = 0
     /// The room readings of the last `roomSpan` before the frame being judged, the newest last.
     private var recent: [Float] = []
     private static let roomFrames = Int((roomSpan / frame).rounded())
@@ -175,7 +180,8 @@ actor Utterance {
         samples += clip.samples
         let peak = clip.peak
         loudestHeard = max(loudestHeard, peak)
-        let loudest = max(loudestSpeech, burst?.runPeak ?? 0, peak)
+        let releaseSpan = Double(ProcessInfo.processInfo.environment["GATE_RELEASE"] ?? "0").flatMap { $0 > 0 ? $0 : nil }
+        if let releaseSpan { speaker *= Float(pow(Double(Self.dynamicRange), -AudioClip.duration(for: clip.samples.count) / releaseSpan)) }
         // A room reading is a whole frame that heard something: digital silence is no
         // microphone, whose own noise is never exactly zero, and a frame the end cut short
         // is no tenth of a second.
@@ -185,14 +191,33 @@ actor Utterance {
         recent = Array((recent + [reading].compactMap { $0 }).suffix(Self.roomFrames))
         // The softest a sample under the floor may be and still be speech.
         let roomGate = min(Self.audible, room * Self.aboveRoom)
+        let early = ProcessInfo.processInfo.environment["GATE_EARLY"] != nil
+        if early { hearRuns(clip, roomGate: roomGate) }
+        let kth = Int(ProcessInfo.processInfo.environment["GATE_KTH"] ?? "0") ?? 0
+        let runs = (topRuns + (ambientRun >= Self.syllable ? [ambientRunPeak] : [])).sorted(by: >)
+        let kthRun = runs.isEmpty || kth == 0 ? 0 : runs[min(kth, runs.count) - 1]
+        let kthRef = ProcessInfo.processInfo.environment["GATE_OUTLIER"] != nil ? runs.first { $0 <= kthRun * Self.dynamicRange } ?? 0 : kthRun
+        let voicedThreshold = Float(ProcessInfo.processInfo.environment["GATE_VOICED"] ?? "")
+        let voicing = Self.voicing(clip.samples)
+        let loudest = voicedThreshold != nil ? max(loudestVoiced, burst?.runPeak ?? 0, peak) : kth > 0 ? max(kthRef, burst?.runPeak ?? 0, peak) : max(releaseSpan == nil ? loudestSpeech : speaker, burst?.runPeak ?? 0, peak)
+        let roomFloored = ProcessInfo.processInfo.environment["GATE_ROOM_FLOOR"] != nil
+        let floorSplit = ProcessInfo.processInfo.environment["GATE_FLOOR_SPLIT"] != nil
+        let heardLoudest = voicedThreshold != nil ? loudest : floorSplit || kth > 0 ? max(loudestSpeech, burst?.runPeak ?? 0, peak) : loudest
+        defer { if let voicedThreshold, voicing >= voicedThreshold { loudestVoiced = max(loudestVoiced, burst?.speechPeak ?? 0) } }
+        if ProcessInfo.processInfo.environment["GATE_VOICING_LOG"] != nil, peak >= 0.01 { Self.voicingLog.append((peak, voicing)) }
         // [LAW:dataflow-not-control-flow] One judgement for every clip, the loudest
         // included: it stands within range of itself, so the clip that lifts the
         // loudest past the floor sounds.
-        let withinRange = loudest >= Self.audible && peak >= loudest / Self.dynamicRange
+        let withinRange = heardLoudest >= Self.audible && peak >= (roomFloored ? min(max(loudestSpeech, burst?.runPeak ?? 0, peak) / Self.dynamicRange, max(loudest / Self.dynamicRange, room * Self.aboveRoom)) : loudest / Self.dynamicRange)
         let sounds = withinRange && peak >= roomGate
         // [LAW:nothing-unseen] What the room refused that the range alone would have kept.
         timeline.heard(reading, refusedAsRoom: withinRange && !sounds ? clip.samples.count : 0)
-        let softest = max(loudest / Self.dynamicRange, roomGate)
+        let pressLong = max(loudestSpeech, burst?.runPeak ?? 0, peak) / Self.dynamicRange
+        let rangeGate = roomFloored ? min(pressLong, max(loudest / Self.dynamicRange, room * Self.aboveRoom)) : loudest / Self.dynamicRange
+        let softest = max(rangeGate, roomGate)
+        if ProcessInfo.processInfo.environment["GATE_TRACE"] != nil {
+            print(String(format: "TRACE t %.2f softest %.4f speaker %.4f peak %.4f loudestSpeech %.4f loudest %.4f room %.4f roomGate %.4f sounds %d burst %@ runs %@ amb %d %.4f", timeline.place(AudioClip.duration(for: start)) - 0.2, softest, speaker, peak, loudestSpeech, loudest, room, roomGate, sounds ? 1 : 0, burst.map { "through \($0.through) speech \($0.isSpeech)" } ?? "nil", runs.map { String(format: "%.3f", $0) }.joined(separator: ","), ambientRun, ambientRunPeak))
+        }
         // Where the audio kept must resume: the lead-in before the clip's first sample
         // that sounds when the clip sounds, the lead-in before its end when it does not,
         // since the next clip may open on speech.
@@ -215,7 +240,46 @@ actor Utterance {
         burst = sounds ? (joined ?? .opening).sounding(clip, through: samples.count, gate: softest) : joined?.broken
         spoken = burst.flatMap { $0.isSpeech ? $0.through : nil } ?? spoken
         loudestSpeech = max(loudestSpeech, burst?.speechPeak ?? 0)
+        speaker = max(speaker, burst?.speechPeak ?? 0)
+        if !early { hearRuns(clip, roomGate: roomGate) }
     }
+    private func hearRuns(_ clip: AudioClip, roomGate: Float) {
+        // Every syllable-long run heard against the room alone, whatever the range said of it.
+        for windowStart in stride(from: 0, to: clip.samples.count, by: Self.envelope) {
+            let window = clip.samples[windowStart..<min(windowStart + Self.envelope, clip.samples.count)]
+            let windowPeak = window.reduce(0) { max($0, abs($1)) }
+            if windowPeak >= max(roomGate, ambientRunPeak / Self.dynamicRange) && (ambientRunPeak == 0 || windowPeak <= ambientRunPeak * Self.dynamicRange) {
+                ambientRun += window.count
+                ambientRunPeak = max(ambientRunPeak, windowPeak)
+            } else {
+                if ambientRun >= Self.syllable { topRuns = Array((topRuns + [ambientRunPeak]).sorted(by: >).prefix(8)) }
+                (ambientRun, ambientRunPeak) = windowPeak >= roomGate ? (window.count, windowPeak) : (0, 0)
+            }
+        }
+    }
+    private var loudestVoiced: Float = 0
+    nonisolated(unsafe) static var voicingLog: [(Float, Float)] = []
+    /// The clip's periodicity: the highest normalized autocorrelation over pitch lags of 80 to 400 Hz.
+    static func voicing(_ x: [Float]) -> Float {
+        let minLag = 40, maxLag = 200
+        guard x.count > maxLag * 2 else { return 0 }
+        var best: Float = 0
+        x.withUnsafeBufferPointer { p in
+            for lag in minLag...maxLag {
+                let n = vDSP_Length(x.count - lag)
+                var xy: Float = 0, xx: Float = 0, yy: Float = 0
+                vDSP_dotpr(p.baseAddress!, 1, p.baseAddress! + lag, 1, &xy, n)
+                vDSP_svesq(p.baseAddress!, 1, &xx, n)
+                vDSP_svesq(p.baseAddress! + lag, 1, &yy, n)
+                let r = xx > 0 && yy > 0 ? xy / (xx * yy).squareRoot() : 0
+                best = max(best, r)
+            }
+        }
+        return best
+    }
+    private var ambientRun = 0
+    private var ambientRunPeak: Float = 0
+    private var topRuns: [Float] = []
 
     /// The key came up: nothing more arrives.
     func end() {
