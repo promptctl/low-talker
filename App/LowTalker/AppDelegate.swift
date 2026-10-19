@@ -179,12 +179,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // [LAW:nothing-unseen] Each moved setting lands on the event with what came of moving it.
         let moved = now.settings(changedFrom: was).map { setting in
             switch setting {
-            case .chords:
-                listening?.hotkey.listen(for: now.chords)
+            case .modes:
+                listening?.hotkey.listen(for: now.modes)
                 // Only a line that says how to press is rewritten: one that says why nothing is
                 // heard still says so. [LAW:no-silent-failure]
                 if case .listening = hotkeyStatus { showHotkeyStatus(.listening(listeningStatus)) }
-                return "chords \(Hotkey.named(in: now))"
+                return "modes [\(now.modes.map(\.description).joined(separator: ", "))]"
             case .microphone:
                 capture.rest(as: now.microphone)
                 return "microphone \(capture.doing)"

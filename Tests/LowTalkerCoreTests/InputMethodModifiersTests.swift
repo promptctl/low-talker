@@ -12,8 +12,8 @@ private struct Told {
     var detector: HotkeyDetector
     private var told = ToldModifiers(held: [])
 
-    init(listeningFor chord: KeyChord) {
-        detector = HotkeyDetector(chords: [chord], tapThreshold: .milliseconds(250))
+    init(listeningFor mode: Mode) {
+        detector = HotkeyDetector(modes: [mode], tapThreshold: .milliseconds(250))
     }
 
     /// The input method telling the app that `modifiers` are held, `ms` into the run.
@@ -38,8 +38,8 @@ private struct Told {
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }
 
-private let oneKey = KeyChord(modifiers: .rightOption)
-private let twoKeys = KeyChord(modifiers: .rightOption, .rightCommand)
+private let oneKey = Mode(name: "dictation", chord: KeyChord(modifiers: .rightOption))
+private let twoKeys = Mode(name: "notes", chord: KeyChord(modifiers: .rightOption, .rightCommand))
 
 @Suite struct InputMethodModifiersTests {
     @Test func aHoldBeginsAtThePressAndEndsAtTheRelease() {

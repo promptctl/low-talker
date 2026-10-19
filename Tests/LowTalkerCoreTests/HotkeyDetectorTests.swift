@@ -1,8 +1,9 @@
 import LowTalkerCore
 import Testing
 
-private let rightOption = KeyChord(modifiers: .rightOption)
-private let command = KeyChord(modifiers: .rightOption, .leftShift)
+private let rightOption = Mode(name: "dictation", chord: KeyChord(modifiers: .rightOption))
+private let command = Mode(name: "command", chord: KeyChord(modifiers: .rightOption, .leftShift))
+private let rightCommand = Mode(name: "notes", chord: KeyChord(modifiers: .rightCommand))
 
 /// A keyboard the test types on, event by event, at the moments it says.
 private struct Keyboard {
@@ -11,8 +12,8 @@ private struct Keyboard {
     /// the input method does.
     private var held: Set<Modifier> = []
 
-    init(chords: Set<KeyChord> = [rightOption], tapThreshold: Duration = .milliseconds(250)) {
-        detector = HotkeyDetector(chords: chords, tapThreshold: tapThreshold)
+    init(modes: [Mode] = [rightOption], tapThreshold: Duration = .milliseconds(250)) {
+        detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
 
     mutating func press(_ modifier: Modifier, at ms: Int64) -> HotkeyDetector.Transition? {
@@ -28,8 +29,8 @@ private struct Keyboard {
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }
 
-private func began(_ chord: KeyChord, at ms: Int64) -> HotkeyDetector.Transition { .began(chord, at: at(ms)) }
-private func ended(_ chord: KeyChord, _ press: PressKind, at ms: Int64) -> HotkeyDetector.Transition { .ended(chord, .released(press, at: at(ms))) }
+private func began(_ mode: Mode, at ms: Int64) -> HotkeyDetector.Transition { .began(mode, at: at(ms)) }
+private func ended(_ mode: Mode, _ press: PressKind, at ms: Int64) -> HotkeyDetector.Transition { .ended(mode, .released(press, at: at(ms))) }
 
 @Suite struct HotkeyDetectorTests {
     @Test func aPressReleasedAfterTheThresholdIsAHold() {
@@ -93,7 +94,7 @@ private func ended(_ chord: KeyChord, _ press: PressKind, at ms: Int64) -> Hotke
     /// The chord that began the press owns it: adding Shift to a held Right Option
     /// changes nothing, though Right Option with Shift is itself a chord.
     @Test func aChordCompletedOnTopOfAHeldOneIsIgnored() {
-        var keyboard = Keyboard(chords: [rightOption, command])
+        var keyboard = Keyboard(modes: [rightOption, command])
         #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
         #expect(keyboard.press(.leftShift, at: 100) == nil)
         #expect(keyboard.detector.phase == .held(rightOption, since: at(0)))
@@ -104,7 +105,7 @@ private func ended(_ chord: KeyChord, _ press: PressKind, at ms: Int64) -> Hotke
     /// Shift first, then Right Option, is the two-key chord, and releasing either ends
     /// the press.
     @Test func theOrderOfKeysPicksTheChord() {
-        var keyboard = Keyboard(chords: [rightOption, command])
+        var keyboard = Keyboard(modes: [rightOption, command])
         #expect(keyboard.press(.leftShift, at: 0) == nil)
         #expect(keyboard.press(.rightOption, at: 10) == began(command, at: 10))
         #expect(keyboard.release(.leftShift, at: 400) == ended(command, .hold, at: 400))
@@ -114,7 +115,7 @@ private func ended(_ chord: KeyChord, _ press: PressKind, at ms: Int64) -> Hotke
 
     /// The two-key chord released on either key within the threshold latches like any tap.
     @Test func releasingEitherKeyOfAChordWithinTheThresholdLatches() {
-        var keyboard = Keyboard(chords: [rightOption, command])
+        var keyboard = Keyboard(modes: [rightOption, command])
         _ = keyboard.press(.leftShift, at: 0)
         #expect(keyboard.press(.rightOption, at: 10) == began(command, at: 10))
         #expect(keyboard.release(.leftShift, at: 100) == nil)
@@ -127,7 +128,6 @@ private func ended(_ chord: KeyChord, _ press: PressKind, at ms: Int64) -> Hotke
     /// neither dropped nor ended, it ends at that chord's release, and the next press is
     /// heard on the new chord alone.
     @Test func aHoldOpenWhenTheChordMovesEndsAtItsOwnRelease() {
-        let rightCommand = KeyChord(modifiers: .rightCommand)
         var keyboard = Keyboard()
         #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
         keyboard.detector.listen(for: [rightCommand])
@@ -138,12 +138,23 @@ private func ended(_ chord: KeyChord, _ press: PressKind, at ms: Int64) -> Hotke
         #expect(keyboard.press(.rightCommand, at: 1000) == began(rightCommand, at: 1000))
     }
 
+    /// A saved config gives the held chord's mode a vocabulary mid-hold: the press keeps the
+    /// mode it began in, so its decode and its record agree on what it expected, and the next
+    /// press begins in the mode as saved.
+    @Test func aHoldOpenWhenItsModeChangesKeepsTheModeItBeganIn() throws {
+        let saved = Mode(name: "dictation", chord: rightOption.chord, vocabulary: Vocabulary([try Vocabulary.Term("Brynleigh")]))
+        var keyboard = Keyboard()
+        #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
+        keyboard.detector.listen(for: [saved])
+        #expect(keyboard.release(.rightOption, at: 400) == ended(rightOption, .hold, at: 400))
+        #expect(keyboard.press(.rightOption, at: 1000) == began(saved, at: 1000))
+    }
+
     /// A tap latched under the old chord stays latched, and is ended by the chord that began
     /// it - the one the person tapped to start - or by the chord listened for now, the one
     /// the menu names. Neither leaves the microphone recording with no way to stop it.
     @Test(arguments: [Modifier.rightOption, .rightCommand])
     func aTapLatchedWhenTheChordMovesIsEndedByEitherChord(_ ending: Modifier) {
-        let rightCommand = KeyChord(modifiers: .rightCommand)
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
         _ = keyboard.release(.rightOption, at: 100)
@@ -187,7 +198,7 @@ private func ended(_ chord: KeyChord, _ press: PressKind, at ms: Int64) -> Hotke
     /// While latched, any configured chord ends the listening, not only the one that
     /// began it.
     @Test func anyChordPressEndsALatchedSession() {
-        var keyboard = Keyboard(chords: [rightOption, command])
+        var keyboard = Keyboard(modes: [rightOption, command])
         _ = keyboard.press(.rightOption, at: 0)
         _ = keyboard.release(.rightOption, at: 100)
         _ = keyboard.press(.leftShift, at: 1000)

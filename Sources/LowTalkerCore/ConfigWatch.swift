@@ -104,8 +104,8 @@ public enum RunningConfig: Equatable, Sendable, CustomStringConvertible {
 extension Config {
     /// A part of the running app a config sets, and a reload can move.
     public enum Setting: CaseIterable, Sendable {
-        /// What the hotkey listens for.
-        case chords
+        /// What the hotkey listens for: each mode's chord, and what its presses are heard expecting.
+        case modes
         /// What the microphone does between presses.
         case microphone
         /// Where the server listens.
@@ -119,7 +119,7 @@ extension Config {
     public func settings(changedFrom earlier: Config) -> [Setting] {
         Setting.allCases.filter { setting in
             switch setting {
-            case .chords: chords != earlier.chords
+            case .modes: modes != earlier.modes
             case .microphone: microphone != earlier.microphone
             case .serve: serve != earlier.serve
             }

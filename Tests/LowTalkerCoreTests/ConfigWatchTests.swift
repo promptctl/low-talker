@@ -76,12 +76,13 @@ import Testing
     }
 
     /// What a reload says it moved is every setting whose value changed, and only those: a
-    /// save that moves the chord and leaves the rest names the chord alone, and one that
-    /// moves every setting names each.
+    /// save that moves the chord, or gives the mode a vocabulary, and leaves the rest names
+    /// the modes alone, and one that moves every setting names each.
     @Test func aReloadNamesTheSettingsItMoved() throws {
         let was = try Self.config(Self.onRightCommand)
         #expect(was.settings(changedFrom: was) == [])
-        #expect(try Self.config(Self.onLeftControl).settings(changedFrom: was) == [.chords])
+        #expect(try Self.config(Self.onLeftControl).settings(changedFrom: was) == [.modes])
+        #expect(try Self.config(Self.onRightCommand + "\nvocabulary = [\"Brynleigh\"]").settings(changedFrom: was) == [.modes])
         let everything = try Self.config("""
             microphone = { at_rest = "open" }
             [serve]
@@ -91,7 +92,7 @@ import Testing
             name = "dictation"
             chord = { modifiers = ["leftControl"] }
             """)
-        #expect(everything.settings(changedFrom: was) == [.chords, .microphone, .serve])
+        #expect(everything.settings(changedFrom: was) == [.modes, .microphone, .serve])
     }
 
     // MARK: - Against a real file

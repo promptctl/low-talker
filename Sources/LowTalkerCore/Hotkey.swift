@@ -32,20 +32,20 @@ public final class Hotkey {
     /// press still open when the feed stops is ended at that same handler.
     private var installed: (dispose: Disposal, onTransition: @MainActor (HotkeyDetector.Transition) -> Void)?
 
-    public init(chords: Set<KeyChord>, tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed) {
+    public init(modes: [Mode], tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed) {
         self.feed = feed
-        detector = HotkeyDetector(chords: chords, tapThreshold: tapThreshold)
+        detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
 
-    /// The app's hotkey: the chords `config` names, heard through the input method, which
-    /// also tells each cursor it is given focus in to `cursorArrived` while this is watching,
-    /// and whose process `superviseInputMethod` supervises meanwhile.
+    /// The app's hotkey: the modes `config` names, heard by their chords through the input
+    /// method, which also tells each cursor it is given focus in to `cursorArrived` while this
+    /// is watching, and whose process `superviseInputMethod` supervises meanwhile.
     public convenience init(
         listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold,
         cursorArrived: @escaping @MainActor () -> Void,
         superviseInputMethod: @escaping @MainActor () -> Disposal
     ) {
-        self.init(chords: config.chords, tapThreshold: tapThreshold,
+        self.init(modes: config.modes, tapThreshold: tapThreshold,
                   feed: InputMethodModifiers(cursorArrived: cursorArrived, superviseInputMethod: superviseInputMethod))
     }
 
@@ -67,10 +67,10 @@ public final class Hotkey {
         installed = (dispose, onTransition)
     }
 
-    /// Listens for `chords` from the next press on, without stopping the feed or ending a
+    /// Listens for `modes` from the next press on, without stopping the feed or ending a
     /// press already open; see `HotkeyDetector.listen(for:)`.
-    public func listen(for chords: Set<KeyChord>) {
-        detector.listen(for: chords)
+    public func listen(for modes: [Mode]) {
+        detector.listen(for: modes)
     }
 
     /// Stops watching. A press still open is ended here as `.lapsed`, at the handler it
@@ -82,7 +82,7 @@ public final class Hotkey {
         let was = installed
         installed = nil
         was?.dispose()
-        detector = HotkeyDetector(chords: detector.chords, tapThreshold: detector.tapThreshold)
+        detector = HotkeyDetector(modes: detector.modes, tapThreshold: detector.tapThreshold)
         unfinished.map { transition in
             was.map { installation in after { installation.onTransition(transition) } }
         }

@@ -103,18 +103,6 @@ import Testing
         #expect(Mode.dictation.vocabulary == .empty)
     }
 
-    /// The chord that started listening picks the mode, and the hotkey is told exactly the
-    /// chords the modes claim.
-    @Test func theChordSelectsTheMode() throws {
-        let config = try Self.config(Self.full)
-        let dictation = KeyChord(modifiers: .rightOption)
-        #expect(config.mode(for: dictation)?.name == "dictation")
-        #expect(config.mode(for: KeyChord(modifiers: .rightCommand))?.name == "notes")
-        #expect(config.mode(for: KeyChord(modifiers: .function)) == nil)
-        #expect(config.chords == Set(config.modes.map(\.chord)))
-        #expect(config.chords.contains(dictation))
-    }
-
     /// [LAW:one-source-of-truth] A mode with no chord listens for the default one, the
     /// chord `Hotkey.defaultChord` names.
     @Test func aModeWithNoChordHearsTheDefaultChord() throws {
