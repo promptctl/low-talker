@@ -379,10 +379,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     }
 
     /// A refusal while the press is open is what the report names even when the press then
-    /// lapses: it is what left the words unplaced, and the lapse came after it. A pass between
-    /// them that confirms nothing new is no run, so the held words are not inserted on their
-    /// own, before the lapse or after it.
-    @Test func aRefusalBeforeALapseIsWhatTheReportNames() async throws {
+    /// lapses, or turns out to be a typed key's modifier: it is what left spoken words unplaced,
+    /// and the ending came after it. A pass between them that confirms nothing new is no run,
+    /// so the held words are not inserted on their own, before the ending or after it.
+    @Test(arguments: [HotkeyDetector.Ending.lapsed, .usedAsModifier])
+    func aRefusalBeforeALapseIsWhatTheReportNames(ending: HotkeyDetector.Ending) async throws {
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "hello" : "") }) { _ in Transcript(typed: "hello") }
         let rig = try Rig(hearing: engine)
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
@@ -392,7 +393,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(nil)
         rig.speak([3])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing.count == 3 })
-        rig.dictation.press(.ended(.lapsed))
+        rig.dictation.press(.ended(ending))
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.cause as? InsertFailure == .refused(.noClientHasFocus))
         #expect(rig.inputMethod.inserted == [])

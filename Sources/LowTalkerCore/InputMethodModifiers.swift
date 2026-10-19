@@ -37,8 +37,9 @@ public struct InputMethodModifiers: ModifierFeed {
         self.superviseInputMethod = superviseInputMethod
     }
 
-    /// How often a held key is looked for in the session: how late, at most, a release the
-    /// input method never told is heard.
+    /// How often a held key is looked for in the session. A release the input method never
+    /// told is heard within two of these, since one younger than `ToldModifiers.telling` is
+    /// left for the next.
     static let confirming: DispatchTimeInterval = .milliseconds(200)
 
     /// What the port's messages reach on the main actor: while the feed is open, the port
@@ -60,8 +61,7 @@ public struct InputMethodModifiers: ModifierFeed {
         /// The port's queue, where the session is read too.
         private let hearing: DispatchQueue
         /// [LAW:effects-at-boundaries] The reading of the session, the one the input method
-        /// sends. It answers no change, so it places no typed key, and a release only it saw is
-        /// told by its length.
+        /// sends.
         private let session: @Sendable () -> HeldModifiers
 
         init(told: ToldModifiers, hearing: DispatchQueue, session: @escaping @Sendable () -> HeldModifiers) {
@@ -85,7 +85,7 @@ public struct InputMethodModifiers: ModifierFeed {
         }
 
         func confirmed(_ session: HeldModifiers, at time: HostTime) {
-            heard(told.confirm(session: session.held, at: time, lastTyped: session.lastTyped))
+            heard(told.confirm(session: session.held, changed: session.changed, at: time))
         }
 
         /// [LAW:dataflow-not-control-flow] The session is read for as long as the feed is
@@ -182,10 +182,20 @@ public struct ToldModifiers: Sendable {
         return move(to: now.subtracting(letGo.keys), at: time, lastTyped: lastTyped)
     }
 
-    /// The key events that let go of what `session`, read at `time`, no longer holds.
-    public mutating func confirm(session: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
-        held.subtracting(session).forEach { letGo[$0] = time }
-        return move(to: held.intersection(session), at: time, lastTyped: lastTyped)
+    /// How long after a change the app's own reading leaves it for the input method to tell.
+    /// The input method's release carries the key typed under the chord, and the app's reading
+    /// answers no change, so it can place none: a release it let go of first would be told by
+    /// its length, and the input method's word would come too late. Measured on studious,
+    /// 2026-10-03: the input method reads a change 1.5-9 ms after it.
+    public static let telling: Duration = .milliseconds(100)
+
+    /// The key events that let go of what `session`, read at `time`, no longer holds, once the
+    /// session's last change, at `changed`, is `telling` old. They place no typed key, since a
+    /// reading of the app's own answers no change. [LAW:single-enforcer]
+    public mutating func confirm(session: Set<Modifier>, changed: HostTime, at time: HostTime) -> [KeyEvent] {
+        let released = time - changed < Self.telling ? [] : held.subtracting(session)
+        released.forEach { letGo[$0] = time }
+        return move(to: held.subtracting(released), at: time, lastTyped: nil)
     }
 
     private mutating func move(to now: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {

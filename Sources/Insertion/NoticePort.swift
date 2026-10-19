@@ -89,7 +89,8 @@ public struct SessionModifiers: Equatable, Sendable, CustomStringConvertible {
     /// and not the reading's date, which a later change of another modifier moves. The session
     /// keeps only its latest key, so one typed since the event hides any typed before it, and a
     /// reading that answers no event places no key. A session with no key typed reports one
-    /// near when the machine came up, taken as no earlier than that. [LAW:parse-dont-validate]
+    /// near when the machine came up, which is taken as typed then and never before it.
+    /// [LAW:parse-dont-validate]
     static func typed(lastKeyDown: TimeInterval, before event: TimeInterval) -> TimeInterval? {
         let typed = max(lastKeyDown, 0)
         return typed < event ? typed : nil

@@ -26,10 +26,10 @@ private struct Told {
         return heard(told.take(reading.held, at: reading.changed, lastTyped: reading.lastTyped))
     }
 
-    /// The app reading the session's modifier keys itself, `ms` into the run: a reading that
-    /// answers no change, and so places no typed key.
-    mutating func session(_ modifiers: Set<Modifier>, at ms: Int64) -> [HotkeyDetector.Transition] {
-        heard(told.confirm(session: modifiers, at: at(ms), lastTyped: nil))
+    /// The app reading the session's modifier keys itself, `ms` into the run, the session's
+    /// last change at `changed`: long before the read, unless the test says.
+    mutating func session(_ modifiers: Set<Modifier>, at ms: Int64, changed: Int64? = nil) -> [HotkeyDetector.Transition] {
+        heard(told.confirm(session: modifiers, changed: at(changed ?? ms - 1000), at: at(ms)))
     }
 
     /// A key that is not a modifier typed `ms` into the run, which the input method is
@@ -183,7 +183,7 @@ private let twoKeys = Mode(name: "notes", chord: KeyChord(modifiers: .rightOptio
         let (moves, heard) = AsyncStream<KeyEvent>.makeStream()
         let pressedAt = DispatchTime.now().uptimeNanoseconds
         let pressed = HostTime(uptime: .nanoseconds(pressedAt))
-        let released = HeldModifiers(flags: 0, uptimeNanoseconds: pressedAt + 100_000_000, typedUptimeNanoseconds: nil)
+        let released = HeldModifiers(flags: 0, uptimeNanoseconds: pressedAt + 10_000_000, typedUptimeNanoseconds: nil)
         let installed = InputMethodModifiers.Installed<Void>(told: ToldModifiers(held: []), hearing: DispatchQueue(label: #function),
                                                              session: { released })
         installed.open = ((), { heard.yield($0) })
@@ -224,6 +224,25 @@ private let twoKeys = Mode(name: "notes", chord: KeyChord(modifiers: .rightOptio
         told.typed(at: 40)
         #expect(told.holding([], at: 110) == [.ended(.usedAsModifier)])
         #expect(told.detector.phase == .idle)
+    }
+
+    /// Right Option let go of with A typed under it, just before the app reads the session:
+    /// the release is left for the input method, whose word carries the A, and the app's
+    /// reading lets go of it only once the input method has had `telling` to tell it.
+    @Test func aReleaseYoungerThanTellingIsTheInputMethodsToTell() {
+        var told = Told(listeningFor: oneKey)
+        #expect(told.holding([.rightOption], at: 0) == [.began(oneKey, at: at(0))])
+        told.typed(at: 40)
+        #expect(told.session([], at: 212, changed: 210).isEmpty)
+        #expect(told.holding([], at: 210) == [.ended(.usedAsModifier)])
+    }
+
+    /// The input method's word lost, the next reading lets go of the release.
+    @Test func aReleaseTheInputMethodNeverToldIsLetGoOfOnceTellingHasPassed() {
+        var told = Told(listeningFor: oneKey)
+        #expect(told.holding([.rightOption], at: 0) == [.began(oneKey, at: at(0))])
+        #expect(told.session([], at: 612, changed: 610).isEmpty)
+        #expect(told.session([], at: 812, changed: 610) == [.ended(.released(.hold, at: at(812)))])
     }
 
     /// A hold let go of where the input method is told nothing, with keys typed under it and
