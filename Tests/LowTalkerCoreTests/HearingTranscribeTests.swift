@@ -106,6 +106,7 @@ import Testing
         }
         #expect(passes.count == 1)
         #expect(passes[0].samples.count == AudioClip.sampleCount(for: 0.4) + Utterance.hangover)
+        #expect(passes[0].arrived == AudioClip.sampleCount(for: 0.4))
         #expect(passes[0].cut == 0)
         #expect(passes[0].saying == "")
         #expect(partials.isEmpty)

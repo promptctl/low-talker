@@ -143,15 +143,16 @@ actor Utterance {
     }
 
     /// The speech so far, once it runs to more than `count` samples or the
-    /// utterance has ended, whichever comes first, and where it lies in the audio
-    /// appended. [LAW:one-source-of-truth] The timeline comes with the samples it
-    /// places, so words are never timed by a timeline other than their audio's.
-    func audio(beyond count: Int) async -> (samples: [Float], ended: Bool, timeline: Timeline) {
+    /// utterance has ended, whichever comes first, how many of its samples arrived
+    /// before the silence standing in for the rest of the hangover, and where it lies
+    /// in the audio appended. [LAW:one-source-of-truth] The timeline comes with the
+    /// samples it places, so words are never timed by a timeline other than their audio's.
+    func audio(beyond count: Int) async -> (samples: [Float], arrived: Int, ended: Bool, timeline: Timeline) {
         while speechCount <= count && !ended {
             await withCheckedContinuation { waiting.append($0) }
         }
-        let speech = Array(samples.prefix(speechCount)) + Array(repeating: 0, count: max(0, speechCount - samples.count))
-        return (speech, ended, timeline)
+        let arrived = min(speechCount, samples.count)
+        return (Array(samples.prefix(arrived)) + Array(repeating: 0, count: speechCount - arrived), arrived, ended, timeline)
     }
 
     private func wake() {

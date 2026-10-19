@@ -1,4 +1,6 @@
 import Foundation
+import Identity
+import os
 import WhisperKit
 
 /// Whisper on the Neural Engine through WhisperKit.
@@ -90,7 +92,7 @@ public struct WhisperKitTranscriber: Transcriber {
         // decode of what a pass asks for, and its floor and prefix length are the
         // facts it hands over.
         return try await Hearing.transcribe(audio, margin: Pipeline.margin, context: Pipeline.contextWords, pass: { pass async throws(TranscriptionFailure) in
-            try await turns.decode(as: caller) { () async throws(TranscriptionFailure) in try await pipeline.hear(pass.samples, from: pass.cut, saying: pass.saying, told: prompt) }
+            try await turns.decode(as: caller) { () async throws(TranscriptionFailure) in try await pipeline.hear(pass.samples, arrived: pass.arrived, from: pass.cut, saying: pass.saying, told: prompt) }
         }, partial: partial)
     }
 
@@ -155,17 +157,17 @@ public struct WhisperKitTranscriber: Transcriber {
         /// the same as decoding it, so the prefix is a few words, not every confirmed one.
         static let contextWords = 3
 
+        static let alignmentLog = Logger(subsystem: AppIdentity.bundleIdentifier, category: "alignment")
+
         /// Nonisolated on purpose: the non-Sendable WhisperKit is created and wrapped
         /// here without crossing an isolation boundary.
         nonisolated init(installed: InstalledModel) async throws {
             // WhisperKit logs to stdout when verbose; stdout belongs to whoever called us.
             // `download` gates only the weights, which `modelFolder` supplies; the
             // tokenizer is read from `tokenizerFolder`, where the install put it.
-            // The seeker is ours so that a prompted pass keeps its word timings.
             whisperKit = try await WhisperKit(WhisperKitConfig(
                 modelFolder: installed.folder.path,
                 tokenizerFolder: installed.hub,
-                segmentSeeker: PromptOffsetSegmentSeeker(),
                 verbose: false,
                 load: true,
                 download: false
@@ -198,7 +200,7 @@ public struct WhisperKitTranscriber: Transcriber {
         /// long vocabulary leaves a 30 s window fewer words to read.
         func prompt(for vocabulary: Vocabulary) throws(VocabularyError) -> [Int] {
             let tokens = tokenizer.encode(text: vocabulary.whisperPrompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-            let limit = PromptOffsetSegmentSeeker.promptTokenLimit
+            let limit = SpeechAlignedSegmentSeeker.promptTokenLimit
             guard tokens.count <= limit else {
                 throw .tooLong(tokens: tokens.count, limit: limit)
             }
@@ -208,24 +210,35 @@ public struct WhisperKitTranscriber: Transcriber {
         /// One pass: the words in `samples` from `cut` on, the first of them forced to
         /// read `prefix`, the text spoken from the cut, with `prompt` as the text
         /// before the utterance. Times are from the utterance's start, and the
-        /// prefix's words come back first, timed over their own audio. Samples short
-        /// of the engine's floor are padded out to it; see `window(_:from:)`.
+        /// prefix's words come back first, timed over their own audio, which is the
+        /// first `arrived` of the samples. Samples short of the engine's floor are
+        /// padded out to it; see `window(_:from:)`.
         ///
         /// [LAW:parse-dont-validate] The border with WhisperKit: what its library throws is
         /// its own, and what its reading cannot become is ours, each named once here.
-        func hear(_ samples: [Float], from cut: Int, saying prefix: String, told prompt: [Int]) async throws(TranscriptionFailure) -> [Transcript.Word] {
+        func hear(_ samples: [Float], arrived: Int, from cut: Int, saying prefix: String, told prompt: [Int]) async throws(TranscriptionFailure) -> [Transcript.Word] {
             var options = Self.decodeOptions
             options.clipTimestamps = [Float(AudioClip.duration(for: cut))]
             options.promptTokens = prompt
             options.prefixTokens = tokenizer.encode(text: prefix)
-            let results: [TranscriptionResult]
+            // The seeker is ours so that a prompted pass keeps its word timings and no
+            // word is timed past its audio, and it is this pass's: the task WhisperKit's
+            // `transcribe` runs over a window it does not chunk is built here with it,
+            // rather than reading one the shared pipeline holds.
+            let seeker = SpeechAlignedSegmentSeeker(arrived: arrived, told: { Self.alignmentLog.info("\($0.description, privacy: .public)") })
+            let task = TranscribeTask(
+                currentTimings: whisperKit.currentTimings, progress: nil, audioProcessor: whisperKit.audioProcessor,
+                audioEncoder: whisperKit.audioEncoder, featureExtractor: whisperKit.featureExtractor, segmentSeeker: seeker,
+                textDecoder: whisperKit.textDecoder, tokenizer: tokenizer
+            )
+            let result: TranscriptionResult
             do {
-                results = try await whisperKit.transcribe(audioArray: Self.window(samples, from: cut), decodeOptions: options)
+                result = try await task.run(audioArray: Self.window(samples, from: cut), decodeOptions: options)
             } catch {
                 throw .engine(error)
             }
             do throws(WhisperKitTranscriberError) {
-                return try Transcript(whisperKit: results.flatMap(\.segments)).words
+                return try Transcript(whisperKit: result.segments).words
             } catch {
                 throw .unreadable(error)
             }
