@@ -255,9 +255,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// step that asks for it, so a reading taken after the decision is owed to its end, as a
     /// come-up's is. [LAW:no-ambient-temporal-coupling]
     ///
-    /// Refused once a quit is asked for, and nothing is handed back; see `quitting`. Refused
-    /// here rather than by each caller, so a caller that suspended before asking needs no
-    /// check of its own. [LAW:single-enforcer]
+    /// Refused once a quit is asked for, and nothing is handed back; see `quitting`. A caller
+    /// that suspended before asking needs no check of its own. [LAW:single-enforcer]
     @discardableResult
     private func rebuild() -> Task<Void, Never>? {
         guard !quitting else {
@@ -658,6 +657,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 comingUp = nil
                 settleOwedReading()
             }
+            // A capture started now could open the microphone after the quit let it go.
             guard !quitting else { return }
             do {
                 // A capture already running is left running: the microphone was held before, and
