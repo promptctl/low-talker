@@ -43,13 +43,14 @@ private let repository = URL(fileURLWithPath: #filePath)
     }
 }
 
-/// White noise, the same samples every run: a linear congruential generator.
+/// White noise, the same samples every run: a linear congruential generator, read from its
+/// top 20 bits, since its low bits repeat with short periods.
 struct Noise {
     private var state: UInt64 = 0x9E37_79B9_7F4A_7C15
 
     mutating func next() -> Float {
         state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-        return Float(Int64(bitPattern: state >> 11) & 0xFFFFF) / Float(0xFFFFF) * 2 - 1
+        return Float(state >> 44) / Float(0xFFFFF) * 2 - 1
     }
 
     /// `count` samples of noise peaking at `level`.
@@ -67,14 +68,15 @@ struct Case: Sendable {
     let inserted: Range<Int>?
     let signal: @Sendable () -> [Float]
 
-    /// The window a row's windows are counted in: a hundredth of a second.
-    static let window = 160
+    /// A hundredth of a second: the clips the gate is handed, and the window a row's windows are counted in.
+    static let hundredth: TimeInterval = 0.01
+    static let window = AudioClip.sampleCount(for: hundredth)
 
     /// The id, the count and FNV-1a hash of the samples the last pass is handed, and the
     /// windows of the signal they came from, as runs `first-last` (inclusive), or `-`.
     func row() async -> String {
         let utterance = Utterance()
-        for clip in AudioClip(samples: signal()).chunks(of: 0.01) {
+        for clip in AudioClip(samples: signal()).chunks(of: Self.hundredth) {
             await utterance.append(clip)
         }
         await utterance.end()
@@ -141,17 +143,22 @@ struct Fixtures {
     /// ESC-50 clips by `category/name`, each its loudest half second scaled to peak at 0.9.
     let transients: [(name: String, samples: [Float])]
 
-    static let rate = Int(AudioClip.sampleRate)
+    static let rate = AudioClip.sampleCount(for: 1)
+    static let tenth = AudioClip.sampleCount(for: 0.1)
     /// A room at -51 and -35 dBFS: an M2 Max's built-in microphone in a quiet room, and a loud one.
     static let quietRoom: Float = 0.00282
     static let loudRoom: Float = 0.0178
     /// A speaker 20 dB down: the bench's soft reader.
     static let soft: Float = 0.1
     /// Room before the speech in a whole press, 0.5 s.
-    static let lead = 8_000
+    static let lead = AudioClip.sampleCount(for: 0.5)
+    /// The stretch of an ESC-50 clip inserted: its loudest half second.
+    static let clip = AudioClip.sampleCount(for: 0.5)
     /// A white-noise burst: 0.15 s at 0.9. Bursts in a run are 0.25 s apart.
-    static let burst = Noise.samples(2_400, at: 0.9).map { $0 >= 0 ? Float(0.9) : -0.9 }
-    static let gap = 4_000
+    static let burst = Noise.samples(AudioClip.sampleCount(for: 0.15), at: 0.9).map { $0 >= 0 ? Float(0.9) : -0.9 }
+    static let gap = AudioClip.sampleCount(for: 0.25)
+    /// How long after a short press the talk under it starts.
+    static let afterPress = AudioClip.sampleCount(for: 0.3)
 
     init(bench: URL, esc50: URL) throws {
         func wavs(_ folder: URL) throws -> [URL] {
@@ -169,16 +176,16 @@ struct Fixtures {
         transients = try folders(esc50).flatMap(wavs).map { url in
             let clip = try AudioClip(contentsOf: url).samples
             let loudest = clip.indices.max { abs(clip[$0]) < abs(clip[$1]) } ?? 0
-            let from = max(0, min(loudest - 1_600, clip.count - 8_000))
-            let segment = Array(clip[from..<min(clip.count, from + 8_000)])
-            let scale = 0.9 / (segment.map { abs($0) }.max() ?? 1)
-            return (name: named(url), samples: segment.map { $0 * scale })
+            let from = max(0, min(loudest - Self.tenth, clip.count - Self.clip))
+            let segment = AudioClip(samples: Array(clip[from..<min(clip.count, from + Self.clip)]))
+            let scale = 0.9 / segment.peak
+            return (name: named(url), samples: segment.samples.map { $0 * scale })
         }
     }
 
     /// The fixture from the first tenth of a second that reaches -40 dBFS.
     static func fromFirstSound(_ samples: [Float]) -> [Float] {
-        let opening = stride(from: 0, to: samples.count, by: 1_600).first { samples[$0..<min($0 + 1_600, samples.count)].contains { abs($0) >= 0.01 } } ?? 0
+        let opening = stride(from: 0, to: samples.count, by: tenth).first { samples[$0..<min($0 + tenth, samples.count)].contains { abs($0) >= 0.01 } } ?? 0
         return Array(samples[opening...])
     }
 
@@ -215,15 +222,18 @@ struct Fixtures {
             let audio = zip(base, Noise.samples(base.count, at: room.1)).map { $0 * Self.soft + $1 }
             return ("fixture=\(name) shape=\(shape) room=\(room.0)", audio, ats.filter { $0 < audio.count })
         }
-        func run(_ burst: [Float], _ count: Int) -> [Float] {
-            (0..<count).flatMap { index in burst + (index + 1 < count ? Array(repeating: 0, count: Self.gap) : []) }
-        }
-        func inserting(_ key: String, _ audio: [Float], at: Int, source: String, runs: Int, _ stretch: [Float]) -> [Case] {
-            let id = "family=transient \(key) at=\(at) runs=\(runs) length=\(stretch.count)"
-            let silence = [Float](repeating: 0, count: stretch.count)
-            return [(source, stretch), ("silence", silence)].map { source, stretch in
-                Case(id: "\(id) source=\(source)", inserted: at..<at + stretch.count) {
-                    Array(audio[..<at]) + stretch + Array(audio[at...])
+        // A run of `runs` copies of `sound`, `gap` apart, and as much silence: each is built
+        // when its case is measured, so only the cases in flight hold their audio.
+        func inserting(_ key: String, _ audio: [Float], at: Int, source: String, runs: Int, _ sound: [Float]) -> [Case] {
+            let length = runs * sound.count + (runs - 1) * Self.gap
+            let id = "family=transient \(key) at=\(at) runs=\(runs) length=\(length)"
+            let stretches: [(String, @Sendable () -> [Float])] = [
+                (source, { (0..<runs).flatMap { index in sound + (index + 1 < runs ? Array(repeating: 0, count: Self.gap) : []) } }),
+                ("silence", { Array(repeating: 0, count: length) }),
+            ]
+            return stretches.map { source, stretch in
+                Case(id: "\(id) source=\(source)", inserted: at..<at + length) {
+                    Array(audio[..<at]) + stretch() + Array(audio[at...])
                 }
             }
         }
@@ -234,12 +244,12 @@ struct Fixtures {
         }
         let alone = sources.map { key, audio, _ in Case(id: "family=transient \(key) source=none", inserted: nil) { audio } }
         let bursts = sources.flatMap { key, audio, ats in
-            ats.flatMap { at in [1, 3, 5].flatMap { inserting(key, audio, at: at, source: "noise", runs: $0, run(Self.burst, $0)) } }
+            ats.flatMap { at in [1, 3, 5].flatMap { inserting(key, audio, at: at, source: "noise", runs: $0, Self.burst) } }
         }
         let clips = readers.flatMap { name, samples in
             let (key, audio, _) = soft(name, samples, shape: "whole", room: ("-51", Self.quietRoom))
             return transients.flatMap { clip, segment in
-                [1, 3, 5].flatMap { inserting(key, audio, at: Self.lead + Self.rate, source: clip, runs: $0, run(segment, $0)) }
+                [1, 3, 5].flatMap { inserting(key, audio, at: Self.lead + Self.rate, source: clip, runs: $0, segment) }
             }
         }
         // Every reader takes every clip at one place, so the silence beside a run of clips is
@@ -256,9 +266,9 @@ struct Fixtures {
         let readers = readers
         func mixed(_ press: String, _ index: Int, _ speaker: (name: String, samples: [Float]), talkFrom: (Int) -> Int) -> [Case] {
             let talker = readers[index % readers.count]
-            let speakerPeak = speaker.samples.map(abs).max() ?? 0, talkerPeak = talker.samples.map(abs).max() ?? 1
+            let speakerPeak = AudioClip(samples: speaker.samples).peak, talkerPeak = AudioClip(samples: talker.samples).peak
             let start = talkFrom(speaker.samples.count)
-            let length = Self.lead + speaker.samples.count + 3 * Self.rate + (press == "short" ? 4_800 : 0)
+            let length = Self.lead + speaker.samples.count + 3 * Self.rate + (press == "short" ? Self.afterPress : 0)
             return [-24, -27, -30, -36].map { db in
                 let gain = speakerPeak * Float(pow(10, Double(db) / 20)) / talkerPeak
                 return Case(id: "family=talk press=\(press) fixture=\(speaker.name) under=\(talker.name) db=\(db)", inserted: nil) {
@@ -272,7 +282,7 @@ struct Fixtures {
             }
         }
         return readers.enumerated().flatMap { index, reader in mixed("long", index + 1, reader) { _ in 0 } }
-            + shortPresses.enumerated().flatMap { index, press in mixed("short", index, press) { Self.lead + $0 + 4_800 } }
+            + shortPresses.enumerated().flatMap { index, press in mixed("short", index, press) { Self.lead + $0 + Self.afterPress } }
     }
 
     /// A tap left open: each fixture, then 10 s of room, at -51 to -35 dBFS.

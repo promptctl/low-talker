@@ -6,17 +6,19 @@
 Both files are rows the gate replay (Tests/GateReplayTests) wrote: a case's `key=value`
 id, the count and hash of the samples its last pass is handed, and the 10 ms windows of
 its signal they came from. The baseline is master's; the measured rows are the tree's.
-Four reports, each against the baseline:
+Five reports, each against the baseline:
 
 - speech lost after inserted transients, beyond what as much digital silence loses: the
   windows master hands without the transient that the tree's silence control keeps and its
   transient case does not;
+- the soft readers those go into, alone and beside as much silence, whose handed samples
+  changed: what the tree's gate loses there, the loss above cannot see;
 - background talk let in under a speaker, and speech lost there;
 - bench variants whose handed samples changed;
 - a tap left open in a room, where what it keeps changed.
 
-Two files that do not hold the same cases are no comparison, and the report stops naming
-them. Differences are the report, not a failure: it exits 0 whatever it finds.
+Two files that do not hold the same cases, or hold one twice, are no comparison, and the
+report stops naming them. Differences are the report, not a failure: it exits 0 whatever it finds.
 """
 import sys
 from collections import defaultdict
@@ -48,6 +50,8 @@ def load(path):
             if len(columns) != 4:
                 fail(f"{path}:{number}: {len(columns)} columns, not 4")
             case, count, digest, runs = columns
+            if case in rows:
+                fail(f"{path}:{number}: {case} is a second row of one case")
             fields = dict(field.split("=", 1) for field in case.split(" "))
             rows[case] = {"fields": fields, "samples": (int(count), digest), "windows": windows(runs)}
     return rows
@@ -95,10 +99,10 @@ def transients(baseline, measured):
     return lines + sorted(worse)
 
 
-def changes(baseline, measured, name):
-    """The cases of a family whose handed samples changed, with the windows let in and lost."""
+def changes(baseline, measured):
+    """The measured cases whose handed samples changed, with the windows let in and lost."""
     changed = []
-    for case, row in sorted(family(measured, name).items()):
+    for case, row in sorted(measured.items()):
         was = baseline[case]
         if row["samples"] != was["samples"]:
             changed.append((row["fields"], len(row["windows"] - was["windows"]), len(was["windows"] - row["windows"])))
@@ -106,7 +110,7 @@ def changes(baseline, measured, name):
 
 
 def talk(baseline, measured):
-    changed = changes(baseline, measured, "talk")
+    changed = changes(baseline, family(measured, "talk"))
     cases = defaultdict(int)
     for row in family(measured, "talk").values():
         cases[(row["fields"]["press"], int(row["fields"]["db"]))] += 1
@@ -134,9 +138,11 @@ def main(baseline_path, measured_path):
     clips = {row["fields"]["source"] for row in family(measured, "transient").values() if "/" in row["fields"]["source"]}
     report = [f"gate replay: {len(measured)} cases against {baseline_path}; {len(clips)} ESC-50 clips", ""]
     report += transients(baseline, measured) + [""]
+    controls = {case: row for case, row in family(measured, "transient").items() if row["fields"]["source"] in ("none", "silence")}
+    report += [f"soft readers alone and beside as much silence whose handed samples changed, of {len(controls)}"] + listed(changes(baseline, controls)) + [""]
     report += talk(baseline, measured) + [""]
-    report += [f"bench variants whose handed samples changed, of {len(family(measured, 'bench'))}"] + listed(changes(baseline, measured, "bench")) + [""]
-    report += [f"a tap left open in a room, of {len(family(measured, 'tap'))}"] + listed(changes(baseline, measured, "tap"))
+    report += [f"bench variants whose handed samples changed, of {len(family(measured, 'bench'))}"] + listed(changes(baseline, family(measured, "bench"))) + [""]
+    report += [f"a tap left open in a room, of {len(family(measured, 'tap'))}"] + listed(changes(baseline, family(measured, "tap")))
     print("\n".join(report))
 
 
