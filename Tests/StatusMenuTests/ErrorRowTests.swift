@@ -33,8 +33,10 @@ import Testing
     @Test func theRowCarriesTheWarningSignInItsOwnColours() throws {
         try withScratch { pasteboard in
             let sign = try #require(ErrorRow("Model: it did not load", copyingTo: pasteboard) { _ in }.image)
-            // A menu draws a template image in its text colour, as plain as the rows around it.
+            // A menu draws a template image, or a sign in one colour, in its text colour, as
+            // plain as the rows around it.
             #expect(!sign.isTemplate)
+            #expect(sign.symbolConfiguration == .preferringMulticolor())
             #expect(sign.accessibilityDescription == "Error")
         }
     }
