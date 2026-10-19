@@ -41,6 +41,24 @@ private final class GatedQueue: Sendable {
         #expect(throws: Refused.self) { try handed.result().get() }
     }
 
+    /// Waiting from the main actor leaves it free: the gate is opened from the main actor while
+    /// a waiter on it is still waiting, which a wait that held the main actor would never allow,
+    /// and the waiter comes back once the work is done, with what it came to.
+    @MainActor @Test func waitingLeavesTheMainActorFree() async throws {
+        let gated = GatedQueue()
+        let handed = Elsewhere(on: gated.queue) { 42 }
+        let waiting = Atomic<Bool>(false)
+        let waiter = Task { @MainActor in
+            waiting.store(true, ordering: .relaxed)
+            await handed.wait()
+            return handed.finished
+        }
+        while !waiting.load(ordering: .relaxed) { await Task.yield() }
+        #expect(handed.finished == nil)
+        gated.open()
+        #expect(try await waiter.value?.get() == 42)
+    }
+
     /// Work let go of before the queue reached it costs the queue nothing, which is what lets
     /// a run of readyings for one device change do the newest and not every one before it.
     @Test func workNobodyHoldsWhenItsTurnComesIsNeverDone() throws {

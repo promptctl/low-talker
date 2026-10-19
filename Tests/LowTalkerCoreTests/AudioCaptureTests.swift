@@ -56,7 +56,7 @@ private final class FakeHardware: AudioHardware {
         var isOnTheDefaultInput: Bool { device == hardware.defaultInput }
 
         /// Readied the moment it was made, so there is never anything left to wait for.
-        func waitUntilReadied() {}
+        func waitUntilReadied() async {}
     }
 
     final class Engine {

@@ -41,4 +41,11 @@ public final class Elsewhere<Value: Sendable>: Sendable {
         guard let finished else { preconditionFailure("a wait on a serial queue returned before work handed to it earlier had run") }
         return finished
     }
+
+    /// Waits for whatever of the work is left without holding the thread that waits: the
+    /// caller is resumed by a step handed to the queue behind the work, so `finished` has the
+    /// outcome by the time this returns.
+    public func wait() async {
+        await withCheckedContinuation { resumed in queue.async { resumed.resume() } }
+    }
 }

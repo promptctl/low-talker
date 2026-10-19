@@ -657,9 +657,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // Restarting it would close and reopen an engine the resting mode holds open.
                 if capture.atRest == nil {
                     try capture.start(try readMicrophone().grant(), atRest: try config.get().microphone)
-                    // Readied before the hotkey goes up, so the first press opens a microphone
-                    // already reached rather than paying for reaching one.
-                    capture.waitUntilReadied()
                 }
             } catch {
                 // Stopping is idempotent, so a grant withheld and a capture that failed to
@@ -675,6 +672,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 showHotkeyStatus(.off("\(error)\(whereToAllow)"))
                 return
             }
+            // Readied before the hotkey goes up, so the first press opens a microphone already
+            // reached rather than paying for reaching one. Awaited, so the menu and the
+            // readings queued behind the come-up run while a slow input is reached.
+            let reaching = ContinuousClock.now
+            await capture.waitUntilReadied()
+            log.notice("come-up: waited \(reaching.duration(to: .now), privacy: .public) for the microphone to be readied")
+            // A rebuild started after a quit asked for during that wait is one the quit never
+            // waits on, and would put up a hotkey nothing takes down; see `quitting`.
+            guard !quitting else { return }
             await rebuild().value
         }
         comingUp = this

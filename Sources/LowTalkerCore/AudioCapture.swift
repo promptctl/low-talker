@@ -596,9 +596,9 @@ public final class AudioCapture {
     /// that installs a hotkey, or presses itself, waits here first. What readying came to is
     /// the press's to report, and capture that is not started has nothing being readied.
     /// [LAW:no-ambient-temporal-coupling]
-    public func waitUntilReadied() {
+    public func waitUntilReadied() async {
         guard case .started(let started) = phase else { return }
-        started.prepared.waitUntilReadied()
+        await started.prepared.waitUntilReadied()
     }
 
     public func stop() {

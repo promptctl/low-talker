@@ -57,10 +57,12 @@ public protocol PreparedInput {
     var isOnTheDefaultInput: Bool { get }
 
     /// Waits for readying to finish - what `open` does first, for a caller that needs the
-    /// microphone reached before a press can come for it. What readying came to is not
-    /// answered here: a readying that failed throws at `open`, which is where every caller
-    /// already answers a microphone that cannot be had. [LAW:single-enforcer]
-    func waitUntilReadied()
+    /// microphone reached before a press can come for it. Suspends rather than holding the
+    /// main actor, which the menu and every reading need while a slow input is reached. What
+    /// readying came to is not answered here: a readying that failed throws at `open`, which
+    /// is where every caller already answers a microphone that cannot be had.
+    /// [LAW:single-enforcer]
+    func waitUntilReadied() async
 }
 
 /// A microphone that opened: what gives it back, and the device it is.

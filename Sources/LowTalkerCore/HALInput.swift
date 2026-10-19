@@ -510,9 +510,9 @@ final class HALInput: PreparedInput {
         get throws { try reach.result().get().device }
     }
 
-    func waitUntilReadied() {
+    func waitUntilReadied() async {
         // What it came to is read again by `open`, which is where a failure is reported.
-        _ = reach.result()
+        await reach.wait()
     }
 
     /// Opens the device. What a press pays - and, for a press that came before readying
