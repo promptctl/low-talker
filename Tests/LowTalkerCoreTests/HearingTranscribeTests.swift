@@ -58,7 +58,7 @@ import Testing
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
-        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0))
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, transients: .none))
         #expect(passes.isEmpty)
     }
 
@@ -92,7 +92,7 @@ import Testing
     /// client's turns, is heard as only what was said in it: opening on the quiet, or with
     /// a click a second in, in clips of a second or as one clip. No pass is handed a second
     /// of the quiet, and the words are timed from the audio's first sample, not from the
-    /// quiet let go (low-serve-axq.ium).
+    /// quiet let go (low-serve-axq.ium). The click goes with the quiet, as a transient.
     @Test(arguments: [(click: false, clipSeconds: 1.0), (true, 1.0), (false, 400), (true, 400)])
     func quietInAnUtteranceYieldsNoWords(click: Bool, clipSeconds: Double) async throws {
         let quiet = Self.quiet(1).samples + (click ? Self.speech(0.01).samples : []) + Self.quiet(299).samples
@@ -110,8 +110,28 @@ import Testing
         #expect(!passes.isEmpty)
         #expect(transcription.transcript.text == " see you")
         #expect(abs(transcription.transcript.words[0].time.lowerBound - AudioClip.duration(for: quiet.count)) < 1e-9)
-        let kept = click ? 2 * Utterance.leadIn + AudioClip.sampleCount(for: Utterance.frame) + Utterance.hangover : Utterance.leadIn
-        #expect(abs(transcription.quiet.letGo - AudioClip.duration(for: quiet.count - kept)) < 1e-9)
+        #expect(abs(transcription.quiet.letGo - AudioClip.duration(for: quiet.count - Utterance.leadIn)) < 1e-9)
+        #expect(transcription.quiet.transients == (click ? Transients(count: 1, longest: 0.01) : .none))
+    }
+
+    /// A click with nothing said around it, streamed as a tap's microphone delivers it, is no
+    /// pass at all and a refusal: the click is a transient, and all of the audio is quiet
+    /// (low-unfiled-50ff.7r3). Whisper reads " Thank you." into a pass over it.
+    @Test func aClickWithNothingSaidMakesNoPassAndIsRefused() async {
+        let room = { (seconds: Double) in (0..<AudioClip.sampleCount(for: seconds)).map { Float($0.isMultiple(of: 2) ? 0.002 : -0.002) } }
+        let audio = room(2) + Array(repeating: 0.03, count: 480) + room(10)
+        var passes: [Hearing.Pass] = []
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            (passes, _, _) = try await Self.transcribe { feed, _ in
+                for buffer in AudioClip(samples: audio).chunks(of: 0.01) { feed.yield(buffer) }
+                feed.finish()
+            }
+        }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.03)
+        #expect(quiet.letGo == AudioClip.duration(for: audio.count))
+        #expect(quiet.transients == Transients(count: 1, longest: 0.03))
+        #expect(passes.isEmpty)
     }
 
     /// Speech under a second, well under what a pass waits for during the hold,

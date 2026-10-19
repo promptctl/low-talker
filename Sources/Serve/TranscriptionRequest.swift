@@ -84,7 +84,7 @@ struct Usage: Encodable, Sendable {
 /// [LAW:one-source-of-truth] The upload and the Realtime item are both answered through here.
 struct Heard: Sendable {
     let transcription: Transcription
-    /// The loudest sample of an utterance no clip of which reached the audible floor.
+    /// The loudest sample of an utterance refused as nothing spoken.
     let nothingSpokenPeak: Float?
 
     /// The utterance `transcribing` hears; any failure but nothing spoken is thrown.

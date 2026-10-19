@@ -32,7 +32,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// answers a turn with nothing said in it: completed, with an empty transcript, and never
     /// failed (low-serve-7t8). The socket's event counts it.
     @Test func aSilentTurnIsCompletedWithNothingSaid() async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0, transients: .none))))
         defer { running.server.stop() }
         var client = Client(running)
         // 100 of 32767, about -50 dBFS: a quiet room, under the -40 dBFS floor.
@@ -120,7 +120,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
 
     /// The socket's one event says what happened on it.
     @Test func theSocketsEventCountsWhatHappenedOnIt() async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 1)
@@ -138,6 +138,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         #expect(realtime.refusals == ["input_audio_buffer_commit_empty": 1] && realtime.refusedAudioSeconds == nil)
         #expect(realtime.sent.quietSeconds == 1.5)
         #expect(realtime.sent.roomPeak == 0.25 && realtime.sent.refusedAsRoomSeconds == 0.5)
+        #expect(realtime.sent.transients == 2 && realtime.sent.longestTransientSeconds == 0.03)
     }
 
     /// A client that appends for longer than the limit without a commit, as Pipecat does

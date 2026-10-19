@@ -64,7 +64,7 @@ public final class Dictation {
             let destination = performed.first.map { " into \($0.into.rawValue)" } ?? ""
             let quiet = transcription.quiet
             let room = quiet.room.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? "none heard"
-            return "heard \(transcription.transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
+            return "heard \(transcription.transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room, \(quiet.transients.count) transients refused, the longest sounding \(String(format: "%.2f", quiet.transients.longest)) s) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
         }
     }
 

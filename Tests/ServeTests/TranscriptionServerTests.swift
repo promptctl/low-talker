@@ -94,9 +94,9 @@ import TestProbes
     }
 
     /// An mp3 is decoded as a wav is, and the engine hears all of it. The event carries
-    /// the quiet the engine let go and the room it was judged against.
+    /// the quiet the engine let go, the room it was judged against, and the transients refused.
     @Test func hearsAnMP3() async throws {
-        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5))
+        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -110,6 +110,7 @@ import TestProbes
         #expect(event.status == 200 && event.words == 5 && event.model == "gpt-transcribe" && event.error == nil)
         #expect(event.quietSeconds == 1.5 && event.nothingSpokenPeak == nil)
         #expect(event.roomPeak == 0.25 && event.refusedAsRoomSeconds == 0.5)
+        #expect(event.transients == 2 && event.longestTransientSeconds == 0.03)
     }
 
     /// An upload no sample of which reached the audible floor, a push-to-talk hold where
@@ -121,7 +122,7 @@ import TestProbes
         ("verbose_json", Data(#"{"duration":2.5,"language":"english","segments":[],"task":"transcribe","text":"","usage":{"seconds":3,"type":"duration"}}"#.utf8)),
     ])
     func anUploadWithNothingSpokenIsEmptyText(format: String, answer: Data) async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0, transients: .none))))
         defer { running.server.stop() }
         // 0.0025, about -52 dBFS: a quiet room's hold, under the -40 dBFS floor.
         let (response, body) = try await running.post([
