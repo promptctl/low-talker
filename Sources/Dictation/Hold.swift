@@ -1,7 +1,7 @@
 import Insertion
 import LowTalkerCore
 
-/// What no cursor took, and what the latest try to place it was told.
+/// What no cursor took, and why the latest of it was held.
 ///
 /// [LAW:types-are-the-program] Two cases because a landing settles one and not the other.
 public enum Held: Sendable, Equatable {
@@ -189,8 +189,16 @@ public final class Hold {
     /// its account keeps clear of the words.
     func failed(_ words: Transcript, with failure: InsertFailure) {
         let warning = failure.account.facts
-        held = failure.wordsMayHaveLanded
-            ? .unaccounted(warning: warning)
-            : .unplaced(offering(words), warning: warning, unaccounted: held?.standing)
+        failure.wordsMayHaveLanded ? (held = .unaccounted(warning: warning)) : heldBack(words, warning: warning)
+    }
+
+    /// What is held and then `words` are at no cursor, for the reason `warning` gives the
+    /// person, and a warning that stands still stands. [LAW:single-enforcer] Every word held
+    /// is held here: those an insert did not place, and those a press cut short never offered.
+    /// Nothing said changes nothing, since `.unplaced` holds words.
+    func heldBack(_ words: Transcript, warning: String) {
+        let unplaced = offering(words)
+        guard !unplaced.isBlank else { return }
+        held = .unplaced(unplaced, warning: warning, unaccounted: held?.standing)
     }
 }

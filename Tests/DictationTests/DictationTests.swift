@@ -404,7 +404,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.cause as? InsertFailure == .refused(.noTextFieldHasFocus))
         #expect(rig.inputMethod.inserted == [])
-        #expect(rig.hold.held?.words == Transcript(typed: "hello"))
+        // The ending heard nothing past the refused run, so the warning stays the refusal's.
+        #expect(rig.hold.held == .unplaced(Transcript(typed: "hello"), warning: "\(Refusal.noTextFieldHasFocus)"))
     }
 
     /// A pass that confirms only whitespace confirms nothing said, so it is no run either:
@@ -440,28 +441,29 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     }
 
     /// [LAW:no-silent-failure] A press whose microphone opened after the words it was pressed
-    /// for commits nothing while the key is down: the engine reads the fragment it was given
-    /// as a fluent sentence with the first words gone, and the capture knew the head was lost
-    /// before any of it was confirmed.
-    @Test func aPressMissingItsHeadCommitsNothingWhileTheKeyIsDown() async throws {
+    /// for commits nothing: the engine reads the fragment it was given as a fluent sentence
+    /// with the first words gone, and the capture knew the head was lost before any of it was
+    /// confirmed. What it read is held beside the loss.
+    @Test func aPressMissingItsHeadCommitsNothingAndHoldsWhatItHeard() async throws {
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "there" : "") }) { _ in Transcript(typed: "there") }
         let rig = try await Rig(hearing: engine)
         let keyWentDown = rig.now
         rig.wait(AudioCapture.warmUpAllowance + 0.4)
         rig.dictation.press(.began(Rig.dictation, at: keyWentDown))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.turns.reading.holds == 0 })
-        #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2] })
         rig.keyUp()
         let press = try #require(await rig.report().failure as? SpeechLost)
         #expect(press.lost.unopened)
         #expect(press.landed == 0)
+        #expect(press.held == 1)
         #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(rig.hold.held == .unplaced(Transcript(typed: "there"), warning: "WARNING: Your microphone was not open for the whole of your dictation."))
     }
 
     /// A press that lapses after some of its words were committed keeps them, commits
-    /// nothing more, and says how many had landed rather than that nothing was inserted.
-    @Test func aLapseAfterCommitsKeepsThemAndSaysHowManyLanded() async throws {
+    /// nothing more, holds what it heard after them, and says how many of each.
+    @Test func aLapseAfterCommitsKeepsThemAndHoldsTheRest() async throws {
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 2 ? "hello there" : "")
         }) { _ in Transcript(typed: "hello there friend") }
@@ -472,9 +474,45 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.press(.ended(.lapsed))
         let lapsed = try #require(await rig.report().failure as? PressLapsed)
         #expect(lapsed.landed == 2)
-        #expect("\(lapsed)".hasSuffix("The 2 words already inserted stay; the rest of your dictation was ignored."))
+        #expect(lapsed.held == 1)
+        #expect("\(lapsed)" == "WARNING: The hotkey stopped listening during your dictation. The 2 words already inserted stay, and the 1 heard after them are held.")
         #expect(failureLine(lapsed) == "\(lapsed)")
         #expect(rig.inputMethod.inserted == ["hello there"])
+        #expect(rig.hold.held == .unplaced(Transcript(typed: " friend"), warning: "WARNING: The hotkey stopped listening during your dictation."))
+    }
+
+    /// The input device changes while the key is down, after a commit: the commits stop at
+    /// once, since what is confirmed past the gap reads a fragment, but the decode hears on
+    /// across the gap to key-up, and everything it read past the commit is held.
+    @Test func aLossWhileTheKeyIsDownStopsTheCommitsAndTheDecodeHearsOn() async throws {
+        let engine = FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
+        }) { _ in Transcript(typed: "hello there friend") }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        rig.changeDevice()
+        rig.speak([3, 4])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2, 3, 4] })
+        rig.keyUp()
+        let press = try #require(await rig.report().failure as? SpeechLost)
+        #expect(press.lost.interrupted)
+        #expect(press.landed == 1)
+        #expect(press.held == 2)
+        #expect(engine.clips.map(\.samples) == [[1, 2, 3, 4]])
+        #expect(rig.inputMethod.inserted == ["hello"])
+        #expect(rig.hold.held?.words == Transcript(typed: " there friend"))
+    }
+
+    /// A press cut short whose decode fails says so, with how many words had landed: the
+    /// words it heard could not be read, so there is nothing to hold.
+    @Test func aCutPressWhoseDecodeFailsIsReportedAsTheFailure() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) })
+        rig.lapse()
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(engineFailed(stopped.cause, with: NoEngine.self))
+        #expect(rig.hold.held == nil)
     }
 
     /// The engine hears a press while it is still going on: the audio reaches it as it is
@@ -658,8 +696,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// Under continuous capture the pre-roll covered a late key-down by reaching back over
     /// audio already on the ring; with the microphone opening per press there is nothing
     /// behind the mark to reach into, so a loss that used to be repaired is now reported.
-    @Test func aPressWhoseMicrophoneOpenedAfterTheWordsItWasPressedForIsReportedNotInserted() async throws {
-        let engine = FakeTranscriber { _ in Transcript(typed: "a") }
+    @Test func aPressWhoseMicrophoneOpenedAfterTheWordsItWasPressedForIsHeldNotInserted() async throws {
+        let engine = FakeTranscriber { clip in Transcript(typed: clip.samples == [4, 5] ? " b" : "a") }
         let rig = try await Rig(hearing: engine)
 
         let keyWentDown = rig.now
@@ -672,17 +710,18 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
         let press = try #require(await rig.report().failure as? SpeechLost)
         #expect(press.lost.unopened)
-        #expect("\(press)" == "WARNING: Your microphone was not open for the whole of your dictation. Your dictation was ignored.")
+        #expect("\(press)" == "WARNING: Your microphone was not open for the whole of your dictation. Its 1 words are held.")
         #expect(!press.lost.interrupted)
         #expect(press.lost.scrolledOff == 0)
         #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(rig.hold.held?.words == Transcript(typed: "a"))
 
         // The next press is heard the moment it is made, so its microphone is open for all
-        // of it and it inserts.
+        // of it and it inserts, carrying the held words ahead of its own.
         rig.hold(speaking: [4, 5])
-        #expect(try await rig.session().transcription.transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == " b")
         #expect(engine.clips.last?.samples == [4, 5])
-        #expect(rig.inputMethod.inserted == ["a"])
+        #expect(rig.inputMethod.inserted == ["a b"])
     }
 
     /// The epic's contract, as one run: speech spoken into a press appears in that
@@ -1108,19 +1147,21 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     }
 
     /// A cursor that arrives while a press is open is offered what is held once that press
-    /// ends, when the press placed nothing of its own.
+    /// ends, when the press placed nothing of its own. What a lapsed press heard is held
+    /// behind what was, so the offer carries both.
     @Test func aCursorArrivingDuringAPressThatLapsesIsOfferedTheHeldWordsAfterIt() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [4, 5] ? " b" : "a") })
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         rig.hold()
         _ = await rig.report()
         rig.inputMethod.refusing(nil)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([4, 5])
         rig.dictation.cursorArrived()
         rig.dictation.press(.ended(.lapsed))
         #expect(await rig.report().failure is PressLapsed)
         try await rig.dictation.finish()
-        #expect(rig.inputMethod.inserted == ["a"])
+        #expect(rig.inputMethod.inserted == ["a b"])
         #expect(rig.hold.held == nil)
     }
 
@@ -1152,72 +1193,79 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted == ["a"])
     }
 
-    /// A press that will not be inserted is reported in its turn even while the model it
-    /// would have been heard by is still loading: nothing it could say waits on the engine.
-    @Test func aPressThatWillNotBeInsertedIsReportedWhileTheEngineStillLoads() async throws {
+    /// A press cut short while the model it is heard by is still loading waits for it, as a
+    /// released one does: what it heard is what the hold keeps, so it is reported once heard.
+    @Test func aPressCutShortWhileTheEngineLoadsWaitsForItAndHoldsWhatItHeard() async throws {
         let gate = Gate()
         let rig = try await Rig { await gate.wait(); return FakeTranscriber { _ in Transcript(typed: "a") } }
         rig.lapse()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.reported.raised })
-        #expect(await rig.report().failure is PressLapsed)
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        #expect(!rig.reported.raised)
         gate.open()
+        let lapsed = try #require(await rig.report().failure as? PressLapsed)
+        #expect(lapsed.held == 1)
+        #expect(rig.hold.held?.words == Transcript(typed: "a"))
     }
 
-    /// A press that will not be inserted stops its decode, so the engine goes back to whoever
-    /// is waiting rather than finishing words nobody will read, and the next press is heard.
-    @Test func aPressThatWillNotBeInsertedStopsItsDecode() async throws {
-        let stopped = Flag()
-        let engine = FakeTranscriber { clip throws(TranscriptionFailure) in
-            guard clip.samples == [1, 2, 3] else { return Transcript(typed: "a") }
-            do {
-                try await Task.sleep(for: .seconds(3600))
-            } catch {
-                stopped.raise()
-                throw .cancelled
-            }
-            return Transcript(typed: "never")
-        }
-        let rig = try await Rig(hearing: engine)
-        rig.lapse(speaking: [1, 2, 3])
-        #expect(await rig.report().failure is PressLapsed)
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { stopped.raised && rig.turns.reading.holds == 0 })
-        rig.hold(speaking: [4, 5])
-        #expect(try await rig.session().transcription.transcript.text == "a")
-    }
-
-    /// A chord that was a typed key's modifier was never dictation: nothing of it is
-    /// inserted, it is reported as what it was rather than as a failure, its decode stops
-    /// and lets go of the engine, and the next press is heard.
-    @Test func aPressUsedAsAModifierInsertsNothingAndIsNoFailure() async throws {
+    /// The app quits, or is sent SIGTERM, mid-press: the hotkey comes down, which lapses the
+    /// press, and the quit waits on `finish`. By the time it returns, what the press heard is
+    /// in the store the next launch reads.
+    @Test func aPressCutShortByAQuitLeavesItsWordsInTheStore() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.lapse(speaking: [1, 2, 3])
+        try await rig.dictation.finish()
+        #expect(rig.store.kept == .unplaced(Transcript(typed: "a"), warning: "WARNING: The hotkey stopped listening during your dictation."))
+    }
+
+    /// The chord was a typed key's modifier - Return pressed to send before letting go: the
+    /// press inserts nothing more and is reported as what it was rather than as a failure,
+    /// and everything it heard is held, from the whole of its audio.
+    @Test func aPressUsedAsAModifierHoldsWhatItHeardAndIsNoFailure() async throws {
+        let engine = FakeTranscriber { clip in Transcript(typed: clip.samples == [4, 5] ? " b" : "a") }
+        let rig = try await Rig(hearing: engine)
         rig.usedAsModifier(speaking: [1, 2, 3])
-        guard case .usedAsModifier(let landed) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        guard case .usedAsModifier(let landed, let held) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
         #expect(landed == 0)
+        #expect(held == 1)
+        #expect(engine.clips.first?.samples == [1, 2, 3])
         #expect(rig.inputMethod.inserted.isEmpty)
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.turns.reading.holds == 0 })
+        #expect(rig.hold.held == .unplaced(Transcript(typed: "a"), warning: "WARNING: You typed a key while holding the dictation chord."))
         rig.hold(speaking: [4, 5])
-        #expect(try await rig.session().transcription.transcript.text == "a")
-        #expect(rig.inputMethod.inserted == ["a"])
+        #expect(try await rig.session().transcription.transcript.text == " b")
+        #expect(rig.inputMethod.inserted == ["a b"])
+    }
+
+    /// A chord used as a modifier with nothing said into it is a typed key and nothing else:
+    /// no failure, and nothing held.
+    @Test func aChordUsedAsAModifierWithNothingSaidHoldsNothing() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in
+            throw .nothingSpoken(peak: 0, quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none))
+        })
+        rig.usedAsModifier(speaking: [0, 0, 0])
+        guard case .usedAsModifier(let landed, let held) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        #expect(landed == 0 && held == 0)
+        #expect(rig.hold.held == nil)
     }
 
     /// [LAW:no-silent-failure] Two presses the speaker made identically, told apart by
     /// nothing but how listening stopped. The hotkey stops partway through the first, so
     /// what it captured runs to the stop and not to the release: it is reported as lapsed
-    /// and never inserted, because a fragment inserted into the user's editor
+    /// and held rather than inserted, because a fragment inserted into the user's editor
     /// arrives unmarked as a fragment and cannot be marked there. The second is released
-    /// and inserts. The outcomes have nothing in common, which is the whole of
-    /// what the ending buys.
-    @Test func aPressTheTapLapsedOutOfIsReportedInsteadOfInsertedAndTheNextPressInserts() async throws {
-        let engine = FakeTranscriber { _ in Transcript(typed: "a") }
+    /// and inserts, carrying the held words ahead of its own.
+    @Test func aPressTheHotkeyLapsedOutOfIsHeldAndTheNextPressCarriesIt() async throws {
+        let engine = FakeTranscriber { clip in Transcript(typed: clip.samples == [4, 5] ? " b" : "a") }
         let rig = try await Rig(hearing: engine)
 
         rig.lapse(speaking: [1, 2, 3])
         let lapsed = try #require(await rig.report().failure as? PressLapsed)
+        #expect("\(lapsed)" == "WARNING: The hotkey stopped listening during your dictation. Its 1 words are held.")
         #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(rig.hold.held?.words == Transcript(typed: "a"))
 
-        rig.hold(speaking: [1, 2, 3])
-        #expect(try await rig.session().transcription.transcript.text == "a")
-        #expect(rig.inputMethod.inserted == ["a"])
+        rig.hold(speaking: [4, 5])
+        #expect(try await rig.session().transcription.transcript.text == " b")
+        #expect(rig.inputMethod.inserted == ["a b"])
     }
 
     /// The speaker held the key for longer than the ring retains. The ring overwrote the
@@ -1239,9 +1287,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// either. What the ring holds is the words before the change butted straight against
     /// the words after it, with nothing in the samples marking the join: ring positions
     /// advance only on capture, so the stretch that was lost left nothing behind, not even
-    /// a hole. The press is reported instead of inserted, because what a splice transcribes
-    /// to is a sentence - just not the one that was said.
-    @Test func aPressTheInputDeviceChangedDuringIsReportedInsteadOfInserted() async throws {
+    /// a hole. The audio on both sides is heard, and what it reads is held beside the loss
+    /// rather than inserted, because what a splice transcribes to is a sentence - just not
+    /// the one that was said.
+    @Test func aPressTheInputDeviceChangedDuringIsHeardAcrossTheGapAndHeld() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
         let rig = try await Rig(hearing: engine)
 
@@ -1254,7 +1303,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let press = try #require(await rig.report().failure as? SpeechLost)
         #expect(press.lost.interrupted)
         #expect(press.lost.scrolledOff == 0)
+        #expect(press.held == 1)
+        #expect(engine.clips.first?.samples == [1, 2, 3, 4])
         #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(rig.hold.held == .unplaced(Transcript(typed: "a"), warning: "WARNING: Your microphone restarted while you were dictating."))
 
         // The next press is whole: it opens a microphone of its own and reaches back over
         // nothing, so the seam is behind it however close to it the key went down.
@@ -1358,14 +1410,14 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// mid-sentence, with no device change and nothing to recover onto before the key came
     /// up. The microphone was gone for the tail of the press, so what the ring holds ends
     /// somewhere inside the sentence, and a fragment that transcribes fluently is the one
-    /// thing that must not be inserted.
+    /// thing that must not be inserted: what was heard before the failure is held instead.
     ///
     /// This is the door the loop's own `.stopped`/`.failed` branches used to hold open.
-    /// They are gone: a press that lost its microphone is reported because its audio comes
-    /// back partial, the same as any other loss, so the report rests entirely on capture
-    /// marking it - which is what this press checks.
-    @Test func aPressWhoseMicrophoneFailedMidHoldIsReportedInsteadOfInserted() async throws {
-        let engine = FakeTranscriber { _ in Transcript(typed: "a") }
+    /// They are gone: a press that lost its microphone is held because its audio comes back
+    /// partial, the same as any other loss, so the report rests entirely on capture marking
+    /// it - which is what this press checks.
+    @Test func aPressWhoseMicrophoneFailedMidHoldIsHeldInsteadOfInserted() async throws {
+        let engine = FakeTranscriber { clip in Transcript(typed: clip.samples == [3, 4] ? " b" : "a") }
         let rig = try await Rig(hearing: engine)
 
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
@@ -1376,13 +1428,15 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let press = try #require(await rig.report().failure as? SpeechLost)
         #expect(press.lost.unopened)
         #expect(!press.lost.interrupted)
+        #expect(press.held == 1)
         #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(rig.hold.held?.words == Transcript(typed: "a"))
 
         // The failed engine was let go with the press, so the next one opens a microphone
         // of its own rather than finding capture wedged on the engine that died.
         rig.hold(speaking: [3, 4])
-        #expect(try await rig.session().transcription.transcript.text == "a")
-        #expect(rig.inputMethod.inserted == ["a"])
+        #expect(try await rig.session().transcription.transcript.text == " b")
+        #expect(rig.inputMethod.inserted == ["a b"])
     }
 
     /// The status item's activity: listening from key-down, transcribing from key-up, and

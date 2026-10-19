@@ -78,7 +78,7 @@ public struct HeldFile: HeldStore, Sendable {
 struct HeldRecord: Codable, Equatable {
     /// The words no cursor took.
     var unplaced: Transcript?
-    /// What the latest try to place them was told.
+    /// Why the latest of them were held.
     var warning: String?
     /// The warning for words that may have landed, which stands until dismissed.
     var unaccounted: String?
