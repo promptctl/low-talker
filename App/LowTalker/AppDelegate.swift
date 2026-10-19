@@ -6,6 +6,7 @@ import Identity
 import Grants
 import InputSource
 import Insertion
+import LoopLifecycle
 import LowTalkerCore
 import MenuBarPresence
 import Onboarding
@@ -174,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let was, case .success(let now) = next.config else {
             configLog.notice("config: \(next, privacy: .public)")
             serving?.resume(at: config.map(\.serve))
-            comeUp()
+            lifecycle.comeUp()
             return
         }
         // [LAW:nothing-unseen] Each moved setting lands on the event with what came of moving it.
@@ -208,19 +209,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var listening: Listening?
 
-    /// The rebuild in progress, which the next one waits behind.
-    ///
-    /// [LAW:no-ambient-temporal-coupling] A rebuild awaits the old loop's sessions, and a
-    /// second one asked for during that wait would otherwise build a loop beside the first
-    /// one's and leave a hotkey up that nothing can take down. Each rebuild awaits the one
-    /// before it, so there is only ever one loop being built.
-    private var rebuilding: Task<Void, Never>?
-    /// Set the moment a quit is asked for, and never cleared. `rebuild` refuses once it is set.
-    ///
-    /// A rebuild taken after that point would chain behind the one the quit is waiting on,
-    /// and put a fresh hotkey up after the quit has taken the old one down, with nothing
-    /// left to wait for its sessions. [LAW:no-ambient-temporal-coupling]
-    private var quitting = false
+    /// When the loop comes up, is rebuilt, or is left as it stands, and the one owner of the
+    /// quit's refusal of anything new. Its events are the loop's lines in the log.
+    /// [LAW:single-enforcer]
+    private lazy var lifecycle = LoopLifecycle(
+        startCapture: { [unowned self] in await startCapture() },
+        adopt: { [unowned self] in await adopt() },
+        requirementsMet: { [unowned self] in readReadiness().ready },
+        watching: { [unowned self] in listening?.hotkey.isWatching == true },
+        told: { [unowned self] in log.notice("\($0, privacy: .public)") })
 
     /// Why the last press's words reached no cursor, while no press has begun since.
     private var lastFailure: String?
@@ -249,36 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Takes the loop down and builds it again: the old loop's hotkey comes down first,
     /// ending any press it had open, its sessions are waited out, and then the input method
-    /// is installed and the hotkey goes up in front of a new loop.
-    ///
-    /// Queued behind any rebuild still in progress; see `rebuilding`. Counted in flight in the
-    /// step that asks for it, so a reading taken after the decision is owed to its end, as a
-    /// come-up's is. [LAW:no-ambient-temporal-coupling]
-    ///
-    /// Refused once a quit is asked for, and nothing is handed back; see `quitting`. A caller
-    /// that suspended before asking needs no check of its own. [LAW:single-enforcer]
-    @discardableResult
-    private func rebuild() -> Task<Void, Never>? {
-        guard !quitting else {
-            log.notice("rebuild: not started, as \(AppIdentity.displayName, privacy: .public) is quitting")
-            return nil
-        }
-        let before = rebuilding
-        rebuildsInFlight += 1
-        let this = Task {
-            await before?.value
-            await adopt()
-            rebuildsInFlight -= 1
-            settleOwedReading()
-        }
-        rebuilding = this
-        return this
-    }
-
-    /// How many rebuilds are queued or running. While any is, the loop is being rebuilt by
-    /// someone already, and a grant noticed in the meantime is that rebuild's to take up.
-    private var rebuildsInFlight = 0
-
+    /// is installed and the hotkey goes up in front of a new loop. `lifecycle` decides when.
     private func adopt() async {
         if let previous = listening {
             listening = nil
@@ -291,8 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // goes up, so no press is heard that has nowhere to go yet.
         showHotkeyStatus(.starting(step: "setting up the input method"))
         let installed = await selectInputMethod()
-        // `comeUp` reads the config before it adopts and adopts nothing on a config it cannot
-        // read, so a loop is only ever built over one that was read.
+        // `startCapture` reads the config, and a come-up whose capture did not start adopts
+        // nothing, so a loop is only ever built over a config that was read.
         guard case .success(let config) = config else { preconditionFailure("a loop is adopted only once the config has been read") }
         // The input method tells each cursor it is given focus in, and the loop listening then
         // offers it what is held.
@@ -418,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var setUp = SetUpWindow(
         read: { [unowned self] in readReadiness() },
         ask: { [unowned self] in await ask($0) },
-        settle: { [unowned self] in comeUpIfGranted($0) }, log: log)
+        settle: { [unowned self] in lifecycle.settle(requirementsMet: $0.ready) }, log: log)
 
     /// Asks macOS for one requirement - the only place in the app that does, and reached
     /// only from the button a person pressed on that requirement's step. Each case raises
@@ -448,7 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do { try await InstalledInputMethod().switchOn() } catch { return .failed("\(error)") }
             // Switched on is not selected: once it reads as met, the loop is rebuilt so the
             // install selects it, whether or not the loop is up.
-            inputMethodSwitchedOn = true
+            lifecycle.inputMethodWasSwitchedOn()
             return .made
         }
     }
@@ -563,7 +531,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         // Asking whether to keep running means nothing to an app already on its way out.
-        guard !quitting else {
+        guard !lifecycle.quitting else {
             menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as \(AppIdentity.displayName, privacy: .public) is quitting")
             return
         }
@@ -620,17 +588,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// A launch asks for no grant. Every grant is asked for from its own step in setup,
     /// after that step has said why; see `ask(_:)`.
     private func listen() async {
-        await comeUp().value
+        await lifecycle.comeUp().value
         if !readReadiness().unmet.isEmpty { setUp.show() }
     }
 
-    /// From the microphone up: the grant read, then capture holding it, then the hotkey in
-    /// front of the keyboard, last, so no press can arrive before there is a capture to
-    /// open a microphone for it. [LAW:no-ambient-temporal-coupling]
+    /// The come-up's first step: the microphone grant read, then capture holding it. Answers
+    /// whether the loop can be built over it; `lifecycle` builds it, last, so no press can
+    /// arrive before there is a capture to open a microphone for it.
+    /// [LAW:no-ambient-temporal-coupling]
     ///
-    /// Reads every grant and asks for none: a microphone not yet allowed leaves the loop
-    /// down with the reason on the status line, and the setup's step is where it is asked
-    /// for. Run at launch and again whenever setup may have changed what is granted.
+    /// Reads the grant and asks for none: a microphone not yet allowed leaves the loop down
+    /// with the reason on the status line, and the setup's step is where it is asked for.
     ///
     /// What the microphone is doing when this returns is the resting mode's to say, which
     /// is the one thing the config decides here; `AudioCapture.start` is where that is
@@ -642,112 +610,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// one as the first would hold or release the microphone on settings its owner never
     /// chose. The menu says what is wrong with it.
     /// [LAW:no-silent-failure]
-    ///
-    /// Called while a come-up is under way, it hands back that one rather than starting a
-    /// second. [LAW:no-ambient-temporal-coupling] The come-up is claimed in the same step that
-    /// starts it, so a reading taken after the decision finds it claimed and is owed to its end.
-    @discardableResult
-    private func comeUp() -> Task<Void, Never> {
-        if let comingUp {
-            log.notice("come-up: one is under way; joining it rather than starting a second")
-            return comingUp
-        }
-        let this = Task {
-            defer {
-                comingUp = nil
-                settleOwedReading()
+    private func startCapture() async -> Bool {
+        do {
+            // A capture already running is left running: the microphone was held before, and
+            // what came up short was the hotkey or the input method, which the rebuild redoes.
+            // Restarting it would close and reopen an engine the resting mode holds open.
+            if capture.atRest == nil {
+                let grant = try readMicrophone().grant()
+                let atRest = try config.get().microphone
+                // Awaited, so the menu and the readings queued behind the come-up run while
+                // a slow input is reached.
+                try await capture.start(grant, atRest: atRest)
             }
-            // A capture started now could open the microphone after the quit let it go.
-            guard !quitting else { return }
-            do {
-                // A capture already running is left running: the microphone was held before, and
-                // what came up short was the hotkey or the input method, which `rebuild` redoes.
-                // Restarting it would close and reopen an engine the resting mode holds open.
-                if capture.atRest == nil {
-                    let grant = try readMicrophone().grant()
-                    let atRest = try config.get().microphone
-                    // Awaited, so the menu and the readings queued behind the come-up run while
-                    // a slow input is reached.
-                    let reaching = ContinuousClock.now
-                    try await capture.start(grant, atRest: atRest)
-                    log.notice("come-up: waited \(reaching.duration(to: .now), privacy: .public) for capture to start with its microphone readied")
-                }
-            } catch {
-                // Stopping is idempotent, so a grant withheld and a capture that failed to
-                // start leave by one path. [LAW:dataflow-not-control-flow]
-                capture.stop()
-                // A microphone macOS was never asked about, or was told no, is a step in setup,
-                // and the status says where it is the way the input method's refusal does.
-                let whereToAllow = switch error {
-                case MicrophoneAuthorization.Withheld.notDetermined, MicrophoneAuthorization.Withheld.denied:
-                    "; allow it in \(GuidedSetup.title) in this menu"
-                default: ""
-                }
-                showHotkeyStatus(.off("\(error)\(whereToAllow)"))
-                return
+            return true
+        } catch {
+            // Stopping is idempotent, so a grant withheld and a capture that failed to
+            // start leave by one path. [LAW:dataflow-not-control-flow]
+            capture.stop()
+            // A microphone macOS was never asked about, or was told no, is a step in setup,
+            // and the status says where it is the way the input method's refusal does.
+            let whereToAllow = switch error {
+            case MicrophoneAuthorization.Withheld.notDetermined, MicrophoneAuthorization.Withheld.denied:
+                "; allow it in \(GuidedSetup.title) in this menu"
+            default: ""
             }
-            await rebuild()?.value
+            showHotkeyStatus(.off("\(error)\(whereToAllow)"))
+            return false
         }
-        comingUp = this
-        return this
-    }
-
-    /// The come-up under way, from the moment it is decided until it ends.
-    private var comingUp: Task<Void, Never>?
-
-    /// Once every requirement is met: brings the loop up when no hotkey is watching, whatever
-    /// took it down - a grant given since, or an install that refused while an app held Secure
-    /// Event Input - and rebuilds a loop that is up when the input method was just switched
-    /// on, so the install selects it. Every reading is a retry, so a loop that came down is
-    /// never down until a relaunch.
-    ///
-    /// [LAW:dataflow-not-control-flow] Decided from where things stand, not from a
-    /// difference between two readings, so it holds however the grant arrived and whichever
-    /// reading first sees it. [LAW:effects-at-boundaries] Reading has no effects; this is the
-    /// one place a reading is acted on, called after a request, when setup comes back to the
-    /// front, and when the menu opens. A reading that arrives while a rebuild or `comeUp` is
-    /// running is owed to the moment it ends, never dropped, and never acted on while
-    /// quitting. [LAW:no-ambient-temporal-coupling]
-    private func comeUpIfGranted(_ readiness: Readiness) {
-        guard !quitting else { return }
-        // A rebuild or a comeUp in flight may have read the grants before this reading did,
-        // so the reading is owed to the moment it ends rather than dropped.
-        guard comingUp == nil, rebuildsInFlight == 0 else {
-            readingOwed = true
-            return
-        }
-        guard readiness.unmet.isEmpty else { return }
-        if listening?.hotkey.isWatching != true {
-            inputMethodSwitchedOn = false
-            log.notice("setup: every requirement is met and no hotkey is watching; bringing it up")
-            comeUp()
-        } else if inputMethodSwitchedOn {
-            inputMethodSwitchedOn = false
-            log.notice("setup: the input method was switched on; rebuilding the loop to select it")
-            rebuild()
-        }
-    }
-
-    /// Set when a reading reached `comeUpIfGranted` while a rebuild or a comeUp was running,
-    /// and settled - with a fresh reading - by whichever of them ends last.
-    private var readingOwed = false
-
-    /// Set when a request to switch the input method on went through; cleared once the loop
-    /// has been rebuilt behind it.
-    private var inputMethodSwitchedOn = false
-
-    /// The one place an owed reading is paid: once nothing is rebuilding the loop.
-    private func settleOwedReading() {
-        guard readingOwed, rebuildsInFlight == 0, comingUp == nil else { return }
-        readingOwed = false
-        comeUpIfGranted(readReadiness())
     }
 
     /// Quitting waits for the sessions: a press heard just before the quit still has its
     /// words on the way to the cursor, and the wait is what lets them land.
     /// [LAW:no-ambient-temporal-coupling] The quit has an owner, rather than a race.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        quitting = true
+        let rebuilding = lifecycle.quit()
         // A save during the drain would rebind the server and move the microphone under it.
         reloading?.cancel()
         Task {
@@ -908,7 +804,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// before the menu is laid out, so the items are in place when it is measured.
     func menuNeedsUpdate(_ menu: NSMenu) {
         let readiness = readReadiness()
-        comeUpIfGranted(readiness)
+        lifecycle.settle(requirementsMet: readiness.ready)
 
         // What the user's microphone is doing, on the surface the epic exists for: the
         // menu-bar indicator says the device is open and only this says why, so a lit

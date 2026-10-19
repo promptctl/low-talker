@@ -93,6 +93,9 @@ targets:
       # The menu's error rows, which a click copies.
       - package: low-talker
         product: StatusMenu
+      # When the loop comes up, is rebuilt, or is left as it stands.
+      - package: low-talker
+        product: LoopLifecycle
       - package: low-talker
         product: Signals
       - package: low-talker

@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "Onboarding", targets: ["Onboarding"]),
         .library(name: "MenuBarPresence", targets: ["MenuBarPresence"]),
         .library(name: "StatusMenu", targets: ["StatusMenu"]),
+        .library(name: "LoopLifecycle", targets: ["LoopLifecycle"]),
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "Dictation", targets: ["Dictation"]),
         .library(name: "InputMethod", targets: ["InputMethod"]),
@@ -93,6 +94,11 @@ let package = Package(
         // click copies. Out of the app target so `make test` runs it. [LAW:decomposition]
         .target(name: "StatusMenu"),
         .testTarget(name: "StatusMenuTests", dependencies: ["StatusMenu"]),
+        // What a reading of the requirements does to the loop: a come-up, a rebuild, a reading
+        // owed to one under way, and nothing new once a quit is asked for. Every effect is the
+        // app's, taken as a closure. Out of the app target so `make test` runs it. [LAW:decomposition]
+        .target(name: "LoopLifecycle"),
+        .testTarget(name: "LoopLifecycleTests", dependencies: ["LoopLifecycle"]),
         .testTarget(name: "SignalsTests", dependencies: ["Signals", "LowTalkerCore", "TestProbes"]),
         // The loop from a press to inserted text, with every collaborator taken as a value.
         // Its own target rather than app code so the loop runs under `swift test`; the
