@@ -415,20 +415,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .withheld(.notDetermined):
                 // Asked here, as measured on studious 2026-09-24: one dialog, naming the app.
                 _ = await MicrophonePermission().request()
-                return .asked
+                return .answered
             case .withheld(.denied):
                 return .sentToSystemSettings("macOS asks only once. Turn on \(AppIdentity.displayName) in the \(row.rawValue) list in System Settings.")
             case .withheld(.restricted):
                 return .failed("A policy on this Mac blocks the microphone.")
             case .granted:
-                return .asked
+                return .made
             }
         case .inputMethod:
             do { try await InstalledInputMethod().switchOn() } catch { return .failed("\(error)") }
             // Switched on is not selected: once it reads as met, the loop is rebuilt so the
             // install selects it, whether or not the loop is up.
             inputMethodSwitchedOn = true
-            return .asked
+            return .made
         }
     }
 
