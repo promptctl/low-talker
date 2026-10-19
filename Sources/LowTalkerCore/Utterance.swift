@@ -115,20 +115,20 @@ actor Utterance {
         // A room reading is a whole frame that heard something: digital silence is no
         // microphone, whose own noise is never exactly zero, and a frame the end cut short
         // is no tenth of a second.
-        let reading = peak > 0 && clip.samples.count == Self.frameCount ? [peak] : []
+        let reading = peak > 0 && clip.samples.count == Self.frameCount ? peak : nil
         // The room: the quietest of this frame and the readings of the last `roomSpan` before it.
         let room = recent.reduce(peak, min)
-        recent = Array((recent + reading).suffix(Self.roomFrames))
-        // The softest a sample of speech may be: within range of the loudest, and above
-        // the room too unless it reaches the audible floor.
-        let softest = max(loudest / Self.dynamicRange, min(Self.audible, room * Self.aboveRoom))
+        recent = Array((recent + [reading].compactMap { $0 }).suffix(Self.roomFrames))
+        // The softest a sample under the floor may be and still be speech.
+        let roomGate = min(Self.audible, room * Self.aboveRoom)
         // [LAW:dataflow-not-control-flow] One judgement for every clip, the loudest
         // included: it stands within range of itself, so the clip that lifts the
         // loudest past the floor is the first speech.
-        let speech = loudest >= Self.audible && peak >= softest
+        let withinRange = loudest >= Self.audible && peak >= loudest / Self.dynamicRange
+        let speech = withinRange && peak >= roomGate
         // [LAW:nothing-unseen] What the room refused that the range alone would have kept.
-        let refused = loudest >= Self.audible && peak >= loudest / Self.dynamicRange && !speech
-        timeline.heard(reading, refusedAsRoom: refused ? clip.samples.count : 0)
+        timeline.heard(reading, refusedAsRoom: withinRange && !speech ? clip.samples.count : 0)
+        let softest = max(loudest / Self.dynamicRange, roomGate)
         // Where the audio kept must resume: the lead-in before the clip's first sample
         // of speech when the clip is speech, the lead-in before its end when it is not,
         // since the next clip may open on speech.
@@ -212,8 +212,8 @@ struct Timeline: Sendable {
         AudioClip.duration(for: gaps.values.reduce(0, +))
     }
 
-    mutating func heard(_ reading: [Float], refusedAsRoom refused: Int) {
-        room = ([room].compactMap { $0 } + reading).min()
+    mutating func heard(_ reading: Float?, refusedAsRoom refused: Int) {
+        room = [room, reading].compactMap { $0 }.min()
         refusedAsRoom += refused
     }
 
