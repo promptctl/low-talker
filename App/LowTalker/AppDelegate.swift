@@ -259,8 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // goes up, so no press is heard that has nowhere to go yet.
         showHotkeyStatus(.starting(step: "setting up the input method"))
         let installed = await selectInputMethod()
-        // `startCapture` reads the config, and a come-up whose capture did not start adopts
-        // nothing, so a loop is only ever built over a config that was read.
+        // A loop is built only over capture holding the microphone, capture starts only over
+        // a config that was read, and a save the file refused keeps the one that ran.
         guard case .success(let config) = config else { preconditionFailure("a loop is adopted only once the config has been read") }
         // The input method tells each cursor it is given focus in, and the loop listening then
         // offers it what is held.
@@ -593,7 +593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The come-up's first step: the microphone grant read, then capture holding it. Answers
-    /// whether the loop can be built over it; `lifecycle` builds it, last, so no press can
+    /// what came of it; `lifecycle` builds the loop over it, last, so no press can
     /// arrive before there is a capture to open a microphone for it.
     /// [LAW:no-ambient-temporal-coupling]
     ///
@@ -610,19 +610,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// one as the first would hold or release the microphone on settings its owner never
     /// chose. The menu says what is wrong with it.
     /// [LAW:no-silent-failure]
-    private func startCapture() async -> Bool {
+    private func startCapture() async -> LoopLifecycle.Capture {
         do {
             // A capture already running is left running: the microphone was held before, and
             // what came up short was the hotkey or the input method, which the rebuild redoes.
             // Restarting it would close and reopen an engine the resting mode holds open.
-            if capture.atRest == nil {
-                let grant = try readMicrophone().grant()
-                let atRest = try config.get().microphone
-                // Awaited, so the menu and the readings queued behind the come-up run while
-                // a slow input is reached.
-                try await capture.start(grant, atRest: atRest)
-            }
-            return true
+            guard capture.atRest == nil else { return .running }
+            let grant = try readMicrophone().grant()
+            let atRest = try config.get().microphone
+            // Awaited, so the menu and the readings queued behind the come-up run while
+            // a slow input is reached.
+            try await capture.start(grant, atRest: atRest)
+            return .started
         } catch {
             // Stopping is idempotent, so a grant withheld and a capture that failed to
             // start leave by one path. [LAW:dataflow-not-control-flow]
@@ -635,7 +634,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             default: ""
             }
             showHotkeyStatus(.off("\(error)\(whereToAllow)"))
-            return false
+            return .notStarted
         }
     }
 

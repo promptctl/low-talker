@@ -25,7 +25,7 @@ private final class Held<Answer: Sendable> {
 /// test meets, a hotkey that watches once a loop is adopted, and every event told.
 @MainActor
 private final class App {
-    let capture = Held<Bool>()
+    let capture = Held<LoopLifecycle.Capture>()
     let adopt = Held<Void>()
     var requirementsMet = true
     var watching = false
@@ -35,7 +35,7 @@ private final class App {
 
     /// Weak, because a test may end while the lifecycle's last task finishes behind it.
     lazy var lifecycle = LoopLifecycle(
-        startCapture: { [weak self] in await self?.capture.run() ?? false },
+        startCapture: { [weak self] in await self?.capture.run() ?? .notStarted },
         adopt: { [weak self] in
             await self?.adopt.run()
             self?.watching = true
@@ -50,7 +50,7 @@ private final class App {
 
     /// The events with the capture's wait set to zero, so a test can compare them whole.
     var untimed: [LoopLifecycle.Event] {
-        events.map { if case .capture(let started, _) = $0 { .capture(started: started, waited: .zero) } else { $0 } }
+        events.map { if case .capture(let capture, _) = $0 { .capture(capture, waited: .zero) } else { $0 } }
     }
 }
 
@@ -74,7 +74,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         app.lifecycle.settle(requirementsMet: true)
         app.lifecycle.settle(requirementsMet: true)
         try await untilItHolds { app.capture.waiters == 1 }
-        app.capture.release(true)
+        app.capture.release(.started)
         try await untilItHolds { app.adopt.waiters == 1 }
         app.adopt.release(())
         try await untilItHolds { app.readings == 1 }
@@ -82,7 +82,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         #expect(app.adopt.begun == 1)
         #expect(app.untimed == [
             .settled(.comingUp), .settled(.owed),
-            .capture(started: true, waited: .zero),
+            .capture(.started, waited: .zero),
             .settled(.up),
         ])
     }
@@ -114,19 +114,19 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         app.lifecycle.settle(requirementsMet: true)
         try await untilItHolds { app.capture.waiters == 1 }
         app.lifecycle.settle(requirementsMet: true)
-        app.capture.release(false)
+        app.capture.release(.notStarted)
         try await untilItHolds { app.capture.waiters == 1 }
         #expect(app.capture.begun == 2)
         #expect(app.adopt.begun == 0)
-        app.capture.release(true)
+        app.capture.release(.started)
         try await untilItHolds { app.adopt.waiters == 1 }
         app.adopt.release(())
         try await untilItHolds { app.watching }
         #expect(app.untimed == [
             .settled(.comingUp), .settled(.owed),
-            .capture(started: false, waited: .zero),
+            .capture(.notStarted, waited: .zero),
             .settled(.comingUp),
-            .capture(started: true, waited: .zero),
+            .capture(.started, waited: .zero),
         ])
     }
 
@@ -137,12 +137,12 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         let second = app.lifecycle.comeUp()
         #expect(first == second)
         try await untilItHolds { app.capture.waiters == 1 }
-        app.capture.release(true)
+        app.capture.release(.started)
         try await untilItHolds { app.adopt.waiters == 1 }
         app.adopt.release(())
         await first.value
         #expect(app.capture.begun == 1)
-        #expect(app.untimed == [.joined, .capture(started: true, waited: .zero)])
+        #expect(app.untimed == [.joined, .capture(.started, waited: .zero)])
     }
 
     /// A capture that did not start builds no loop over it.
@@ -150,10 +150,24 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         let app = App()
         let up = app.lifecycle.comeUp()
         try await untilItHolds { app.capture.waiters == 1 }
-        app.capture.release(false)
+        app.capture.release(.notStarted)
         await up.value
         #expect(app.adopt.begun == 0)
-        #expect(app.untimed == [.capture(started: false, waited: .zero)])
+        #expect(app.untimed == [.capture(.notStarted, waited: .zero)])
+    }
+
+    /// A capture already holding the microphone is left running and the loop is built over it,
+    /// and the come-up says it found it running rather than that it started one.
+    @Test func aComeUpOverACaptureAlreadyRunningBuildsTheLoopAndSaysSo() async throws {
+        let app = App()
+        let up = app.lifecycle.comeUp()
+        try await untilItHolds { app.capture.waiters == 1 }
+        app.capture.release(.running)
+        try await untilItHolds { app.adopt.waiters == 1 }
+        app.adopt.release(())
+        await up.value
+        #expect(app.watching)
+        #expect(app.untimed == [.capture(.running, waited: .zero)])
     }
 
     /// The come-up says how long capture took to start, which is how long a slow input kept
@@ -163,9 +177,9 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         let up = app.lifecycle.comeUp()
         try await untilItHolds { app.capture.waiters == 1 }
         try await Task.sleep(for: .milliseconds(50))
-        app.capture.release(false)
+        app.capture.release(.notStarted)
         await up.value
-        guard case .capture(false, let waited) = try #require(app.events.first) else {
+        guard case .capture(.notStarted, let waited) = try #require(app.events.first) else {
             Issue.record("the come-up told \(app.events), not its capture's wait")
             return
         }
@@ -179,11 +193,11 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         let up = app.lifecycle.comeUp()
         try await untilItHolds { app.capture.waiters == 1 }
         #expect(app.lifecycle.quit() == nil)
-        app.capture.release(true)
+        app.capture.release(.started)
         await up.value
         #expect(app.adopt.begun == 0)
         #expect(!app.watching)
-        #expect(app.untimed == [.capture(started: true, waited: .zero), .refused(.rebuild)])
+        #expect(app.untimed == [.capture(.started, waited: .zero), .refused(.rebuild)])
     }
 
     /// After a quit, a come-up starts no capture, which could open the microphone the quit let
@@ -223,7 +237,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         try await untilItHolds { app.adopt.waiters == 1 }
         let up = app.lifecycle.comeUp()
         try await untilItHolds { app.capture.waiters == 1 }
-        app.capture.release(true)
+        app.capture.release(.started)
         for _ in 0..<10 { await Task.yield() }
         #expect(app.adopt.begun == 1)
         app.adopt.release(())

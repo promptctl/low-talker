@@ -12,9 +12,9 @@ public final class LoopLifecycle {
         case settled(Outcome)
         /// A come-up asked for while one is under way, which joins it.
         case joined
-        /// The come-up's capture step: whether capture started, and how long it took. A slow or
+        /// The come-up's capture step: what it came to, and how long it took. A slow or
         /// Bluetooth input is reached in this wait.
-        case capture(started: Bool, waited: Duration)
+        case capture(Capture, waited: Duration)
         /// Work asked for after the quit, and not started.
         case refused(Work)
 
@@ -22,8 +22,9 @@ public final class LoopLifecycle {
             switch self {
             case .settled(let outcome): "reading: \(outcome)"
             case .joined: "come-up: one is under way; joining it rather than starting a second"
-            case .capture(true, let waited): "come-up: waited \(waited) for capture to start with its microphone readied"
-            case .capture(false, let waited): "come-up: capture did not start, after \(waited); the loop stays down"
+            case .capture(.started, let waited): "come-up: waited \(waited) for capture to start with its microphone readied"
+            case .capture(.running, _): "come-up: capture was already holding the microphone, and is left running"
+            case .capture(.notStarted, let waited): "come-up: capture did not start, after \(waited); the loop stays down"
             case .refused(let work): "\(work.rawValue): not started, as the app is quitting"
             }
         }
@@ -58,28 +59,38 @@ public final class LoopLifecycle {
         }
     }
 
+    /// What the come-up's capture step came to. A loop is built over the first two.
+    public enum Capture: Equatable, Sendable {
+        /// Capture started, holding the microphone readied.
+        case started
+        /// Capture was already holding the microphone, and was left running.
+        case running
+        /// Capture did not start, and the app has said why.
+        case notStarted
+    }
+
     /// The two kinds of work a reading can start.
     public enum Work: String, Sendable {
         case comeUp = "come-up"
         case rebuild
     }
 
-    private let startCapture: @MainActor () async -> Bool
+    private let startCapture: @MainActor () async -> Capture
     private let adopt: @MainActor () async -> Void
     private let requirementsMet: @MainActor () -> Bool
     private let watching: @MainActor () -> Bool
     private let told: @MainActor (Event) -> Void
 
     /// - Parameters:
-    ///   - startCapture: brings capture up holding the microphone, and answers whether the loop
-    ///     can be built over it. One that answers false has already said why.
+    ///   - startCapture: brings capture up holding the microphone, or leaves one already holding
+    ///     it running, and says which. One that did not start has already said why.
     ///   - adopt: takes the old loop down, waits out its sessions, and builds the new one.
     ///   - requirementsMet: a fresh reading: whether every requirement is met. Read when an owed reading
     ///     is paid.
     ///   - watching: whether a hotkey is watching now.
     ///   - told: every event, as it happens.
     public init(
-        startCapture: @escaping @MainActor () async -> Bool,
+        startCapture: @escaping @MainActor () async -> Capture,
         adopt: @escaping @MainActor () async -> Void,
         requirementsMet: @escaping @MainActor () -> Bool,
         watching: @escaping @MainActor () -> Bool,
@@ -181,9 +192,9 @@ public final class LoopLifecycle {
                 return
             }
             let reaching = ContinuousClock.now
-            let started = await startCapture()
-            told(.capture(started: started, waited: reaching.duration(to: .now)))
-            guard started else { return }
+            let capture = await startCapture()
+            told(.capture(capture, waited: reaching.duration(to: .now)))
+            guard capture != .notStarted else { return }
             // A quit during the capture wait is refused by `rebuild`, the one place that refuses
             // it. [LAW:single-enforcer]
             await rebuild()?.value
