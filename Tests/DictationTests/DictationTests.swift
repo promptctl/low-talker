@@ -1112,7 +1112,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold(speaking: [0.5, -0.25])
         let report = await rig.pressReport()
         #expect(try report.outcome.get().transcript.text == "a")
-        #expect(report.capture == CapturedAudio.Reading(input: FakeHardware.microphone, samples: 2, peak: 0.5, firstSample: .zero))
+        #expect(report.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 2, peak: 0.5, firstSample: .zero))
         #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
     }
 
@@ -1124,7 +1124,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let report = await rig.pressReport()
         let lost = try #require(report.outcome.failure as? SpeechLost)
         #expect(lost.lost.unopened)
-        #expect(report.capture == CapturedAudio.Reading(input: FakeHardware.microphone, samples: 0, peak: 0, firstSample: nil))
+        #expect(report.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 0, peak: 0, firstSample: nil))
         #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel) delivered nothing after the key went down")
     }
 

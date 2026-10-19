@@ -93,6 +93,7 @@ public final class AudioCapture {
     private struct Live {
         let dispose: Disposal
         let generation: Int
+        let input: MicrophoneInput
     }
 
     /// What the microphone is doing.
@@ -160,10 +161,6 @@ public final class AudioCapture {
         /// does not ask the main actor, so the answer lives here beside the samples it admits.
         /// [LAW:no-ambient-temporal-coupling]
         var accepting: Int?
-        /// The input the engine now feeding the ring was opened on, or the last one that did:
-        /// an engine that failed leaves its input here, which is the one a press it failed
-        /// under was heard through. Nil until the first engine of this capture opens.
-        var input: MicrophoneInput?
         /// What has arrived since the open session began.
         var arrivals = Arrivals()
         /// Where the open session's audio goes as it lands, once something has asked for
@@ -172,9 +169,10 @@ public final class AudioCapture {
         var feed: AsyncStream<AudioClip>.Continuation?
     }
 
-    /// The buffers delivered since the open session began, counted as they land.
-    /// [LAW:nothing-unseen] A press that heard nothing and one that heard a quiet room end
-    /// with the same empty transcript, and these are what tell them apart.
+    /// What the ring cannot say about the open session's audio: when it began arriving and
+    /// through which inputs. [LAW:nothing-unseen] A press that heard nothing and one that
+    /// heard a quiet room end with the same empty transcript, and these and the ring are what
+    /// tell them apart.
     private struct Arrivals: Sendable {
         /// When the first sample delivered since the open session began was captured, and
         /// nothing once it is set: it dates that session's head, so a later engine's
@@ -186,15 +184,10 @@ public final class AudioCapture {
         /// a microphone that never opened for it at all - and which a held microphone can
         /// arrive at too, by dying quietly rather than by opening late.
         var first: HostTime?
-        var samples = 0
-        /// The largest sample magnitude among them, where full scale is 1.
-        var peak: Float = 0
-
-        mutating func add(_ buffer: [Float], at time: HostTime) {
-            first = first ?? time
-            samples += buffer.count
-            peak = buffer.reduce(peak) { max($0, abs($1)) }
-        }
+        /// The inputs the session is heard through, in the order they opened: the one held
+        /// open when it began or the one opened for it, then any a device change opened
+        /// under it.
+        var inputs: [MicrophoneInput] = []
     }
 
     /// The stream behind a lock, shared between the input's delivery thread and the main
@@ -353,8 +346,11 @@ public final class AudioCapture {
         // Cleared before any input opens, so the first buffer delivered after the key
         // is the one that dates this session's head. Cleared here and not in `launch()`
         // because a mid-session replacement launches too, and its first buffer dates its
-        // own audio rather than the moment this session's microphone opened.
-        shared.stream.withLock { $0.arrivals = Arrivals() }
+        // own audio rather than the moment this session's microphone opened. A microphone
+        // held open is the input the session is heard through from its first sample; one
+        // opened for it is added by the launch that opens it.
+        let held: [MicrophoneInput] = if case .running(let live) = started.engine { [live.input] } else { [] }
+        shared.stream.withLock { $0.arrivals = Arrivals(inputs: held) }
         switch started.engine {
         // Held open by the resting mode, and left alone: relaunching splices the ring, and
         // the audio it would splice off is exactly the look-back this mode is held open to
@@ -436,13 +432,15 @@ public final class AudioCapture {
     /// dropped before the stream began is missing.
     public func endSession(_ streamed: StreamedSession) -> StreamedSession.Ending {
         end(streamed.session, scrolledOff: { _, _ in streamed.missed }) { stream, _, lost in
-            guard let input = stream.input else { preconditionFailure("a session ended in a capture no engine ever opened in; beginning one opens one") }
-            let arrivals = stream.arrivals
+            // [LAW:one-source-of-truth] Positions advance only on capture, so the session's
+            // own stretch of them is what it was delivered: the clip its transcriber heard,
+            // less the pre-roll. Read once here rather than counted as each buffer lands.
+            let own = streamed.session.begin..<stream.ring.end
             return StreamedSession.Ending(lost: lost, reading: CapturedAudio.Reading(
-                input: input,
-                samples: arrivals.samples,
-                peak: arrivals.peak,
-                firstSample: arrivals.first.map(streamed.session.unheard(since:))
+                inputs: stream.arrivals.inputs,
+                samples: own.count,
+                peak: stream.ring.clip(in: own).peak,
+                firstSample: stream.arrivals.first.map(streamed.session.unheard(since:))
             ))
         }
     }
@@ -744,15 +742,15 @@ public final class AudioCapture {
                         // The buffer's first sample takes the position the ring is at, and
                         // that is the sample its stamp dates.
                         $0.timeline.mark($0.ring.end, at: time)
-                        $0.arrivals.add(samples, at: time)
+                        $0.arrivals.first = $0.arrivals.first ?? time
                         $0.ring.append(samples)
                         $0.feed?.yield(AudioClip(samples: samples))
                     }
                 },
                 onFailure: { [weak self] error in self?.fail(error, from: generation) }
             )
-            shared.stream.withLock { $0.input = opened.input }
-            return Live(dispose: opened.dispose, generation: generation)
+            shared.stream.withLock { $0.arrivals.inputs.append(opened.input) }
+            return Live(dispose: opened.dispose, generation: generation, input: opened.input)
         } catch {
             // Nothing took over, so nothing resumed: no input opened and no buffer
             // can have landed. A mark left standing forward of the last engine's audio

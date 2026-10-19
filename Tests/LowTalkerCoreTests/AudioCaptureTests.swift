@@ -442,7 +442,7 @@ private struct Authorized: MicrophoneAuthority {
         hardware.engines[0].appending([0.5, -0.75], after(2) + .milliseconds(40))
         hardware.engines[0].appending([0.25], after(4) + .milliseconds(40))
         let reading = capture.endSession(session).reading
-        #expect(reading == CapturedAudio.Reading(input: hardware.engines[0].input.microphone, samples: 3, peak: 0.75, firstSample: .milliseconds(40)))
+        #expect(reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 3, peak: 0.75, firstSample: .milliseconds(40)))
         #expect(reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) delivered 0.0 s (3 samples) peaking at -2.5 dBFS, the first 40 ms after the key went down")
     }
 
@@ -453,7 +453,7 @@ private struct Authorized: MicrophoneAuthority {
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
         let session = capture.stream(try opened(capture))
         let end = capture.endSession(session)
-        #expect(end.reading == CapturedAudio.Reading(input: hardware.engines[0].input.microphone, samples: 0, peak: 0, firstSample: nil))
+        #expect(end.reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 0, peak: 0, firstSample: nil))
         #expect(end.reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) delivered nothing after the key went down")
         #expect(end.lost?.unopened == true)
     }
@@ -472,8 +472,9 @@ private struct Authorized: MicrophoneAuthority {
     }
 
     /// The device under a press went away and capture relaunched on the one that replaced
-    /// it: the reading names the input the press ended on, and the loss says it was spliced.
-    @Test func aPressWhoseDeviceWasReplacedReadsTheInputItEndedOn() throws {
+    /// it: the reading names both inputs, in the order they fed the press, since the samples
+    /// it counts are both of theirs, and the loss says it was spliced.
+    @Test func aPressWhoseDeviceWasReplacedReadsBothInputs() throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
         let session = capture.stream(try opened(capture))
@@ -482,10 +483,28 @@ private struct Authorized: MicrophoneAuthority {
         hardware.engines[0].input.onStale()
         hardware.engines[1].appending([0.5], after(1))
         let end = capture.endSession(session)
-        #expect(end.reading.input == hardware.engines[1].input.microphone)
-        #expect(end.reading.input.device == 2)
+        #expect(end.reading.inputs == [hardware.engines[0].input.microphone, hardware.engines[1].input.microphone])
         #expect(end.reading.samples == 2)
+        #expect(end.reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) then \"Device 2\" (device 2, 48000 Hz, 1 channel) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
         #expect(end.lost?.interrupted == true)
+    }
+
+    /// A held microphone's buffer captured before the key and landing after it is the
+    /// session's own audio, since the key marked the newest sample there was: the reading
+    /// counts exactly the clip the stream handed over less its pre-roll, and the pre-roll's
+    /// level is not the press's.
+    @Test func aHeldPressReadsExactlyItsOwnAudio() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try capture.start(grant, atRest: .open)
+        hardware.engines[0].appending([0.9, 0.9], origin)
+        let session = capture.stream(try capture.beginSession(at: after(3), preRoll: AudioSession.defaultPreRoll))
+        hardware.engines[0].appending([0.5, -0.25], after(2))
+        let end = capture.endSession(session)
+        var heard: [Float] = []
+        for await clip in session.audio { heard += clip.samples }
+        #expect(heard == [0.9, 0.9, 0.5, -0.25])
+        #expect(end.reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 2, peak: 0.5, firstSample: .zero))
     }
 
     /// The key-up does not close a microphone the user asked to have held, and does not

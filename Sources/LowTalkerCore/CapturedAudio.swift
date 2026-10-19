@@ -85,27 +85,31 @@ extension CapturedAudio {
     /// arrived was digital silence - a muted input, or one macOS feeds zeros - or what arrived
     /// had a level and the room was quiet.
     public struct Reading: Sendable, Equatable, CustomStringConvertible {
-        public let input: MicrophoneInput
+        /// Every input that fed the session, in the order they opened: one, unless a device
+        /// change spliced the press, and then the samples below are all of theirs together.
+        public let inputs: [MicrophoneInput]
         /// Pipeline samples delivered since the session began, its pre-roll not among them.
         public let samples: Int
-        /// The largest sample magnitude among them, where full scale is 1: zero for none, and
-        /// for digital silence.
+        /// The largest sample magnitude among those the ring still holds, where full scale is
+        /// 1: zero for none, and for digital silence. A press longer than the ring's retention
+        /// is read over its newest stretch.
         public let peak: Float
         /// How long after the key went down the first of them was captured, and nil when none
         /// arrived. Zero for a microphone already running at the key.
         public let firstSample: Duration?
 
-        public init(input: MicrophoneInput, samples: Int, peak: Float, firstSample: Duration?) {
-            self.input = input
+        public init(inputs: [MicrophoneInput], samples: Int, peak: Float, firstSample: Duration?) {
+            self.inputs = inputs
             self.samples = samples
             self.peak = peak
             self.firstSample = firstSample
         }
 
         public var description: String {
-            guard let firstSample else { return "\(input) delivered nothing after the key went down" }
+            let through = inputs.map(\.description).joined(separator: " then ")
+            guard let firstSample else { return "\(through) delivered nothing after the key went down" }
             let level = peak == 0 ? "of digital silence" : String(format: "peaking at %.1f dBFS", 20 * log10(peak))
-            return "\(input) delivered \(String(format: "%.1f", AudioClip.duration(for: samples))) s (\(samples) samples) \(level), the first \(Int(firstSample / .milliseconds(1))) ms after the key went down"
+            return "\(through) delivered \(String(format: "%.1f", AudioClip.duration(for: samples))) s (\(samples) samples) \(level), the first \(Int(firstSample / .milliseconds(1))) ms after the key went down"
         }
     }
 }

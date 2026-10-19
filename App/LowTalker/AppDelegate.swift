@@ -274,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             await previous.hotkey.stopAndDeliver()
             // A refused wait is reported and the rebuild still made: a loop that cannot be
             // replaced would be the worse failure of the two. [LAW:no-silent-failure]
-            do throws(SerialQueueError) { try await previous.dictation.finish() } catch { reportFailure(Dictation.Failed(error), microphone: unfinished) }
+            do throws(SerialQueueError) { try await previous.dictation.finish() } catch { reportFailure(Dictation.Failed(error), of: nil) }
         }
         // [LAW:no-ambient-temporal-coupling] The input method is made ready before the hotkey
         // goes up, so no press is heard that has nowhere to go yet.
@@ -737,7 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             capture.stop()
             // A refused wait is reported and the quit still granted: an app that cannot
             // be quit would be the worse failure of the two. [LAW:no-silent-failure]
-            do throws(SerialQueueError) { try await listening?.dictation.finish() } catch { reportFailure(Dictation.Failed(error), microphone: unfinished) }
+            do throws(SerialQueueError) { try await listening?.dictation.finish() } catch { reportFailure(Dictation.Failed(error), of: nil) }
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -791,14 +791,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .success(let session):
             sessions.notice("\(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcript.text, privacy: .private)")
         case .failure(let failed):
-            reportFailure(failed, microphone: press.microphone)
+            reportFailure(failed, of: press)
         }
     }
 
-    /// What a failure that was no press says in place of a microphone.
-    private let unfinished = "none: the loop's sessions could not be waited out"
-
-    private func reportFailure(_ failed: Dictation.Failed, microphone: String) {
+    /// `press` is nil for a failure that was no press - the loop's sessions could not be
+    /// waited out - which has no microphone to say.
+    private func reportFailure(_ failed: Dictation.Failed, of press: Dictation.Report?) {
         // [LAW:no-silent-failure] The words went nowhere, or only some of them did, so the
         // menu says why.
         lastFailure = failureLine(failed.failure)
@@ -806,11 +805,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // that did: the facts in the clear and any words it carries private, as its type
         // declares them.
         let account = failed.failure.account
+        let microphone = press.map { "; microphone: \($0.microphone)" } ?? ""
         switch account.dictated {
         case nil:
-            sessions.error("session failed: \(failed.kind, privacy: .public) — \(account.facts, privacy: .public); microphone: \(microphone, privacy: .public)")
+            sessions.error("session failed: \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public)")
         case let dictated?:
-            sessions.error("session failed: \(failed.kind, privacy: .public) — \(account.facts, privacy: .public); microphone: \(microphone, privacy: .public); dictated: \(dictated, privacy: .private)")
+            sessions.error("session failed: \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public); dictated: \(dictated, privacy: .private)")
         }
     }
 
