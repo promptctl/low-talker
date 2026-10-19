@@ -10,10 +10,17 @@ public struct Transcript: Hashable, Codable, Sendable {
     /// Seconds of quiet no pass was handed, before the speech and between it: heard as
     /// nothing, while the words are still timed in the audio as it was sent.
     public let quiet: TimeInterval
+    /// The peak of the quietest tenth of a second heard, digital silence aside: the least
+    /// room the quiet was judged against. None when no room was heard.
+    public let room: Float?
+    /// Seconds within range of the loudest that stood too near the room to be speech.
+    public let refusedAsRoom: TimeInterval
 
-    public init(words: [Word], quiet: TimeInterval = 0) {
+    public init(words: [Word], quiet: TimeInterval = 0, room: Float? = nil, refusedAsRoom: TimeInterval = 0) {
         self.words = words
         self.quiet = quiet
+        self.room = room
+        self.refusedAsRoom = refusedAsRoom
     }
 
     /// A transcript nobody spoke: text typed in for a dry run or a test. Whitespace
@@ -25,6 +32,8 @@ public struct Transcript: Hashable, Codable, Sendable {
             Word(text: String(match.output), time: 0...0, confidence: 1.0)
         }
         self.quiet = 0
+        self.room = nil
+        self.refusedAsRoom = 0
     }
 
     /// The words concatenated as the engine emitted them. Each word carries its own

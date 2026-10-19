@@ -208,14 +208,45 @@ import Testing
 
     /// Speech is judged against the utterance's own loudest clip, not a level: a
     /// clip within the range of the loudest is speech and one under it is not, at
-    /// full level and at a tenth of it alike, so a soft speaker is cut into speech
-    /// and quiet where a loud one is.
+    /// full level and at a tenth of it alike, so a soft speaker in a quiet room is cut
+    /// into speech and quiet where a loud one is.
     @Test(arguments: [Float(1), 0.1]) func speechStandsWithinRangeOfTheLoudest(scale: Float) async {
         let utterance = Utterance()
+        await utterance.append(AudioClip(samples: Array(repeating: 0.0005 * scale, count: 16_000)))
         await utterance.append(AudioClip(samples: Array(repeating: 0.5 * scale, count: 1_600)))
         await utterance.append(AudioClip(samples: Array(repeating: 0.04 * scale, count: 1_600)))
         await utterance.append(AudioClip(samples: Array(repeating: 0.03 * scale, count: 1_600)))
         let (samples, _, _, _) = await utterance.audio(beyond: 0)
-        #expect(samples.count == 3_200 + Utterance.hangover)
+        #expect(samples.count == Utterance.leadIn + 3_200 + Utterance.hangover)
+    }
+
+    /// A click past the floor does not make the room a speaker: noise under the floor that
+    /// stands no higher than the room is quiet, though it lies within range of the click,
+    /// so a tap left open after a keystroke hands no pass a minute of it to read words
+    /// into (low-dictation-f15). Speech under the floor that does stand above the room is
+    /// still speech, and the room and what it refused are on the record. A microphone that
+    /// opens on digital silence has not heard the room yet, so the click's room is the one
+    /// after it.
+    @Test(arguments: [Float(0.002), 0]) func theRoomAfterAClickIsQuiet(opening: Float) async {
+        let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
+        let utterance = Utterance()
+        await utterance.append(AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? opening : -opening }))
+        await utterance.append(AudioClip(samples: Array(repeating: 0.03, count: 1_600)))
+        for _ in 0..<60 { await utterance.append(room) }
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 1_600 + Utterance.hangover)
+        // Let go: all of the room but the click's lead-in and hangover, and the lead-in of
+        // speech that may yet follow.
+        #expect(timeline.quiet == AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover))
+        // The room before the click is under the floor, so only the minute after it was refused as room.
+        #expect(timeline.place(Transcript(words: [])) == Transcript(words: [], quiet: timeline.quiet, room: 0.002, refusedAsRoom: 60))
+
+        await utterance.append(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
+        // The few samples the end cuts a frame short to are no tenth of a second, so no room reading.
+        await utterance.append(AudioClip(samples: Array(repeating: 0.001, count: 5)))
+        await utterance.end()
+        let ended = await utterance.audio(beyond: 0)
+        #expect(ended.samples.count == Utterance.leadIn + 1_600 + Utterance.hangover + Utterance.leadIn + 1_600 + Utterance.hangover)
+        #expect(ended.timeline.place(Transcript(words: [])).room == 0.002)
     }
 }

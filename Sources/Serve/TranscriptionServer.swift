@@ -444,6 +444,8 @@ private struct Answering: Sendable {
         }
         event.words = heard.transcript.words.count
         event.quietSeconds = heard.transcript.quiet
+        event.roomPeak = heard.transcript.room.map(Double.init)
+        event.refusedAsRoomSeconds = heard.transcript.refusedAsRoom
         event.nothingSpokenPeak = heard.nothingSpokenPeak.map(Double.init)
         let segment = try Segment(heard.transcript)
         (event.avgLogprob, event.compressionRatio) = (segment?.avgLogprob, segment?.compressionRatio)
@@ -577,6 +579,10 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     public internal(set) var words: Int?
     /// Seconds of the upload's quiet the engine was not handed.
     public internal(set) var quietSeconds: Double?
+    /// The peak of the upload's quietest tenth of a second, the room its quiet was judged
+    /// against, and seconds within range of its loudest that stood too near the room to be speech.
+    public internal(set) var roomPeak: Double?
+    public internal(set) var refusedAsRoomSeconds: Double?
     /// The loudest sample of an upload no clip of which reached the audible floor, which was
     /// answered as nothing said.
     public internal(set) var nothingSpokenPeak: Double?

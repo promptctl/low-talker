@@ -214,6 +214,14 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted == ["hi"])
     }
 
+    /// The press's line says the room its quiet was judged against and what that room refused.
+    @Test func aPressLineSaysTheRoomItsQuietWasJudgedAgainst() async throws {
+        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(words: Transcript(typed: "hi").words, quiet: 2, room: 0.001, refusedAsRoom: 1.5) })
+        rig.hold(speaking: [1, 2, 3])
+        let line = try await rig.session().description
+        #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room)"), "\(line)")
+    }
+
     /// Confirmed words land while the key is still down, each run once and in order, and
     /// key-up commits only what follows them. The press's line counts the commits acknowledged
     /// while it was open, the words they carried, and when the first landed.
