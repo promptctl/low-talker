@@ -208,9 +208,9 @@ public final class Dictation {
         }
 
         /// The words confirmed since the last run, which are now this run's, or no run when
-        /// none were. [LAW:types-are-the-program] A pass need not confirm anything, and a wake
-        /// can find its words already taken by the run before it; neither is a run, so the
-        /// words held for the next run are never inserted on their own.
+        /// nothing was said in them. [LAW:types-are-the-program] A pass need not confirm
+        /// anything, and a wake can find its words already taken by the run before it; neither
+        /// is a run, so the words held for the next run are never inserted on their own.
         ///
         /// While the key is down, audio the capture already knows is missing stops the
         /// commits: what is confirmed from then on reads a fragment, and key-up reports the
@@ -233,7 +233,9 @@ public final class Dictation {
                 }
                 // A stopped press takes no words, so it has no run.
                 let run = state.cursor.advance(through: state.committing ? state.confirmed : [])
-                return run.words.isEmpty ? nil : Run(words: run, since: since)
+                // [LAW:one-source-of-truth] Nothing said is the transcript's test, the one the
+                // executor refuses an insert by.
+                return run.isBlank ? nil : Run(words: run, since: since)
             }
         }
 

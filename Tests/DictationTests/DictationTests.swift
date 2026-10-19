@@ -344,10 +344,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.speak([3, 4])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held?.words == Transcript(typed: "hello there") })
         rig.inputMethod.refusing(nil)
-        // A pass that confirms nothing new is no run, so the held words wait for the next one.
-        rig.speak([5])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing.count == 5 })
-        rig.speak([6])
+        rig.speak([5, 6])
         // The hold empties on the main actor in the step that counts the words, after the
         // input method has them.
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there my"] && rig.hold.held == nil })
@@ -360,7 +357,9 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     }
 
     /// A refusal while the press is open is what the report names even when the press then
-    /// lapses: it is what left the words unplaced, and the lapse came after it.
+    /// lapses: it is what left the words unplaced, and the lapse came after it. A pass between
+    /// them that confirms nothing new is no run, so the held words are not inserted on their
+    /// own, before the lapse or after it.
     @Test func aRefusalBeforeALapseIsWhatTheReportNames() async throws {
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "hello" : "") }) { _ in Transcript(typed: "hello") }
         let rig = try Rig(hearing: engine)
@@ -368,10 +367,31 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held != nil })
+        rig.inputMethod.refusing(nil)
+        rig.speak([3])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing.count == 3 })
         rig.dictation.press(.ended(.lapsed))
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.cause as? InsertFailure == .refused(.noClientHasFocus))
+        #expect(rig.inputMethod.inserted == [])
         #expect(rig.hold.held?.words == Transcript(typed: "hello"))
+    }
+
+    /// A pass that confirms only whitespace confirms nothing said, so it is no run either:
+    /// the held words wait for key-up rather than going in with a space after them.
+    @Test func aPassConfirmingOnlyWhitespaceIsNoRun() async throws {
+        let blank = Transcript(words: Transcript(typed: "hello").words + [Transcript.Word(text: " ", time: 0...0, confidence: 1.0)])
+        let engine = FakeTranscriber(confirming: { samples in samples.count >= 3 ? blank : Transcript(typed: samples.count >= 2 ? "hello" : "") }) { _ in blank }
+        let rig = try Rig(hearing: engine)
+        rig.inputMethod.refusing(.refused(.noClientHasFocus))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held != nil })
+        rig.inputMethod.refusing(nil)
+        rig.speak([3])
+        rig.keyUp()
+        _ = try await rig.session()
+        #expect(rig.inputMethod.inserted == ["hello"])
     }
 
     /// A decode that fails after words were committed says how many are at the cursor
