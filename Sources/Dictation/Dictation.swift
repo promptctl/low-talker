@@ -656,15 +656,17 @@ public final class Dictation {
 
     /// The person asked for every held word at the cursor in front, the words that may have
     /// landed with the rest, which they are saying were not typed. Offered as a cursor
-    /// arriving is, so an open press carries them in its own insert.
+    /// arriving is, so an open press lands its own words first.
     public func insertHeld() {
-        hold.asked()
         offer(.asked(.now))
     }
 
     private func offer(_ since: Executor.Since) {
         switch press {
-        case .down: offeredDuringPress = hold.held.map { _ in since } ?? offeredDuringPress
+        case .down:
+            // An ask stands over a cursor arriving after it in the same press.
+            let asked = offeredDuringPress.flatMap { $0.key == .asked ? $0 : nil }
+            offeredDuringPress = hold.held.map { _ in asked ?? since } ?? offeredDuringPress
         case .up, .refused: submitOffer(since)
         }
     }
@@ -673,6 +675,10 @@ public final class Dictation {
     private func submitOffer(_ since: Executor.Since) {
         do throws(SerialQueueError) {
             try sessions.submit {
+                // [LAW:no-ambient-temporal-coupling] An ask is taken in its own turn, once every
+                // insert queued before it is answered, so none of those settles words it never
+                // carried, and none is left in the store as words a cursor is offered.
+                if since.key == .asked { await self.hold.asked() }
                 // A failure is the hold's to show, and `place` has told it.
                 _ = try? await self.place(Transcript(words: []), following: nil, since: since)
             }

@@ -83,8 +83,8 @@ public enum Held: Sendable, Equatable {
     /// landed, and like it standing in for a warning before it.
     var sent: Held? {
         switch self {
-        case .unplaced(let unplaced, _):
-            Held(unplaced: nil, unaccounted: Part(words: allWords, warning: "LowTalker ended while inserting \(unplaced.words.words.count) held words, so they may have been typed"))
+        case .unplaced:
+            Held(unplaced: nil, unaccounted: Part(words: allWords, warning: "LowTalker ended while inserting held words, so they may have been typed"))
         case .unaccounted: self
         }
     }
@@ -221,7 +221,8 @@ public final class Hold {
     }
 
     /// The person asked for every held word at the cursor, saying none of it was typed: the
-    /// words that may have landed are offered with the rest, under the latest warning.
+    /// words that may have landed are offered with the rest, under the latest warning. Made in
+    /// the ask's turn on the queue, with no insert on its way.
     func asked() {
         held = held.flatMap { held in Held(unplaced: Held.Part(words: held.allWords, warning: held.latest.warning), unaccounted: nil) }
     }

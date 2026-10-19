@@ -158,16 +158,24 @@ final class HUD {
 
     func show(_ activity: Dictation.Activity, held: Held?) {
         // A press on its way carries what is held in its own insert, so only a panel with no
-        // press asks for a click, and only for words a cursor arriving is offered: not those
-        // that may have landed.
+        // press asks for a click or offers Insert, and a click only for words a cursor arriving
+        // is offered: not those that may have landed.
         let allHeld = held?.allWords ?? Transcript(words: [])
         let shown: (state: String?, words: Transcript, offer: String) = switch activity {
-        case .idle: (nil, allHeld, held?.offered.map { _ in " Click into a text field to insert these words." } ?? "")
+        case .idle: (nil, allHeld, held.flatMap(Self.offer) ?? "")
         case .listening(let heard): ("Listening", heard, "")
         case .transcribing: ("Transcribing", allHeld, "")
         }
         guard shown.state != nil || held != nil else { return hide() }
         draw(state: shown.state, held: held, words: shown.words, offer: shown.offer)
+    }
+
+    /// What a click into a text field places of what is held, shown after it: the words after
+    /// any that may have landed, which the panel shows ahead of them.
+    private static func offer(_ held: Held) -> String? {
+        held.offered.map { offered in
+            " Click into a text field to insert \(held.standing == nil ? "these" : "the last \(offered.words.words.count)") words."
+        }
     }
 
     private func hide() {
@@ -204,16 +212,14 @@ final class HUD {
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
         // The circle's centre sits on the face's top-left arc, as a Notification Center
-        // banner's does, and the button sits under the face's right edge. Both are there only
-        // while something is held.
+        // banner's does, and the button sits under the face's right edge. The circle is there
+        // while something is held, and Insert only while no press is on its way, which a
+        // panel with no state is.
         let onTheArc = Self.cornerRadius * (1 - 1 / 2.squareRoot())
         corner.setFrameOrigin(NSPoint(x: frame.minX + onTheArc - Self.circleSide / 2, y: frame.maxY - onTheArc - Self.circleSide / 2))
         below.setFrameOrigin(NSPoint(x: frame.maxX - below.frame.width, y: frame.minY - 6 - below.frame.height))
-        for control in [corner, below] {
-            switch held {
-            case nil: control.orderOut(nil)
-            case .some: control.orderFrontRegardless()
-            }
+        for (control, shown) in [(corner, held != nil), (below, held != nil && state == nil)] {
+            if shown { control.orderFrontRegardless() } else { control.orderOut(nil) }
         }
     }
 

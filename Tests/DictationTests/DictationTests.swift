@@ -1004,6 +1004,50 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.held == nil)
     }
 
+    /// An ask made while an insert of the held words is on its way is taken in its own turn:
+    /// that insert's landing does not settle the words that may have landed, which it never
+    /// carried, and until it is answered the store still says they may have been typed.
+    @Test func anAskDuringAnInsertPlacesWhatThatInsertDidNotCarry() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        let notYetTaken = NotYetTaken(characters: 1, into: "com.apple.TextEdit")
+        rig.inputMethod.refusing(.notYetTaken(notYetTaken))
+        rig.hold()
+        _ = await rig.report()
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.hold(speaking: [4])
+        _ = await rig.report()
+        rig.inputMethod.refusing(nil)
+        rig.inputMethod.hold()
+        rig.dictation.cursorArrived()
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        rig.dictation.insertHeld()
+        #expect(rig.store.kept == .unaccounted(part("a b", "LowTalker ended while inserting held words, so they may have been typed")))
+        rig.inputMethod.letGo()
+        try await rig.dictation.finish()
+        #expect(rig.inputMethod.inserted == [" b", "a"])
+        #expect(rig.hold.held == nil)
+        #expect(rig.store.kept == nil)
+    }
+
+    /// An ask made while a press is open waits for the press, and a cursor arriving after it in
+    /// the same press does not take it back.
+    @Test func anAskDuringAPressOutlastsACursorArrivingAfterIt() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        rig.inputMethod.refusing(.notYetTaken(NotYetTaken(characters: 1, into: "com.apple.TextEdit")))
+        rig.hold()
+        _ = await rig.report()
+        rig.inputMethod.refusing(nil)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([4])
+        rig.dictation.insertHeld()
+        rig.dictation.cursorArrived()
+        rig.keyUp()
+        _ = try await rig.session()
+        try await rig.dictation.finish()
+        #expect(rig.inputMethod.inserted == [" b", "a"])
+        #expect(rig.hold.held == nil)
+    }
+
     /// Held words the person dismisses while an insert carrying only them is on its way stay
     /// dismissed when its answer says they may have landed: nothing is held, and no warning
     /// stands over nothing.
@@ -1215,7 +1259,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         before.dictation.cursorArrived()
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { before.inputMethod.holding == 1 })
         let after = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
-        #expect(after.hold.held == .unaccounted(part("a", "LowTalker ended while inserting 1 held words, so they may have been typed")))
+        #expect(after.hold.held == .unaccounted(part("a", "LowTalker ended while inserting held words, so they may have been typed")))
         after.dictation.cursorArrived()
         try await after.dictation.finish()
         #expect(after.inputMethod.inserted.isEmpty)
