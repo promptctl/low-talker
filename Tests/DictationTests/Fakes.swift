@@ -7,8 +7,7 @@ import LowTalkerCore
 import Synchronization
 
 /// A store kept in memory, outliving the rigs built over it as a file outlives the app, and
-/// keeping the store's contract: once a write returns or throws, it holds what it was given
-/// or nothing.
+/// keeping the store's contract.
 @MainActor
 final class FakeHeldStore: HeldStore {
     private(set) var kept: Held?

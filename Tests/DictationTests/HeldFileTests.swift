@@ -5,9 +5,13 @@ import Testing
 
 /// The file the app keeps what is held in, in a directory of its own.
 @MainActor
-struct HeldFileTests {
+final class HeldFileTests {
     let directory = FileManager.default.temporaryDirectory.appending(path: "held-\(UUID())")
     var file: HeldFile { HeldFile(url: directory.appending(path: "held.json")) }
+
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
+    }
 
     nonisolated static let held: [Held] = [
         .unplaced(Transcript(words: [Transcript.Word(text: " hello", time: 0.12...0.48, confidence: 0.73), Transcript.Word(text: " there.", time: 0.5...0.9, confidence: 0.91)]), warning: "refused"),
@@ -42,6 +46,14 @@ struct HeldFileTests {
         #expect(try file.read() == nil)
     }
 
+    /// A file as this build writes it, so a change to `Transcript` that a later build could not
+    /// read it with fails here rather than at the upgrade.
+    @Test func aFileAsThisBuildWritesItReads() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(#"{"unplaced":{"words":[{"text":" hello","time":[0.12,0.48],"confidence":0.73}]},"warning":"refused"}"#.utf8).write(to: file.url)
+        #expect(try file.read() == .unplaced(Transcript(words: [Transcript.Word(text: " hello", time: 0.12...0.48, confidence: 0.73)]), warning: "refused"))
+    }
+
     /// A field this build does not know is one a later build added, and the rest still reads.
     @Test func aFieldALaterBuildAddsLeavesTheFileReadable() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -66,8 +78,8 @@ struct HeldFileTests {
     func aWriteThatCannotRemoveTheOlderFileSaysItStands(_ held: Held?) throws {
         try file.write(.unaccounted(warning: "older"))
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
         let error = #expect(throws: HeldUnkept.self) { try file.write(held) }
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
         guard case .stale? = error else {
             Issue.record("not stale: \(String(describing: error))")
             return

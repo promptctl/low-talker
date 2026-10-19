@@ -38,13 +38,24 @@ public enum Held: Sendable, Equatable {
         case .unaccounted(let warning): warning
         }
     }
+
+    /// What an end of the process leaves held while an insert carrying the held words is on
+    /// its way: words handed to an app that may yet take them, like any insert that may have
+    /// landed, and like it standing in for a warning before it.
+    var sent: Held {
+        switch self {
+        case .unplaced(let words, _, _): .unaccounted(warning: "LowTalker ended while inserting \(words.words.count) held words, so they may have been typed")
+        case .unaccounted: self
+        }
+    }
 }
 
 /// Where what is held is kept from one run of the app to the next.
 ///
-/// [LAW:one-source-of-truth] Once `write` returns or throws, the store holds the `held` it was
-/// given or nothing, never a state the app has moved past: the next launch believes it, and
-/// words already placed, or handed to an app that may have taken them, would be offered again.
+/// [LAW:one-source-of-truth] Once `write` returns, the store holds the `held` it was given, and
+/// once it throws `.lost`, nothing. Only `.stale` leaves a state the app has moved past, and
+/// says so: the next launch believes the store, and would offer again words already placed,
+/// or handed to an app that may have taken them.
 @MainActor
 public protocol HeldStore {
     /// What was held when the app last ended, nil when nothing was.
@@ -72,7 +83,7 @@ public struct HeldUnreadable: Error, Equatable, Sendable, CustomStringConvertibl
     public var description: String {
         switch kept {
         case .movedTo(let path): "what was held when LowTalker last quit could not be read back (\(why)); it is kept at \(path)"
-        case .notMoved(let move): "what was held when LowTalker last quit could not be read back (\(why)) or moved aside (\(move)), so the next save replaces it"
+        case .notMoved(let move): "what was held when LowTalker last quit could not be read back (\(why)) or moved aside (\(move)), so what is held since is saved over it"
         }
     }
 }
@@ -102,12 +113,12 @@ public enum HeldUnkept: Error, Equatable, Sendable, CustomStringConvertible {
 /// to `showing`, so no end of the process leaves the store behind what was shown.
 @MainActor
 public final class Hold {
+    /// Written even when unchanged, since an insert on its way left the store saying what an
+    /// end of the process then would, and what it was answered is what puts the store back.
     public private(set) var held: Held? {
         didSet {
-            if held != oldValue {
-                keep()
-                showing(held)
-            }
+            keep(held)
+            if held != oldValue { showing(held) }
         }
     }
 
@@ -136,9 +147,9 @@ public final class Hold {
         showing(held)
     }
 
-    private func keep() {
+    private func keep(_ state: Held?) {
         do throws(HeldUnkept) {
-            try store.write(held)
+            try store.write(state)
             unkept = nil
         } catch {
             unkept = error
@@ -151,8 +162,15 @@ public final class Hold {
         held = nil
     }
 
-    /// What the next insert carries: what is held, then `words`.
-    func offering(_ words: Transcript) -> Transcript {
+    /// What an insert made now carries: what is held, then `words`. Until it is answered the
+    /// store holds what an end of the process would leave, so a launch after a crash mid-insert
+    /// does not type the held words a second time.
+    func sending(_ words: Transcript) -> Transcript {
+        keep(held?.sent)
+        return offering(words)
+    }
+
+    private func offering(_ words: Transcript) -> Transcript {
         Transcript(words: (held?.words.words ?? []) + words.words)
     }
 

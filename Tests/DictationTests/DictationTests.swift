@@ -935,7 +935,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted.isEmpty)
         #expect(rig.shown.held == [nil, .unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)"), nil])
-        #expect(rig.store.written == [.unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)"), nil])
+        #expect(rig.store.kept == nil)
     }
 
     /// Words dismissed while an insert carrying them is on its way stay dismissed when that
@@ -1036,11 +1036,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let held = Held.unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)")
         #expect(rig.hold.held == held)
         #expect(rig.hold.unkept == .lost(why: "disk full"))
-        #expect(rig.shown.unkept == [.lost(why: "disk full")])
+        #expect(rig.shown.unkept.contains(.lost(why: "disk full")))
         store.failing = nil
         rig.hold.dismiss()
         #expect(rig.hold.unkept == nil)
-        #expect(store.written == [held, nil])
+        #expect(store.written.last == .some(nil))
     }
 
     /// Held words that land while the write saying so fails are not offered after the next launch.
@@ -1075,6 +1075,36 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(before.hold.held == .unaccounted(warning: "\(notYetTaken)"))
         let after = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
         #expect(after.hold.held?.words.words.isEmpty ?? true)
+    }
+
+    /// Held words on their way to an app when the app ends are not offered after its next
+    /// launch, since they may have been typed, and that launch says so.
+    @Test func wordsOnTheirWayWhenTheAppEndsAreNotOfferedAgain() async throws {
+        let store = FakeHeldStore()
+        let before = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") }, keeping: store)
+        before.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        before.hold()
+        _ = await before.report()
+        before.inputMethod.refusing(nil)
+        before.inputMethod.hold()
+        before.dictation.cursorArrived()
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { before.inputMethod.holding == 1 })
+        let after = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
+        #expect(after.hold.held == .unaccounted(warning: "LowTalker ended while inserting 1 held words, so they may have been typed"))
+        before.inputMethod.letGo()
+        try await before.dictation.finish()
+    }
+
+    /// Held words an insert is refused for again, as they were before, are still kept once it
+    /// is answered, not left as words that may have been typed.
+    @Test func heldWordsRefusedAgainAreStillKept() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.hold()
+        _ = await rig.report()
+        rig.dictation.cursorArrived()
+        try await rig.dictation.finish()
+        #expect(rig.store.kept == .unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)"))
     }
 
     /// A cursor that arrives while a press is open is offered what is held once that press
