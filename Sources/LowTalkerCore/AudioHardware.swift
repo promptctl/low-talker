@@ -24,7 +24,7 @@ public typealias Disposal = @MainActor () -> Void
 /// preparing cannot open one. The second is the `Disposal` `open` hands back.
 @MainActor
 public protocol PreparedInput {
-    /// Opens the device. Every buffer it captures arrives at `appending` as pipeline
+    /// Opens the device, and says which one it opened and in what format. Every buffer it captures arrives at `appending` as pipeline
     /// samples with the host time its first sample was captured at, on a thread of the
     /// press's own - never CoreAudio's IO thread, which has a deadline to keep - and
     /// `onFailure` reports on the main actor when one could not be converted or placed in
@@ -44,7 +44,7 @@ public protocol PreparedInput {
     func open(
         appending: @escaping @Sendable ([Float], HostTime) -> Void,
         onFailure: @escaping @MainActor (any Error) -> Void
-    ) throws -> Disposal
+    ) throws -> OpenedInput
 
     /// Whether the device this is bound to is the system default input now.
     ///
@@ -61,6 +61,44 @@ public protocol PreparedInput {
     /// answered here: a readying that failed throws at `open`, which is where every caller
     /// already answers a microphone that cannot be had. [LAW:single-enforcer]
     func waitUntilReadied()
+}
+
+/// A microphone that opened: what gives it back, and the device it is.
+public struct OpenedInput {
+    public let dispose: Disposal
+    public let input: MicrophoneInput
+
+    public init(dispose: @escaping Disposal, input: MicrophoneInput) {
+        self.dispose = dispose
+        self.input = input
+    }
+}
+
+/// The device a microphone is bound to and the format it delivers in, before conversion to
+/// the pipeline's. [LAW:nothing-unseen] What a press's record names its microphone by, so a
+/// press that heard nothing says which device heard nothing.
+public struct MicrophoneInput: Sendable, Equatable, CustomStringConvertible {
+    public let device: AudioObjectID
+    /// The name macOS shows for it, or why CoreAudio would not say: an input is no less
+    /// openable for lacking a name, so this is a fact on the record rather than a refusal.
+    public let name: Result<String, AudioHardwareError>
+    public let sampleRate: Double
+    public let channels: Int
+
+    public init(device: AudioObjectID, name: Result<String, AudioHardwareError>, sampleRate: Double, channels: Int) {
+        self.device = device
+        self.name = name
+        self.sampleRate = sampleRate
+        self.channels = channels
+    }
+
+    public var description: String {
+        let named = switch name {
+        case .success(let name): "\"\(name)\""
+        case .failure(let error): "an input whose name is unknown (\(error))"
+        }
+        return "\(named) (device \(device), \(Int(sampleRate)) Hz, \(channels) channel\(channels == 1 ? "" : "s"))"
+    }
 }
 
 /// What the system does for capture: ready a microphone, open it, and say when the
@@ -130,6 +168,7 @@ public enum AudioHardwareError: Error, Equatable, CustomStringConvertible {
     /// The device would not say whether it is running, so nothing can say what the
     /// menu-bar indicator is showing for it.
     case runningStateUnreadable(OSStatus)
+    case nameUnreadable(OSStatus)
     case renderFailed(OSStatus)
     /// The device asked to hand over more audio at once than it offered when the press opened.
     case overlongSlice(frames: Int, capacity: Int)
@@ -148,6 +187,7 @@ public enum AudioHardwareError: Error, Equatable, CustomStringConvertible {
         case .noDefaultInput(let status): "this Mac has no default input device (status \(status))"
         case .preparingOpenedTheDevice(let device): "readying a microphone opened device \(device) instead of only reaching it"
         case .runningStateUnreadable(let status): "CoreAudio would not say whether the input device is running (status \(status))"
+        case .nameUnreadable(let status): "CoreAudio would not say the input device's name (status \(status))"
         case .renderFailed(let status): "the input device refused to hand over a buffer it had announced (status \(status))"
         case .overlongSlice(let frames, let capacity): "the input device asked to hand over \(frames) frames at once, past the \(capacity) it offered when the press opened"
         case .deliveryFellBehind(let dropped): "the microphone's audio was handed over too slowly to keep up with the device, and \(dropped) of its buffers were lost"
@@ -156,7 +196,7 @@ public enum AudioHardwareError: Error, Equatable, CustomStringConvertible {
 
     /// [LAW:no-silent-failure] The one place an OSStatus becomes a thrown error, so no
     /// call in the capture path can be checked by eye and then not checked.
-    static func check(_ status: OSStatus, _ fault: (OSStatus) -> AudioHardwareError) throws {
+    static func check(_ status: OSStatus, _ fault: (OSStatus) -> AudioHardwareError) throws(AudioHardwareError) {
         guard status == noErr else { throw fault(status) }
     }
 }

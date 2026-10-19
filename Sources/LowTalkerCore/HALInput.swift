@@ -195,6 +195,9 @@ final class HALInput: PreparedInput {
         /// this one. [LAW:one-source-of-truth] `AudioCapture` is the one place that knows the
         /// device changed, and asking it for a fresh input is how that knowledge arrives here.
         let device: AudioObjectID
+        /// That device and the format it delivers in, named while readying rather than at the
+        /// press, so the press's record costs the press nothing.
+        let input: MicrophoneInput
         /// Listeners on the bound device, held for as long as this is - which is as long as
         /// the binding they watch. They were a press's once, and the stretch that left
         /// unwatched is what low-privacy-o1z.aa1 was.
@@ -363,6 +366,7 @@ final class HALInput: PreparedInput {
             self.sink = sink
             self.format = format
             self.watches = registered
+            input = MicrophoneInput(device: device, name: Result { () throws(AudioHardwareError) in try HALInput.name(of: device) }, sampleRate: format.sampleRate, channels: Int(format.channelCount))
         }
 
         /// What a press renders into and hands its audio over through: a buffer that holds the
@@ -516,7 +520,7 @@ final class HALInput: PreparedInput {
     func open(
         appending: @escaping @Sendable ([Float], HostTime) -> Void,
         onFailure: @escaping @MainActor (any Error) -> Void
-    ) throws -> Disposal {
+    ) throws -> OpenedInput {
         let reached = try reach.result().get()
         presses += 1
         let press = presses
@@ -538,7 +542,7 @@ final class HALInput: PreparedInput {
         // that outlived the input is one whose `self` is already gone - so the reach is read
         // exactly when it is still there, and holding it here would keep a unit this input had
         // let go of. [LAW:one-source-of-truth] The input is what owns the unit's lifetime.
-        return { [weak self, unowned reached] in self?.endPress(press, on: reached) }
+        return OpenedInput(dispose: { [weak self, unowned reached] in self?.endPress(press, on: reached) }, input: reached.input)
     }
 
     /// Ends a press, whether it ran or never started, and gives the input up when the
@@ -681,6 +685,23 @@ final class HALInput: PreparedInput {
             AudioHardwareError.runningStateUnreadable
         )
         return running != 0
+    }
+
+    /// The name macOS shows for `device`.
+    private nonisolated static func name(of device: AudioObjectID) throws(AudioHardwareError) -> String {
+        var name: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        try AudioHardwareError.check(
+            withUnsafeMutablePointer(to: &name) { AudioObjectGetPropertyData(device, &address, 0, nil, &size, $0) },
+            AudioHardwareError.nameUnreadable
+        )
+        guard let name else { throw .nameUnreadable(noErr) }
+        return name.takeRetainedValue() as String
     }
 
     /// Which device `unit` is bound to, asked of the unit rather than remembered from what
