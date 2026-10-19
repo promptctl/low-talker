@@ -41,21 +41,15 @@ private final class GatedQueue: Sendable {
         #expect(throws: Refused.self) { try handed.result().get() }
     }
 
-    /// Waiting from the main actor leaves it free: the gate is opened from the main actor while
-    /// a waiter on it is still waiting, which a wait that held the main actor would never allow,
-    /// and the waiter comes back once the work is done, with what it came to.
-    @MainActor @Test func waitingLeavesTheMainActorFree() async throws {
+    /// An awaited wait comes back once the work has run, so `finished` has what it came to by
+    /// then. The gate opens a moment after the waiter is under way, so a wait that came back
+    /// before the work ran would find nothing finished. That the wait holds no thread is the
+    /// compiler's to keep: the blocking `result()` is unavailable to async code.
+    @Test func anAwaitedWaitComesBackWithWhatTheWorkCameTo() async throws {
         let gated = GatedQueue()
         let handed = Elsewhere(on: gated.queue) { 42 }
-        let waiting = Atomic<Bool>(false)
-        let waiter = Task { @MainActor in
-            waiting.store(true, ordering: .relaxed)
-            await handed.wait()
-            return handed.finished
-        }
-        while !waiting.load(ordering: .relaxed) { await Task.yield() }
-        #expect(handed.finished == nil)
-        gated.open()
+        let waiter = Task { await handed.wait(); return handed.finished }
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(50)) { gated.open() }
         #expect(try await waiter.value?.get() == 42)
     }
 

@@ -34,11 +34,27 @@ private final class FakeHardware: AudioHardware {
         /// this was a parameter of `open`.
         let onStale: @MainActor () -> Void
 
+        /// Whether readying has finished: at once, unless the hardware holds readying back,
+        /// and then when the test calls `finishReadying()`.
+        private(set) var isReadied: Bool
+        /// Whoever is waiting for readying to finish.
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        /// How many waits are waiting for readying to finish, which is how a test sees a wait
+        /// reach this input.
+        var waiters: Int { waiting.count }
+
         init(_ hardware: FakeHardware, readying: Int, onStale: @escaping @MainActor () -> Void) {
             self.hardware = hardware
             self.readying = readying
             device = hardware.defaultInput
+            isReadied = !hardware.holdsReadying
             self.onStale = onStale
+        }
+
+        func finishReadying() {
+            isReadied = true
+            waiting.forEach { $0.resume() }
+            waiting = []
         }
 
         func open(
@@ -55,8 +71,10 @@ private final class FakeHardware: AudioHardware {
 
         var isOnTheDefaultInput: Bool { device == hardware.defaultInput }
 
-        /// Readied the moment it was made, so there is never anything left to wait for.
-        func waitUntilReadied() async {}
+        func waitUntilReadied() async {
+            if isReadied { return }
+            await withCheckedContinuation { waiting.append($0) }
+        }
     }
 
     final class Engine {
@@ -99,9 +117,14 @@ private final class FakeHardware: AudioHardware {
     /// test can say that resting readied one and opened nothing.
     var prepared: Int { inputs.count }
 
-    init(launches: [(any Error)?] = [], watch: (any Error)? = nil) {
+    /// Whether a microphone readied here stays readying until the test finishes it, which is
+    /// how a test reaches the stretch a slow input spends being reached.
+    let holdsReadying: Bool
+
+    init(launches: [(any Error)?] = [], watch: (any Error)? = nil, holdsReadying: Bool = false) {
         self.launches = launches
         self.watch = watch
+        self.holdsReadying = holdsReadying
     }
 
     func prepareInput(onStale: @escaping @MainActor () -> Void) -> any PreparedInput {
@@ -179,6 +202,12 @@ private struct Authorized: MicrophoneAuthority {
         return false
     }
 
+    /// Lets what is queued on the main actor run until `holds` is true, and fails if it never is.
+    private func untilItHolds(_ holds: () -> Bool) async throws {
+        for _ in 0..<1000 where !holds() { await Task.yield() }
+        try #require(holds())
+    }
+
     private func isListening(_ capture: AudioCapture) -> Bool {
         if case .listening = capture.state { return true }
         return false
@@ -198,8 +227,8 @@ private struct Authorized: MicrophoneAuthority {
     /// A capture that is started and listening, with a session open on it. Shut at rest
     /// unless a test says otherwise, which is how the app runs when no config file asks
     /// for anything else. Every test that needs audio needs one.
-    private func opened(_ capture: AudioCapture, atRest: MicrophoneAtRest = .shut, at moment: HostTime? = nil, preRoll: TimeInterval = 0) throws -> AudioSession {
-        try capture.start(grant, atRest: atRest)
+    private func opened(_ capture: AudioCapture, atRest: MicrophoneAtRest = .shut, at moment: HostTime? = nil, preRoll: TimeInterval = 0) async throws -> AudioSession {
+        try await capture.start(grant, atRest: atRest)
         return try capture.beginSession(at: moment ?? origin, preRoll: preRoll)
     }
 
@@ -211,24 +240,72 @@ private struct Authorized: MicrophoneAuthority {
     /// It readies one, and that is the other half of the sentence: readying takes no device
     /// and lights nothing, so doing it here - while nobody is dictating - is what leaves a
     /// press paying only what opening costs.
-    @Test func startReadiesAMicrophoneOpensNoneAndWatchesTheDefaultInput() throws {
+    @Test func startReadiesAMicrophoneOpensNoneAndWatchesTheDefaultInput() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         #expect(isListening(capture))
         #expect(hardware.prepared == 1)
         #expect(hardware.engines.isEmpty)
         #expect(hardware.isWatching)
     }
 
+    /// Start comes back only once the microphone a press would open is readied, and suspends
+    /// rather than holding the main actor until then: this suite runs on the main actor, and
+    /// reads capture while a start is still waiting. A microphone held open is launched only
+    /// after readying, so the launch never waits on it.
+    @Test func startWaitsForReadyingWithoutHoldingTheMainActorAndOnlyThenHoldsTheMicrophone() async throws {
+        let hardware = FakeHardware(holdsReadying: true)
+        let capture = AudioCapture(hardware: hardware)
+        let starting = Task { try await capture.start(grant, atRest: .open) }
+        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        #expect(hardware.engines.isEmpty)
+        hardware.inputs[0].finishReadying()
+        try await starting.value
+        #expect(hardware.engines.map(\.readying) == [1])
+        #expect(!hardware.engines[0].disposed)
+    }
+
+    /// A device change while start waits readies another microphone, and start waits for that
+    /// one in turn: the one it replaced being reached says nothing about the one a press would
+    /// open.
+    @Test func aDeviceChangeWhileStartWaitsIsWaitedOnInTurn() async throws {
+        let hardware = FakeHardware(holdsReadying: true)
+        let capture = AudioCapture(hardware: hardware)
+        let starting = Task { try await capture.start(grant, atRest: .open) }
+        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        try hardware.changeDefaultInput()
+        hardware.inputs[0].finishReadying()
+        try await untilItHolds { hardware.inputs.count == 2 && hardware.inputs[1].waiters == 1 }
+        #expect(hardware.engines.isEmpty)
+        hardware.inputs[1].finishReadying()
+        try await starting.value
+        #expect(hardware.engines.map(\.readying) == [2])
+    }
+
+    /// A stop while start waits, which is what a quit during the come-up does, leaves nothing
+    /// to start: start comes back with capture stopped and no microphone held, though the
+    /// config asked for one.
+    @Test func aStopWhileStartWaitsLeavesCaptureStoppedAndHoldsNothing() async throws {
+        let hardware = FakeHardware(holdsReadying: true)
+        let capture = AudioCapture(hardware: hardware)
+        let starting = Task { try await capture.start(grant, atRest: .open) }
+        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        capture.stop()
+        hardware.inputs[0].finishReadying()
+        try await starting.value
+        #expect(hardware.engines.isEmpty)
+        if case .stopped = capture.state {} else { Issue.record("a start stopped while it waited should leave capture stopped") }
+    }
+
     /// What readying early buys, and the one reading that would notice it being given back:
     /// a press opens the microphone the rest already readied rather than readying another,
     /// so it pays only what opening costs. A press that readied its own would pay both,
     /// which is over the allowance and came back refused on every hold.
-    @Test func aPressOpensTheMicrophoneTheRestReadiedRatherThanReadyingAnother() throws {
+    @Test func aPressOpensTheMicrophoneTheRestReadiedRatherThanReadyingAnother() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let first = try opened(capture)
+        let first = try await opened(capture)
         #expect(hardware.prepared == 1)
         #expect(hardware.engines.count == 1)
         hardware.engines[0].appending([1, 2], origin)
@@ -242,10 +319,10 @@ private struct Authorized: MicrophoneAuthority {
         _ = capture.endSession(second)
     }
 
-    @Test func beginningASessionOpensTheMicrophoneAndEndingItShutsIt() throws {
+    @Test func beginningASessionOpensTheMicrophoneAndEndingItShutsIt() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         #expect(isRunning(capture))
         #expect(hardware.engines.count == 1)
         hardware.engines[0].appending([1, 2, 3], origin)
@@ -256,10 +333,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// Press after press, each opens its own engine and gives it back. The ring is the
     /// one thing that carries across.
-    @Test func eachSessionGetsItsOwnEngine() throws {
+    @Test func eachSessionGetsItsOwnEngine() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let first = try opened(capture)
+        let first = try await opened(capture)
         hardware.engines[0].appending([1, 2], origin)
         #expect(capture.endSession(first) == .whole(AudioClip(samples: [1, 2])))
 
@@ -270,10 +347,10 @@ private struct Authorized: MicrophoneAuthority {
         #expect(hardware.engines[1].disposed)
     }
 
-    @Test func whatTheEngineCapturesIsWhatTheRingHolds() throws {
+    @Test func whatTheEngineCapturesIsWhatTheRingHolds() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         hardware.engines[0].appending([1, 2, 3], origin)
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2, 3])))
     }
@@ -285,10 +362,10 @@ private struct Authorized: MicrophoneAuthority {
     /// captured nothing for the mark to reach into, so it lands on the position its first
     /// sample will take. That is the whole of what a per-press microphone costs, and it
     /// is here rather than hidden in an empty clip.
-    @Test func aSessionBeginsWhereTheMicrophoneOpenedHoweverEarlyTheKeyWas() throws {
+    @Test func aSessionBeginsWhereTheMicrophoneOpenedHoweverEarlyTheKeyWas() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let first = try opened(capture)
+        let first = try await opened(capture)
         hardware.engines[0].appending([1, 2, 3, 4], origin)
         _ = capture.endSession(first)
 
@@ -305,10 +382,10 @@ private struct Authorized: MicrophoneAuthority {
     /// the newest sample and holds what comes after. With the microphone opening for the
     /// session this is every session - an engine that has just started has captured
     /// nothing, so the mark lands on the position its first sample will take.
-    @Test func aSessionBegunAfterTheNewestSampleBeginsAtTheNewestSample() throws {
+    @Test func aSessionBegunAfterTheNewestSampleBeginsAtTheNewestSample() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture, at: after(9))
+        let session = try await opened(capture, at: after(9))
         hardware.engines[0].appending([3], after(2))
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [3])))
     }
@@ -316,10 +393,10 @@ private struct Authorized: MicrophoneAuthority {
     /// A hold longer than the ring retains: the first of what was said was overwritten by
     /// the last of it before the key came up. What comes back is the tail, and it says how
     /// much of the head is gone rather than passing for the whole utterance.
-    @Test func aSessionWhoseHeadTheRingDroppedSaysHowMuchIsGone() throws {
+    @Test func aSessionWhoseHeadTheRingDroppedSaysHowMuchIsGone() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(retaining: AudioClip.duration(for: 4), hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         hardware.engines[0].appending([1, 2, 3, 4, 5, 6], origin)
         #expect(try capture.endSession(session) == .partial(AudioClip(samples: [3, 4, 5, 6]), lost: loss(scrolledOff: 2)))
     }
@@ -328,10 +405,10 @@ private struct Authorized: MicrophoneAuthority {
     /// clamps to the moment the engine started, and audio that was never captured was not
     /// lost. This is the ordinary state of every press once the microphone opens per
     /// session, and it is what the epic traded the look-back for.
-    @Test func aPreRollHasNothingToReachBackOverWhenTheMicrophoneJustOpened() throws {
+    @Test func aPreRollHasNothingToReachBackOverWhenTheMicrophoneJustOpened() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture, preRoll: AudioSession.defaultPreRoll)
+        let session = try await opened(capture, preRoll: AudioSession.defaultPreRoll)
         #expect(session.preRoll == 0)
         hardware.engines[0].appending([1, 2], origin)
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
@@ -340,10 +417,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The pre-roll never reaches across the moment the microphone opened, so a press
     /// cannot pick up the tail of the press before it: those words were said a minute ago
     /// and belong to no part of this utterance.
-    @Test func aPreRollDoesNotReachIntoAnEarlierSessionsAudio() throws {
+    @Test func aPreRollDoesNotReachIntoAnEarlierSessionsAudio() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let first = try opened(capture)
+        let first = try await opened(capture)
         hardware.engines[0].appending([1, 2, 3, 4], origin)
         _ = capture.endSession(first)
 
@@ -359,10 +436,10 @@ private struct Authorized: MicrophoneAuthority {
     /// the device while nobody is dictating. macOS lights the menu bar for as long as the
     /// engine runs, so a test that let this pass on a config nobody wrote would be a test
     /// that let the whole epic be undone by a default.
-    @Test func theMicrophoneIsHeldFromTheStartWhenTheConfigAsksForIt() throws {
+    @Test func theMicrophoneIsHeldFromTheStartWhenTheConfigAsksForIt() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         #expect(hardware.engines.count == 1)
         #expect(!hardware.engines[0].disposed)
         // Nobody is holding the key, so nothing is being dictated: the microphone is open
@@ -374,10 +451,10 @@ private struct Authorized: MicrophoneAuthority {
     /// `aPreRollHasNothingToReachBackOverWhenTheMicrophoneJustOpened`, where the same
     /// pre-roll over the same press comes back with nothing in front of it: there, the
     /// microphone opened at the key and there was no audio behind it to reach into.
-    @Test func aHeldMicrophoneGivesAPressTheLookBackAPerPressOneCannotHave() throws {
+    @Test func aHeldMicrophoneGivesAPressTheLookBackAPerPressOneCannotHave() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         // Said before the key went down: the speaker began the word and then reached for
         // the chord.
         hardware.engines[0].appending([1, 2], origin)
@@ -396,7 +473,7 @@ private struct Authorized: MicrophoneAuthority {
     @Test func aSessionsAudioArrivesAsItIsCapturedAndEndsWithTheSession() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].appending([1, 2], origin)
         let session = capture.stream(try capture.beginSession(at: after(2), preRoll: AudioSession.defaultPreRoll))
         var audio = session.audio.makeAsyncIterator()
@@ -414,7 +491,7 @@ private struct Authorized: MicrophoneAuthority {
     @Test func aStreamedSessionMissesOnlyWhatTheRingDroppedBeforeItsStreamBegan() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(retaining: 0.5, hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let long = AudioClip.sampleCount(for: 0.8)
         let held = capture.stream(try capture.beginSession(at: origin, preRoll: 0))
         hardware.engines[0].appending([Float](repeating: 1, count: long), origin)
@@ -433,10 +510,10 @@ private struct Authorized: MicrophoneAuthority {
     /// the input it came through, how many samples, the loudest of them, and how long after
     /// the key the first was captured. The look-back a held microphone hands over is the
     /// ring's and not among them.
-    @Test func aStreamedSessionsEndReadsWhatItsMicrophoneDeliveredSinceTheKey() throws {
+    @Test func aStreamedSessionsEndReadsWhatItsMicrophoneDeliveredSinceTheKey() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].appending([0.9, 0.9], origin)
         let session = capture.stream(try capture.beginSession(at: after(2), preRoll: AudioSession.defaultPreRoll))
         hardware.engines[0].appending([0.5, -0.75], after(2) + .milliseconds(40))
@@ -448,10 +525,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// A press whose microphone delivered nothing reads as nothing, not as a quiet room: no
     /// samples, and no first one to date.
-    @Test func aPressWhoseMicrophoneDeliveredNothingReadsAsNothing() throws {
+    @Test func aPressWhoseMicrophoneDeliveredNothingReadsAsNothing() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = capture.stream(try opened(capture))
+        let session = capture.stream(try await opened(capture))
         let end = capture.endSession(session)
         #expect(end.reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 0, peak: 0, firstSample: nil))
         #expect(end.reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) delivered nothing after the key went down")
@@ -460,10 +537,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// Samples that are all zero are digital silence - a muted input, or one macOS feeds
     /// nothing but zeros - and read as that rather than as a level.
-    @Test func aPressOfDigitalSilenceReadsAsSilence() throws {
+    @Test func aPressOfDigitalSilenceReadsAsSilence() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = capture.stream(try opened(capture))
+        let session = capture.stream(try await opened(capture))
         hardware.engines[0].appending([Float](repeating: 0, count: AudioClip.sampleCount(for: 1)), origin)
         let reading = capture.endSession(session).reading
         #expect(reading.samples == AudioClip.sampleCount(for: 1))
@@ -474,10 +551,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The device under a press went away and capture relaunched on the one that replaced
     /// it: the reading names both inputs, in the order they fed the press, since the samples
     /// it counts are both of theirs, and the loss says it was spliced.
-    @Test func aPressWhoseDeviceWasReplacedReadsBothInputs() throws {
+    @Test func aPressWhoseDeviceWasReplacedReadsBothInputs() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = capture.stream(try opened(capture))
+        let session = capture.stream(try await opened(capture))
         hardware.engines[0].appending([0.5], origin)
         hardware.moveDefaultInput()
         hardware.engines[0].input.onStale()
@@ -496,7 +573,7 @@ private struct Authorized: MicrophoneAuthority {
     @Test func aHeldPressReadsExactlyItsOwnAudio() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].appending([0.9, 0.9], origin)
         let session = capture.stream(try capture.beginSession(at: after(3), preRoll: AudioSession.defaultPreRoll))
         hardware.engines[0].appending([0.5, -0.25], after(2))
@@ -510,10 +587,10 @@ private struct Authorized: MicrophoneAuthority {
     /// A key-down handled after a held microphone's buffers already reached past the key:
     /// the samples from the key on are the press's head, so the reading dates them from the
     /// key and counts them, and the press is whole rather than one nothing reached.
-    @Test func aHeldPressHandledLateIsDatedFromTheKey() throws {
+    @Test func aHeldPressHandledLateIsDatedFromTheKey() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].appending([0.25, 0.25, 0.5, 0.5], origin)
         let end = capture.endSession(capture.stream(try capture.beginSession(at: after(2), preRoll: 0)))
         #expect(end.reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 2, peak: 0.5, firstSample: .zero))
@@ -523,10 +600,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The key-up does not close a microphone the user asked to have held, and does not
     /// relaunch it either: a relaunch would splice the ring at every release, which is the
     /// look-back being thrown away once per press by the mode that exists to keep it.
-    @Test func aHeldMicrophoneOutlivesThePressThatSpokeIntoIt() throws {
+    @Test func aHeldMicrophoneOutlivesThePressThatSpokeIntoIt() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let first = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
         #expect(capture.endSession(first) == .whole(AudioClip(samples: [1, 2])))
@@ -542,10 +619,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// A saved config that asks for the microphone held opens it at once when nobody is
     /// pressing, and one that asks for it shut closes it at once.
-    @Test func aRestingModeChangedBetweenPressesTakesEffectAtOnce() throws {
+    @Test func aRestingModeChangedBetweenPressesTakesEffectAtOnce() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         capture.rest(as: .open)
         #expect(capture.atRest == .open)
         #expect(hardware.engines.count == 1)
@@ -558,10 +635,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// The same change made mid-press waits for the key-up: the press goes on speaking into
     /// the microphone it opened, keeps every sample, and only then is the device let go.
-    @Test func aRestingModeChangedMidPressWaitsForTheKeyUp() throws {
+    @Test func aRestingModeChangedMidPressWaitsForTheKeyUp() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let session = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
         capture.rest(as: .shut)
@@ -587,10 +664,10 @@ private struct Authorized: MicrophoneAuthority {
     /// full second older than the press - and the words said during that lateness are in
     /// the ring rather than missing from it. This is a press a per-press microphone reports
     /// cut and a held one reports whole, and both are right about their own machine.
-    @Test func aPressOnAHeldMicrophoneIsNotChargedForAHeadItHeard() throws {
+    @Test func aPressOnAHeldMicrophoneIsNotChargedForAHeadItHeard() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let late = after(AudioClip.sampleCount(for: 1))
         let session = try capture.beginSession(at: late, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
@@ -602,10 +679,10 @@ private struct Authorized: MicrophoneAuthority {
     /// yields an empty clip - which transcribes to nothing at all, and reads exactly like a
     /// quiet room. Nothing about being held makes that press whole.
     /// [LAW:no-silent-failure]
-    @Test func aHeldMicrophoneThatDeliveredNothingForAPressStillSaysItWasNotOpen() throws {
+    @Test func aHeldMicrophoneThatDeliveredNothingForAPressStillSaysItWasNotOpen() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].appending([1, 2], origin)
         let session = try capture.beginSession(at: after(2), preRoll: 0)
         #expect(try capture.endSession(session) == .partial(AudioClip(samples: []), lost: loss(unopened: true)))
@@ -615,10 +692,10 @@ private struct Authorized: MicrophoneAuthority {
     /// a reason to try the device again; without that, a Mac that booted with its
     /// microphone unplugged would stay deaf until one was plugged in, even with a key held
     /// down. [LAW:no-silent-failure]
-    @Test func aHeldMicrophoneThatCouldNotOpenIsTriedAgainByTheNextPress() throws {
+    @Test func aHeldMicrophoneThatCouldNotOpenIsTriedAgainByTheNextPress() async throws {
         let hardware = FakeHardware(launches: [NoDevice()])
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         #expect(failure(of: capture, as: NoDevice.self) == NoDevice())
         #expect(hardware.engines.isEmpty)
 
@@ -641,10 +718,10 @@ private struct Authorized: MicrophoneAuthority {
     /// has just failed are the same silence, and only the newest error tells them apart. No
     /// gap is booked, because none ended: this retry extends the outage it found.
     /// [LAW:no-silent-failure]
-    @Test func aPressThatCannotReviveAHeldMicrophoneLeavesItFailedAndCountsNoGap() throws {
+    @Test func aPressThatCannotReviveAHeldMicrophoneLeavesItFailedAndCountsNoGap() async throws {
         let hardware = FakeHardware(launches: [NoDevice(), BadBuffer()])
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         #expect(failure(of: capture, as: NoDevice.self) == NoDevice())
 
         #expect(throws: NoMicrophone.self) { try capture.beginSession(at: origin, preRoll: 0) }
@@ -657,10 +734,10 @@ private struct Authorized: MicrophoneAuthority {
     /// the press that retries opens that one rather than readying a third. Readying runs off
     /// the main actor, so the one the report asked for can still be under way at the key, and
     /// replacing it would make the press wait for it and for its replacement back to back.
-    @Test func aRetryOpensTheInputADeviceReportReadiedWhileTheEngineWasDown() throws {
+    @Test func aRetryOpensTheInputADeviceReportReadiedWhileTheEngineWasDown() async throws {
         let hardware = FakeHardware(launches: [NoDevice()])
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.inputs[0].onStale()
         #expect(hardware.prepared == 2)
 
@@ -671,10 +748,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// The same input is not kept once the default has moved off the device it was readied
     /// for: that is the retry the default-input watch exists to make.
-    @Test func aRetryOnANewDefaultReadiesForItEvenWhenAnInputWasReadiedSinceTheFailure() throws {
+    @Test func aRetryOnANewDefaultReadiesForItEvenWhenAnInputWasReadiedSinceTheFailure() async throws {
         let hardware = FakeHardware(launches: [NoDevice()])
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.inputs[0].onStale()
         try hardware.changeDefaultInput()
 
@@ -689,10 +766,10 @@ private struct Authorized: MicrophoneAuthority {
     /// captured is on the far side of a splice - so the look-back this mode is held open
     /// for stops at the new engine's first sample rather than reaching across the break
     /// into a clip whose seam is in no sample.
-    @Test func aDeviceChangedWhileIdleIsReplacedAndTheNextPressIsWhole() throws {
+    @Test func aDeviceChangedWhileIdleIsReplacedAndTheNextPressIsWhole() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].appending([1, 2, 3, 4, 5, 6], origin)
 
         hardware.engines[0].input.onStale()
@@ -721,10 +798,10 @@ private struct Authorized: MicrophoneAuthority {
     /// so every press afterwards launched on a stale input and no later device change could
     /// clear it. Readying opens no device, so answering this costs the mode nothing: the
     /// microphone stays shut, and is simply ready against the right device.
-    @Test func aDefaultInputChangedWhileShutReadiesAnotherAndOpensNothing() throws {
+    @Test func aDefaultInputChangedWhileShutReadiesAnotherAndOpensNothing() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         #expect(hardware.prepared == 1)
 
         try hardware.changeDefaultInput()
@@ -756,10 +833,10 @@ private struct Authorized: MicrophoneAuthority {
     /// quality defect and not a corrupt one. Readying opens no device, so answering it costs
     /// the mode nothing: the microphone stays shut and is simply ready against the shape the
     /// device has now.
-    @Test func aBoundDeviceThatChangedShapeWhileShutReadiesAnotherAndOpensNothing() throws {
+    @Test func aBoundDeviceThatChangedShapeWhileShutReadiesAnotherAndOpensNothing() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         #expect(hardware.prepared == 1)
 
         hardware.inputs[0].onStale()
@@ -789,10 +866,10 @@ private struct Authorized: MicrophoneAuthority {
     /// still open - a press or a default-input change is what ends it, and both ready a
     /// microphone of their own - and all this owes is an input a press could open, because the
     /// one being held is bound to a device that has moved.
-    @Test func aBoundDeviceThatChangedShapeUnderAFailedEngineLeavesItFailedAndReadiesAnother() throws {
+    @Test func aBoundDeviceThatChangedShapeUnderAFailedEngineLeavesItFailedAndReadiesAnother() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].onFailure(BadBuffer())
         #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
         #expect(hardware.prepared == 1)
@@ -820,10 +897,10 @@ private struct Authorized: MicrophoneAuthority {
     /// may be the device the input was readied against, and under `shut` no failure is
     /// recorded for the watch to act on - so a press that kept its stale input would refuse
     /// every press after it until capture was restarted.
-    @Test func aPressThatCouldNotOpenAShutMicrophoneReadiesAnotherForTheNext() throws {
+    @Test func aPressThatCouldNotOpenAShutMicrophoneReadiesAnotherForTheNext() async throws {
         let hardware = FakeHardware(launches: [NoDevice()])
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         #expect(hardware.prepared == 1)
 
         #expect(throws: NoMicrophone.self) { try capture.beginSession(at: origin, preRoll: 0) }
@@ -844,10 +921,10 @@ private struct Authorized: MicrophoneAuthority {
     /// nothing of a switch to a different one that is still alive - neither its liveness nor
     /// its format changed - so the system-wide watch is the only thing that can notice, and
     /// with no session open there is no recording to cut.
-    @Test func aDefaultInputChangedWhileHeldAndIdleReplacesTheEngine() throws {
+    @Test func aDefaultInputChangedWhileHeldAndIdleReplacesTheEngine() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         #expect(hardware.prepared == 1)
         #expect(hardware.engines.count == 1)
 
@@ -865,10 +942,10 @@ private struct Authorized: MicrophoneAuthority {
     /// reason to cut the recording the speaker is in the middle of making: the engine keeps
     /// running on the device the press began on, and the input it is running on keeps the
     /// only strong reference the open device has.
-    @Test func aDefaultInputChangedMidPressDoesNotCutTheRecording() throws {
+    @Test func aDefaultInputChangedMidPressDoesNotCutTheRecording() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let session = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
 
@@ -891,10 +968,10 @@ private struct Authorized: MicrophoneAuthority {
     ///
     /// Under `shut` that means the key-up readies against B and opens nothing, and the press
     /// after it is the one that opens B.
-    @Test func aDefaultInputChangedMidPressReadiesTheNewDeviceAtTheKeyUp() throws {
+    @Test func aDefaultInputChangedMidPressReadiesTheNewDeviceAtTheKeyUp() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         let session = try capture.beginSession(at: origin, preRoll: 0)
         #expect(hardware.engines[0].readying == 1)
 
@@ -932,10 +1009,10 @@ private struct Authorized: MicrophoneAuthority {
     /// [LAW:single-enforcer]. This is the press ending - the microphone comes to rest, and
     /// the mode opens the one it now holds - so it reads the way the same event reads under
     /// `shut`, where nothing is replaced at all.
-    @Test func aDefaultInputChangedMidPressMovesTheHeldMicrophoneAtTheKeyUp() throws {
+    @Test func aDefaultInputChangedMidPressMovesTheHeldMicrophoneAtTheKeyUp() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let session = try capture.beginSession(at: origin, preRoll: 0)
         #expect(hardware.engines[0].readying == 1)
 
@@ -965,10 +1042,10 @@ private struct Authorized: MicrophoneAuthority {
     /// top of it and the outage would never be booked, which is the accounting this file
     /// treats as the failure itself. [LAW:no-silent-failure] So the key-up readies against
     /// the new default and leaves the failure where it is, for the device watch to end.
-    @Test func aDeferredDeviceChangeLeavesAFailureThatArrivedFirstToBeBooked() throws {
+    @Test func aDeferredDeviceChangeLeavesAFailureThatArrivedFirstToBeBooked() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let session = try capture.beginSession(at: origin, preRoll: 0)
 
         try hardware.changeDefaultInput()
@@ -996,10 +1073,10 @@ private struct Authorized: MicrophoneAuthority {
     /// one. A key-up that skipped the readying because the engine was failed rather than
     /// running would leave the next press opening the device that stopped being the
     /// default, which is the whole of what the deferral exists to prevent.
-    @Test func aDeferredDeviceChangeIsStillReadiedWhenThePressesEngineDied() throws {
+    @Test func aDeferredDeviceChangeIsStillReadiedWhenThePressesEngineDied() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         let session = try capture.beginSession(at: origin, preRoll: 0)
 
         try hardware.changeDefaultInput()
@@ -1038,10 +1115,10 @@ private struct Authorized: MicrophoneAuthority {
     /// look-back over audio the replacement had already captured: the one thing `open` is
     /// held for.
     @Test(arguments: UnplugReports.allCases)
-    func aHeldMicrophoneUnpluggedMidPressIsReplacedOnceWhicheverReportLandsFirst(_ order: UnplugReports) throws {
+    func aHeldMicrophoneUnpluggedMidPressIsReplacedOnceWhicheverReportLandsFirst(_ order: UnplugReports) async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let session = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
 
@@ -1067,10 +1144,10 @@ private struct Authorized: MicrophoneAuthority {
     /// key-up rather than a splice: the replacement's input is already on the new default,
     /// and the press after the key-up opens it.
     @Test(arguments: UnplugReports.allCases)
-    func aShutMicrophoneUnpluggedMidPressIsReadiedOnceWhicheverReportLandsFirst(_ order: UnplugReports) throws {
+    func aShutMicrophoneUnpluggedMidPressIsReadiedOnceWhicheverReportLandsFirst(_ order: UnplugReports) async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
 
         try unplugTheDefaultInput(hardware, reportedIn: order)
         _ = capture.endSession(session)
@@ -1088,10 +1165,10 @@ private struct Authorized: MicrophoneAuthority {
     /// can hide behind a key-up: the second report used to replace a held engine already on
     /// the new default, a second swap and a second splice for one unplug.
     @Test(arguments: UnplugReports.allCases)
-    func aHeldMicrophoneUnpluggedWhileIdleIsReplacedOnceWhicheverReportLandsFirst(_ order: UnplugReports) throws {
+    func aHeldMicrophoneUnpluggedWhileIdleIsReplacedOnceWhicheverReportLandsFirst(_ order: UnplugReports) async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
 
         try unplugTheDefaultInput(hardware, reportedIn: order)
         #expect(hardware.prepared == 2)
@@ -1104,10 +1181,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The idle unplug under `shut`, where a second answer is a second readying and nothing
     /// is opened either way.
     @Test(arguments: UnplugReports.allCases)
-    func aShutMicrophoneUnpluggedWhileIdleIsReadiedOnceWhicheverReportLandsFirst(_ order: UnplugReports) throws {
+    func aShutMicrophoneUnpluggedWhileIdleIsReadiedOnceWhicheverReportLandsFirst(_ order: UnplugReports) async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
 
         try unplugTheDefaultInput(hardware, reportedIn: order)
         #expect(hardware.prepared == 2)
@@ -1136,11 +1213,11 @@ private struct Authorized: MicrophoneAuthority {
     /// readied a microphone on the new default, and the other one finding nothing left to do.
     /// A recovery that leaves no trace is indistinguishable from one that never came.
     @Test(arguments: UnplugReports.allCases)
-    func anUnplugWhileIdleReportsOneAnswerAndOneReportFoundAnswered(_ order: UnplugReports) throws {
+    func anUnplugWhileIdleReportsOneAnswerAndOneReportFoundAnswered(_ order: UnplugReports) async throws {
         let hardware = FakeHardware()
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
 
         try unplugTheDefaultInput(hardware, reportedIn: order)
         switch order {
@@ -1152,11 +1229,11 @@ private struct Authorized: MicrophoneAuthority {
     /// The only device going away under a held microphone is reported as the relaunch that
     /// failed, and the device that appears after as the relaunch that worked: the outage and
     /// its end, both in the log.
-    @Test func aHeldMicrophoneThatLostItsOnlyDeviceReportsTheFailureAndTheRecovery() throws {
+    @Test func aHeldMicrophoneThatLostItsOnlyDeviceReportsTheFailureAndTheRecovery() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice()])
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
 
         hardware.engines[0].input.onStale()
         try hardware.changeDefaultInput()
@@ -1166,11 +1243,11 @@ private struct Authorized: MicrophoneAuthority {
 
     /// A default-input change under a press is reported as left for its key-up, so a press
     /// that went on recording on the old device says why in the log.
-    @Test func aDefaultInputChangedMidPressIsReportedAsLeftForTheKeyUp() throws {
+    @Test func aDefaultInputChangedMidPressIsReportedAsLeftForTheKeyUp() async throws {
         let hardware = FakeHardware()
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
-        _ = try opened(capture)
+        _ = try await opened(capture)
 
         try hardware.changeDefaultInput()
         #expect(reports.said == ["defaultInputChanged: left for the key-up"])
@@ -1179,11 +1256,11 @@ private struct Authorized: MicrophoneAuthority {
     /// The key-up a mid-press change was left for says what it did about it, so the log
     /// carries the recovery it promised and not only the promise.
     @Test(arguments: [(MicrophoneAtRest.shut, "readied"), (.open, "launched")])
-    func theKeyUpAMidPressChangeWasLeftForReportsWhatItDid(atRest: MicrophoneAtRest, did: String) throws {
+    func theKeyUpAMidPressChangeWasLeftForReportsWhatItDid(atRest: MicrophoneAtRest, did: String) async throws {
         let hardware = FakeHardware()
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
-        let session = try opened(capture, atRest: atRest)
+        let session = try await opened(capture, atRest: atRest)
 
         try hardware.changeDefaultInput()
         _ = capture.endSession(session)
@@ -1193,11 +1270,11 @@ private struct Authorized: MicrophoneAuthority {
     /// An unplug under a press whose bound device reports first is answered then and there,
     /// so the default-input report says so rather than promising a key-up that has nothing
     /// left to do - and the key-up reports nothing.
-    @Test func anUnplugMidPressAnsweredByTheBoundDeviceIsNotLeftForTheKeyUp() throws {
+    @Test func anUnplugMidPressAnsweredByTheBoundDeviceIsNotLeftForTheKeyUp() async throws {
         let hardware = FakeHardware()
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
-        let session = try opened(capture)
+        let session = try await opened(capture)
 
         try unplugTheDefaultInput(hardware, reportedIn: .deviceFirst)
         _ = capture.endSession(session)
@@ -1206,11 +1283,11 @@ private struct Authorized: MicrophoneAuthority {
 
     /// A default-input change that lands after capture stopped is reported as outdated, the
     /// same as the bound device's report in that stretch.
-    @Test func aDefaultInputChangeAfterStopIsReportedOutdated() throws {
+    @Test func aDefaultInputChangeAfterStopIsReportedOutdated() async throws {
         let hardware = FakeHardware()
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         let lateNotification = try #require(hardware.onDefaultInputChange)
 
         capture.stop()
@@ -1219,10 +1296,10 @@ private struct Authorized: MicrophoneAuthority {
     }
 
     /// Quitting gives the device back, however the run was holding it.
-    @Test func stopGivesUpAHeldMicrophone() throws {
+    @Test func stopGivesUpAHeldMicrophone() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         capture.stop()
         #expect(hardware.engines[0].disposed)
         #expect(hardware.watchDisposals == 1)
@@ -1232,10 +1309,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The menu reads this rather than the config it was started from, so what it tells the
     /// user is what their microphone is doing. A run that never started says nothing, which
     /// is the truth and is not the same answer as "shut between presses".
-    @Test func theRestingModeIsReadBackFromTheRunOfCaptureHoldingIt() throws {
+    @Test func theRestingModeIsReadBackFromTheRunOfCaptureHoldingIt() async throws {
         let capture = AudioCapture(hardware: FakeHardware(), startingAt: origin)
         #expect(capture.atRest == nil)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         #expect(capture.atRest == .open)
         capture.stop()
         #expect(capture.atRest == nil)
@@ -1248,13 +1325,13 @@ private struct Authorized: MicrophoneAuthority {
     /// reports a live microphone on a Mac that has none. This is the one reading that puts
     /// the failure in front of the user before their next press does.
     /// [LAW:no-silent-failure]
-    @Test func aHeldMicrophoneThatDiedSaysSoRatherThanThatItIsStillHeldOpen() throws {
+    @Test func aHeldMicrophoneThatDiedSaysSoRatherThanThatItIsStillHeldOpen() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
         // Not started is its own answer, and not the same one as "shut between presses".
         #expect("\(capture.doing)" == "not being captured")
 
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         #expect("\(capture.doing)" == "\(MicrophoneAtRest.open)")
 
         hardware.engines[0].onFailure(NoDevice())
@@ -1278,10 +1355,10 @@ private struct Authorized: MicrophoneAuthority {
     /// engine is the only thing that can end the gap unattended. A recovery is not a swap -
     /// nothing was replaced, capture simply resumed - so it is booked as the outage it ends
     /// and not as a device change.
-    @Test func aHeldMicrophoneThatDiedWhileIdleComesBackWhenADeviceAppears() throws {
+    @Test func aHeldMicrophoneThatDiedWhileIdleComesBackWhenADeviceAppears() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         hardware.engines[0].onFailure(NoDevice())
         #expect(failure(of: capture, as: NoDevice.self) == NoDevice())
         // The gap is open, so it is not booked yet: an outage is counted where it ends.
@@ -1308,10 +1385,10 @@ private struct Authorized: MicrophoneAuthority {
     /// the run is holding the device, so a failure that outlived the press is the truth
     /// about it until something launches again - and it is what leaves the engine in the
     /// one state `recover()` will act on. [LAW:no-silent-failure]
-    @Test func aHeldMicrophoneThatDiedMidPressIsStillDeadAfterTheKeyComesUp() throws {
+    @Test func aHeldMicrophoneThatDiedMidPressIsStillDeadAfterTheKeyComesUp() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .open)
+        try await capture.start(grant, atRest: .open)
         let session = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
         hardware.engines[0].onFailure(NoDevice())
@@ -1329,10 +1406,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The engine took longer to start than the key was held, so not one sample of what
     /// was said was captured. An empty clip transcribes to nothing at all, which reads
     /// exactly like a quiet room; this is the door that tells the two apart.
-    @Test func aSessionTheMicrophoneCapturedNothingForSaysItWasNotOpen() throws {
+    @Test func aSessionTheMicrophoneCapturedNothingForSaysItWasNotOpen() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         #expect(try capture.endSession(session) == .partial(AudioClip(samples: []), lost: loss(unopened: true)))
     }
 
@@ -1341,10 +1418,10 @@ private struct Authorized: MicrophoneAuthority {
     /// first launch costs. Either way the speaker was talking to a shut
     /// microphone, and the clip that comes back is their sentence with the front of it
     /// gone. Nothing in those samples says so, which is why the session does.
-    @Test func aSessionWhoseMicrophoneOpenedLongAfterTheKeyWentDownSaysSo() throws {
+    @Test func aSessionWhoseMicrophoneOpenedLongAfterTheKeyWentDownSaysSo() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         // The first sample this engine captured was taken past the allowance after the key
         // went down, so that much of what was said was never captured at all.
         hardware.engines[0].appending([1, 2], after(AudioClip.sampleCount(for: AudioCapture.warmUpAllowance + 0.4)))
@@ -1356,10 +1433,10 @@ private struct Authorized: MicrophoneAuthority {
     /// A press that lost only that much is whole - the measurement behind the allowance is
     /// that a speaker has not begun the word yet - and a loop that called this one partial
     /// would refuse every press ever made.
-    @Test func aSessionWhoseMicrophoneOpenedWithinTheAllowanceIsWhole() throws {
+    @Test func aSessionWhoseMicrophoneOpenedWithinTheAllowanceIsWhole() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         let warmUp = AudioClip.sampleCount(for: AudioCapture.warmUpAllowance / 2)
         hardware.engines[0].appending([1, 2], after(warmUp))
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
@@ -1368,10 +1445,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The microphone was open and then was not, and the key came up while it was gone:
     /// the tail of the utterance was never captured, and the clip that is left is a
     /// fragment however complete it looks.
-    @Test func aSessionWhoseMicrophoneDiedAndDidNotComeBackIsPartial() throws {
+    @Test func aSessionWhoseMicrophoneDiedAndDidNotComeBackIsPartial() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice()])
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         hardware.engines[0].appending([1, 2], origin)
         hardware.engines[0].input.onStale()
         #expect(failure(of: capture, as: NoDevice.self) == NoDevice())
@@ -1391,10 +1468,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// The device cannot feed the pipeline, so there is no microphone to open and the
     /// press says so. Nothing is left half-open behind it.
-    @Test func beginningASessionTheDeviceRefusesThrowsAndLeavesNothingOpen() throws {
+    @Test func beginningASessionTheDeviceRefusesThrowsAndLeavesNothingOpen() async throws {
         let hardware = FakeHardware(launches: [NoDevice()])
         let capture = AudioCapture(hardware: hardware)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         #expect(throws: NoMicrophone.self) { try capture.beginSession(at: origin) }
         #expect(isListening(capture))
         #expect(hardware.engines.isEmpty)
@@ -1405,10 +1482,10 @@ private struct Authorized: MicrophoneAuthority {
     /// after it, followed by the new engine's - spliced, since nothing was captured in
     /// between and no position advanced while nothing was. A session open across the
     /// change is told so; the samples themselves have no seam to find it by.
-    @Test func aConfigurationChangeReplacesTheEngineAndSplicesTheRing() throws {
+    @Test func aConfigurationChangeReplacesTheEngineAndSplicesTheRing() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         hardware.engines[0].appending([1], origin)
         hardware.engines[0].input.onStale()
         #expect(hardware.engines[0].disposed)
@@ -1430,10 +1507,10 @@ private struct Authorized: MicrophoneAuthority {
     /// simulates a reconnect that took no time at all - the one quantity that makes the
     /// error visible. This is the unit-level guard on it; `DictationTests` holds the same
     /// press end to end.
-    @Test func aSessionSplicedAcrossARealOutageIsNotAlsoUnopened() throws {
+    @Test func aSessionSplicedAcrossARealOutageIsNotAlsoUnopened() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         hardware.engines[0].appending([1], origin)
         hardware.engines[0].input.onStale()
         hardware.engines[1].appending([2], after(1 + AudioClip.sampleCount(for: 0.3)))
@@ -1442,10 +1519,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// The press after the one the device changed under hears one engine only: the break
     /// is behind it, so its clip is whole.
-    @Test func aSessionBegunAfterAConfigurationChangeIsWhole() throws {
+    @Test func aSessionBegunAfterAConfigurationChangeIsWhole() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let spanning = try opened(capture)
+        let spanning = try await opened(capture)
         hardware.engines[0].appending([1], origin)
         hardware.engines[0].input.onStale()
         _ = capture.endSession(spanning)
@@ -1458,10 +1535,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The same splice by the other door: the microphone died mid-session and the device
     /// that appeared brought it back, so the clip is two engines' audio with the outage
     /// taken out of the middle of it.
-    @Test func aSessionThatSpansAnOutageIsPartial() throws {
+    @Test func aSessionThatSpansAnOutageIsPartial() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice()])
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         hardware.engines[0].appending([1], origin)
         hardware.engines[0].input.onStale()
         try hardware.changeDefaultInput()
@@ -1472,10 +1549,10 @@ private struct Authorized: MicrophoneAuthority {
     /// The only microphone is unplugged mid-hold: the replacement cannot launch, capture
     /// is failed for a while, and the plug-back-in (a default input change) brings it
     /// back before the speaker has let go.
-    @Test func aReplacementThatCannotLaunchIsFailedUntilTheDefaultInputChanges() throws {
+    @Test func aReplacementThatCannotLaunchIsFailedUntilTheDefaultInputChanges() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice()])
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         hardware.engines[0].input.onStale()
         #expect(failure(of: capture, as: NoDevice.self) == NoDevice())
         #expect(hardware.engines.count == 1)
@@ -1491,10 +1568,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// A device that appears but cannot feed the pipeline either extends the outage
     /// rather than beginning another; the next one that can ends it.
-    @Test func aRecoveryThatFailsAgainExtendsTheSameOutage() throws {
+    @Test func aRecoveryThatFailsAgainExtendsTheSameOutage() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice(), BadBuffer()])
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         hardware.engines[0].input.onStale()
         try hardware.changeDefaultInput()
         #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
@@ -1507,10 +1584,10 @@ private struct Authorized: MicrophoneAuthority {
     /// recording on is still alive and still the shape it was - what changed is which device
     /// the *next* press should open - so cutting this one buys nothing, and the readying it
     /// does owe is the key-up's.
-    @Test func aDefaultInputChangeWhileRunningLaunchesNothing() throws {
+    @Test func aDefaultInputChangeWhileRunningLaunchesNothing() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         try hardware.changeDefaultInput()
         #expect(hardware.engines.count == 1)
         #expect(isRunning(capture))
@@ -1521,10 +1598,10 @@ private struct Authorized: MicrophoneAuthority {
     /// for the whole started period because a session's failed engine has no other way to
     /// hear that a device came back - it must never be read as a reason to start
     /// listening when no session is open.
-    @Test func aDefaultInputChangeWhileShutOpensNoMicrophone() throws {
+    @Test func aDefaultInputChangeWhileShutOpensNoMicrophone() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         try hardware.changeDefaultInput()
         #expect(hardware.engines.isEmpty)
         #expect(isListening(capture))
@@ -1532,10 +1609,10 @@ private struct Authorized: MicrophoneAuthority {
 
     /// A session that ended while its engine was failed leaves nothing running, so the
     /// device that appears afterwards finds a shut microphone and leaves it shut.
-    @Test func aDeviceAppearingAfterAFailedSessionEndedOpensNoMicrophone() throws {
+    @Test func aDeviceAppearingAfterAFailedSessionEndedOpensNoMicrophone() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice()])
         let capture = AudioCapture(hardware: hardware)
-        let session = try opened(capture)
+        let session = try await opened(capture)
         hardware.engines[0].input.onStale()
         _ = capture.endSession(session)
         try hardware.changeDefaultInput()
@@ -1543,10 +1620,10 @@ private struct Authorized: MicrophoneAuthority {
         #expect(isListening(capture))
     }
 
-    @Test func aBufferTheTapCannotConvertFailsCapture() throws {
+    @Test func aBufferTheTapCannotConvertFailsCapture() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         hardware.engines[0].onFailure(BadBuffer())
         #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
         #expect(hardware.engines[0].disposed)
@@ -1558,10 +1635,10 @@ private struct Authorized: MicrophoneAuthority {
     /// have posted before their input was let go and arrive after - so each callback carries
     /// the generation it belongs to and is matched rather than trusted. Acting on the second
     /// one here would give up an engine running healthily on the input that took over.
-    @Test func aCallbackFromAReplacedEngineIsStale() throws {
+    @Test func aCallbackFromAReplacedEngineIsStale() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         hardware.engines[0].input.onStale()
         hardware.engines[0].onFailure(BadBuffer())
         hardware.engines[0].input.onStale()
@@ -1571,10 +1648,10 @@ private struct Authorized: MicrophoneAuthority {
     }
 
     /// Quitting mid-hold: the key is still down, so there is a microphone to give back.
-    @Test func stopDuringASessionDisposesTheEngineAndTheWatch() throws {
+    @Test func stopDuringASessionDisposesTheEngineAndTheWatch() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         capture.stop()
         if case .stopped = capture.state {} else { Issue.record("stop did not stop") }
         #expect(hardware.engines[0].disposed)
@@ -1582,20 +1659,20 @@ private struct Authorized: MicrophoneAuthority {
         #expect(hardware.watchDisposals == 1)
     }
 
-    @Test func stopWhileShutDisposesTheWatch() throws {
+    @Test func stopWhileShutDisposesTheWatch() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         capture.stop()
         if case .stopped = capture.state {} else { Issue.record("stop did not stop") }
         #expect(!hardware.isWatching)
         #expect(hardware.watchDisposals == 1)
     }
 
-    @Test func stopWhileFailedDisposesTheWatch() throws {
+    @Test func stopWhileFailedDisposesTheWatch() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice()])
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         hardware.engines[0].input.onStale()
         capture.stop()
         #expect(!hardware.isWatching)
@@ -1604,24 +1681,24 @@ private struct Authorized: MicrophoneAuthority {
     /// A start that cannot watch the input device leaves nothing behind, and says why.
     /// Capture that cannot hear a device appear could never recover a session's engine,
     /// so half-starting is worse than not starting.
-    @Test func aStartThatCannotWatchThrowsAndLeavesNothingStarted() throws {
+    @Test func aStartThatCannotWatchThrowsAndLeavesNothingStarted() async throws {
         let hardware = FakeHardware(watch: NoDevice())
         let capture = AudioCapture(hardware: hardware)
-        #expect(throws: NoDevice.self) { try capture.start(grant, atRest: .shut) }
+        await #expect(throws: NoDevice.self) { try await capture.start(grant, atRest: .shut) }
         #expect(!hardware.isWatching)
         if case .stopped = capture.state {} else { Issue.record("a failed start should leave capture stopped") }
     }
 
-    @Test func startAgainResetsTheCounts() throws {
+    @Test func startAgainResetsTheCounts() async throws {
         let hardware = FakeHardware(launches: [nil, NoDevice(), nil, nil])
         let capture = AudioCapture(hardware: hardware)
-        _ = try opened(capture)
+        _ = try await opened(capture)
         hardware.engines[0].input.onStale()
         try hardware.changeDefaultInput()
         hardware.engines[1].input.onStale()
         #expect(capture.deviceChanges == 1)
         #expect(capture.outages.count == 1)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         #expect(capture.deviceChanges == 0)
         #expect(capture.outages.count == 0)
         #expect(capture.outages.total == .zero)
@@ -1637,13 +1714,13 @@ private struct Authorized: MicrophoneAuthority {
     /// speaks about an input no press could open any more. This is why the preparation count is
     /// the one thing `start()` does not reset: it resets what it counts two lines above, and a
     /// counter back at zero would let this straggler match the microphone the restart readied.
-    @Test func aReadiedMicrophoneLetGoByARestartIsStaleWhenItReportsAfterIt() throws {
+    @Test func aReadiedMicrophoneLetGoByARestartIsStaleWhenItReportsAfterIt() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         let letGoByTheRestart = hardware.inputs[0]
 
-        try capture.start(grant, atRest: .shut)
+        try await capture.start(grant, atRest: .shut)
         #expect(hardware.prepared == 2)
 
         letGoByTheRestart.onStale()

@@ -33,7 +33,9 @@ public final class Elsewhere<Value: Sendable>: Sendable {
     /// What the work came to, or nothing while it has not finished.
     public var finished: Result<Value, any Error>? { outcome.withLock { $0 } }
 
-    /// What the work came to, waiting for whatever of it is left.
+    /// What the work came to, waiting for whatever of it is left. The wait holds the thread
+    /// that waits, so async code awaits `wait()` instead. [LAW:types-are-the-program]
+    @available(*, noasync, message: "holds the waiting thread; await wait() and read finished")
     public func result() -> Result<Value, any Error> {
         // A wait on the queue from inside it would be a wait on itself, forever.
         dispatchPrecondition(condition: .notOnQueue(queue))
