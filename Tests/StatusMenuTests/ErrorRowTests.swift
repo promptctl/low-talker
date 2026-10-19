@@ -32,6 +32,9 @@ import Testing
 
     /// A menu disables any item nothing answers the click of.
     @Test func aMenuEnablesTheRow() {
+        // A menu asks the application who answers each item, and with no application it
+        // disables every item. The app's menu always has one.
+        _ = NSApplication.shared
         withScratch { pasteboard in
             let menu = NSMenu()
             let row = ErrorRow("Config: it cannot be read", copyingTo: pasteboard) { _ in }
