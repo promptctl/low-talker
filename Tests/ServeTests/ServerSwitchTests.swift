@@ -80,15 +80,26 @@ import Testing
         _ = try await listening(resumed)
     }
 
-    /// Asked again while listening, it listens again on its own port rather than being
-    /// refused by the listener it is replacing.
-    @Test func aRestartListensAgainOnTheSamePort() async throws {
+    /// Asked again while listening, it listens again on its own port, over what the server
+    /// it replaces leaves there: the TIME_WAIT of a request it answered and closed, and a
+    /// Realtime socket a client still holds, which goes on being served (low-serve-28l). A
+    /// plain bind() is refused over either; NWListener binds over both with
+    /// `allowLocalEndpointReuse` false.
+    @Test(.timeLimit(.minutes(1))) func aRestartListensAgainOnTheSamePort() async throws {
         let server = aSwitch()
         defer { server.choose(false, at: .success(.loopback)) }
+        server.answer(with: .ready(Stub()))
         server.choose(true, at: .success(.loopback))
-        let port = try await listening(server).server.port
+        let running = try await listening(server)
+        // Answered with `connection: close`, so the server's side closes first.
+        _ = try await running.post(Data())
+        var client = Client(running)
+        defer { client.task.cancel(with: .normalClosure, reason: nil) }
+        try await client.wait(for: "session.created")
         server.resume(at: .success(.loopback))
-        #expect(try await listening(server).server.port == port)
+        #expect(try await listening(server).server.port == running.server.port)
+        try await client.send(["type": "session.update", "session": [:] as [String: Any]])
+        try await client.wait(for: "session.updated")
     }
 
     /// Switched off while it was still binding, the listen that answers late lets its port go
