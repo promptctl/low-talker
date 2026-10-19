@@ -318,4 +318,19 @@ import Testing
         #expect(!samples.contains(0.4))
         #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
     }
+
+    /// A click in the same burst as speech sets no range either: the speech is judged against
+    /// its own loudest syllable, so a softer word after it, within range of the speaker but not
+    /// of the click, is speech.
+    @Test func aClickJoinedToSpeechSetsNoRange() async {
+        let utterance = Utterance()
+        await utterance.append(Self.click)
+        await utterance.append(Self.quiet(1_600))
+        await utterance.append(AudioClip(samples: Array(repeating: 0.05, count: 1_600)))
+        await utterance.append(AudioClip(samples: Array(repeating: 0.02, count: 1_600)))
+        await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == 4 * 1_600 + Utterance.hangover)
+        #expect(timeline.quiet.transients == .none)
+    }
 }

@@ -38,7 +38,7 @@ actor Utterance {
     /// (`aboveRoom`).
     static let audible: Float = 0.01
     /// A clip sounds when its peak stands within this factor of the loudest speech
-    /// so far, or of the burst it carries on: 16, 24 dB, one speaker's spread from a
+    /// so far, or of its own: 16, 24 dB, one speaker's spread from a
     /// stressed vowel to a soft consonant per tenth of a second. A ratio does not move when the level does,
     /// so a soft speaker or a low-gain microphone is cut into the same speech and
     /// quiet as a loud one. On the bench fixtures it names the same last clip of
@@ -93,41 +93,46 @@ actor Utterance {
     private struct Burst {
         /// Samples through the end of its last frame that sounded.
         var through: Int
-        /// Its loudest frame's peak.
-        var peak: Float
         /// Samples its `envelope` windows have sounded without a break, through its last
-        /// window, and the most they ever ran to.
+        /// window, the loudest of them, and the most they ever ran to.
         var run: Int
+        var runPeak: Float
         var longest: Int
+        /// The loudest window of a run that sounded as long as a syllable; zero until one has.
+        var speechPeak: Float
         var isSpeech: Bool { longest >= Utterance.syllable }
         /// Its longest run, when that was too brief to be speech.
         var transient: Int? { isSpeech ? nil : longest }
 
         /// A burst nothing has sounded in yet, for a clip that sounds to open.
-        static let opening = Burst(through: 0, peak: 0, run: 0, longest: 0)
+        static let opening = Burst(through: 0, run: 0, runPeak: 0, longest: 0, speechPeak: 0)
 
-        /// The burst carried on through `clip`, which sounded, peaked at `peak` and ends at
-        /// `through`: each window peaking at or above `gate` runs on, and any other breaks the run.
-        func sounding(_ clip: AudioClip, peak clipPeak: Float, through end: Int, gate: Float) -> Burst {
-            var next = Burst(through: end, peak: max(peak, clipPeak), run: run, longest: longest)
+        /// The burst carried on through `clip`, which sounded and ends at `through`: each window
+        /// peaking at or above `gate` runs on, and any other breaks the run.
+        func sounding(_ clip: AudioClip, through end: Int, gate: Float) -> Burst {
+            var next = self
+            next.through = end
             for start in stride(from: 0, to: clip.samples.count, by: Utterance.envelope) {
                 let window = clip.samples[start..<min(start + Utterance.envelope, clip.samples.count)]
-                next.run = window.contains { abs($0) >= gate } ? next.run + window.count : 0
+                let peak = window.reduce(0) { max($0, abs($1)) }
+                next.run = peak >= gate ? next.run + window.count : 0
+                next.runPeak = peak >= gate ? max(next.runPeak, peak) : 0
                 next.longest = max(next.longest, next.run)
+                next.speechPeak = next.run >= Utterance.syllable ? max(next.speechPeak, next.runPeak) : next.speechPeak
             }
             return next
         }
 
         /// The burst carried on through a clip that did not sound, which breaks its run.
-        var broken: Burst { Burst(through: through, peak: peak, run: 0, longest: longest) }
+        var broken: Burst { Burst(through: through, run: 0, runPeak: 0, longest: longest, speechPeak: speechPeak) }
     }
     /// The last burst, until quiet past its hangover is let go.
     private var burst: Burst?
     /// The loudest clip peak heard: what an utterance with no speech in it is refused with.
     private var loudestHeard: Float = 0
-    /// The loudest peak of a burst that was speech: with the burst a clip may carry on, what
-    /// the clip is judged against. A transient that died judges nothing after it, so a soft
-    /// speaker after a loud click is heard.
+    /// The loudest window of a run that sounded as long as a syllable: with its own peak,
+    /// what a clip is judged against. A click is never a syllable, so it sets no range, and a
+    /// soft speaker after one, or in the same burst, is heard.
     private var loudestSpeech: Float = 0
     /// The room readings of the last `roomSpan` before the frame being judged, the newest last.
     private var recent: [Float] = []
@@ -165,7 +170,7 @@ actor Utterance {
         samples += clip.samples
         let peak = clip.peak
         loudestHeard = max(loudestHeard, peak)
-        let loudest = max(loudestSpeech, burst?.peak ?? 0, peak)
+        let loudest = max(loudestSpeech, peak)
         // A room reading is a whole frame that heard something: digital silence is no
         // microphone, whose own noise is never exactly zero, and a frame the end cut short
         // is no tenth of a second.
@@ -202,9 +207,9 @@ actor Utterance {
         timeline.letGo(letGo, at: kept)
         // [LAW:nothing-unseen] A burst that died short of speech was a transient.
         timeline.refused(transient: joined == nil ? burst?.transient : nil)
-        burst = sounds ? (joined ?? .opening).sounding(clip, peak: peak, through: samples.count, gate: softest) : joined?.broken
+        burst = sounds ? (joined ?? .opening).sounding(clip, through: samples.count, gate: softest) : joined?.broken
         spoken = burst.flatMap { $0.isSpeech ? $0.through : nil } ?? spoken
-        loudestSpeech = max(loudestSpeech, burst.flatMap { $0.isSpeech ? $0.peak : nil } ?? 0)
+        loudestSpeech = max(loudestSpeech, burst?.speechPeak ?? 0)
     }
 
     /// The key came up: nothing more arrives.
