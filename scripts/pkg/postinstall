@@ -1,14 +1,14 @@
 # The body of the package's postinstall. scripts/make-pkg writes the lines above this one:
 # the names of what it acts on, from the bundles it packed (input_method_name,
-# input_method_executable, app, app_executable and family), then scripts/pkg/functions, where
-# `say` and `stop` are. It runs as root once the payload
-# stands, and everything it says goes to /var/log/install.log.
+# input_method_executable, app, app_executable and family), then scripts/pkg/functions. It
+# runs as root once the payload stands, and everything it says goes to /var/log/install.log.
 #
-# The package has just replaced the app and its input method on disk. What still runs is the
-# code that stood there before, so this retires it: the app first, since an app from before
-# the package copied its own input method into the home folder of whoever ran it, and would
-# copy it back; then the app and input method of an installation from before LowTalker was
-# one app; then those copies, which the text input system would go on launching; then,
+# The package has just replaced the app and its input method on disk. The preinstall has
+# already stopped the app, which an app from before the package needed, since it copied its own
+# input method into the home folder of whoever ran it and would copy it back. What still runs
+# is the code that stood there before, so this retires it: the app and input method of an
+# installation from before LowTalker was one app; then those copies, which the text input
+# system would go on launching; then,
 # for each person logged in, the new bundles are registered and the input methods whose
 # bundles are gone are switched off; then every person's input source caches, which predate
 # the new bundles; then every input method process, which the text input system relaunches
@@ -17,19 +17,10 @@ set -euo pipefail
 # Bytewise, the order make-pkg sorted the payload list in, for every sort and comm below.
 export LC_ALL=C
 
-lines() { if [ -n "$1" ]; then wc -l <<<"$1" | tr -d ' '; else echo 0; fi; }
 # Runs a command as this uid, inside that person's login session.
 as_user() { launchctl asuser "$1" sudo -u "#$1" "${@:2}"; }
 # The bundle identifier of the bundle at this path; fails for a bundle with none readable.
 identifier() { /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$1/Contents/Info.plist" 2>/dev/null; }
-
-# The processes running this executable name from any bundle, as "pid uid" lines. By path
-# and not by process name, which macOS cuts to 16 characters.
-running() {
-  local found
-  found=$(pgrep -f "/Contents/MacOS/$1\$") || [ $? -eq 1 ] || { say "pgrep failed looking for $1"; exit 1; }
-  for pid in $found; do echo "$pid $(ps -o uid= -p "$pid" | tr -d ' ')"; done
-}
 
 # Written over in place (scripts/make-pkg says why), so a file an older build had and this
 # one does not is still there. Each bundle is cut back to the paths the package wrote, listed
@@ -54,9 +45,8 @@ done
 # step has run, so no one else is left with the app stopped and the old input method running.
 failed=0
 
-apps=$(running "$app_executable")
-say "found $(lines "$apps") running $app_executable"
-stop $(cut -d ' ' -f 1 <<<"$apps") || failed=1
+# The apps the preinstall stopped, as "pid uid" lines.
+apps=$(<"$(dirname "$0")/stopped")
 
 # LowTalker was once installed as two apps side by side, the second under identifiers of its
 # own, "dev" after the family and "dev.inputmethod.dictation" (low-build-41v). Whatever of

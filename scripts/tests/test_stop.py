@@ -1,4 +1,4 @@
-"""scripts/pkg/functions' `stop`, sourced whole by /bin/bash under the postinstall's options,
+"""scripts/pkg/functions' `stop`, sourced whole by /bin/bash under the package scripts' options,
 against children that end only when the test lets them. Nothing here waits on a clock for
 `stop` to act: the bound on each read is there so a regression fails rather than hangs."""
 import os
@@ -74,7 +74,8 @@ class StopTests(unittest.TestCase):
 
     def stop(self, *pids):
         process = subprocess.Popen(
-            ["/bin/bash", "-c", 'set -euo pipefail; . "$0"; stop_every=1; stop "$@"', str(functions), *map(str, pids)],
+            # Run as the preinstall, the script that stops the app, so its lines carry that name.
+            ["/bin/bash", "-c", 'set -euo pipefail; . "$1"; shift; stop_every=1; stop "$@"', "preinstall", str(functions), *map(str, pids)],
             stdout=subprocess.PIPE)
         self.own(process)
         return process, Lines(process.stdout)
@@ -87,15 +88,15 @@ class StopTests(unittest.TestCase):
 
     def ended(self, out, pid):
         line = out.next()
-        while line.startswith("postinstall: still waiting on "):
+        while line.startswith("preinstall: still waiting on "):
             line = out.next()
-        self.assertRegex(line, rf"^postinstall: {pid} ended \d+ s after it was asked to quit$")
+        self.assertRegex(line, rf"^preinstall: {pid} ended \d+ s after it was asked to quit$")
 
     def test_waits_for_a_process_however_long_its_quit_takes(self):
         process, out, marker = self.spawn("quit")
         stopping, said = self.stop(process.pid)
         self.assertEqual(out.next(), "asked")
-        self.assertRegex(said.next(), rf"^postinstall: still waiting on {process.pid}, \d+ s in$")
+        self.assertRegex(said.next(), rf"^preinstall: still waiting on {process.pid}, \d+ s in$")
         self.assertIsNone(stopping.poll())
         self.assertIsNone(process.poll())
         self.release(process, marker)
@@ -118,7 +119,7 @@ class StopTests(unittest.TestCase):
         gone = subprocess.Popen(["/usr/bin/true"])
         gone.wait()
         stopping, said = self.stop(gone.pid)
-        self.assertEqual(said.next(), f"postinstall: {gone.pid} had already ended")
+        self.assertEqual(said.next(), f"preinstall: {gone.pid} had already ended")
         self.assertEqual(stopping.wait(timeout=bound), 0)
 
     # As root this would end launchd, which is why it runs only as someone else.
@@ -126,7 +127,7 @@ class StopTests(unittest.TestCase):
     def test_a_process_it_cannot_ask_is_said_and_fails_the_call_after_the_rest_end(self):
         process, out, marker = self.spawn("quit")
         stopping, said = self.stop(1, process.pid)
-        self.assertRegex(said.next(), r"^postinstall: could not ask 1 to quit: .*Operation not permitted$")
+        self.assertRegex(said.next(), r"^preinstall: could not ask 1 to quit: .*Operation not permitted$")
         self.assertEqual(out.next(), "asked")
         self.release(process, marker)
         self.ended(said, process.pid)

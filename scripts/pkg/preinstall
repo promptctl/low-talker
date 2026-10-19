@@ -1,0 +1,16 @@
+# The body of the package's preinstall. scripts/make-pkg writes the lines above this one: the
+# names of what the package acts on, from the bundles it packed, then scripts/pkg/functions.
+# It runs as root before the payload is written, and everything it says goes to
+# /var/log/install.log.
+#
+# The running app is asked to quit here, while its bundle is still the one it was built in, so
+# its quit decodes every press it heard with its own model, and the postinstall later finds it
+# gone. A wait the installer cuts off at its 600 s limit, or a process this cannot signal,
+# fails the install here, before anything on disk has changed. Who it was running for is left
+# beside this script, where the postinstall starts the app again for each of them.
+set -euo pipefail
+
+apps=$(running "$app_executable")
+say "found $(lines "$apps") running $app_executable"
+stop $(cut -d ' ' -f 1 <<<"$apps")
+echo "$apps" >"$(dirname "$0")/stopped"
