@@ -121,7 +121,7 @@ import TestProbes
         ("verbose_json", Data(#"{"duration":2.5,"language":"english","segments":[],"task":"transcribe","text":"","usage":{"seconds":3,"type":"duration"}}"#.utf8)),
     ])
     func anUploadWithNothingSpokenIsEmptyText(format: String, answer: Data) async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0))))
         defer { running.server.stop() }
         // 0.0025, about -52 dBFS: a quiet room's hold, under the -40 dBFS floor.
         let (response, body) = try await running.post([
@@ -131,7 +131,8 @@ import TestProbes
         #expect(body == answer, "\(String(decoding: body, as: UTF8.self))")
         let event = try await running.nextEvent()
         #expect(event.status == 200 && event.error == nil && event.words == 0)
-        #expect(event.quietSeconds == 2.5)
+        // The quiet the engine refused it with, the room it heard included.
+        #expect(event.quietSeconds == 2.5 && event.roomPeak == Double(Float(0.002)))
         let peak = try #require(event.nothingSpokenPeak)
         // Within a 16-bit step of the peak written.
         #expect(abs(peak - 0.0025) < 0.0001)

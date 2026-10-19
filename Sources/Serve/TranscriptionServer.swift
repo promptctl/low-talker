@@ -436,20 +436,20 @@ private struct Answering: Sendable {
         event.audioSeconds = clip.duration
         let heard: Heard
         do {
-            heard = try await Heard(seconds: clip.duration) { try await transcriber.transcribe(clip, expecting: request.vocabulary) }
+            heard = try await Heard { try await transcriber.transcribe(clip, expecting: request.vocabulary) }
         } catch TranscriptionFailure.vocabulary(let refusal) {
             throw APIError.promptRefused("\(refusal)")
         } catch {
             throw APIError.engineFailed("\(error)")
         }
-        event.words = heard.transcript.words.count
-        event.quietSeconds = heard.quiet.letGo
-        event.roomPeak = heard.quiet.room.map(Double.init)
-        event.refusedAsRoomSeconds = heard.quiet.refusedAsRoom
+        event.words = heard.transcription.transcript.words.count
+        event.quietSeconds = heard.transcription.quiet.letGo
+        event.roomPeak = heard.transcription.quiet.room.map(Double.init)
+        event.refusedAsRoomSeconds = heard.transcription.quiet.refusedAsRoom
         event.nothingSpokenPeak = heard.nothingSpokenPeak.map(Double.init)
-        let segment = try Segment(heard.transcript)
+        let segment = try Segment(heard.transcription.transcript)
         (event.avgLogprob, event.compressionRatio) = (segment?.avgLogprob, segment?.compressionRatio)
-        return request.format.response(heard.transcript, segment, heard: clip)
+        return request.format.response(heard.transcription.transcript, segment, heard: clip)
     }
 }
 

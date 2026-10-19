@@ -41,9 +41,7 @@ public final class Dictation {
     /// type says it is: one the speaker ended, heard from every sample it covered.
     public struct Session: Sendable, CustomStringConvertible {
         public let context: Context
-        public let transcript: Transcript
-        /// The quiet of the press's audio no pass was handed, and the room it was judged against.
-        public let quiet: Quiet
+        public let transcription: Transcription
         /// What the engine had shown by the time the key came up.
         public let duringPress: DuringPress
         /// From the key coming up to the transcript: `keyUpDelivery`, then the engine's share.
@@ -64,8 +62,9 @@ public final class Dictation {
         /// went to, so the first names the one app all of them went to.
         public var description: String {
             let destination = performed.first.map { " into \($0.into.rawValue)" } ?? ""
+            let quiet = transcription.quiet
             let room = quiet.room.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? "none heard"
-            return "heard \(transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
+            return "heard \(transcription.transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
         }
     }
 
@@ -679,7 +678,7 @@ public final class Dictation {
         } catch { throw stopped(error) }
         // A rest of nothing leaves what the commits could not place where it was.
         if placed.performed == nil, let unplaced { throw stopped(unplaced) }
-        return Session(context: context, transcript: transcription.transcript, quiet: transcription.quiet, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 })
+        return Session(context: context, transcription: transcription, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 })
     }
 }
 

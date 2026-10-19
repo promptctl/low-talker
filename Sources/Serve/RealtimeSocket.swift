@@ -463,8 +463,8 @@ final class Deltas: Sendable {
     /// sent, then the transcript, or the reason there is none.
     func settle(_ transcription: Result<Transcription, any Error>, heard seconds: TimeInterval) async {
         do {
-            let heard = try await Heard(seconds: seconds) { try transcription.get() }
-            send(heard.transcript.words)
+            let heard = try await Heard { try transcription.get() }
+            send(heard.transcription.transcript.words)
             outbox.emit(.completed(item: item, heard: heard, usage: Usage(heard: seconds)))
         } catch TranscriptionFailure.vocabulary(let refusal) {
             outbox.emit(.failed(item: item, .promptRefused("\(refusal)")))
@@ -658,9 +658,9 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
             case .delta: deltas += 1
             case .completed(_, let heard, _):
                 completed += 1
-                quietSeconds += heard.quiet.letGo
-                roomPeak = [roomPeak, heard.quiet.room.map(Double.init)].compactMap { $0 }.min()
-                refusedAsRoomSeconds += heard.quiet.refusedAsRoom
+                quietSeconds += heard.transcription.quiet.letGo
+                roomPeak = [roomPeak, heard.transcription.quiet.room.map(Double.init)].compactMap { $0 }.min()
+                refusedAsRoomSeconds += heard.transcription.quiet.refusedAsRoom
                 if let peak = heard.nothingSpokenPeak {
                     nothingSpoken += 1
                     nothingSpokenPeak = max(nothingSpokenPeak ?? 0, Double(peak))

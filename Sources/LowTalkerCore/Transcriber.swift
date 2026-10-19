@@ -68,8 +68,9 @@ public struct Quiet: Hashable, Sendable {
 public enum TranscriptionFailure: Error, CustomStringConvertible {
     /// The caller stopped waiting for the engine before its turn came.
     case cancelled
-    /// No clip reached the audible floor; `peak` is the loudest sample heard.
-    case nothingSpoken(peak: Float)
+    /// No clip reached the audible floor; `peak` is the loudest sample heard, and `quiet`
+    /// all of the audio, with the room it was judged against.
+    case nothingSpoken(peak: Float, quiet: Quiet)
     case vocabulary(VocabularyError)
     /// The engine read the audio and its reading could not become a transcript.
     case unreadable(WhisperKitTranscriberError)
@@ -80,7 +81,7 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .cancelled: "the decode was cancelled before the engine took it"
-        case .nothingSpoken(let peak): "nothing spoken: the loudest sample was \(peak), under the audible floor \(Utterance.audible)"
+        case .nothingSpoken(let peak, _): "nothing spoken: the loudest sample was \(peak), under the audible floor \(Utterance.audible)"
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"

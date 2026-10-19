@@ -202,7 +202,7 @@ import Testing
         let refusal = await #expect(throws: TranscriptionFailure.self) {
             try await utterance.fill(from: clips)
         }
-        guard case .nothingSpoken(let peak)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        guard case .nothingSpoken(let peak, _)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.008)
     }
 

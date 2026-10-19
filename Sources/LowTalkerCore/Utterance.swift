@@ -156,14 +156,15 @@ actor Utterance {
     /// Appends every clip of `audio` as it arrives, then ends the utterance.
     ///
     /// [LAW:parse-dont-validate] An utterance no clip of which reached the floor is
-    /// refused here, with its loudest peak: an empty transcript would not say
-    /// whether nothing was said or the audio was too soft to be a speaker.
+    /// refused here, with its loudest peak and its quiet: an empty transcript would not
+    /// say whether nothing was said or the audio was too soft to be a speaker. No pass is
+    /// handed any of it, so the samples still kept are quiet too.
     func fill(from audio: some AsyncSequence<AudioClip, Never> & Sendable) async throws(TranscriptionFailure) {
         for await clip in audio {
             append(clip)
         }
         end()
-        guard spoken != nil else { throw .nothingSpoken(peak: loudest) }
+        guard spoken != nil else { throw .nothingSpoken(peak: loudest, quiet: timeline.quiet(lettingGo: samples.count)) }
     }
 
     /// How much audio the speech so far is worth a pass over: none until a clip
@@ -208,8 +209,11 @@ struct Timeline: Sendable {
     private var refusedAsRoom = 0
 
     /// The quiet no pass is handed, and the room it was judged against.
-    var quiet: Quiet {
-        Quiet(letGo: AudioClip.duration(for: gaps.values.reduce(0, +)), room: room, refusedAsRoom: AudioClip.duration(for: refusedAsRoom))
+    var quiet: Quiet { quiet(lettingGo: 0) }
+
+    /// The quiet, with `kept` samples more that no pass will be handed.
+    func quiet(lettingGo kept: Int) -> Quiet {
+        Quiet(letGo: AudioClip.duration(for: gaps.values.reduce(0, +) + kept), room: room, refusedAsRoom: AudioClip.duration(for: refusedAsRoom))
     }
 
     mutating func heard(_ reading: Float?, refusedAsRoom refused: Int) {

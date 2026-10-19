@@ -133,9 +133,8 @@ extension Hearing {
     /// over the speech so far whenever the engine is free and speech worth a pass has
     /// arrived, feeding the words back in and telling `partial` what is heard so far.
     /// The last pass's reading is the transcript, told with the quiet the utterance let
-    /// go. Engine-agnostic: `pass` is the
-    /// engine, `margin` the span it decodes no window under, and `context` how many
-    /// confirmed words it is told to say first.
+    /// go. Engine-agnostic: `pass` is the engine, `margin` the span it decodes no window
+    /// under, and `context` how many confirmed words it is told to say first.
     ///
     /// [LAW:dataflow-not-control-flow] The one branch is the utterance's own state:
     /// speech to hear, or nothing more. A pass over what is there is the same pass

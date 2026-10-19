@@ -205,7 +205,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold(speaking: [1, 2, 3])
         let session = try await rig.session()
         #expect(engine.clips.map(\.samples) == [[1, 2, 3]])
-        #expect(session.transcript.text == "hi")
+        #expect(session.transcription.transcript.text == "hi")
         #expect(session.context.frontmostApp == Rig.textEdit)
         #expect(session.context.press == .hold)
         #expect(session.performed.count == 1)
@@ -249,7 +249,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.letGo()
         let session = try await rig.session()
         #expect(rig.inputMethod.inserted == ["hello", " there", " my", " friend"])
-        #expect(session.transcript.text == "hello there my friend")
+        #expect(session.transcription.transcript.text == "hello there my friend")
         #expect(session.performed.count == 4)
         #expect(session.duringPress.commits == 2)
         #expect(session.duringPress.wordsCommitted == 2)
@@ -612,8 +612,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         gate.open()
         let first = try await rig.session()
         let second = try await rig.session()
-        #expect(first.transcript.text == "a")
-        #expect(second.transcript.text == "b")
+        #expect(first.transcription.transcript.text == "a")
+        #expect(second.transcription.transcript.text == "b")
         #expect(rig.inputMethod.inserted == ["a", "b"])
     }
 
@@ -650,7 +650,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         // The next press is heard the moment it is made, so its microphone is open for all
         // of it and it inserts.
         rig.hold(speaking: [4, 5])
-        #expect(try await rig.session().transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == "a")
         #expect(engine.clips.last?.samples == [4, 5])
         #expect(rig.inputMethod.inserted == ["a"])
     }
@@ -692,8 +692,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted.isEmpty)
 
         rig.inputMethod.letGo()
-        #expect(try await rig.session().transcript.text == sentence)
-        #expect(try await rig.session().transcript.text == "b")
+        #expect(try await rig.session().transcription.transcript.text == sentence)
+        #expect(try await rig.session().transcription.transcript.text == "b")
         #expect(engine.clips.map(\.samples) == [said, andThen])
         #expect(rig.inputMethod.inserted == [sentence, "b"])
     }
@@ -735,7 +735,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         gate.open()
         let first = await rig.report()
         let second = await rig.report()
-        #expect(try first.get().transcript.text == "a")
+        #expect(try first.get().transcription.transcript.text == "a")
         #expect(second.failure is FrontmostUnknown)
     }
 
@@ -1038,7 +1038,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(await rig.report().failure is PressLapsed)
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { stopped.raised && rig.turns.reading.holds == 0 })
         rig.hold(speaking: [4, 5])
-        #expect(try await rig.session().transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == "a")
     }
 
     /// [LAW:no-silent-failure] Two presses the speaker made identically, told apart by
@@ -1057,7 +1057,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted.isEmpty)
 
         rig.hold(speaking: [1, 2, 3])
-        #expect(try await rig.session().transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == "a")
         #expect(rig.inputMethod.inserted == ["a"])
     }
 
@@ -1069,7 +1069,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try Rig(hearing: engine, retaining: 0.5)
         let said = [Float](repeating: 1, count: AudioClip.sampleCount(for: 0.8))
         rig.hold(speaking: said)
-        #expect(try await rig.session().transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == "a")
         #expect(engine.clips.last?.samples == said)
         #expect(rig.inputMethod.inserted == ["a"])
     }
@@ -1100,7 +1100,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         // The next press is whole: it opens a microphone of its own and reaches back over
         // nothing, so the seam is behind it however close to it the key went down.
         rig.hold(speaking: [5, 6])
-        #expect(try await rig.session().transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == "a")
         #expect(engine.clips.last?.samples == [5, 6])
     }
 
@@ -1154,7 +1154,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         // The device comes back, and the next press opens a microphone and inserts.
         rig.hardware.failingToLaunch = nil
         rig.hold(speaking: [1, 2])
-        #expect(try await rig.session().transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == "a")
         #expect(rig.inputMethod.inserted == ["a"])
     }
 
@@ -1166,7 +1166,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.hold(speaking: [0.5, -0.25])
         let report = await rig.pressReport()
-        #expect(try report.outcome.get().transcript.text == "a")
+        #expect(try report.outcome.get().transcription.transcript.text == "a")
         #expect(report.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 2, peak: 0.5, firstSample: .zero))
         #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
     }
@@ -1222,7 +1222,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         // The failed engine was let go with the press, so the next one opens a microphone
         // of its own rather than finding capture wedged on the engine that died.
         rig.hold(speaking: [3, 4])
-        #expect(try await rig.session().transcript.text == "a")
+        #expect(try await rig.session().transcription.transcript.text == "a")
         #expect(rig.inputMethod.inserted == ["a"])
     }
 

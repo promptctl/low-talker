@@ -32,7 +32,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// answers a turn with nothing said in it: completed, with an empty transcript, and never
     /// failed (low-serve-7t8). The socket's event counts it.
     @Test func aSilentTurnIsCompletedWithNothingSaid() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0))))
         defer { running.server.stop() }
         var client = Client(running)
         // 100 of 32767, about -50 dBFS: a quiet room, under the -40 dBFS floor.
@@ -48,7 +48,8 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         #expect(realtime.sent.completed == 1 && realtime.sent.failed == 0 && realtime.sent.nothingSpoken == 1)
         // The 100 appended, as the 16 kHz audio the engine is handed peaks at it.
         #expect(abs(try #require(realtime.sent.nothingSpokenPeak) - 100.0 / 32_767) < 0.0002)
-        #expect(abs(realtime.sent.quietSeconds - 1) < 0.01)
+        // The quiet the engine refused it with, the room it heard included.
+        #expect(realtime.sent.quietSeconds == 1 && realtime.sent.roomPeak == Double(Float(0.002)))
     }
 
     /// An engine failure fails its item, not the session: no `error` event, which Pipecat

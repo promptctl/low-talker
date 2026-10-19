@@ -47,7 +47,7 @@ import Testing
     }
 
     /// Nothing reaching the gate is no pass at all and a refusal, not a decode of
-    /// silence that comes back empty.
+    /// silence that comes back empty. All of it is quiet, judged against the room it heard.
     @Test func aSilentHoldMakesNoPassAndIsRefused() async {
         var passes: [Hearing.Pass] = []
         let refusal = await #expect(throws: TranscriptionFailure.self) {
@@ -56,9 +56,27 @@ import Testing
                 feed.finish()
             }
         }
-        guard case .nothingSpoken(let peak)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0))
         #expect(passes.isEmpty)
+    }
+
+    /// The transcription's quiet is the gate's: what it let go, the room it judged against,
+    /// and what the room refused, as the utterance's own timeline has them.
+    @Test func theTranscriptionCarriesTheQuietTheGateKept() async throws {
+        let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
+        let clips = [room, AudioClip(samples: Array(repeating: 0.03, count: 1_600))] + Array(repeating: room, count: 60)
+        let utterance = Utterance()
+        for clip in clips { await utterance.append(clip) }
+        await utterance.end()
+        let gate = await utterance.audio(beyond: 0).timeline.quiet
+        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60)
+        let transcription = try await Hearing.transcribe(AsyncStream { feed in
+            for clip in clips { feed.yield(clip) }
+            feed.finish()
+        }, margin: Self.margin, context: 3, pass: { _ in Self.reading }, partial: { _ in })
+        #expect(transcription.quiet == gate)
     }
 
     /// An engine that reads words into any second of quiet it is handed, as Whisper does

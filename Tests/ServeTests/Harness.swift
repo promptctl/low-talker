@@ -9,7 +9,7 @@ import Testing
 /// what it was given. While audio streams in it confirms a word per half second heard, up
 /// to half the words, so a streamed utterance has words confirmed before it ends and
 /// words left for the final transcript. Audio that never reaches the engine's audible floor
-/// it refuses as nothing spoken, as the engine does, and noise it hears its words in doubtfully.
+/// it refuses as nothing spoken, as the engine does, with `quiet`, and noise it hears its words in doubtfully.
 final class Stub: Transcriber {
     let heard = Mutex<[(seconds: TimeInterval, vocabulary: Vocabulary, cancelled: Bool)]>([])
     let answer: Result<Transcript, TranscriptionFailure>
@@ -41,7 +41,7 @@ final class Stub: Transcriber {
             partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0))
         }
         heard.withLock { $0.append((seconds, vocabulary, Task.isCancelled)) }
-        guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest) }
+        guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest, quiet: quiet) }
         let transcript = try answer.get()
         // White noise changes sign on about half its samples, speech and a tone on far fewer.
         // Noise is read as the engine reads a primed hallucination over it: words, barely believed.
