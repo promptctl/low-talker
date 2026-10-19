@@ -1,6 +1,7 @@
 import AppKit
 import Identity
 import Onboarding
+import os
 
 /// The guided setup's window: one requirement at a time, explained in plain words before
 /// the person presses the button that makes macOS ask.
@@ -19,11 +20,13 @@ import Onboarding
 final class SetUpWindow: NSObject, NSWindowDelegate {
     /// The list as it stands now.
     private let read: () -> Readiness
-    /// Asks macOS for one row's grant, and answers with what went wrong when something did.
-    private let ask: (Requirement.Row) async -> String?
+    /// Asks macOS for one row's grant, and answers with how the request ended.
+    private let ask: (Requirement.Row) async -> Request
     /// Told the reading taken after a request and on coming back to the front, the moments
     /// a grant may have arrived.
     private let settle: (Readiness) -> Void
+    /// The app's log, where each request says how it ended.
+    private let log: Logger
 
     private var walk = GuidedSetup()
     /// What the last request said went wrong, shown on the step it was made from.
@@ -57,27 +60,38 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private static let width: CGFloat = 520
 
     init(
-        read: @escaping () -> Readiness, ask: @escaping (Requirement.Row) async -> String?,
-        settle: @escaping (Readiness) -> Void
+        read: @escaping () -> Readiness, ask: @escaping (Requirement.Row) async -> Request,
+        settle: @escaping (Readiness) -> Void, log: Logger
     ) {
         self.read = read
         self.ask = ask
         self.settle = settle
+        self.log = log
     }
 
-    /// Opens the walk at its first step, with nothing set aside. The page is drawn from the
-    /// one reading taken as the window becomes key; a window macOS did not let become key
-    /// is drawn here instead, so it is never shown empty, and so is one that was key
-    /// already, which does not become key again.
+    /// Opens the walk at its first step, with nothing set aside.
     func show() {
         walk = GuidedSetup()
         failure = nil
         asked = []
-        let wasKey = window.isKeyWindow
         window.center()
-        NSApp.activate()
+        comeToFront()
+    }
+
+    /// Takes the front, drawn from a reading taken now and again from the one taken as the
+    /// window becomes key, so it is never shown stale while the front is on its way.
+    ///
+    /// The front is asked of LaunchServices, as `open -a` asks for it, not of `NSApp.activate`:
+    /// since macOS 14 activation is cooperative, and an app the front was not yielded to is
+    /// refused, `ignoringOtherApps` or not. Measured on studious 2026-10-18 (macOS 15.0.1):
+    /// once the microphone dialog was answered, both were refused and the app in front before
+    /// took it back; LaunchServices was not refused.
+    private func comeToFront() {
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: NSWorkspace.OpenConfiguration()) { [log] _, error in
+            if let error { log.error("setup: the window could not take the front: \(error, privacy: .public)") }
+        }
         window.makeKeyAndOrderFront(nil)
-        if wasKey || !window.isKeyWindow { draw(read()) }
+        redrawFromAFreshReading()
     }
 
     /// Back at the front, most often from System Settings: read again, and hand the
@@ -182,17 +196,46 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         asking = true
         failure = nil
         draw(shown)
+        log.notice("setup: asking for \(row.rawValue, privacy: .public)")
         Task {
-            let reason = await ask(row)
+            let request = await ask(row)
+            let level: OSLogType = if case .failed = request { .error } else { .default }
+            log.log(level: level, "setup: asked for \(row.rawValue, privacy: .public): \(String(describing: request), privacy: .public)")
             asking = false
-            // Only a request that went through counts as asked: one that failed showed no
-            // dialog, so its button stays, beside the reason, to be tried again.
-            if reason == nil { asked.insert(row) }
-            failure = reason.map { (row, $0) }
-            let readiness = read()
-            draw(readiness)
-            settle(readiness)
+            // Only a request that went through counts as asked: the others showed no dialog,
+            // so their button stays, beside the reason, to be tried again.
+            switch request {
+            case .asked:
+                asked.insert(row)
+                failure = nil
+                // An answered dialog hands the front back to the app that had it before
+                // this one, not to this window, so the window takes it back.
+                comeToFront()
+            case .failed(let reason):
+                failure = (row, reason)
+                comeToFront()
+            case .sentToSystemSettings(let reason):
+                failure = (row, reason)
+                redrawFromAFreshReading()
+                NSWorkspace.shared.open(row.settingsPane)
+            }
         }
+    }
+
+    /// How a request for one step's grant ended, which says where the person is left.
+    ///
+    /// [LAW:types-are-the-program] Taking the front back and opening System Settings are two
+    /// arms, so a request that sends the person to System Settings cannot also pull this
+    /// window over it.
+    enum Request {
+        /// macOS asked and was answered, or had nothing left to ask: the step reads again
+        /// here, in front.
+        case asked
+        /// Nothing was asked, for the reason shown on the step, in front.
+        case failed(String)
+        /// macOS will not ask again, and the switch is in System Settings, which opens with
+        /// the reason shown on the step behind it.
+        case sentToSystemSettings(String)
     }
 
     // MARK: - pieces

@@ -397,17 +397,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var setUp = SetUpWindow(
         read: { [unowned self] in readReadiness() },
         ask: { [unowned self] in await ask($0) },
-        settle: { [unowned self] in comeUpIfGranted($0) })
+        settle: { [unowned self] in comeUpIfGranted($0) }, log: log)
 
     /// Asks macOS for one requirement - the only place in the app that does, and reached
     /// only from the button a person pressed on that requirement's step. Each case raises
     /// at most one system dialog.
     ///
-    /// Answers with what went wrong, for the step to show, or nil. A person declining is not
-    /// something that went wrong: the next reading shows the step still unmet, with what
-    /// skipping it costs. [LAW:no-silent-failure]
-    private func ask(_ row: Requirement.Row) async -> String? {
-        log.notice("setup: asking for \(row.rawValue, privacy: .public)")
+    /// Answers with how the request ended, and what went wrong for the step to show when
+    /// something did. A person declining is not something that went wrong: the next reading
+    /// shows the step still unmet, with what skipping it costs. [LAW:no-silent-failure]
+    private func ask(_ row: Requirement.Row) async -> SetUpWindow.Request {
         switch row {
         case .microphone:
             // macOS asks about the microphone once. Past that, requesting answers at once and
@@ -416,24 +415,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .withheld(.notDetermined):
                 // Asked here, as measured on studious 2026-09-24: one dialog, naming the app.
                 _ = await MicrophonePermission().request()
-                return nil
+                return .asked
             case .withheld(.denied):
-                NSWorkspace.shared.open(row.settingsPane)
-                return "macOS asks only once. Turn on \(AppIdentity.displayName) in the \(row.rawValue) list in System Settings."
+                return .sentToSystemSettings("macOS asks only once. Turn on \(AppIdentity.displayName) in the \(row.rawValue) list in System Settings.")
             case .withheld(.restricted):
-                return "A policy on this Mac blocks the microphone."
+                return .failed("A policy on this Mac blocks the microphone.")
             case .granted:
-                return nil
+                return .asked
             }
         case .inputMethod:
-            do { try await InstalledInputMethod().switchOn() } catch {
-                log.error("setup: input method: \(String(describing: error), privacy: .public)")
-                return "\(error)"
-            }
+            do { try await InstalledInputMethod().switchOn() } catch { return .failed("\(error)") }
             // Switched on is not selected: once it reads as met, the loop is rebuilt so the
             // install selects it, whether or not the loop is up.
             inputMethodSwitchedOn = true
-            return nil
+            return .asked
         }
     }
 
