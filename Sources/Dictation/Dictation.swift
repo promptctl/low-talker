@@ -162,8 +162,9 @@ public final class Dictation {
         private let keyDown: ContinuousClock.Instant
         private let state: Mutex<State>
         private let wake: AsyncStream<Void>.Continuation
-        /// A wake for each change to the confirmed words; ends when no more can come. The
-        /// newest is all that is kept, since each run takes every word confirmed so far.
+        /// A wake for each pass, which may or may not have confirmed more words; ends when no
+        /// more can come. The newest is all that is kept, since each run takes every word
+        /// confirmed so far.
         let wakes: AsyncStream<Void>
         private let read: AsyncStream<Void>.Continuation
         /// A wake for each pass, for whoever shows what the press has read; ends with `wakes`.
@@ -206,14 +207,17 @@ public final class Dictation {
             read.finish()
         }
 
-        /// The words confirmed since the last run, which are now this run's.
+        /// The words confirmed since the last run, which are now this run's, or no run when
+        /// none were. [LAW:types-are-the-program] A pass need not confirm anything, and a wake
+        /// can find its words already taken by the run before it; neither is a run, so the
+        /// words held for the next run are never inserted on their own.
         ///
         /// While the key is down, audio the capture already knows is missing stops the
         /// commits: what is confirmed from then on reads a fragment, and key-up reports the
         /// loss with the words that landed before it. From key-up on, how the press ended
         /// says. [LAW:no-silent-failure] An insert that fails stops nothing: its words are
         /// held, and the next run carries them.
-        @MainActor func take() -> Run {
+        @MainActor func take() -> Run? {
             let missing = state.withLock { state -> (@MainActor @Sendable () -> CapturedAudio.Loss?)? in
                 switch state.ended {
                 case nil: state.hearing?.missing
@@ -227,10 +231,9 @@ public final class Dictation {
                 case .up(let keyUp): .keyUp(keyUp)
                 case nil, .lapsed: .keyDown(keyDown)
                 }
-                // [LAW:dataflow-not-control-flow] A stopped press takes no words, and a run of
-                // no words inserts nothing, by the same path every run takes.
+                // A stopped press takes no words, so it has no run.
                 let run = state.cursor.advance(through: state.committing ? state.confirmed : [])
-                return Run(words: run, since: since)
+                return run.words.isEmpty ? nil : Run(words: run, since: since)
             }
         }
 
@@ -582,7 +585,7 @@ public final class Dictation {
     private func commit(_ streaming: Streaming) async -> InsertFailure? {
         var unplaced: InsertFailure?
         for await _ in streaming.wakes {
-            let run = streaming.take()
+            guard let run = streaming.take() else { continue }
             do throws(InsertFailure) {
                 let placed = try await place(run.words, following: streaming.landed.performed.last, since: run.since)
                 streaming.landed(placed)

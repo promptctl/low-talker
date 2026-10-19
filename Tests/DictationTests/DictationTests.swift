@@ -344,7 +344,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.speak([3, 4])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held?.words == Transcript(typed: "hello there") })
         rig.inputMethod.refusing(nil)
-        rig.speak([5, 6])
+        // A pass that confirms nothing new is no run, so the held words wait for the next one.
+        rig.speak([5])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing.count == 5 })
+        rig.speak([6])
         // The hold empties on the main actor in the step that counts the words, after the
         // input method has them.
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there my"] && rig.hold.held == nil })
@@ -828,7 +831,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(nil)
         rig.hold(speaking: [4])
         _ = try await rig.session()
-        #expect(rig.inputMethod.inserted == ["a", " b"])
+        #expect(rig.inputMethod.inserted == ["a b"])
         #expect(rig.hold.held == nil)
     }
 
@@ -867,7 +870,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.speak([4])
         rig.keyUp()
         _ = try await rig.session()
-        #expect(rig.inputMethod.inserted == ["a", " b"])
+        #expect(rig.inputMethod.inserted == ["a b"])
     }
 
     /// Words dismissed are let go of: a cursor arriving after is offered nothing.
