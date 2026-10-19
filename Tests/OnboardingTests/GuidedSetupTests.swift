@@ -53,16 +53,27 @@ import Testing
         }
     }
 
-    /// The note names both facts a person cannot see coming and would otherwise be left to
-    /// discover: that declining is not the end because the dialog returns, and that nothing
-    /// happening means the source waits for the next login. [LAW:no-silent-failure] Naming
-    /// neither is the silent failure; naming the login as unconditional would be the false
-    /// claim the previous wording made.
-    @Test func theInputMethodNoteNamesTheReturningDialogAndTheLogin() throws {
+    /// The note names what a person cannot see coming: that declining is not the end because
+    /// the dialog returns, and, when no dialog comes, the button on this page that leads on.
+    /// [LAW:no-silent-failure]
+    @Test func theInputMethodNoteNamesTheReturningDialogAndTheWayOnWithoutIt() throws {
         let note = try #require(Requirement.Row.inputMethod.switchOnNote)
         #expect(note.contains("Allow"), "the note never names the dialog to allow it")
         #expect(note.contains("again"), "the note never says the dialog returns after a No")
-        #expect(note.contains("log out") && note.contains("back in"), "the note never names the login")
+        #expect(note.contains(GuidedSetup.openSettingsTitle), "the note never names the button that leads on when no dialog comes")
+    }
+
+    /// No words Onboarding writes for a step ask the person to log out or restart: an install
+    /// that needed one would have broken a macOS rule, and the fix is the install, not words
+    /// sending the person away.
+    @Test func noStepAsksForALogoutOrARestart() {
+        let shown: [String?] = Requirement.all.flatMap { [$0.name, $0.reads, $0.step] as [String?] }
+            + Requirement.Row.allCases.flatMap { [$0.explanation.why, $0.explanation.ifSkipped, $0.askTitle, $0.switchOnNote] as [String?] }
+        for text in shown.compactMap({ $0?.lowercased() }) {
+            for asking in ["log out", "logout", "log back in", "next login", "restart", "reboot"] {
+                #expect(!text.contains(asking), "\"\(text)\" asks for a \(asking)")
+            }
+        }
     }
 
     /// A note that tells the person to press the button again is claiming the same fact
