@@ -562,8 +562,8 @@ public final class AudioCapture {
     /// same way one that disappears mid-press is.
     ///
     /// Returns once the microphone a press would open is readied, so the first press opens
-    /// one already reached rather than paying for reaching it, and an `open` launch never
-    /// waits on readying. It suspends for that rather than holding the main actor, which the
+    /// one already reached rather than paying for reaching it, and the `open` launch here
+    /// does not wait on readying. It suspends for that rather than holding the main actor, which the
     /// menu and every reading need while a slow input is reached.
     /// [LAW:no-ambient-temporal-coupling]
     public func start(_ grant: MicrophoneGrant, atRest: MicrophoneAtRest) async throws {
