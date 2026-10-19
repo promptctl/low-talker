@@ -67,7 +67,7 @@ public struct Quiet: Hashable, Sendable {
 /// go with the quiet around them.
 public struct Transients: Hashable, Sendable {
     public let count: Int
-    /// Seconds the longest of them sounded at or above the gate.
+    /// Seconds the longest of them sounded without a break.
     public let longest: TimeInterval
 
     public static let none = Transients(count: 0, longest: 0)
@@ -85,7 +85,7 @@ public struct Transients: Hashable, Sendable {
 public enum TranscriptionFailure: Error, CustomStringConvertible {
     /// The caller stopped waiting for the engine before its turn came.
     case cancelled
-    /// Nothing sounded as long as a word: no clip reached the audible floor, or what did was
+    /// Nothing sounded as long as a syllable: no clip reached the audible floor, or what did was
     /// a transient. `peak` is the loudest sample heard, and `quiet` all of the audio, with the
     /// room it was judged against and the transients it refused.
     case nothingSpoken(peak: Float, quiet: Quiet)
@@ -100,7 +100,7 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
         switch self {
         case .cancelled: "the decode was cancelled before the engine took it"
         case .nothingSpoken(let peak, let quiet):
-            "nothing spoken: the loudest sample was \(peak) against the audible floor \(Utterance.audible), and \(quiet.transients.count) transients sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.wordSounding)) s a word sounds"
+            "nothing spoken: the loudest sample was \(peak) against the audible floor \(Utterance.audible), and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"

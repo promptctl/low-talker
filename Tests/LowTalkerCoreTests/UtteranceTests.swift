@@ -283,4 +283,39 @@ import Testing
         #expect(samples.prefix(480).allSatisfy { $0 == 0.4 })
         #expect(timeline.quiet.transients == .none)
     }
+
+    /// Typing is no speech: keystrokes five a second join one burst, and however many of them
+    /// there are, none sounds long enough without a break to be a syllable, so the utterance is
+    /// refused with the run of them as one transient.
+    @Test func typingIsNoSpeech() async {
+        let utterance = Utterance()
+        let clips = AsyncStream<AudioClip> { continuation in
+            for _ in 0..<20 {
+                continuation.yield(Self.click)
+                continuation.yield(Self.quiet(1_600))
+            }
+            continuation.finish()
+        }
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            try await utterance.fill(from: clips)
+        }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.4)
+        #expect(quiet.transients == Transients(count: 1, longest: 0.03))
+    }
+
+    /// A soft speaker after a loud click is heard: the click, refused as a transient, is no
+    /// speaker to judge what follows against, so speech 24 dB under it is speech once the
+    /// click has gone with the quiet.
+    @Test func aSoftSpeakerAfterALoudClickIsHeard() async {
+        let utterance = Utterance()
+        await utterance.append(Self.click)
+        await utterance.append(Self.quiet(16_000))
+        await utterance.append(AudioClip(samples: Array(repeating: 0.02, count: 16_000)))
+        await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 16_000 + Utterance.hangover)
+        #expect(!samples.contains(0.4))
+        #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
+    }
 }
