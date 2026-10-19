@@ -45,11 +45,11 @@ final class Rig {
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
         frontmost: @escaping @Sendable @MainActor () throws(FrontmostUnknown) -> BundleID = { textEdit }
-    ) throws {
+    ) async throws {
         capture = AudioCapture(retaining: retaining, hardware: hardware, startingAt: Self.origin, reporting: { _ in })
         // Shut between presses unless a test says otherwise, which is the loop the app
         // runs when no config file asks for the microphone to be held.
-        try capture.start(try MicrophonePermission(authority: Authorized()).current.grant(), atRest: atRest)
+        try await capture.start(try MicrophonePermission(authority: Authorized()).current.grant(), atRest: atRest)
         let (stream, feed) = AsyncStream.makeStream(of: Dictation.Report.self)
         reports = stream
         let reported = reported
@@ -74,8 +74,8 @@ final class Rig {
         hearing transcriber: FakeTranscriber,
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut
-    ) throws {
-        try self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest)
+    ) async throws {
+        try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest)
     }
 
     /// Audio captured from `now` on, stamped as the microphone would stamp it, into
@@ -223,7 +223,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 @Suite struct DictationTests {
     @Test func aHoldInsertsWhatWasSaidIntoTheAppThatWasInFront() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "hi") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.hold(speaking: [1, 2, 3])
         let session = try await rig.session()
         #expect(engine.clips.map(\.samples) == [[1, 2, 3]])
@@ -238,7 +238,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
     /// The press's line says the room its quiet was judged against, what that room refused, and the transients refused.
     @Test func aPressLineSaysTheRoomItsQuietWasJudgedAgainst() async throws {
-        let rig = try Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, transients: Transients(count: 2, longest: 0.03))) { _ in Transcript(typed: "hi") })
+        let rig = try await Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, transients: Transients(count: 2, longest: 0.03))) { _ in Transcript(typed: "hi") })
         rig.hold(speaking: [1, 2, 3])
         let line = try await rig.session().description
         #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room, 2 transients refused, the longest sounding 0.03 s)"), "\(line)")
@@ -255,7 +255,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 6 ? "hello there my" : samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
         }) { _ in Transcript(typed: "hello there my friend") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         let keyDown = HostTime.now
         rig.dictation.press(.began(Rig.dictation, at: keyDown))
         rig.speak([1, 2])
@@ -289,7 +289,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
         }) { _ in Transcript(typed: "hello there friend") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
@@ -313,7 +313,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
         }) { _ in Transcript(typed: "hello there friend") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
@@ -337,7 +337,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 2 ? "hello" : "")
         }) { _ in Transcript(typed: "hello there friend") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
@@ -358,7 +358,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 6 ? "hello there my" : samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
         }) { _ in Transcript(typed: "hello there my friend") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -385,7 +385,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test(arguments: [HotkeyDetector.Ending.lapsed, .usedAsModifier])
     func aRefusalBeforeALapseIsWhatTheReportNames(ending: HotkeyDetector.Ending) async throws {
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "hello" : "") }) { _ in Transcript(typed: "hello") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -405,7 +405,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func aPassConfirmingOnlyWhitespaceIsNoRun() async throws {
         let blank = Transcript(words: Transcript(typed: "hello").words + [Transcript.Word(text: " ", time: 0...0, confidence: 1.0)])
         let engine = FakeTranscriber(confirming: { samples in samples.count >= 3 ? blank : Transcript(typed: samples.count >= 2 ? "hello" : "") }) { _ in blank }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -421,7 +421,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// rather than that nothing was placed.
     @Test func aDecodeThatFailsAfterCommitsSaysHowManyLanded() async throws {
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "hello there" : "") }) { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
@@ -438,7 +438,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// before any of it was confirmed.
     @Test func aPressMissingItsHeadCommitsNothingWhileTheKeyIsDown() async throws {
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "there" : "") }) { _ in Transcript(typed: "there") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         let keyWentDown = rig.now
         rig.wait(AudioCapture.warmUpAllowance + 0.4)
         rig.dictation.press(.began(Rig.dictation, at: keyWentDown))
@@ -458,7 +458,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 2 ? "hello there" : "")
         }) { _ in Transcript(typed: "hello there friend") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
@@ -476,7 +476,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// key-down the first words came.
     @Test func aPressIsHeardWhileTheKeyIsStillDown() async throws {
         let engine = FakeTranscriber(reading: { Transcript(typed: $0.isEmpty ? "" : "hello") }, repunctuating: { $0.isEmpty ? 0 : 2 }) { _ in Transcript(typed: "hello") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         let keyDown = HostTime.now
         rig.dictation.press(.began(Rig.dictation, at: keyDown))
         rig.speak([1, 2])
@@ -498,7 +498,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// method's hop to the app and the main queue's wait behind it are inside every key-up
     /// figure, and the session names how long the telling took.
     @Test func aKeyUpDeliveredLateIsTimedFromTheKeyComingUp() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hi") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hi") })
         let late = Duration.milliseconds(300)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2, 3])
@@ -514,7 +514,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A press whose engine read nothing before the key came up says so, rather than
     /// timing words it never showed.
     @Test func aPressThatShowedNoWordsBeforeKeyUpSaysSo() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hi") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hi") })
         rig.hold()
         let session = try await rig.session()
         #expect(session.duringPress.firstWords == nil)
@@ -528,7 +528,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// clip that began with them would transcribe to a sentence nobody just spoke.
     @Test func aPressHearsWhatWasSaidIntoItAndNotThePressBeforeIt() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.hold(speaking: [1, 2])
         _ = try await rig.session()
         rig.hold(speaking: [7, 8])
@@ -542,7 +542,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// pins what `shut` gives the indicator up for; this one pins what `open` buys back.
     @Test func aPressMadeWhileTheMicrophoneIsHeldOpenHearsTheWordsBeforeIt() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "") }
-        let rig = try Rig(hearing: engine, atRest: .open)
+        let rig = try await Rig(hearing: engine, atRest: .open)
         rig.speak([1, 2])
         rig.hold(speaking: [7, 8])
         _ = try await rig.session()
@@ -556,7 +556,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// back among an earlier press's samples from beginning this press among them.
     @Test func aKeyDownDeliveredLateDoesNotReachIntoThePressBeforeIt() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         let duringTheFirstPress = rig.now
         rig.hold(speaking: [1, 2, 3])
         _ = try await rig.session()
@@ -569,7 +569,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     }
 
     @Test func nothingSaidIsASessionThatInsertsNothing() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "") })
         rig.hold()
         let session = try await rig.session()
         #expect(session.performed.isEmpty)
@@ -580,7 +580,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func aPressWhileTheEngineLoadsWaitsForIt() async throws {
         let gate = Gate()
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig { await gate.wait(); return engine }
+        let rig = try await Rig { await gate.wait(); return engine }
         rig.hold()
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
         #expect(rig.inputMethod.inserted.isEmpty)
@@ -594,7 +594,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// speaker and no longer. A refused press takes and lets go of it the same way.
     @Test func aPressHoldsTheEngineFromKeyDownUntilItsTranscriptIsOut() async throws {
         let gate = Gate()
-        let rig = try Rig(hearing: FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") })
         rig.inputMethod.hold()
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         #expect(rig.turns.reading.holds == 1)
@@ -625,7 +625,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             if clip.samples == [1] { await gate.wait() }
             return Transcript(typed: clip.samples == [1] ? "a" : "b")
         }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.hold(speaking: [1])
         rig.hold(speaking: [2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
@@ -653,7 +653,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// behind the mark to reach into, so a loss that used to be repaired is now reported.
     @Test func aPressWhoseMicrophoneOpenedAfterTheWordsItWasPressedForIsReportedNotInserted() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
 
         let keyWentDown = rig.now
         // The speaker starts talking as they press. The loop hears the press later than the
@@ -704,7 +704,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let said = [Float](repeating: 1, count: AudioClip.sampleCount(for: 0.5))
         let andThen = [Float](repeating: 2, count: AudioClip.sampleCount(for: 0.8))
         let engine = FakeTranscriber { clip in Transcript(typed: clip.samples.contains(1) ? sentence : "b") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.inputMethod.hold()
 
         rig.hold(speaking: said)
@@ -723,7 +723,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
     @Test func aPressWithNothingToInsertIntoIsReportedAndTheNextPressInserts() async throws {
         let refused = Mutex(true)
-        let rig = try Rig(transcriber: { FakeTranscriber { _ in Transcript(typed: "a") } }) { () throws(FrontmostUnknown) in
+        let rig = try await Rig(transcriber: { FakeTranscriber { _ in Transcript(typed: "a") } }) { () throws(FrontmostUnknown) in
             if refused.withLock({ $0 }) { throw .noFrontmostApp }
             return Rig.textEdit
         }
@@ -742,7 +742,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func aRefusedPressIsReportedAfterAnEarlierPressStillBeingHeard() async throws {
         let gate = Gate()
         let refusing = Mutex(false)
-        let rig = try Rig(transcriber: {
+        let rig = try await Rig(transcriber: {
             FakeTranscriber { _ in
                 await gate.wait()
                 return Transcript(typed: "a")
@@ -769,7 +769,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// of what `finish` promises.
     @Test func finishReturnsOnlyAfterASessionStillInFlightHasInsertedAndBeenReported() async throws {
         let gate = Gate()
-        let rig = try Rig(transcriber: {
+        let rig = try await Rig(transcriber: {
             FakeTranscriber { _ in
                 await gate.wait()
                 return Transcript(typed: "a")
@@ -792,7 +792,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// here to reach, and a test that claimed to reproduce one would be claiming more than
     /// it does. [LAW:behavior-not-structure]
     @Test func finishRightAfterAKeyUpWaitsForThatPressWithNothingAwaitedInBetween() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.hold()
         try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted == ["a"])
@@ -803,7 +803,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// what was performed, so the app the input method says it reached is named, and not the
     /// one that happened to be in front at key-down.
     @Test func aSessionsLineNamesTheAppTheWordsReachedNotTheOneInFront() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.inputMethod.reaching(BundleID(rawValue: "com.apple.Safari"))
         rig.hold()
         #expect(try await rig.session().description.hasSuffix("1 insert into com.apple.Safari"))
@@ -813,7 +813,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// report names that mode: two modes pressed in turn, each decode told its own terms.
     @Test func aPressOnAModesChordDecodesExpectingThatModesTerms() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.hold(in: Self.notes)
         let first = await rig.pressReport()
         #expect(first.mode == Self.notes)
@@ -826,7 +826,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A press whose engine refused the mode's vocabulary is reported in that mode, so the
     /// record says whose terms to cut.
     @Test func aFailedPressIsReportedInTheModeItBeganIn() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .vocabulary(.tooLong(tokens: 300, limit: 224)) })
+        let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .vocabulary(.tooLong(tokens: 300, limit: 224)) })
         rig.hold(in: Self.notes)
         let report = await rig.pressReport()
         #expect(report.mode == Self.notes)
@@ -839,14 +839,14 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// Nothing said is a session that performed nothing, and a destination it never had
     /// is left unsaid rather than rendered as an empty one.
     @Test func aSessionThatPerformedNothingNamesNoDestination() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "") })
         rig.hold()
         #expect(try await rig.session().description.hasSuffix("0 inserts"))
     }
 
     @Test func anEngineThatFailsIsReportedAndTheNextPressInserts() async throws {
         let failing = Mutex(true)
-        let rig = try Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in
+        let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in
             if failing.withLock({ $0 }) { throw .engine(NoEngine()) }
             return Transcript(typed: "a")
         })
@@ -864,7 +864,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// An input method that refuses stops the session with what was done, and the next press
     /// lands the refused words with its first insert, ahead of its own.
     @Test func aRefusedInsertIsReportedAndTheNextPressCarriesItsWords() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.hold()
         let stopped = try #require(await rig.report().failure as? PressStopped)
@@ -884,7 +884,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// one way to type them twice; the warning stands until the person dismisses it.
     @Test(arguments: failedInserts)
     func aFailedInsertHoldsWhatIsAtNoCursorUntilACursorTakesIt(failed: FailedInsert) async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hello there") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hello there") })
         rig.inputMethod.refusing(failed.failure)
         rig.hold()
         #expect(try #require(await rig.report().failure as? PressStopped).landed == 0)
@@ -903,7 +903,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A cursor that arrives while a press is open offers it nothing: the press places what
     /// is held ahead of its own words, into the app those go to.
     @Test func aCursorArrivingDuringAPressLeavesTheHeldWordsToIt() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.hold()
         _ = await rig.report()
@@ -918,7 +918,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
     /// Words dismissed are let go of: a cursor arriving after is offered nothing.
     @Test func dismissedWordsAreNotOffered() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.hold()
         _ = await rig.report()
@@ -933,7 +933,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// Words dismissed while an insert carrying them is on its way stay dismissed when that
     /// insert fails: only its own words are held.
     @Test func wordsDismissedDuringAFailingInsertStayDismissed() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.hold()
         _ = await rig.report()
@@ -952,7 +952,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
         }) { _ in Transcript(typed: "hello there friend") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         let notYetTaken = NotYetTaken(characters: 5, into: "com.apple.TextEdit")
         rig.inputMethod.refusing(.notYetTaken(notYetTaken))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
@@ -969,7 +969,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A later failure whose words went nowhere is held beside a warning that stands, and
     /// when its words land the warning still stands.
     @Test func aWarningThatStandsOutlivesALaterRefusalAndItsLanding() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
         let notYetTaken = NotYetTaken(characters: 1, into: "com.apple.TextEdit")
         rig.inputMethod.refusing(.notYetTaken(notYetTaken))
         rig.hold()
@@ -989,7 +989,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A cursor that arrives while a press is open is offered what is held once that press
     /// ends, when the press placed nothing of its own.
     @Test func aCursorArrivingDuringAPressThatLapsesIsOfferedTheHeldWordsAfterIt() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.hold()
         _ = await rig.report()
@@ -1006,7 +1006,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A failed press is reported by its kind and with its cause in the clear: as readable in
     /// the log as a dictation that happened.
     @Test func aFailedPressIsReportedByKindWithItsCauseInTheClear() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) })
+        let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) })
         rig.hold()
         guard case .failed(let failed) = await rig.report() else { Issue.record("expected the press to fail"); return }
         #expect(failed.kind == "PressStopped")
@@ -1016,7 +1016,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// The hold is the app's, not the loop's: a loop rebuilt over a new config offers what
     /// the old one could not place.
     @Test func heldWordsOutliveTheLoopThatHeldThem() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.inputMethod.refusing(.refused(.noClientHasFocus))
         rig.hold()
         _ = await rig.report()
@@ -1035,7 +1035,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// would have been heard by is still loading: nothing it could say waits on the engine.
     @Test func aPressThatWillNotBeInsertedIsReportedWhileTheEngineStillLoads() async throws {
         let gate = Gate()
-        let rig = try Rig { await gate.wait(); return FakeTranscriber { _ in Transcript(typed: "a") } }
+        let rig = try await Rig { await gate.wait(); return FakeTranscriber { _ in Transcript(typed: "a") } }
         rig.lapse()
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.reported.raised })
         #expect(await rig.report().failure is PressLapsed)
@@ -1056,7 +1056,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             }
             return Transcript(typed: "never")
         }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.lapse(speaking: [1, 2, 3])
         #expect(await rig.report().failure is PressLapsed)
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { stopped.raised && rig.turns.reading.holds == 0 })
@@ -1068,7 +1068,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// inserted, it is reported as what it was rather than as a failure, its decode stops
     /// and lets go of the engine, and the next press is heard.
     @Test func aPressUsedAsAModifierInsertsNothingAndIsNoFailure() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.usedAsModifier(speaking: [1, 2, 3])
         guard case .usedAsModifier(let landed) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
         #expect(landed == 0)
@@ -1088,7 +1088,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// what the ending buys.
     @Test func aPressTheTapLapsedOutOfIsReportedInsteadOfInsertedAndTheNextPressInserts() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
 
         rig.lapse(speaking: [1, 2, 3])
         let lapsed = try #require(await rig.report().failure as? PressLapsed)
@@ -1104,7 +1104,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// buffer as it landed, so the press is whole and inserts.
     @Test func aPressLongerThanTheRingRetainsIsHeardWholeAndInserts() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine, retaining: 0.5)
+        let rig = try await Rig(hearing: engine, retaining: 0.5)
         let said = [Float](repeating: 1, count: AudioClip.sampleCount(for: 0.8))
         rig.hold(speaking: said)
         #expect(try await rig.session().transcription.transcript.text == "a")
@@ -1122,7 +1122,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// to is a sentence - just not the one that was said.
     @Test func aPressTheInputDeviceChangedDuringIsReportedInsteadOfInserted() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
 
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -1153,7 +1153,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// first word.
     @Test func aPressSplicedAcrossARealReconnectIsNotAlsoReportedAsUnopened() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
 
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -1181,7 +1181,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// engine at all rather than a failed one.
     @Test func aPressWithNoMicrophoneToOpenIsReportedNotHeardAsSilence() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.hardware.failingToLaunch = BadBuffer()
         rig.refusedHold()
         let failure = try #require(await rig.report().failure as? NoMicrophone)
@@ -1201,7 +1201,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// [LAW:nothing-unseen] Every press's report carries what its microphone delivered, so a
     /// press that was heard says through which input, how much and how loud.
     @Test func aHeardPressReportsWhatItsMicrophoneDelivered() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.hold(speaking: [0.5, -0.25])
         let report = await rig.pressReport()
         #expect(try report.outcome.get().transcription.transcript.text == "a")
@@ -1212,7 +1212,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// The press the ticket was filed for: the microphone opened and delivered nothing, and
     /// the record says so beside the refusal, rather than leaving nothing to read.
     @Test func aPressWhoseMicrophoneDeliveredNothingReportsItWithTheLoss() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.refusedHold()
         let report = await rig.pressReport()
         let lost = try #require(report.outcome.failure as? SpeechLost)
@@ -1224,7 +1224,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A press refused before any microphone opened has no reading, and its record says that
     /// beside the reason it was refused.
     @Test func aPressRefusedBeforeItsMicrophoneOpenedReportsNoReading() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.hardware.failingToLaunch = BadBuffer()
         rig.refusedHold()
         let report = await rig.pressReport()
@@ -1245,7 +1245,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// marking it - which is what this press checks.
     @Test func aPressWhoseMicrophoneFailedMidHoldIsReportedInsteadOfInserted() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
 
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -1268,7 +1268,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// idle once the outcome is reported, never before it.
     @Test func aPressShowsListeningThenTranscribingThenIdleOnceReported() async throws {
         let gate = Gate()
-        let rig = try Rig(hearing: FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") })
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         #expect(rig.shown.activities == [.listening(heard: Transcript(words: []))])
         rig.speak([1, 2, 3])
@@ -1286,7 +1286,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             heard.count < 2 ? Transcript(words: [])
                 : Transcript(words: [.init(text: " hello", time: 0...Double(heard.count), confidence: 0.9)])
         }) { _ in Transcript(typed: "hello") }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1])
         rig.speak([2])
@@ -1302,7 +1302,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A press refused its microphone is never shown as listening, and its failure, once
     /// reported, leaves the loop idle.
     @Test func aRefusedPressIsNeverShownListening() async throws {
-        let rig = try Rig(transcriber: { FakeTranscriber { _ in Transcript(typed: "a") } }) { () throws(FrontmostUnknown) in throw .noFrontmostApp }
+        let rig = try await Rig(transcriber: { FakeTranscriber { _ in Transcript(typed: "a") } }) { () throws(FrontmostUnknown) in throw .noFrontmostApp }
         rig.refusedHold()
         #expect(await rig.report().failure is FrontmostUnknown)
         #expect(rig.shown.activities == [.transcribing, .idle])
@@ -1312,7 +1312,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// loop stays transcribing until the last outcome is reported.
     @Test func thePressBeingSpokenIsShownOverOneStillOnItsWay() async throws {
         let gate = Gate()
-        let rig = try Rig(hearing: FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") })
         rig.hold()
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         #expect(rig.shown.activities == [.listening(heard: Transcript(words: [])), .transcribing, .listening(heard: Transcript(words: []))])

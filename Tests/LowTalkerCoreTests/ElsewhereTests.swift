@@ -41,6 +41,18 @@ private final class GatedQueue: Sendable {
         #expect(throws: Refused.self) { try handed.result().get() }
     }
 
+    /// An awaited wait comes back once the work has run, so `finished` has what it came to by
+    /// then. The gate opens a moment after the waiter is under way, so a wait that came back
+    /// before the work ran would find nothing finished. That the wait holds no thread is the
+    /// compiler's to keep: the blocking `result()` is unavailable to async code.
+    @Test func anAwaitedWaitComesBackWithWhatTheWorkCameTo() async throws {
+        let gated = GatedQueue()
+        let handed = Elsewhere(on: gated.queue) { 42 }
+        let waiter = Task { await handed.wait(); return handed.finished }
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(50)) { gated.open() }
+        #expect(try await waiter.value?.get() == 42)
+    }
+
     /// Work let go of before the queue reached it costs the queue nothing, which is what lets
     /// a run of readyings for one device change do the newest and not every one before it.
     @Test func workNobodyHoldsWhenItsTurnComesIsNeverDone() throws {

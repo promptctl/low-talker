@@ -16,7 +16,7 @@ import TestProbes
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "hello there" : "") }) { _ throws(TranscriptionFailure) in
             throw .unreadable(.speechWithoutWords(text: said))
         }
-        let rig = try Rig(hearing: engine)
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })

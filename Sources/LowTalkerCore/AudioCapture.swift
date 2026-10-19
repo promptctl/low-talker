@@ -560,7 +560,13 @@ public final class AudioCapture {
     /// down. A launch that fails leaves capture started and failed rather than throwing:
     /// the device watch is up by then, so a microphone that appears later is picked up the
     /// same way one that disappears mid-press is.
-    public func start(_ grant: MicrophoneGrant, atRest: MicrophoneAtRest) throws {
+    ///
+    /// Returns once the microphone a press would open is readied, so the first press opens
+    /// one already reached rather than paying for reaching it, and the `open` launch here
+    /// does not wait on readying. It suspends for that rather than holding the main actor, which the
+    /// menu and every reading need while a slow input is reached.
+    /// [LAW:no-ambient-temporal-coupling]
+    public func start(_ grant: MicrophoneGrant, atRest: MicrophoneAtRest) async throws {
         stop()
         deviceChanges = 0
         outages = Outages()
@@ -575,6 +581,8 @@ public final class AudioCapture {
             // shows no microphone.
             prepared: readiedInput()
         ))
+        await readied()
+        // A stop during the wait leaves nothing started, and resting it is nothing.
         rest()
     }
 
@@ -588,17 +596,17 @@ public final class AudioCapture {
         if !started.sessionIsOpen { rest() }
     }
 
-    /// Waits for the microphone a press would open to finish being readied.
-    ///
-    /// `start` returns with readying still under way, which is right for a device change and
-    /// not for a caller about to let presses in: the first press would pay what is left of a
-    /// cold readying, which is the first-press refusal `start` readies to prevent. So a caller
-    /// that installs a hotkey, or presses itself, waits here first. What readying came to is
-    /// the press's to report, and capture that is not started has nothing being readied.
-    /// [LAW:no-ambient-temporal-coupling]
-    public func waitUntilReadied() {
-        guard case .started(let started) = phase else { return }
-        started.prepared.waitUntilReadied()
+    /// Waits until the microphone a press would open is readied. A device change during the
+    /// wait readies another in its place, and that one is waited on in turn: the one it
+    /// replaced being reached says nothing about the one a press would open. What readying
+    /// came to is the press's to report, and capture stopped during the wait has nothing
+    /// being readied.
+    private func readied() async {
+        while case .started(let started) = phase {
+            let awaited = preparations
+            await started.prepared.waitUntilReadied()
+            if awaited == preparations { return }
+        }
     }
 
     public func stop() {
