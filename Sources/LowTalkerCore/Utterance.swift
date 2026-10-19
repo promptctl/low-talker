@@ -31,7 +31,8 @@ actor Utterance {
     /// the floor refuses is quiet, which Whisper would read words into: a hold with
     /// nothing in it, and all but the lead-in of the quiet before the first speech,
     /// however softly a word in it was said. Level is all a peak knows, so a click
-    /// this loud is a speaker too.
+    /// this loud is a speaker too, and a clip under it is speech only when it also
+    /// stands above the room (`aboveRoom`).
     static let audible: Float = 0.01
     /// A clip holds speech when its peak stands within this factor of the loudest
     /// clip so far: 16, 24 dB, one speaker's spread from a stressed vowel to a soft
@@ -41,6 +42,20 @@ actor Utterance {
     /// speech as the absolute -34 dBFS gate it replaces, differing on 18 of some
     /// 800 clip judgements, all mid-utterance.
     static let dynamicRange: Float = 16
+    /// A clip under the audible floor holds speech only when its peak also stands this
+    /// far above the room's noise floor, the quietest frame of the last `roomSpan`
+    /// (minimum statistics): 3, about 10 dB. The range says how soft a speaker gets
+    /// below their loudest; it reaches into the room whenever the loudest is a click
+    /// rather than a voice, and then a tap left open types what Whisper reads into the
+    /// room's noise (" Thank you.", low-dictation-f15). Replaying the gate over the bench
+    /// fixtures, at full level and 20 dB down, clean and over -51 dBFS of noise, lets
+    /// go no clip the range alone called speech; at 5 the softest begins to lose some.
+    static let aboveRoom: Float = 3
+    /// How far back the room's noise floor is read: long enough that its quietest frame
+    /// is a pause between words rather than the softest of them, and short enough that
+    /// digital silence a device opened on stops standing for the room soon after the
+    /// room is heard.
+    static let roomSpan: TimeInterval = 3
     /// Audio kept past the last clip with speech in it, so a word's soft tail rides
     /// with the word. Silence to the encoder either way, so it costs the pass nothing.
     static let hangover = AudioClip.sampleCount(for: 0.3)
@@ -52,8 +67,8 @@ actor Utterance {
     /// Where `samples` lie in the audio appended: the quiet let go from between them.
     private var timeline = Timeline()
     /// Samples through the end of the last clip that held speech, once one has.
-    /// Each frame is judged as it fills, against the loudest so far, and never
-    /// again: a louder clip later may put an earlier one outside the range, but
+    /// Each frame is judged as it fills, against the loudest and the room so far, and
+    /// never again: a louder clip later may put an earlier one outside the range, but
     /// the speech only ever grows, which is what a pass waiting on it relies on.
     /// [LAW:types-are-the-program] No speech yet is its own state, not a count of
     /// zero: the hangover rides on speech, so with none there is no audio to hand a
@@ -62,6 +77,9 @@ actor Utterance {
     /// The loudest clip peak so far: what every clip is judged against, and what an
     /// utterance that never reached the floor is refused with.
     private var loudest: Float = 0
+    /// The peaks of the last `roomSpan` of frames, the newest last: the room is the least of them.
+    private var recent: [Float] = []
+    private static let roomFrames = Int((roomSpan / frame).rounded())
     private var ended = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
@@ -95,14 +113,18 @@ actor Utterance {
         samples += clip.samples
         let peak = clip.peak
         loudest = max(loudest, peak)
+        recent = Array((recent + [peak]).suffix(Self.roomFrames))
+        // The softest a sample of speech may be: within range of the loudest, and above
+        // the room too unless it reaches the audible floor.
+        let softest = max(loudest / Self.dynamicRange, min(Self.audible, recent.reduce(peak, min) * Self.aboveRoom))
         // [LAW:dataflow-not-control-flow] One judgement for every clip, the loudest
         // included: it stands within range of itself, so the clip that lifts the
         // loudest past the floor is the first speech.
-        let speech = loudest >= Self.audible && peak * Self.dynamicRange > loudest
+        let speech = loudest >= Self.audible && peak >= softest
         // Where the audio kept must resume: the lead-in before the clip's first sample
-        // within range of the loudest when the clip is speech, the lead-in before its end
-        // when it is not, since the next clip may open on speech.
-        let onset = speech ? clip.samples.firstIndex { abs($0) * Self.dynamicRange > loudest } : nil
+        // of speech when the clip is speech, the lead-in before its end when it is not,
+        // since the next clip may open on speech.
+        let onset = speech ? clip.samples.firstIndex { abs($0) >= softest } : nil
         let resume = start + (onset ?? clip.samples.count) - Self.leadIn
         // [LAW:dataflow-not-control-flow] Every clip lets go the quiet between the speech's
         // hangover and where the audio resumes, which is none while either is still
