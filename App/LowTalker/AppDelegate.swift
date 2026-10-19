@@ -96,11 +96,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         log.notice("hotkey: \(status, privacy: .public)")
     }
 
-    /// Every device report the microphone answers, and what it is doing after, so a device
-    /// that went away and the recovery that followed - or did not - read in `log show`
+    /// Every device report the microphone answers and every move of its resting mode, and
+    /// what it is doing after, so a device that went away and the recovery that followed - or
+    /// did not - and a saved mode that did or did not open the microphone read in `log show`
     /// without a press or a menu to show them. [LAW:nothing-unseen]
     private lazy var capture: AudioCapture = AudioCapture { [unowned self] report in
-        microphoneLog.notice("device: \(report, privacy: .public); now \(self.capture.doing, privacy: .public)")
+        microphoneLog.notice("\(report, privacy: .public); now \(self.capture.doing, privacy: .public)")
     }
     private let microphoneLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "microphone")
 
@@ -188,8 +189,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if case .listening = hotkeyStatus { showHotkeyStatus(.listening(listeningStatus)) }
                 return "modes \(now.modes)"
             case .microphone:
+                // What the microphone came to is the move's report: it lands once the input
+                // is readied, after this event.
                 capture.rest(as: now.microphone)
-                return "microphone \(capture.doing)"
+                return "microphone to \(now.microphone)"
             case .serve:
                 serving?.resume(at: config.map(\.serve))
                 return "server binding"

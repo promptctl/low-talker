@@ -202,10 +202,11 @@ public final class AudioCapture {
     private let hardware: any AudioHardware
     private let shared: Shared
     /// Told every device report and what was done about it, including the ones that changed
-    /// nothing. A device going away is answered here with no press to throw to and no
-    /// session to mark, so this is the only place a recovery - or a recovery that did not
-    /// come - leaves a trace. [LAW:nothing-unseen]
-    private let reporting: @MainActor (DeviceReport) -> Void
+    /// nothing, and what every move of the resting mode came to. A device going away is
+    /// answered here with no press to throw to and no session to mark, and a move lands after
+    /// the call that asked for it has returned, so this is the only place either leaves a
+    /// trace. [LAW:nothing-unseen]
+    private let reporting: @MainActor (CaptureReport) -> Void
     private var phase: Phase = .stopped
     private var generation = 0
     /// Microphones readied since this capture was made. What the staleness callback of each
@@ -215,6 +216,11 @@ public final class AudioCapture {
     /// would open any more. Never reset - `start()` resets what it counts, and a counter that
     /// went back to zero would let the previous run's stragglers match.
     private var preparations = 0
+    /// Resting modes asked for since this capture was made, each `start` and each `rest(as:)`.
+    /// What a move waiting for readying carries, so one that a later move or a restart asked
+    /// past while it waited reports itself superseded rather than as the mode it did not set.
+    /// Never reset, for the reason `preparations` is not.
+    private var moves = 0
     /// Running engines `replaceEngine` swapped in place since `start()`: the device
     /// changed, capture stayed running, and nothing failed. Not a claim that no audio was
     /// lost to them - the audio on either side of each one is spliced, which is what a
@@ -246,7 +252,7 @@ public final class AudioCapture {
         retaining duration: TimeInterval = defaultRetention,
         hardware: any AudioHardware = SystemAudioHardware(),
         startingAt origin: HostTime = .now,
-        reporting: @escaping @MainActor (DeviceReport) -> Void
+        reporting: @escaping @MainActor (CaptureReport) -> Void
     ) {
         self.hardware = hardware
         self.reporting = reporting
@@ -581,19 +587,46 @@ public final class AudioCapture {
             // shows no microphone.
             prepared: readiedInput()
         ))
-        await readied()
-        // A stop during the wait leaves nothing started, and resting it is nothing.
-        rest()
+        moves += 1
+        await restOnceReadied()
     }
 
     /// What the microphone does between presses from now on, for capture that is started.
-    /// With no session open the microphone goes there at once; with one open, the key-up that
-    /// ends it takes it there, so a saved config never cuts a recording short.
+    /// Returns at once, so a saved config holds up nothing else it moves; the microphone goes
+    /// there once the input a press would open is readied, and what came of that is reported
+    /// as a `RestingMove`. A key-up during the wait already reads the new mode, and a session
+    /// open when the wait ends leaves the move to its key-up, so a saved config never cuts a
+    /// recording short.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] The move is this capture's to finish: `moves` says
+    /// whether it is still the latest one asked for, and `stop()` ends it, since a stopped
+    /// capture has nothing being readied and no resting mode to reach.
     public func rest(as atRest: MicrophoneAtRest) {
         guard case .started(var started) = phase, started.atRest != atRest else { return }
         started.atRest = atRest
         phase = .started(started)
-        if !started.sessionIsOpen { rest() }
+        moves += 1
+        let move = moves
+        let asked = ContinuousClock.now
+        Task {
+            let outcome = await restOnceReadied()
+            reporting(.resting(RestingMove(to: atRest, waited: .now - asked, outcome: move == moves ? outcome : .superseded)))
+        }
+    }
+
+    /// Brings the microphone to its resting mode once the input a press would open is
+    /// readied. [LAW:single-enforcer] The one way `start` and a move of the resting mode reach
+    /// it, so neither launches on an input still being reached, which holds the main actor -
+    /// and with it the menu and every reading - until it is.
+    @discardableResult
+    private func restOnceReadied() async -> RestingMove.Outcome {
+        await readied()
+        guard case .started(let started) = phase else { return .stopped }
+        // A press opened during the wait holds the microphone, and its key-up is the next
+        // moment no session is open; resting here would take the press's session from it.
+        guard !started.sessionIsOpen else { return .leftForTheKeyUp }
+        rest()
+        return .reached
     }
 
     /// Waits until the microphone a press would open is readied. A device change during the
@@ -718,7 +751,7 @@ public final class AudioCapture {
         }
         phase = .started(started)
         // The answer `leftForTheKeyUp` promised, given now. [LAW:nothing-unseen]
-        if owed { reporting(DeviceReport(cause: .pressEndedOffTheDefault, answer: answer)) }
+        if owed { reporting(.device(DeviceReport(cause: .pressEndedOffTheDefault, answer: answer))) }
     }
 
     /// Books the end of a gap in capture. [LAW:single-enforcer] A device that came back is
@@ -818,7 +851,7 @@ public final class AudioCapture {
         // A notification posted before its input was let go can arrive after, and acting on
         // it would give up an engine running healthily on the input that replaced it.
         guard case .started(var started) = phase, preparation == preparations else {
-            reporting(DeviceReport(cause: .boundDeviceChanged, answer: .outdated))
+            reporting(.device(DeviceReport(cause: .boundDeviceChanged, answer: .outdated)))
             return
         }
         let answer: DeviceReport.Answer
@@ -834,7 +867,7 @@ public final class AudioCapture {
             answer = .readied
         }
         phase = .started(started)
-        reporting(DeviceReport(cause: .boundDeviceChanged, answer: answer))
+        reporting(.device(DeviceReport(cause: .boundDeviceChanged, answer: answer)))
     }
 
     /// The default input device changed - which device a press should open, not anything
@@ -854,7 +887,7 @@ public final class AudioCapture {
     /// `beginSession` deliberately records no failure.
     private func recover() {
         guard case .started(var started) = phase else {
-            reporting(DeviceReport(cause: .defaultInputChanged, answer: .outdated))
+            reporting(.device(DeviceReport(cause: .defaultInputChanged, answer: .outdated)))
             return
         }
         let answer: DeviceReport.Answer
@@ -891,7 +924,7 @@ public final class AudioCapture {
             answer = .launched(Self.outcome(of: started.engine))
         }
         phase = .started(started)
-        reporting(DeviceReport(cause: .defaultInputChanged, answer: answer))
+        reporting(.device(DeviceReport(cause: .defaultInputChanged, answer: answer)))
     }
 
     /// What a launch came to, read off the engine it left, by every path that launches on a
@@ -946,6 +979,52 @@ public final class AudioCapture {
         started.engine = .failed(error, since: .now, on: preparations)
         phase = .started(started)
     }
+}
+
+/// What capture tells about the microphone as it runs. [LAW:nothing-unseen] One edge for
+/// both, so a reader of either is reading every report capture makes.
+public enum CaptureReport: CustomStringConvertible {
+    case device(DeviceReport)
+    case resting(RestingMove)
+
+    public var description: String {
+        switch self {
+        case .device(let report): "device: \(report)"
+        case .resting(let move): "resting mode: \(move)"
+        }
+    }
+}
+
+/// A move of the resting mode `rest(as:)` was asked for, and what came of it once the
+/// input a press would open was readied.
+public struct RestingMove: CustomStringConvertible {
+    public enum Outcome: CustomStringConvertible {
+        /// The microphone was brought to the mode. Whether that opened it, closed it, or
+        /// failed to open it is what capture's `doing` says.
+        case reached
+        /// A press opened the microphone during the wait, and its key-up brings it to the mode.
+        case leftForTheKeyUp
+        /// Another move, or a restart, was asked for during the wait, and that one reports.
+        case superseded
+        /// Capture stopped during the wait, so there was no microphone to move.
+        case stopped
+
+        public var description: String {
+            switch self {
+            case .reached: "reached"
+            case .leftForTheKeyUp: "left for the key-up of a press that opened during the wait"
+            case .superseded: "superseded by a later move asked for during the wait"
+            case .stopped: "capture stopped during the wait"
+            }
+        }
+    }
+
+    public let to: MicrophoneAtRest
+    /// How long the move waited for the input a press would open to be readied.
+    public let waited: Duration
+    public let outcome: Outcome
+
+    public var description: String { "\(to) after waiting \(waited) for the input; \(outcome)" }
 }
 
 /// One report from CoreAudio about the microphone's device, and what capture did about it.
