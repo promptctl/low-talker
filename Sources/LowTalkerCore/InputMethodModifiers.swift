@@ -1,5 +1,6 @@
 import Dispatch
 import Identity
+import InputSource
 import Insertion
 import os
 
@@ -20,11 +21,18 @@ import os
 ///
 /// The input method tells a cursor arriving on the same port, since it is the one name its
 /// sandbox lets it reach the app on; that notice is no key, and goes to `cursorArrived`.
+///
+/// An input method whose process has ended tells nothing, and nothing but the app starts it
+/// again, so while the feed is open its process is kept running, and what becomes of it goes
+/// to `inputMethodProcess`. [LAW:no-silent-failure]
 public struct InputMethodModifiers: ModifierFeed {
     private let cursorArrived: @MainActor () -> Void
+    private let inputMethodProcess: @MainActor (InputMethodSupervisor.Event) -> Void
 
-    public init(cursorArrived: @escaping @MainActor () -> Void) {
+    public init(cursorArrived: @escaping @MainActor () -> Void,
+                inputMethodProcess: @escaping @MainActor (InputMethodSupervisor.Event) -> Void) {
         self.cursorArrived = cursorArrived
+        self.inputMethodProcess = inputMethodProcess
     }
 
     /// How often a held key is looked for in the session: how late, at most, a release the
@@ -135,8 +143,13 @@ public struct InputMethodModifiers: ModifierFeed {
                 }
             })
         installed.open = (port, handle)
+        // Kept running only once the port is hosted, so its first notice has somewhere to go.
+        let supervisor = InputMethodSupervisor(told: inputMethodProcess)
         // Closed here and now, so a hotkey rebuilt straight after hosts the name again.
-        return { installed.open = nil }
+        return {
+            installed.open = nil
+            supervisor.stop()
+        }
     }
 }
 

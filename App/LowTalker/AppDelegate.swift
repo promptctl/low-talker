@@ -180,10 +180,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let moved = now.settings(changedFrom: was).map { setting in
             switch setting {
             case .chords:
-                if let hotkey = listening?.hotkey {
-                    hotkey.listen(for: now.chords)
-                    if hotkey.isWatching { showHotkeyStatus(.listening(listeningStatus)) }
-                }
+                listening?.hotkey.listen(for: now.chords)
+                // Only a line that says how to press is rewritten: one that says why nothing is
+                // heard still says so. [LAW:no-silent-failure]
+                if case .listening = hotkeyStatus { showHotkeyStatus(.listening(listeningStatus)) }
                 return "chords \(Hotkey.named(in: now))"
             case .microphone:
                 capture.rest(as: now.microphone)
@@ -287,7 +287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard case .success(let config) = config else { preconditionFailure("a loop is adopted only once the config has been read") }
         // The input method tells each cursor it is given focus in, and the loop listening then
         // offers it what is held.
-        let hotkey = Hotkey(listeningFor: config) { [unowned self] in listening?.dictation.cursorArrived() }
+        let hotkey = Hotkey(listeningFor: config, cursorArrived: { [unowned self] in listening?.dictation.cursorArrived() },
+                            inputMethodProcess: { [unowned self] in show($0) })
         let dictation = Dictation(
             capture: capture,
             // A press asks the bench first: while a run holds the Neural Engine, the press is
@@ -320,9 +321,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }.mapError { LoopRefusal(stringLiteral: "\($0)") }
         }
-        switch hearing {
-        case .success: showHotkeyStatus(.listening(listeningStatus))
-        case .failure(let refusal): showHotkeyStatus(.off(refusal.reason))
+        // A hotkey that went up says how to press it once the input method's process is
+        // running, which is that process's event to tell; see `show(_:)`.
+        if case .failure(let refusal) = hearing { showHotkeyStatus(.off(refusal.reason)) }
+    }
+
+    /// The input method's process as the hotkey keeps it: the line says how to press only
+    /// while one is running, since a chord is heard through nothing else.
+    private func show(_ inputMethod: InputMethodSupervisor.Event) {
+        log.notice("input method: \(inputMethod, privacy: .public)")
+        switch inputMethod {
+        case .running: showHotkeyStatus(.listening(listeningStatus))
+        case .ended: showHotkeyStatus(.off("the input method ended; \(AppIdentity.displayName) is starting it again"))
+        case .notOpened(let reason, _):
+            showHotkeyStatus(.off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval)"))
         }
     }
 

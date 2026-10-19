@@ -53,6 +53,8 @@ let package = Package(
                 // The app's end of the hotkey port, which the input method tells the modifier
                 // keys to.
                 "Insertion",
+                // The input method whose process the hotkey keeps running while it hears through it.
+                "InputSource",
                 "CoreAudioCalls",
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "TOMLKit", package: "TOMLKit"),

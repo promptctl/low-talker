@@ -1,4 +1,5 @@
 import Dispatch
+import InputSource
 
 /// The hotkey for the life of the app: the modifier keys as the input method tells them, a
 /// detector reading them, and the presses it finds handed on by the main queue.
@@ -38,9 +39,15 @@ public final class Hotkey {
     }
 
     /// The app's hotkey: the chords `config` names, heard through the input method, which
-    /// also tells each cursor it is given focus in to `cursorArrived` while this is watching.
-    public convenience init(listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold, cursorArrived: @escaping @MainActor () -> Void) {
-        self.init(chords: config.chords, tapThreshold: tapThreshold, feed: InputMethodModifiers(cursorArrived: cursorArrived))
+    /// also tells each cursor it is given focus in to `cursorArrived` while this is watching,
+    /// and whose process is kept running meanwhile, told to `inputMethodProcess`.
+    public convenience init(
+        listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold,
+        cursorArrived: @escaping @MainActor () -> Void,
+        inputMethodProcess: @escaping @MainActor (InputMethodSupervisor.Event) -> Void
+    ) {
+        self.init(chords: config.chords, tapThreshold: tapThreshold,
+                  feed: InputMethodModifiers(cursorArrived: cursorArrived, inputMethodProcess: inputMethodProcess))
     }
 
     public var phase: HotkeyDetector.Phase { detector.phase }
