@@ -719,8 +719,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch press.outcome {
         case .session(let session):
             sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
-        case .usedAsModifier(let landed):
-            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so the press was not dictation; \(landed, privacy: .public) words inserted before; microphone: \(press.microphone, privacy: .public)")
+        case .usedAsModifier(let landed, let held):
+            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so nothing more of the press was inserted; \(landed, privacy: .public) words inserted before, \(held, privacy: .public) heard after them held; microphone: \(press.microphone, privacy: .public)")
         case .failed(let failed):
             reportFailure(failed, of: press)
         }

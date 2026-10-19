@@ -82,8 +82,9 @@ public final class Dictation {
         public enum Outcome: Sendable {
             case session(Session)
             /// The chord was a typed key's modifier, so nothing more of the press went in.
-            /// `landed` is how many of its words were committed while the chord was down.
-            case usedAsModifier(landed: Int)
+            /// `landed` is how many of its words were committed while the chord was down, and
+            /// `held` how many heard after them are held.
+            case usedAsModifier(landed: Int, held: Int)
             case failed(Failed)
         }
 
@@ -136,13 +137,6 @@ public final class Dictation {
             let since: Executor.Since
         }
 
-        /// What the press is heard through once its microphone is open: the decode, and the
-        /// capture's reading of what the press's audio already lacks.
-        struct Hearing {
-            let decode: Task<Decoded, Never>
-            let missing: @MainActor @Sendable () -> CapturedAudio.Loss?
-        }
-
         /// How the press ended. [LAW:types-are-the-program] A lapse ends the press with no
         /// key-up, and a chord that was a typed key's modifier with nothing to time from one,
         /// so "over" and "when the key came up" are not one optional.
@@ -165,8 +159,9 @@ public final class Dictation {
             var cursor = ConfirmedCursor()
             /// False once the press stops committing.
             var committing = true
-            /// Nil until the microphone is open, and for a press refused before it was.
-            var hearing: Hearing?
+            /// The capture's reading of what the press's audio already lacks: nil until the
+            /// microphone is open, and for a press refused before it was.
+            var missing: (@MainActor @Sendable () -> CapturedAudio.Loss?)?
             var performed: [Executor.Performed] = []
             var words = 0
         }
@@ -197,9 +192,9 @@ public final class Dictation {
             state.withLock { $0.heard }
         }
 
-        /// The microphone is open and the decode begun.
-        func hearing(_ decode: Task<Decoded, Never>, missing: @escaping @MainActor @Sendable () -> CapturedAudio.Loss?) {
-            state.withLock { $0.hearing = Hearing(decode: decode, missing: missing) }
+        /// The microphone is open, and `missing` reads what its audio already lacks.
+        func hearing(missing: @escaping @MainActor @Sendable () -> CapturedAudio.Loss?) {
+            state.withLock { $0.missing = missing }
         }
 
         func heard(_ partial: Partial) {
@@ -228,14 +223,14 @@ public final class Dictation {
         /// is a run, so the words held for the next run are never inserted on their own.
         ///
         /// While the key is down, audio the capture already knows is missing stops the
-        /// commits: what is confirmed from then on reads a fragment, and key-up reports the
-        /// loss with the words that landed before it. From key-up on, how the press ended
-        /// says. [LAW:no-silent-failure] An insert that fails stops nothing: its words are
-        /// held, and the next run carries them.
+        /// commits: what is confirmed from then on reads a fragment, which is still heard and
+        /// held at key-up with the loss beside it. From key-up on, how the press ended says.
+        /// [LAW:no-silent-failure] An insert that fails stops nothing: its words are held, and
+        /// the next run carries them.
         @MainActor func take() -> Run? {
             let missing = state.withLock { state -> (@MainActor @Sendable () -> CapturedAudio.Loss?)? in
                 switch state.ended {
-                case nil: state.hearing?.missing
+                case nil: state.missing
                 case .up, .stopped: nil
                 }
             }
@@ -272,16 +267,12 @@ public final class Dictation {
             state.withLock { ($0.performed, $0.words) }
         }
 
-        /// Nothing more is committed for this press, whatever is confirmed after this, and its
-        /// decode, which no one will read, stops: the engine goes back to whoever is waiting.
+        /// Nothing more is committed for this press, whatever is confirmed after this. Its
+        /// decode goes on to the end of its audio, and each pass is still shown: what it hears
+        /// past the commits is held. [LAW:no-silent-failure]
         func stop() {
-            let decode = state.withLock { state in
-                state.committing = false
-                return state.hearing?.decode
-            }
-            decode?.cancel()
+            state.withLock { $0.committing = false }
             wake.finish()
-            read.finish()
         }
 
         /// The press is over, its key up or stopped: what the press showed while it was open.
@@ -331,14 +322,33 @@ public final class Dictation {
         let committing: Task<InsertFailure?, Never>
     }
 
-    /// How a press that was heard ended.
+    /// How a press that was heard ended. [LAW:types-are-the-program] Where the words past its
+    /// commits go is the one thing an ending decides: the cursor, or the hold.
     private enum Ending: Sendable {
         /// The key came up at `keyUp`, by its event's stamp, and this loop was told `delivery`
         /// after it.
         case released(Context, keyUp: ContinuousClock.Instant, delivery: Duration)
+        case cut(Cut)
+    }
+
+    /// Why a press's words past its commits are held rather than inserted. Each leaves the
+    /// person something they must read before the words go in: a press the hotkey stopped
+    /// during, words said with a key typed into the app partway through, or audio with a
+    /// stretch of the speech missing. [LAW:no-silent-failure] Words inserted with that
+    /// unmarked could not be marked once they were in the person's editor.
+    private enum Cut: Sendable {
         case lapsed
         case usedAsModifier
         case lost(CapturedAudio.Loss)
+
+        /// What the hold tells the person beside the words.
+        var warning: String {
+            switch self {
+            case .lapsed: PressLapsed.warning
+            case .usedAsModifier: "WARNING: You typed a key while holding the dictation chord."
+            case .lost(let lost): SpeechLost.warning(lost)
+            }
+        }
     }
 
     /// A press that was heard, handed to the queue: how it ended, what it showed while it was
@@ -452,7 +462,7 @@ public final class Dictation {
                 let session: AudioCapture.StreamedSession
                 do throws(NoMicrophone) { session = capture.stream(try capture.beginSession(at: moment)) } catch { throw Failed(error) }
                 let decode = decode(session.audio, expecting: mode.vocabulary, into: streaming, releasing: hold)
-                streaming.hearing(decode) { [capture] in capture.missing(from: session) }
+                streaming.hearing { [capture] in capture.missing(from: session) }
                 press = .down(mode, Open(session: session, into: into, decode: decode, streaming: streaming, committing: committing))
                 // Each pass is shown on the main actor, where the press is read, until the
                 // decode is over or the press stops.
@@ -505,25 +515,24 @@ public final class Dictation {
                 let end = capture.endSession(down.session)
                 delivered = end.reading
                 // How the press ended, read once. [LAW:no-silent-failure] A hotkey that
-                // stopped and audio the capture could not stream whole each leave
-                // something this loop must not report as an utterance, and a chord used as a
-                // modifier leaves no utterance at all. Those are asked first: a press the
-                // hotkey stopped during says so rather than describing the clip it left
-                // behind, which was never the whole utterance anyway. A microphone that was
-                // not there at all was refused at key-down, so it never reaches here.
+                // stopped, a chord used as a modifier, and audio the capture could not stream
+                // whole each cut the press short. Those are asked first: a press the hotkey
+                // stopped during says so rather than describing the clip it left behind,
+                // which was never the whole utterance anyway. A microphone that was not there
+                // at all was refused at key-down, so it never reaches here.
                 let ended: Ending = switch (ending, released, end.lost) {
-                case (.usedAsModifier, _, _): .usedAsModifier
-                case (_, nil, _): .lapsed
+                case (.usedAsModifier, _, _): .cut(.usedAsModifier)
+                case (_, nil, _): .cut(.lapsed)
                 case (_, let released?, nil): .released(Context(press: released.kind, frontmostApp: down.into), keyUp: released.keyUp, delivery: told - released.keyUp)
-                case (_, _?, let lost?): .lost(lost)
+                case (_, _?, let lost?): .cut(.lost(lost))
                 }
-                // A press that will not be inserted commits nothing more and has no use for
-                // the rest of its decode. What it already committed stays: the person watched
+                // A press cut short commits nothing more, and its decode hears it to the end of
+                // its audio for the hold. What it already committed stays: the person watched
                 // it arrive. Stopped here on the main actor, where every run is taken, so a
                 // pass the ended audio lets the engine finish is never committed.
                 switch ended {
                 case .released: break
-                case .lapsed, .usedAsModifier, .lost: down.streaming.stop()
+                case .cut: down.streaming.stop()
                 }
                 heard = .success(Heard(ending: ended, duringPress: duringPress, decode: down.decode, streaming: down.streaming, committing: down.committing))
             }
@@ -661,46 +670,62 @@ public final class Dictation {
         }
     }
 
-    /// Waits for the press's commits and its decode, then inserts what was heard
-    /// and not yet committed. A press that will not be inserted is reported in its turn
-    /// without waiting on its decode, which was told to stop and may still be waiting for
-    /// the model to load.
+    /// Waits for the press's commits and its decode, then places what was heard and not yet
+    /// committed: at the cursor for a press the speaker released, and in the hold for one cut
+    /// short. Every press waits for its decode, the model's load included, since what it heard
+    /// is what the hold keeps.
     private func hear(_ heard: Result<Heard, Failed>) async throws(Failed) -> Report.Outcome {
         let heard = try heard.get()
         let unplaced = await heard.committing.value
+        let decoded = await heard.decode.value
         let landed = heard.streaming.landed
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
         // words are already at the cursor.
         func stopped(_ cause: any Accounted) -> Failed { Failed(PressStopped(landed: landed.words, cause: cause)) }
-        let context: Context
-        let keyUp: ContinuousClock.Instant
-        let delivery: Duration
-        switch (heard.ending, unplaced) {
-        case (.released(let released, let up, let late), _): (context, keyUp, delivery) = (released, up, late)
-        // [LAW:no-silent-failure] The report names what left the press's words unplaced
-        // first: a refused commit came before whatever the key-up found.
-        case (.lapsed, let unplaced?), (.usedAsModifier, let unplaced?), (.lost, let unplaced?): throw stopped(unplaced)
-        case (.lapsed, nil): throw Failed(PressLapsed(landed: landed.words))
-        case (.usedAsModifier, nil): return .usedAsModifier(landed: landed.words)
-        case (.lost(let lost), nil): throw Failed(SpeechLost(lost: lost, landed: landed.words))
+        switch heard.ending {
+        case .released(let context, let keyUp, let delivery):
+            let transcription: Transcription
+            switch decoded.transcription {
+            case .success(let decodedTranscription): transcription = decodedTranscription
+            case .failure(let failed): throw stopped(failed.failure)
+            }
+            let placed: Placed
+            do throws(InsertFailure) {
+                placed = try await place(heard.streaming.rest(of: transcription.transcript), following: landed.performed.last, since: .keyUp(keyUp))
+            } catch { throw stopped(error) }
+            // A rest of nothing leaves what the commits could not place where it was.
+            if placed.performed == nil, let unplaced { throw stopped(unplaced) }
+            return .session(Session(context: context, transcription: transcription, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 }))
+        case .cut(let cut):
+            // What the decode heard past the commits, and what kept it from reading them. Nothing
+            // spoken is nothing more to hold rather than a failure: a chord used as a modifier
+            // with nothing said is a typed key and nothing else.
+            let rest: Transcript
+            let unread: (any Accounted)?
+            switch decoded.transcription {
+            case .success(let transcription): (rest, unread) = (heard.streaming.rest(of: transcription.transcript), nil)
+            case .failure(let failed):
+                rest = Transcript(words: [])
+                if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = failed.failure }
+            }
+            let held = rest.isBlank ? 0 : rest.words.count
+            // A cut that heard nothing past the commits leaves the hold's warning on the words
+            // it already holds, which that warning is about.
+            if held > 0 { hold.heldBack(rest, warning: cut.warning) }
+            // [LAW:no-silent-failure] The report names what left words unplaced first: a refused
+            // commit came before the decode's end, and either before the cut was known.
+            if let cause = unplaced ?? unread { throw stopped(cause) }
+            switch cut {
+            case .lapsed: throw Failed(PressLapsed(landed: landed.words, held: held))
+            case .usedAsModifier: return .usedAsModifier(landed: landed.words, held: held)
+            case .lost(let lost): throw Failed(SpeechLost(lost: lost, landed: landed.words, held: held))
+            }
         }
-        let decoded = await heard.decode.value
-        let transcription: Transcription
-        switch decoded.transcription {
-        case .success(let decodedTranscription): transcription = decodedTranscription
-        case .failure(let failed): throw stopped(failed.failure)
-        }
-        let placed: Placed
-        do throws(InsertFailure) {
-            placed = try await place(heard.streaming.rest(of: transcription.transcript), following: landed.performed.last, since: .keyUp(keyUp))
-        } catch { throw stopped(error) }
-        // A rest of nothing leaves what the commits could not place where it was.
-        if placed.performed == nil, let unplaced { throw stopped(unplaced) }
-        return .session(Session(context: context, transcription: transcription, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 }))
     }
 }
 
-/// A press the hotkey stopped hearing partway through, reported instead of inserted.
+/// A press the hotkey stopped hearing partway through, its words past the commits held
+/// rather than inserted.
 ///
 /// The hotkey stopped while the key was down - the app rebuilding its loop, or quitting -
 /// so what was captured runs from the press to the stop rather than to the release, and
@@ -709,31 +734,43 @@ public final class Dictation {
 /// [LAW:no-silent-failure] Nothing more is inserted once it stops. Half a sentence inserted
 /// at the end arrives unmarked as half, and it cannot be marked: the destination is the
 /// user's editor, not this app's, and once the words are in it nothing here can say which
-/// ones were missing. Words committed while the press was open stay, and this says how
-/// many: the person watched them arrive, so they are not unmarked. A press that says it
-/// was cut off is a thing they can act on by saying the rest again.
+/// ones were missing. So what was heard is held, beside `warning`, where the person reads
+/// it before it goes in. Words committed while the press was open stay, and this says how
+/// many: the person watched them arrive, so they are not unmarked.
 public struct PressLapsed: WordFree {
     /// The words committed before it stopped.
     public let landed: Int
+    /// The words heard after them, which are held.
+    public let held: Int
 
-    public var description: String { "WARNING: The hotkey stopped listening during your dictation. \(ignored(after: landed))" }
+    /// What happened, which the hold shows beside the words. [LAW:one-source-of-truth]
+    static let warning = "WARNING: The hotkey stopped listening during your dictation."
+
+    public var description: String { "\(Self.warning) \(kept(landed: landed, held: held))" }
 }
 
-/// A press whose audio the capture could not hand over whole, reported instead of inserted.
+/// A press whose audio the capture could not hand over whole, its words past the commits
+/// held rather than inserted.
 ///
 /// Every door leaves the same thing in the user's editor, which is why they arrive here
 /// as one failure rather than several. Which doors there are is `CapturedAudio.Loss`'s to
 /// say, and `lost` carries the ones this press took. [LAW:one-source-of-truth]
 ///
-/// [LAW:no-silent-failure] Nothing more is inserted once it is known, for the reason
-/// `PressLapsed` gives: what a fragment transcribes to is a sentence, just not the one
-/// that was said. Words committed while the press was open stay, and this says how many.
+/// [LAW:no-silent-failure] The audio on both sides of a gap is heard, and nothing more is
+/// inserted once the gap is known, for the reason `PressLapsed` gives: what a fragment
+/// transcribes to is a sentence, just not the one that was said. It is held beside the
+/// loss. Words committed while the press was open stay, and this says how many.
 public struct SpeechLost: WordFree {
     public let lost: CapturedAudio.Loss
     /// The words committed before it was known.
     public let landed: Int
+    /// The words heard after them, which are held.
+    public let held: Int
 
-    public var description: String { "WARNING: \(lost). \(ignored(after: landed))" }
+    /// What happened, which the hold shows beside the words.
+    static func warning(_ lost: CapturedAudio.Loss) -> String { "WARNING: \(lost)." }
+
+    public var description: String { "\(Self.warning(lost)) \(kept(landed: landed, held: held))" }
 }
 
 /// A press that stopped after it began: an insert refused, the engine failed, or what was
@@ -785,7 +822,12 @@ private func insertedBefore(_ landed: Int) -> String {
     landed == 0 ? "" : " \(landed) words of your dictation were inserted before it; the rest were not."
 }
 
-/// What became of a press's words, after however many had landed.
-private func ignored(after landed: Int) -> String {
-    landed == 0 ? "Your dictation was ignored." : "The \(landed) words already inserted stay; the rest of your dictation was ignored."
+/// What became of a cut press's words: how many landed, and how many heard after them are held.
+private func kept(landed: Int, held: Int) -> String {
+    switch (landed, held) {
+    case (0, 0): "No words were heard in it."
+    case (0, _): "Its \(held) words are held."
+    case (_, 0): "The \(landed) words already inserted stay, and no more were heard."
+    case (_, _): "The \(landed) words already inserted stay, and the \(held) heard after them are held."
+    }
 }
