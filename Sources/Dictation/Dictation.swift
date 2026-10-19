@@ -332,10 +332,10 @@ public final class Dictation {
     }
 
     /// Why a press's words past its commits are held rather than inserted. Each leaves the
-    /// person something they must read before the words go in: a press the hotkey stopped
-    /// during, words said with a key typed into the app partway through, or audio with a
-    /// stretch of the speech missing. [LAW:no-silent-failure] Words inserted with that
-    /// unmarked could not be marked once they were in the person's editor.
+    /// person something to see before the next insert carries the words: a press the hotkey
+    /// stopped during, words said with a key typed into the app partway through, or audio
+    /// with a stretch of the speech missing. [LAW:no-silent-failure] Words inserted at once
+    /// would be in the person's editor before anything could say what they are.
     private enum Cut: Sendable {
         case lapsed
         case usedAsModifier
@@ -734,8 +734,8 @@ public final class Dictation {
 /// [LAW:no-silent-failure] Nothing more is inserted once it stops. Half a sentence inserted
 /// at the end arrives unmarked as half, and it cannot be marked: the destination is the
 /// user's editor, not this app's, and once the words are in it nothing here can say which
-/// ones were missing. So what was heard is held, beside `warning`, where the person reads
-/// it before it goes in. Words committed while the press was open stay, and this says how
+/// ones were missing. So what was heard is held, shown beside `warning`, and the next insert
+/// carries it unless the person lets it go first. Words committed while the press was open stay, and this says how
 /// many: the person watched them arrive, so they are not unmarked.
 public struct PressLapsed: WordFree {
     /// The words committed before it stopped.

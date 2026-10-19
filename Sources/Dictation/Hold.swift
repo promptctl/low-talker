@@ -1,7 +1,7 @@
 import Insertion
 import LowTalkerCore
 
-/// What no cursor took, and what the latest try to place it was told.
+/// What no cursor took, and why the latest of it was held.
 ///
 /// [LAW:types-are-the-program] Two cases because a landing settles one and not the other.
 public enum Held: Sendable, Equatable {
