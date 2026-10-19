@@ -63,8 +63,8 @@ public struct Quiet: Hashable, Sendable {
     }
 }
 
-/// The sounds the gate refused as too brief to be speech, a click, a keystroke or a door, let
-/// go with the quiet around them.
+/// The bursts of sound the gate refused as too brief to be speech, a click, a door or a run of
+/// keystrokes, let go with the quiet around them.
 public struct Transients: Hashable, Sendable {
     public let count: Int
     /// Seconds the longest of them sounded without a break.

@@ -38,7 +38,7 @@ actor Utterance {
     /// (`aboveRoom`).
     static let audible: Float = 0.01
     /// A clip sounds when its peak stands within this factor of the loudest speech
-    /// so far, or of its own: 16, 24 dB, one speaker's spread from a
+    /// so far, of the run it may carry on, or of its own: 16, 24 dB, one speaker's spread from a
     /// stressed vowel to a soft consonant per tenth of a second. A ratio does not move when the level does,
     /// so a soft speaker or a low-gain microphone is cut into the same speech and
     /// quiet as a loud one. On the bench fixtures it names the same last clip of
@@ -124,15 +124,20 @@ actor Utterance {
         }
 
         /// The burst carried on through a clip that did not sound, which breaks its run.
-        var broken: Burst { Burst(through: through, run: 0, runPeak: 0, longest: longest, speechPeak: speechPeak) }
+        var broken: Burst {
+            var next = self
+            (next.run, next.runPeak) = (0, 0)
+            return next
+        }
     }
     /// The last burst, until quiet past its hangover is let go.
     private var burst: Burst?
     /// The loudest clip peak heard: what an utterance with no speech in it is refused with.
     private var loudestHeard: Float = 0
-    /// The loudest window of a run that sounded as long as a syllable: with its own peak,
-    /// what a clip is judged against. A click is never a syllable, so it sets no range, and a
-    /// soft speaker after one, or in the same burst, is heard.
+    /// The loudest window of a run that sounded as long as a syllable: with the run a clip
+    /// may carry on and its own peak, what the clip is judged against. A click's run ends
+    /// short of a syllable, so a click sets no range unless nothing breaks it from the speech
+    /// after it, and a soft speaker after one is heard.
     private var loudestSpeech: Float = 0
     /// The room readings of the last `roomSpan` before the frame being judged, the newest last.
     private var recent: [Float] = []
@@ -170,7 +175,7 @@ actor Utterance {
         samples += clip.samples
         let peak = clip.peak
         loudestHeard = max(loudestHeard, peak)
-        let loudest = max(loudestSpeech, peak)
+        let loudest = max(loudestSpeech, burst?.runPeak ?? 0, peak)
         // A room reading is a whole frame that heard something: digital silence is no
         // microphone, whose own noise is never exactly zero, and a frame the end cut short
         // is no tenth of a second.

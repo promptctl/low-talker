@@ -319,6 +319,22 @@ import Testing
         #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
     }
 
+    /// A soft speaker near the floor is heard though a syllable runs from a frame over the floor
+    /// into one under it: the run carries the range across the frames, so the second frame is
+    /// judged against the first, not against itself alone.
+    @Test func aRunAtTheFloorCarriesItsRangeAcrossFrames() async throws {
+        let utterance = Utterance()
+        let clips = AsyncStream<AudioClip> { continuation in
+            continuation.yield(Self.quiet(16_000))
+            continuation.yield(AudioClip(samples: Self.quiet(960).samples + Array(repeating: 0.012, count: 640)))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
+            continuation.finish()
+        }
+        try await utterance.fill(from: clips)
+        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 640 + 1_600 + Utterance.hangover)
+    }
+
     /// A click in the same burst as speech sets no range either: the speech is judged against
     /// its own loudest syllable, so a softer word after it, within range of the speaker but not
     /// of the click, is speech.
