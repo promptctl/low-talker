@@ -180,7 +180,10 @@ public struct InFront: Sendable, CustomStringConvertible {
 /// commit is in flight does not crash or hang IMK. Against 15,991 reactivations landing
 /// inside an accepted commit's round trip, one of 3,471 accepted words never reached the
 /// app - a loss neither this process nor IMK can see, since an off-main commit returns
-/// before the app has taken the words. No word arrived doubled or out of order.
+/// before the app has taken the words. No word arrived doubled or out of order. The
+/// document-access read can land inside the previous insert's round trip the same way, and
+/// whether a read loses words as a reactivation did is not measured; the overlap ends when
+/// commits move onto the main actor (low-imk-rules-w3g.3ky).
 ///
 /// That one loss in 3,471 is left unmitigated, for the reason `Committer` already gives
 /// for the hung-app case: there is no moment at which this process can ask whether the
