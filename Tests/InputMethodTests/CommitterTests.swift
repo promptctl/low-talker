@@ -34,7 +34,7 @@ import Testing
 
         // Never asked here: whether a cursor takes words is decided before it reaches the
         // committer, by `FocusedClient`.
-        @MainActor var givesDocumentAccess: Bool { true }
+        @MainActor var field: FieldAnswer { .documentAccess(caretLine: nil) }
 
         func release() { held?.signal() }
         var committed: [String] { lock.withLock { landed } }

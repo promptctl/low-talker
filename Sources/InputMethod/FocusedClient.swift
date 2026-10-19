@@ -24,15 +24,44 @@ public protocol TextCursor: AnyObject, Sendable {
     /// its constructor establishes rather than leaving every reader of this to ask again.
     /// [LAW:parse-dont-validate]
     var application: String { get }
-    /// Whether the client answers that it gives document access, which is the client's own
-    /// statement that a text field has focus in it.
+    /// What the client answers about the text field behind it.
     ///
     /// Read from the client each time it is asked and never kept, because focus moves
     /// between fields and page bodies in ways the text input system does not always report.
     /// On the main actor, since it is a call on the client (IMK rule 4).
-    @MainActor var givesDocumentAccess: Bool { get }
+    @MainActor var field: FieldAnswer { get }
     /// Commits `text` at the insertion point, taking nothing away.
     func commit(_ text: String)
+}
+
+/// What a client answers about the text field words committed into it would go to.
+public enum FieldAnswer: Sendable, Equatable {
+    /// It gives no document access: by its own word, no text field has focus in it.
+    case noDocumentAccess
+    /// It gives document access, and its caret's line rectangle is here, in screen
+    /// coordinates, or nowhere it reported.
+    case documentAccess(caretLine: CGRect?)
+
+    /// Whether words committed into this client go into a field on one of `screens`.
+    ///
+    /// A caret line on no screen belongs to a field in no window a person can see: the
+    /// Finder's desktop and file lists, and the Open panel's file list, give document
+    /// access to a type-select buffer whose line is its own local coordinates, centered
+    /// below the bottom edge of the main display (measured on studious,
+    /// low-reliability-z2z.anp). Judged by the line's center, because that buffer's line
+    /// reaches 1 point up onto the display. A display arranged directly below the main one's
+    /// left edge contains that center, and there the buffer still takes words.
+    ///
+    /// A client that reports no line is taken: nothing it said places the caret anywhere,
+    /// and the clients seen reporting none were real fields between activating and their
+    /// first answer.
+    func isAField(on screens: [CGRect]) -> Bool {
+        switch self {
+        case .noDocumentAccess: false
+        case .documentAccess(caretLine: nil): true
+        case .documentAccess(caretLine: let line?): screens.contains { $0.contains(CGPoint(x: line.midX, y: line.midY)) }
+        }
+    }
 }
 
 /// The client the text input system has given focus to, and the one thing in this process
@@ -89,8 +118,9 @@ public final class FocusedClient {
         focus = focus?.application == application ? nil : focus
     }
 
-    /// The cursor words go to, provided it is in the app that is actually in front, or the
-    /// refusal that says why there is none.
+    /// What an insert sees on the main actor: the cursor words go to, provided it is in the
+    /// app that is actually in front and its client is a text field, or the refusal that says
+    /// why there is none, with the facts that decided it.
     ///
     /// Only the decision: the commit is `Committer`'s, off this actor, and what the answer
     /// claims once it is made is said there.
@@ -105,61 +135,75 @@ public final class FocusedClient {
     /// reading, and it is here because committing into a window the person has left is the
     /// one outcome worse than refusing.
     ///
-    /// Which app is in front arrives as a value rather than being read here, so the whole
-    /// of this decision is testable without a window server and the one reading of the
-    /// workspace happens where the other effects are. [LAW:effects-at-boundaries]
-    ///
-    /// `secureInputIsOn` is read at the same boundary and asked first: while any app holds
-    /// Secure Event Input macOS hands no input method a client, and a cursor still held from
-    /// before it came on is one the text input system has stopped routing to - so no commit
-    /// is attempted and the refusal names the thing to fix. [LAW:no-silent-failure]
+    /// Which app is in front, which app holds secure input and where the screens are arrive
+    /// as values rather than being read here, so the whole of this decision is testable
+    /// without a window server and the one reading of the workspace happens where the other
+    /// effects are. [LAW:effects-at-boundaries]
     ///
     /// First, the app in front has to be one `destination` admits: words that follow a
     /// dictation's first go only to the app those went to, so a person who moved on mid-press
     /// is refused rather than typed into, and told that they moved - whatever the app they
     /// moved to holds, which is not where the words were going anyway.
     ///
-    /// Last, the cursor has to answer that it gives document access. Every app hands the
-    /// input method a client, a window with no field focused included, and what is committed
-    /// into such a client goes nowhere while the commit returns as if it landed. So the
-    /// client's own answer is asked, and only of the one cursor the words would go to.
-    /// [LAW:no-silent-failure]
-    func cursor(for destination: Destination, whileInFrontIs frontmost: String?, secureInputIsOn: Bool) -> Result<any TextCursor, Refusal> {
-        guard destination.admits(frontmost) else { return .failure(.dictationIsInAnotherApp) }
-        guard !secureInputIsOn else { return .failure(.secureInputIsOn) }
-        guard let focus else { return .failure(.noTextFieldHasFocus) }
-        guard focus.application == frontmost else { return .failure(.cursorIsInAnotherApp) }
-        guard focus.givesDocumentAccess else { return .failure(.noTextFieldHasFocus) }
-        return .success(focus)
-    }
-
-    /// The decision for an insert, with the facts it was made from, in one turn on this
-    /// actor, so the insert's log line names what the decision saw rather than reading it
-    /// again. [LAW:one-source-of-truth]
-    public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?) -> InFront {
-        InFront(frontmost: frontmost, secureInputHolder: holder, cursorApplication: focus?.application,
-                cursor: cursor(for: destination, whileInFrontIs: frontmost, secureInputIsOn: holder != nil))
+    /// Then secure input: while any app holds Secure Event Input macOS hands no input method
+    /// a client, and a cursor still held from before it came on is one the text input system
+    /// has stopped routing to - so no commit is attempted and the refusal names the thing to
+    /// fix. [LAW:no-silent-failure]
+    ///
+    /// Last, the cursor's client has to answer that a text field is behind it. Every app
+    /// hands the input method a client, a window with no field focused included, and what is
+    /// committed into such a client goes nowhere while the commit returns as if it landed.
+    /// So the client's own answer is asked, once and only of the one cursor the words would
+    /// go to, and the log line names that answer rather than asking again.
+    /// [LAW:no-silent-failure] [LAW:one-source-of-truth]
+    public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?,
+                        screens: [CGRect]) -> InFront {
+        func seen(_ field: FieldAnswer?, _ cursor: Result<any TextCursor, Refusal>) -> InFront {
+            InFront(frontmost: frontmost, secureInputHolder: holder, cursorApplication: self.focus?.application, field: field, cursor: cursor)
+        }
+        guard destination.admits(frontmost) else { return seen(nil, .failure(.dictationIsInAnotherApp)) }
+        guard holder == nil else { return seen(nil, .failure(.secureInputIsOn)) }
+        guard let focus else { return seen(nil, .failure(.noTextFieldHasFocus)) }
+        guard focus.application == frontmost else { return seen(nil, .failure(.cursorIsInAnotherApp)) }
+        let field = focus.field
+        return seen(field, field.isAField(on: screens) ? .success(focus) : .failure(.noTextFieldHasFocus))
     }
 }
 
 /// What an insert saw on the main actor: the app in front, the app holding secure input,
-/// the cursor held, and the decision made from them.
+/// the cursor held, what its client answered about its field, and the decision made from
+/// them.
 ///
 /// The app in front is named because the refusal that matters most is the one where it is
 /// not the app holding the cursor, and a line saying only the outcome leaves a reader with
-/// the question it was written to answer. The cursor held is named because it is what tells
-/// a no-text-field refusal with no client from one whose client in front gave no document
-/// access. [LAW:no-silent-failure]
+/// the question it was written to answer. The cursor held and its client's answer are named
+/// because they tell the three ways into a no-text-field refusal apart: no client, a client
+/// giving no document access, and a caret on no screen. A taken insert names where its
+/// caret was too. [LAW:no-silent-failure] [LAW:nothing-unseen]
 public struct InFront: Sendable, CustomStringConvertible {
     let frontmost: String?
     let secureInputHolder: String?
     let cursorApplication: String?
+    /// Asked only of the cursor the words would go to, so absent for every refusal decided
+    /// before it.
+    let field: FieldAnswer?
     public let cursor: Result<any TextCursor, Refusal>
 
     public var description: String {
         "with \(frontmost ?? "nothing") in front and "
             + (cursorApplication.map { "the cursor in \($0)" } ?? "no cursor")
+            + (field.map(said) ?? "")
             + (secureInputHolder.map { ", secure input held by \($0)" } ?? "")
+    }
+
+    /// A client giving document access is refused only for where its caret is.
+    private func said(_ field: FieldAnswer) -> String {
+        switch (field, cursor) {
+        case (.noDocumentAccess, _): ", which gives no document access"
+        case (.documentAccess(caretLine: nil), _): ", which reports no caret"
+        case (.documentAccess(caretLine: let line?), .success): ", its caret line at \(line)"
+        case (.documentAccess(caretLine: let line?), .failure): ", its caret line at \(line), on no screen"
+        }
     }
 }
 
@@ -172,16 +216,16 @@ public struct InFront: Sendable, CustomStringConvertible {
 ///
 /// [LAW:no-ambient-temporal-coupling] exception: `@unchecked`, because `IMKTextInput` is a
 /// proxy the language cannot see into. This type calls it three ways: the name once, on the
-/// main thread, as the cursor is made; document access on the main actor, at each insert;
-/// and every commit on its app's serial queue in `Committer`.
+/// main thread, as the cursor is made; its field on the main actor, at each insert; and
+/// every commit on its app's serial queue in `Committer`.
 /// Measured on low-input-method-s71.c7d: committed from there, the words reach the app, in
 /// order, and the main thread stays free. Measured on low-input-method-s71.03j: the main
 /// thread making a new cursor over the same client, by a reactivation, at the instant a
 /// commit is in flight does not crash or hang IMK. Against 15,991 reactivations landing
 /// inside an accepted commit's round trip, one of 3,471 accepted words never reached the
 /// app - a loss neither this process nor IMK can see, since an off-main commit returns
-/// before the app has taken the words. No word arrived doubled or out of order. The
-/// document-access read can land inside the previous insert's round trip the same way, and
+/// before the app has taken the words. No word arrived doubled or out of order. The field
+/// read can land inside the previous insert's round trip the same way, and
 /// whether a read loses words as a reactivation did is not measured; the overlap ends when
 /// commits move onto the main actor (low-imk-rules-w3g.3ky).
 ///
@@ -212,8 +256,15 @@ final class Client: TextCursor, @unchecked Sendable {
         self.application = application
     }
 
-    @MainActor var givesDocumentAccess: Bool {
-        client.supportsProperty(TSMDocumentPropertyTag(kTSMDocumentSupportDocumentAccessPropertyTag))
+    /// The line is asked for only once document access is given, so a client with no field
+    /// costs the one call. It comes back as the line at the insertion point whatever index is
+    /// asked: Finder's buffer holding 19 characters answered x 108, not index 0's 5. A client
+    /// that reports no line leaves the rectangle empty. [LAW:parse-dont-validate]
+    @MainActor var field: FieldAnswer {
+        guard client.supportsProperty(TSMDocumentPropertyTag(kTSMDocumentSupportDocumentAccessPropertyTag)) else { return .noDocumentAccess }
+        var line = NSRect.zero
+        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &line)
+        return .documentAccess(caretLine: line.isEmpty ? nil : line)
     }
 
     func commit(_ text: String) {
