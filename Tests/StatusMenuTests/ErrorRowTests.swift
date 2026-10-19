@@ -30,6 +30,17 @@ import Testing
         }
     }
 
+    @Test func theRowCarriesTheWarningSignInItsOwnColours() throws {
+        try withScratch { pasteboard in
+            let sign = try #require(ErrorRow("Model: it did not load", copyingTo: pasteboard) { _ in }.image)
+            // A menu draws a template image, or a sign in one colour, in its text colour, as
+            // plain as the rows around it.
+            #expect(!sign.isTemplate)
+            #expect(sign.symbolConfiguration == .preferringMulticolor())
+            #expect(sign.accessibilityDescription == "Error")
+        }
+    }
+
     /// A menu disables any item nothing answers the click of.
     @Test func aMenuEnablesTheRow() {
         // A menu asks the application who answers each item, and with no application it
