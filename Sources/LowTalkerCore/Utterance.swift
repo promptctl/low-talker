@@ -52,9 +52,8 @@ actor Utterance {
     /// go no clip the range alone called speech; at 5 the softest begins to lose some.
     static let aboveRoom: Float = 3
     /// How far back the room's noise floor is read: long enough that its quietest frame
-    /// is a pause between words rather than the softest of them, and short enough that
-    /// digital silence a device opened on stops standing for the room soon after the
-    /// room is heard.
+    /// is a pause between words rather than the softest of them, and short enough that a
+    /// room grown louder is soon the room again.
     static let roomSpan: TimeInterval = 3
     /// Audio kept past the last clip with speech in it, so a word's soft tail rides
     /// with the word. Silence to the encoder either way, so it costs the pass nothing.
@@ -77,7 +76,7 @@ actor Utterance {
     /// The loudest clip peak so far: what every clip is judged against, and what an
     /// utterance that never reached the floor is refused with.
     private var loudest: Float = 0
-    /// The peaks of the last `roomSpan` of frames before the one being judged, the newest last.
+    /// The room readings of the last `roomSpan` before the frame being judged, the newest last.
     private var recent: [Float] = []
     private static let roomFrames = Int((roomSpan / frame).rounded())
     private var ended = false
@@ -113,9 +112,13 @@ actor Utterance {
         samples += clip.samples
         let peak = clip.peak
         loudest = max(loudest, peak)
-        // The room: the quietest of this frame and those of the last `roomSpan` before it.
+        // A room reading is a whole frame that heard something: digital silence is no
+        // microphone, whose own noise is never exactly zero, and a frame the end cut short
+        // is no tenth of a second.
+        let reading = peak > 0 && clip.samples.count == Self.frameCount ? [peak] : []
+        // The room: the quietest of this frame and the readings of the last `roomSpan` before it.
         let room = recent.reduce(peak, min)
-        recent = Array((recent + [peak]).suffix(Self.roomFrames))
+        recent = Array((recent + reading).suffix(Self.roomFrames))
         // The softest a sample of speech may be: within range of the loudest, and above
         // the room too unless it reaches the audible floor.
         let softest = max(loudest / Self.dynamicRange, min(Self.audible, room * Self.aboveRoom))
@@ -125,7 +128,7 @@ actor Utterance {
         let speech = loudest >= Self.audible && peak >= softest
         // [LAW:nothing-unseen] What the room refused that the range alone would have kept.
         let refused = loudest >= Self.audible && peak >= loudest / Self.dynamicRange && !speech
-        timeline.heard(peak, refusedAsRoom: refused ? clip.samples.count : 0)
+        timeline.heard(reading, refusedAsRoom: refused ? clip.samples.count : 0)
         // Where the audio kept must resume: the lead-in before the clip's first sample
         // of speech when the clip is speech, the lead-in before its end when it is not,
         // since the next clip may open on speech.
@@ -199,7 +202,7 @@ struct Timeline: Sendable {
     /// Samples let go, by the kept sample they were let go before: quiet let go at one
     /// place across many clips is one gap.
     private var gaps: [Int: Int] = [:]
-    /// The peak of the quietest frame judged, none before one is.
+    /// The quietest room reading, the least room any frame was judged against; none before one is read.
     private(set) var room: Float?
     /// Samples within range of the loudest that stood too near the room to be speech.
     private var refusedAsRoom = 0
@@ -209,8 +212,8 @@ struct Timeline: Sendable {
         AudioClip.duration(for: gaps.values.reduce(0, +))
     }
 
-    mutating func heard(_ peak: Float, refusedAsRoom refused: Int) {
-        room = min(room ?? peak, peak)
+    mutating func heard(_ reading: [Float], refusedAsRoom refused: Int) {
+        room = ([room].compactMap { $0 } + reading).min()
         refusedAsRoom += refused
     }
 

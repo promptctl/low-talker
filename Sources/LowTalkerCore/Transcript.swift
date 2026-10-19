@@ -10,8 +10,8 @@ public struct Transcript: Hashable, Codable, Sendable {
     /// Seconds of quiet no pass was handed, before the speech and between it: heard as
     /// nothing, while the words are still timed in the audio as it was sent.
     public let quiet: TimeInterval
-    /// The peak of the quietest tenth of a second heard, the room the quiet was judged
-    /// against; none for a transcript no audio was judged for.
+    /// The peak of the quietest tenth of a second heard, digital silence aside: the least
+    /// room the quiet was judged against. None when no room was heard.
     public let room: Float?
     /// Seconds within range of the loudest that stood too near the room to be speech.
     public let refusedAsRoom: TimeInterval
