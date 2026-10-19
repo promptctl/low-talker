@@ -1154,18 +1154,24 @@ private struct Authorized: MicrophoneAuthority {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
         // Not started is its own answer, and not the same one as "shut between presses".
-        #expect(capture.doing == "not being captured")
+        #expect("\(capture.doing)" == "not being captured")
 
         try capture.start(grant, atRest: .open)
-        #expect(capture.doing == "\(MicrophoneAtRest.open)")
+        #expect("\(capture.doing)" == "\(MicrophoneAtRest.open)")
 
         hardware.engines[0].onFailure(NoDevice())
-        let dead = capture.doing
+        let dead = "\(capture.doing)"
         #expect(dead != "\(MicrophoneAtRest.open)")
         // Still says which mode the run is in - the user's arrangement did not change - and
         // now says the device is not keeping to it, in the failure's own words.
         #expect(dead.contains("\(MicrophoneAtRest.open)"))
         #expect(dead.contains("\(NoDevice())"))
+        // And it reads as stopped, which is what makes the menu's line one a click copies.
+        guard case .stopped(.open, let error) = capture.doing else {
+            Issue.record("read as \(capture.doing)")
+            return
+        }
+        #expect(error is NoDevice)
     }
 
     /// What the mode promises after the device has gone: it comes back by itself. Under
@@ -1193,7 +1199,7 @@ private struct Authorized: MicrophoneAuthority {
         #expect(capture.outages.total > .zero)
         #expect(capture.deviceChanges == 0)
         // And the surface stops saying it stopped, without anyone having pressed anything.
-        #expect(capture.doing == "\(MicrophoneAtRest.open)")
+        #expect("\(capture.doing)" == "\(MicrophoneAtRest.open)")
     }
 
     /// The key-up hands the microphone back to its resting state, and under `open` that
@@ -1217,7 +1223,7 @@ private struct Authorized: MicrophoneAuthority {
         #expect(try capture.endSession(session) == .partial(AudioClip(samples: [1, 2]), lost: loss(unopened: true)))
         #expect(failure(of: capture, as: NoDevice.self) == NoDevice())
         #expect(hardware.engines.count == 1)
-        #expect(capture.doing.contains("\(NoDevice())"))
+        #expect("\(capture.doing)".contains("\(NoDevice())"))
     }
 
     // MARK: - what a press was missing

@@ -16,6 +16,8 @@ LowTalker lives in the menu bar and has no window to keep open. The default chor
 
 The text goes in wherever the cursor is, in any app that accepts typing: TextEdit, Safari, Chrome, iTerm2 and VS Code have all been checked. It is not inserted into password fields or other fields that macOS protects with Secure Event Input.
 
+When a dictation, the model, the hotkey, the microphone, the server or a config save fails, the menu says why. Click that line to copy its full text.
+
 ## Install
 
 You need macOS 15 or later.

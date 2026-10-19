@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "Identity", targets: ["Identity"]),
         .library(name: "Onboarding", targets: ["Onboarding"]),
         .library(name: "MenuBarPresence", targets: ["MenuBarPresence"]),
+        .library(name: "StatusMenu", targets: ["StatusMenu"]),
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "Dictation", targets: ["Dictation"]),
         .library(name: "InputMethod", targets: ["InputMethod"]),
@@ -87,6 +88,10 @@ let package = Package(
         // [LAW:decomposition]
         .target(name: "MenuBarPresence", dependencies: ["Identity"]),
         .testTarget(name: "MenuBarPresenceTests", dependencies: ["MenuBarPresence"]),
+        // The rows of the status item's menu that do more than AppKit's own items: an error a
+        // click copies. Out of the app target so `make test` runs it. [LAW:decomposition]
+        .target(name: "StatusMenu"),
+        .testTarget(name: "StatusMenuTests", dependencies: ["StatusMenu"]),
         .testTarget(name: "SignalsTests", dependencies: ["Signals", "LowTalkerCore", "TestProbes"]),
         // The loop from a press to inserted text, with every collaborator taken as a value.
         // Its own target rather than app code so the loop runs under `swift test`; the

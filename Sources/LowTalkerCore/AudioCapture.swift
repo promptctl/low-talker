@@ -273,11 +273,28 @@ public final class AudioCapture {
     /// relaunches a dead engine and the user learns within one hold; under `open` nobody
     /// presses for hours, and this is the only surface that could say the device is gone.
     /// [LAW:no-silent-failure]
-    public var doing: String {
-        guard case .started(let started) = phase else { return "not being captured" }
+    public var doing: Doing {
+        guard case .started(let started) = phase else { return .notCaptured }
         switch started.engine {
-        case .shut, .running: return "\(started.atRest)"
-        case .failed(let error, _, _): return "\(started.atRest), but it stopped: \(error)"
+        case .shut, .running: return .keeping(started.atRest)
+        case .failed(let error, _, _): return .stopped(started.atRest, error)
+        }
+    }
+
+    /// What `doing` reads, which says itself as the sentence.
+    public enum Doing: CustomStringConvertible {
+        case notCaptured
+        /// Doing what the resting mode asks.
+        case keeping(MicrophoneAtRest)
+        /// Asked to keep to the resting mode, and the device stopped, for this reason.
+        case stopped(MicrophoneAtRest, any Error)
+
+        public var description: String {
+            switch self {
+            case .notCaptured: "not being captured"
+            case .keeping(let atRest): "\(atRest)"
+            case .stopped(let atRest, let error): "\(atRest), but it stopped: \(error)"
+            }
         }
     }
 

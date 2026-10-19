@@ -90,6 +90,9 @@ targets:
       # terminal made to LaunchServices, and the delegate says when the icon never showed.
       - package: low-talker
         product: MenuBarPresence
+      # The menu's error rows, which a click copies.
+      - package: low-talker
+        product: StatusMenu
       - package: low-talker
         product: Signals
       - package: low-talker

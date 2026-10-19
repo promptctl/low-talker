@@ -12,6 +12,7 @@ import Onboarding
 import ServiceManagement
 import Serve
 import Signals
+import StatusMenu
 import os
 
 /// The menu-bar agent. `LSUIElement` keeps it out of the Dock, so the status item
@@ -43,14 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// What the engine is doing, and whether the hotkey is being watched. The two
     /// things in the menu that cannot be read on demand: they arrive from the load's
     /// and the loop's own callbacks, so they are held here while everything else is read
-    /// at the moment the menu opens. Launch sets the hotkey's before it returns, so no
-    /// menu can open on an empty string.
+    /// at the moment the menu opens.
     ///
     /// The engine's is also the status icon's face, since a first load runs for minutes
     /// and an icon that looks ready through them reads as an app that is not answering.
     /// Lazy so it can count from `launched`; only `show(_:)` sets it, which redraws the icon.
     private lazy var engineReadiness: EngineReadiness = .preparing(nil, since: launched)
-    private var hotkeyStatus = ""
+    private var hotkeyStatus: HotkeyStatus = .starting(step: nil)
     /// What the loop is doing with presses, which the icon shows over the engine's readiness.
     private var activity: Dictation.Activity = .idle
     /// The loop's activity again, floating over the app being dictated into, with the words
@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sessions.info("activity: \(String(describing: activity), privacy: .public)")
     }
 
-    private func showHotkeyStatus(_ status: String) {
+    private func showHotkeyStatus(_ status: HotkeyStatus) {
         hotkeyStatus = status
         log.notice("hotkey: \(status, privacy: .public)")
     }
@@ -182,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .chords:
                 if let hotkey = listening?.hotkey {
                     hotkey.listen(for: now.chords)
-                    if hotkey.isWatching { showHotkeyStatus(listeningStatus) }
+                    if hotkey.isWatching { showHotkeyStatus(.listening(listeningStatus)) }
                 }
                 return "chords \(Hotkey.named(in: now))"
             case .microphone:
@@ -280,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // goes up, so no press is heard that has nowhere to go yet, and the one status write
         // below comes after it has answered - nothing can say the loop works before it does,
         // or be overwritten by a later write about an earlier state.
-        showHotkeyStatus("starting — setting up the input method")
+        showHotkeyStatus(.starting(step: "setting up the input method"))
         let installed = await selectInputMethod()
         // `comeUp` reads the config before it adopts and adopts nothing on a config it cannot
         // read, so a loop is only ever built over one that was read.
@@ -321,8 +321,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }.mapError { LoopRefusal(stringLiteral: "\($0)") }
         }
         switch hearing {
-        case .success: showHotkeyStatus(listeningStatus)
-        case .failure(let refusal): showHotkeyStatus("off — \(refusal.reason)")
+        case .success: showHotkeyStatus(.listening(listeningStatus))
+        case .failure(let refusal): showHotkeyStatus(.off(refusal.reason))
         }
     }
 
@@ -359,6 +359,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private struct LoopRefusal: Error, ExpressibleByStringInterpolation {
         let reason: String
         init(stringLiteral reason: String) { self.reason = reason }
+    }
+
+    /// What the menu says after "Hotkey: ".
+    private enum HotkeyStatus: CustomStringConvertible {
+        case starting(step: String?)
+        /// Listening, and how to press it.
+        case listening(String)
+        /// Not listening, for this reason.
+        case off(String)
+
+        var description: String {
+            switch self {
+            case .starting(nil): "starting…"
+            case .starting(let step?): "starting — \(step)"
+            case .listening(let howToPress): howToPress
+            case .off(let reason): "off — \(reason)"
+            }
+        }
     }
 
     /// The status line of a hotkey that is listening.
@@ -570,7 +588,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Listening from launch when the person last chose to, answering 503 until the model
         // is resident, so a client started beside the app is told to wait rather than refused.
         serving?.resume(at: config.map(\.serve))
-        showHotkeyStatus("starting…")
+        showHotkeyStatus(.starting(step: nil))
         Task { await listen() }
         // Read after `serving` and the loop's first reading of the config, so a save from
         // here on is a reload of the config they started on.
@@ -636,7 +654,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 "; allow it in \(GuidedSetup.title) in this menu"
             default: ""
             }
-            showHotkeyStatus("off — \(error)\(whereToAllow)")
+            showHotkeyStatus(.off("\(error)\(whereToAllow)"))
             return
         }
         await rebuild()
@@ -862,18 +880,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginLog.notice("open at login: \(openAtLogin, privacy: .public)")
 
         menu.removeAllItems()
-        menu.addItem(readout("Whisper model: \(engineReadiness.readout(at: .now))"))
+        let model = "Whisper model: \(engineReadiness.readout(at: .now))"
+        let modelRow = if case .failed = engineReadiness { errorRow(model, .model) } else { readout(model) }
+        menu.addItem(modelRow)
         // A press made during the wait is not lost, and nothing else on screen says so.
         if case .preparing = engineReadiness { menu.addItem(readout("A press now is heard once the model is ready")) }
         // Beside the model it answers with. [LAW:dataflow-not-control-flow] The offline build
         // has no switch, so no line.
-        serving.map { menu.addItem(readout("Server: \($0.state)")) }
-        menu.addItem(readout("Microphone: \(microphone)"))
-        menu.addItem(readout("Hotkey: \(hotkeyStatus)"))
+        serving.map { serving in
+            let server = "Server: \(serving.state)"
+            let serverRow = if case .stopped = serving.state { errorRow(server, .server) } else { readout(server) }
+            menu.addItem(serverRow)
+        }
+        let mic = "Microphone: \(microphone)"
+        let micRow = if case .stopped = microphone { errorRow(mic, .microphone) } else { readout(mic) }
+        menu.addItem(micRow)
+        let hotkey = "Hotkey: \(hotkeyStatus)"
+        let hotkeyRow = if case .off = hotkeyStatus { errorRow(hotkey, .hotkey) } else { readout(hotkey) }
+        menu.addItem(hotkeyRow)
         for reason in unheard { menu.addItem(readout("    Not heard now: \(reason)")) }
         globeKey.map { menu.addItem(readout("    \($0)")) }
-        lastFailure.map { menu.addItem(readout($0)) }
-        if running.refusal != nil { menu.addItem(readout("Config: \(running)")) }
+        lastFailure.map { menu.addItem(errorRow($0, .lastDictation)) }
+        if running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
         if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: presses are refused until it ends")) }
         // Every requirement, met or not, and its step under it as the lines it was
         // written in - one item per line, so nothing here wraps text the requirement
@@ -911,6 +939,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// one AppKit disables on its own, which is the whole of what "readout" means here.
     private func readout(_ title: String) -> NSMenuItem {
         NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    }
+
+    /// Which of the menu's lines failed, as the log names it when that line is copied.
+    private enum FailedLine: String {
+        case model, server, microphone, hotkey, lastDictation, config
+    }
+
+    /// A line that says what failed, which a click copies whole to the clipboard.
+    private func errorRow(_ text: String, _ line: FailedLine) -> NSMenuItem {
+        ErrorRow(text, copyingTo: .general) { [menuBarLog] copied in
+            // [LAW:nothing-unseen] The count, not the text: a failure line can carry dictated words.
+            if copied.taken {
+                menuBarLog.notice("menu: copied the \(line.rawValue, privacy: .public) error row, \(copied.characters, privacy: .public) characters")
+            } else {
+                menuBarLog.error("menu: the pasteboard refused the \(line.rawValue, privacy: .public) error row's \(copied.characters, privacy: .public) characters")
+            }
+        }
     }
 }
 
