@@ -277,9 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do throws(SerialQueueError) { try await previous.dictation.finish() } catch { report(.failure(Dictation.Failed(error))) }
         }
         // [LAW:no-ambient-temporal-coupling] The input method is made ready before the hotkey
-        // goes up, so no press is heard that has nowhere to go yet, and the one status write
-        // below comes after it has answered - nothing can say the loop works before it does,
-        // or be overwritten by a later write about an earlier state.
+        // goes up, so no press is heard that has nowhere to go yet.
         showHotkeyStatus(.starting(step: "setting up the input method"))
         let installed = await selectInputMethod()
         // `comeUp` reads the config before it adopts and adopts nothing on a config it cannot
