@@ -17,9 +17,7 @@ public struct GuidedSetup: Sendable, Equatable {
     /// What the menu item and every step that points at the setup call it.
     public static let title = "Set Up \(AppIdentity.displayName)…"
 
-    /// The buttons every step shows beside its ask, named here because a step's words send
-    /// the person to them.
-    public static let checkAgainTitle = "Check Again"
+    /// A button every step shows, named here because a step's words send the person to it.
     public static let openSettingsTitle = "Open System Settings"
 
     /// The step to show: the first requirement with something left to do that the person
@@ -89,16 +87,16 @@ public extension Requirement.Row {
     /// method has one. macOS shows an Allow dialog naming the app each time it is asked
     /// (studious 2026-09-27, low-input-method-s71.ssn), so declining is not the end - the
     /// button stays and asks again. When no dialog comes, the switch is under Input Sources
-    /// in the pane this step opens. [LAW:no-silent-failure] Keyed on what the person can
-    /// see - a dialog, or nothing - and every way on is a button on this page.
+    /// in the pane this step opens, and the page reads it again when the person comes back.
+    /// [LAW:no-silent-failure] Keyed on what the person can see - a dialog, or nothing.
     var switchOnNote: String? {
         switch self {
         case .inputMethod:
             """
             macOS asks whether to allow \(AppIdentity.displayName) to switch it on: click Allow. \
             You can press this again if you decline. If pressing it changes nothing, click \
-            \(GuidedSetup.openSettingsTitle), add \(AppIdentity.displayName) under Input Sources, \
-            then click \(GuidedSetup.checkAgainTitle).
+            \(GuidedSetup.openSettingsTitle), click Edit… beside Input Sources, and add \
+            \(AppIdentity.displayName) with the + button.
             """
         case .microphone:
             nil

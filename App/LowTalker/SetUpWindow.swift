@@ -169,7 +169,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         let skip = button("Skip for Now") { [unowned self] in walk.skip(row); failure = nil; draw(shown) }
         // Every step can be read again by hand: a grant made where this window cannot see
         // it arriving - System Settings left open beside it - clears its step here.
-        let checkAgain = button(GuidedSetup.checkAgainTitle) { [unowned self] in redrawFromAFreshReading() }
+        let checkAgain = button("Check Again") { [unowned self] in redrawFromAFreshReading() }
         let openSettings = button(GuidedSetup.openSettingsTitle) { [unowned self] in openSystemSettings(row) }
         // The default is the one button that makes macOS ask, so Return is the person
         // choosing to be asked; once asked, System Settings.

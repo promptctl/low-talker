@@ -218,7 +218,7 @@ The setup is a walk over the same list the menu shows, one requirement per page.
 | Step | What the button does |
 |---|---|
 | Microphone | asks for the microphone (`AVCaptureDevice.requestAccess`) |
-| Input method | switches the input method on (`TISEnableInputSource`), which macOS asks about in a dialog naming the app; it asks again after a No, and a source first installed during this login session switches on only after the next login, with no dialog until then |
+| Input method | switches the input method on (`TISEnableInputSource`), which macOS asks about in a dialog naming the app; it asks again after a No |
 
 Those are the only places the app calls anything that can put a dialog on screen. The input method is copied and registered at launch but never switched on there.
 

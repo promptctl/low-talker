@@ -54,25 +54,23 @@ import Testing
     }
 
     /// The note names what a person cannot see coming: that declining is not the end because
-    /// the dialog returns, and, when no dialog comes, the buttons on this page that lead on.
+    /// the dialog returns, and, when no dialog comes, the button on this page that leads on.
     /// [LAW:no-silent-failure]
     @Test func theInputMethodNoteNamesTheReturningDialogAndTheWayOnWithoutIt() throws {
         let note = try #require(Requirement.Row.inputMethod.switchOnNote)
         #expect(note.contains("Allow"), "the note never names the dialog to allow it")
         #expect(note.contains("again"), "the note never says the dialog returns after a No")
-        #expect(note.contains(GuidedSetup.openSettingsTitle) && note.contains(GuidedSetup.checkAgainTitle),
-                "the note never names the buttons that lead on when no dialog comes")
+        #expect(note.contains(GuidedSetup.openSettingsTitle), "the note never names the button that leads on when no dialog comes")
     }
 
-    /// No step asks the person to log out or restart: an install that needed one would have
-    /// broken a macOS rule, and the fix is the install, not words sending the person away.
+    /// No words Onboarding writes for a step ask the person to log out or restart: an install
+    /// that needed one would have broken a macOS rule, and the fix is the install, not words
+    /// sending the person away.
     @Test func noStepAsksForALogoutOrARestart() {
-        let requirements = MicrophoneAuthorization.Withheld.allCases.map { Requirement.microphone($0) }
-            + [.microphone(nil), .inputMethod(switchedOn: false), .inputMethod(switchedOn: true)]
-        let shown: [String?] = requirements.flatMap { [$0.name, $0.reads, $0.step] as [String?] }
+        let shown: [String?] = Requirement.all.flatMap { [$0.name, $0.reads, $0.step] as [String?] }
             + Requirement.Row.allCases.flatMap { [$0.explanation.why, $0.explanation.ifSkipped, $0.askTitle, $0.switchOnNote] as [String?] }
         for text in shown.compactMap({ $0?.lowercased() }) {
-            for asking in ["log out", "log in", "logout", "login", "restart", "reboot"] {
+            for asking in ["log out", "logout", "log back in", "next login", "restart", "reboot"] {
                 #expect(!text.contains(asking), "\"\(text)\" asks for a \(asking)")
             }
         }

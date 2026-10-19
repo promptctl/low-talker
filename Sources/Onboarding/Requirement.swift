@@ -171,9 +171,11 @@ public extension Requirement {
     /// being the one thing every row says when the machine could not be read, and docs/engineering.md
     /// describes it once as exactly that.
     static var readings: [(row: Row, reading: String)] {
-        let answers: [MicrophoneAuthorization.Withheld?] = [nil] + MicrophoneAuthorization.Withheld.allCases
-        let microphone: [(row: Row, reading: String)] = answers.map { (row: Row.microphone, reading: reads(forMicrophone: $0)) }
-        let inputMethod: [(row: Row, reading: String)] = [true, false].map { (row: Row.inputMethod, reading: reads(forSwitchedOn: $0)) }
-        return microphone + inputMethod
+        all.map { (row: $0.row, reading: $0.reads) }
+    }
+
+    /// Every requirement there can be: each row once per reading it can take.
+    static var all: [Requirement] {
+        ([nil] + MicrophoneAuthorization.Withheld.allCases).map(microphone) + [true, false].map(inputMethod(switchedOn:))
     }
 }
