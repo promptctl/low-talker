@@ -39,12 +39,15 @@ final class Rig {
     let shown = Shown()
     /// The words no cursor took, which outlive the loop as they do in the app.
     let hold: Hold
+    /// Where they are kept, which outlives the app.
+    let store: FakeHeldStore
 
     init(
         transcriber: @escaping @Sendable @MainActor () async throws(EngineUnavailable) -> any Transcriber,
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
-        frontmost: @escaping @Sendable @MainActor () throws(FrontmostUnknown) -> BundleID = { textEdit }
+        frontmost: @escaping @Sendable @MainActor () throws(FrontmostUnknown) -> BundleID = { textEdit },
+        keeping store: FakeHeldStore = FakeHeldStore()
     ) async throws {
         capture = AudioCapture(retaining: retaining, hardware: hardware, startingAt: Self.origin, reporting: { _ in })
         // Shut between presses unless a test says otherwise, which is the loop the app
@@ -54,7 +57,8 @@ final class Rig {
         reports = stream
         let reported = reported
         let shown = shown
-        hold = Hold { shown.held.append($0) }
+        self.store = store
+        hold = Hold(store: store, failedToKeep: { shown.unkept.append($0) }, showing: { shown.held.append($0) })
         dictation = Dictation(
             capture: capture,
             transcriber: transcriber,
@@ -73,9 +77,10 @@ final class Rig {
     convenience init(
         hearing transcriber: FakeTranscriber,
         retaining: TimeInterval = AudioCapture.defaultRetention,
-        atRest: MicrophoneAtRest = .shut
+        atRest: MicrophoneAtRest = .shut,
+        keeping store: FakeHeldStore = FakeHeldStore()
     ) async throws {
-        try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest)
+        try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest, keeping: store)
     }
 
     /// Audio captured from `now` on, stamped as the microphone would stamp it, into
@@ -158,8 +163,10 @@ final class Rig {
 @MainActor
 final class Shown {
     var activities: [Dictation.Activity] = []
-    /// Every change of what is held, in order.
+    /// What is held at the start, then every change of it, in order.
     var held: [Held?] = []
+    /// Every write of what is held that failed, in order.
+    var unkept: [HeldUnkept] = []
 }
 
 /// Whether `cause` is the engine's own library failing with an error of type `error`.
@@ -927,7 +934,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.cursorArrived()
         try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted.isEmpty)
-        #expect(rig.shown.held == [.unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)"), nil])
+        #expect(rig.shown.held == [nil, .unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)"), nil])
+        #expect(rig.store.written == [.unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)"), nil])
     }
 
     /// Words dismissed while an insert carrying them is on its way stay dismissed when that
@@ -984,6 +992,89 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted == [" b"])
         #expect(rig.hold.held == .unaccounted(warning: "\(notYetTaken)"))
+    }
+
+    /// Words held when the app ends are held again at its next launch, and offered to the
+    /// cursor that arrives first.
+    @Test func wordsHeldWhenTheAppEndsAreOfferedAfterItsNextLaunch() async throws {
+        let store = FakeHeldStore()
+        let before = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") }, keeping: store)
+        before.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        before.hold()
+        _ = await before.report()
+        let held = Held.unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)")
+        #expect(store.kept == held)
+        let after = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: " b") }, keeping: store)
+        #expect(after.shown.held == [held])
+        after.dictation.cursorArrived()
+        try await after.dictation.finish()
+        #expect(after.inputMethod.inserted == ["a"])
+        #expect(store.kept == nil)
+    }
+
+    /// A store that cannot be read at launch holds nothing, offers nothing, and says why.
+    @Test func anUnreadableStoreHoldsNothingAndSaysWhy() async throws {
+        let store = FakeHeldStore(keeping: .unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)"))
+        let unreadable = HeldUnreadable(why: "torn", kept: .movedTo("/kept.json"))
+        store.unreadable = unreadable
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
+        #expect(rig.hold.held == nil)
+        #expect(rig.hold.unrestored == unreadable)
+        rig.dictation.cursorArrived()
+        try await rig.dictation.finish()
+        #expect(rig.inputMethod.inserted.isEmpty)
+    }
+
+    /// A write that fails is told and leaves what is held as it was, until a write succeeds.
+    @Test func aFailedWriteIsToldAndTheWordsStayHeld() async throws {
+        let store = FakeHeldStore()
+        store.failing = .lost(why: "disk full")
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") }, keeping: store)
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.hold()
+        _ = await rig.report()
+        let held = Held.unplaced(Transcript(typed: "a"), warning: "\(Refusal.noTextFieldHasFocus)")
+        #expect(rig.hold.held == held)
+        #expect(rig.hold.unkept == .lost(why: "disk full"))
+        #expect(rig.shown.unkept == [.lost(why: "disk full")])
+        store.failing = nil
+        rig.hold.dismiss()
+        #expect(rig.hold.unkept == nil)
+        #expect(store.written == [held, nil])
+    }
+
+    /// Held words that land while the write saying so fails are not offered after the next launch.
+    @Test func wordsThatLandedWhileTheWriteFailedAreNotOfferedAgain() async throws {
+        let store = FakeHeldStore()
+        let before = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") }, keeping: store)
+        before.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        before.hold()
+        _ = await before.report()
+        store.failing = .lost(why: "disk full")
+        before.inputMethod.refusing(nil)
+        before.dictation.cursorArrived()
+        try await before.dictation.finish()
+        #expect(before.inputMethod.inserted == ["a"])
+        let after = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
+        #expect(after.hold.held == nil)
+    }
+
+    /// Held words handed to an app that may yet take them while the write saying so fails are
+    /// not offered after the next launch, which would be the one way to type them twice.
+    @Test func wordsThatMayHaveLandedWhileTheWriteFailedAreNotOfferedAgain() async throws {
+        let store = FakeHeldStore()
+        let before = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") }, keeping: store)
+        before.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        before.hold()
+        _ = await before.report()
+        store.failing = .lost(why: "disk full")
+        let notYetTaken = NotYetTaken(characters: 1, into: "com.apple.TextEdit")
+        before.inputMethod.refusing(.notYetTaken(notYetTaken))
+        before.dictation.cursorArrived()
+        try await before.dictation.finish()
+        #expect(before.hold.held == .unaccounted(warning: "\(notYetTaken)"))
+        let after = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
+        #expect(after.hold.held?.words.words.isEmpty ?? true)
     }
 
     /// A cursor that arrives while a press is open is offered what is held once that press

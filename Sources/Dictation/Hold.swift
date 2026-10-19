@@ -40,22 +40,110 @@ public enum Held: Sendable, Equatable {
     }
 }
 
+/// Where what is held is kept from one run of the app to the next.
+///
+/// [LAW:one-source-of-truth] Once `write` returns or throws, the store holds the `held` it was
+/// given or nothing, never a state the app has moved past: the next launch believes it, and
+/// words already placed, or handed to an app that may have taken them, would be offered again.
+@MainActor
+public protocol HeldStore {
+    /// What was held when the app last ended, nil when nothing was.
+    func read() throws(HeldUnreadable) -> Held?
+    func write(_ held: Held?) throws(HeldUnkept)
+}
+
+/// What was held when the app last ended could not be read back.
+public struct HeldUnreadable: Error, Equatable, Sendable, CustomStringConvertible {
+    public enum Kept: Equatable, Sendable {
+        /// Moved where no write reaches it.
+        case movedTo(String)
+        /// Left where the next write replaces it, since moving it failed for this reason.
+        case notMoved(String)
+    }
+
+    public let why: String
+    public let kept: Kept
+
+    public init(why: String, kept: Kept) {
+        self.why = why
+        self.kept = kept
+    }
+
+    public var description: String {
+        switch kept {
+        case .movedTo(let path): "what was held when LowTalker last quit could not be read back (\(why)); it is kept at \(path)"
+        case .notMoved(let move): "what was held when LowTalker last quit could not be read back (\(why)) or moved aside (\(move)), so the next save replaces it"
+        }
+    }
+}
+
+/// A write of what is held failed. [LAW:types-are-the-program] Two cases, because they carry
+/// opposite risks.
+public enum HeldUnkept: Error, Equatable, Sendable, CustomStringConvertible {
+    /// Nothing is kept, so a quit loses what is held.
+    case lost(why: String)
+    /// An older state is still kept, so the next launch offers words already placed or let go.
+    case stale(why: String)
+
+    public var description: String {
+        switch self {
+        case .lost(let why): "not saved, so a quit now loses them: \(why)"
+        case .stale(let why): "an older hold is still saved, so the next launch offers words already placed or let go: \(why)"
+        }
+    }
+}
+
 /// The words no cursor has taken, kept until one does or the person dismisses them. Brandon,
 /// 2026-10-15: a dictation's words are never thrown away.
 ///
 /// [LAW:no-shared-mutable-globals] One for the life of the app, so a loop rebuilt over a new
 /// config keeps what the old one held. Written by the loop as it places words and by the
-/// person through `dismiss`, and every change is told to `showing`.
+/// person through `dismiss`, and every change is written to `store` as it is made, then told
+/// to `showing`, so no end of the process leaves the store behind what was shown.
 @MainActor
 public final class Hold {
     public private(set) var held: Held? {
-        didSet { if held != oldValue { showing(held) } }
+        didSet {
+            if held != oldValue {
+                keep()
+                showing(held)
+            }
+        }
     }
 
+    /// What reading the store at launch failed with, for the life of the app. Nothing it held
+    /// is offered, since nothing could read it.
+    public let unrestored: HeldUnreadable?
+    /// What the latest write failed with, nil once one succeeds. Memory stays what is held.
+    public private(set) var unkept: HeldUnkept?
+
+    private let store: any HeldStore
+    private let failedToKeep: @MainActor (HeldUnkept) -> Void
     private let showing: @MainActor (Held?) -> Void
 
-    public init(showing: @escaping @MainActor (Held?) -> Void) {
+    /// Holds what `store` kept, and tells `showing` of it as of every later change.
+    public init(store: any HeldStore, failedToKeep: @escaping @MainActor (HeldUnkept) -> Void, showing: @escaping @MainActor (Held?) -> Void) {
+        self.store = store
+        self.failedToKeep = failedToKeep
         self.showing = showing
+        do throws(HeldUnreadable) {
+            held = try store.read()
+            unrestored = nil
+        } catch {
+            held = nil
+            unrestored = error
+        }
+        showing(held)
+    }
+
+    private func keep() {
+        do throws(HeldUnkept) {
+            try store.write(held)
+            unkept = nil
+        } catch {
+            unkept = error
+            failedToKeep(error)
+        }
     }
 
     /// The person let the held words go.
