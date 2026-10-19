@@ -95,11 +95,11 @@ import Testing
         _ = try await running.post(Data())
         var client = Client(running)
         defer { client.task.cancel(with: .normalClosure, reason: nil) }
-        _ = try await client.until("session.created")
+        try await client.wait(for: "session.created")
         server.resume(at: .success(.loopback))
         #expect(try await listening(server).server.port == running.server.port)
         try await client.send(["type": "session.update", "session": [:] as [String: Any]])
-        _ = try await client.until("session.updated")
+        try await client.wait(for: "session.updated")
     }
 
     /// Switched off while it was still binding, the listen that answers late lets its port go

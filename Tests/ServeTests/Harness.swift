@@ -225,6 +225,11 @@ struct Client {
         }
     }
 
+    /// `until` for a caller on an actor, to which an event, not being Sendable, cannot be sent.
+    mutating func wait(for type: String) async throws {
+        _ = try await until(type)
+    }
+
     func types() -> [String] {
         received.compactMap { $0["type"] as? String }
     }
