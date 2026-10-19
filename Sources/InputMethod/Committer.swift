@@ -19,10 +19,10 @@ import os
 /// rather than waited on.
 ///
 /// **What `inserted` claims, exactly: the words were handed to the client of the app in
-/// front, which had answered that it gives document access with its caret on a screen.**
-/// Not that the app has taken
-/// them, and not that a person saw them. Off the main thread even a read of the client
-/// returns at once from a hung app, so nothing here can ask whether the app took the words.
+/// front, which had answered that it gives document access with its caret on a screen or
+/// nowhere it reported.** Not that the app has taken them, and not that a person saw them.
+/// Off the main thread even a read of the client returns at once from a hung app, so
+/// nothing here can ask whether the app took the words.
 /// The text input system offers no delivery report either, and measured on 2026-09-22 there
 /// is nothing to derive one from: iTerm2, where the words land in plain sight, answers
 /// `length()` of 0 before and after, so a check for "did the document grow" would refuse

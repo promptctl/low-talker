@@ -173,10 +173,11 @@ import Testing
     /// cursor, a client giving no document access, a caret on no screen - and says where
     /// the caret of a taken insert was.
     @Test func whatTheInsertSawNamesTheCursorAndWhatItsClientAnswered() {
-        func seen(_ field: FieldAnswer?, inFront frontmost: String? = "com.apple.finder", secureInputHeldBy holder: String? = nil) -> InFront {
+        func seen(_ field: FieldAnswer?, inFront frontmost: String? = "com.apple.finder", secureInputHeldBy holder: String? = nil,
+                  screens: [CGRect] = [Self.display]) -> InFront {
             let client = FocusedClient()
             field.map { client.took(Cursor(in: "com.apple.finder", answering: $0)) }
-            return client.inFront(for: .cursorInFront, whileInFrontIs: frontmost, secureInputHeldBy: holder, screens: [Self.display])
+            return client.inFront(for: .cursorInFront, whileInFrontIs: frontmost, secureInputHeldBy: holder, screens: screens)
         }
 
         let none = seen(nil)
@@ -189,7 +190,11 @@ import Testing
 
         let offScreen = seen(Self.typeSelect)
         #expect(throws: Refusal.noTextFieldHasFocus) { try offScreen.cursor.get() }
-        #expect(offScreen.description == "with com.apple.finder in front and the cursor in com.apple.finder, its caret line at (5.0, -13.0, 1.0, 14.0), on no screen")
+        #expect(offScreen.description == "with com.apple.finder in front and the cursor in com.apple.finder, its caret line at (5.0, -13.0, 1.0, 14.0), on none of the screens [(0.0, 0.0, 1600.0, 900.0)]")
+
+        let noScreens = seen(.documentAccess(caretLine: CGRect(x: 1305, y: 435, width: 1, height: 16)), screens: [])
+        #expect(throws: Refusal.noTextFieldHasFocus) { try noScreens.cursor.get() }
+        #expect(noScreens.description == "with com.apple.finder in front and the cursor in com.apple.finder, its caret line at (1305.0, 435.0, 1.0, 16.0), on none of the screens []")
 
         let taken = seen(.documentAccess(caretLine: CGRect(x: 1305, y: 435, width: 1, height: 16)))
         #expect((try? taken.cursor.get()) != nil)

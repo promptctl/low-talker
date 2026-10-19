@@ -50,7 +50,9 @@ public enum FieldAnswer: Sendable, Equatable {
     /// below the bottom edge of the main display (measured on studious,
     /// low-reliability-z2z.anp). Judged by the line's center, because that buffer's line
     /// reaches 1 point up onto the display. A display arranged directly below the main one's
-    /// left edge contains that center, and there the buffer still takes words.
+    /// left edge contains that center, and there the buffer still takes words. A real field
+    /// whose caret is scrolled past every screen's edge is refused the same way, and its
+    /// words are held as for any refusal.
     ///
     /// A client that reports no line is taken: nothing it said places the caret anywhere,
     /// and the clients seen reporting none were real fields between activating and their
@@ -159,7 +161,8 @@ public final class FocusedClient {
     public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?,
                         screens: [CGRect]) -> InFront {
         func seen(_ field: FieldAnswer?, _ cursor: Result<any TextCursor, Refusal>) -> InFront {
-            InFront(frontmost: frontmost, secureInputHolder: holder, cursorApplication: self.focus?.application, field: field, cursor: cursor)
+            InFront(frontmost: frontmost, secureInputHolder: holder, cursorApplication: self.focus?.application, field: field,
+                    screens: screens, cursor: cursor)
         }
         guard destination.admits(frontmost) else { return seen(nil, .failure(.dictationIsInAnotherApp)) }
         guard holder == nil else { return seen(nil, .failure(.secureInputIsOn)) }
@@ -187,6 +190,7 @@ public struct InFront: Sendable, CustomStringConvertible {
     /// Asked only of the cursor the words would go to, so absent for every refusal decided
     /// before it.
     let field: FieldAnswer?
+    let screens: [CGRect]
     public let cursor: Result<any TextCursor, Refusal>
 
     public var description: String {
@@ -196,13 +200,14 @@ public struct InFront: Sendable, CustomStringConvertible {
             + (secureInputHolder.map { ", secure input held by \($0)" } ?? "")
     }
 
-    /// A client giving document access is refused only for where its caret is.
+    /// A caret on no screen names the screens it was judged against, so an empty list reads
+    /// as none rather than as a caret somewhere strange.
     private func said(_ field: FieldAnswer) -> String {
-        switch (field, cursor) {
-        case (.noDocumentAccess, _): ", which gives no document access"
-        case (.documentAccess(caretLine: nil), _): ", which reports no caret"
-        case (.documentAccess(caretLine: let line?), .success): ", its caret line at \(line)"
-        case (.documentAccess(caretLine: let line?), .failure): ", its caret line at \(line), on no screen"
+        switch field {
+        case .noDocumentAccess: ", which gives no document access"
+        case .documentAccess(caretLine: nil): ", which reports no caret"
+        case .documentAccess(caretLine: let line?):
+            ", its caret line at \(line)" + (field.isAField(on: screens) ? "" : ", on none of the screens \(screens)")
         }
     }
 }
@@ -257,14 +262,15 @@ final class Client: TextCursor, @unchecked Sendable {
     }
 
     /// The line is asked for only once document access is given, so a client with no field
-    /// costs the one call. It comes back as the line at the insertion point whatever index is
-    /// asked: Finder's buffer holding 19 characters answered x 108, not index 0's 5. A client
-    /// that reports no line leaves the rectangle empty. [LAW:parse-dont-validate]
+    /// costs the one call. Index 0 with no marked text asks for the current selection's line
+    /// (IMKInputSession.h), so it is the insertion point's: Finder's buffer holding 19
+    /// characters answered x 108. A client that reports no line leaves the rectangle
+    /// untouched. [LAW:parse-dont-validate]
     @MainActor var field: FieldAnswer {
         guard client.supportsProperty(TSMDocumentPropertyTag(kTSMDocumentSupportDocumentAccessPropertyTag)) else { return .noDocumentAccess }
         var line = NSRect.zero
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &line)
-        return .documentAccess(caretLine: line.isEmpty ? nil : line)
+        return .documentAccess(caretLine: line == .zero ? nil : line)
     }
 
     func commit(_ text: String) {
