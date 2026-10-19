@@ -288,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The input method tells each cursor it is given focus in, and the loop listening then
         // offers it what is held.
         let hotkey = Hotkey(listeningFor: config, cursorArrived: { [unowned self] in listening?.dictation.cursorArrived() },
-                            inputMethodProcess: { [unowned self] in show($0) })
+                            superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
         let dictation = Dictation(
             capture: capture,
             // A press asks the bench first: while a run holds the Neural Engine, the press is
@@ -334,7 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .running: showHotkeyStatus(.listening(listeningStatus))
         case .ended: showHotkeyStatus(.off("the input method ended; \(AppIdentity.displayName) is starting it again"))
         case .notOpened(let reason, _):
-            showHotkeyStatus(.off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval)"))
+            showHotkeyStatus(.off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))"))
         }
     }
 

@@ -110,7 +110,9 @@ public struct InputMethodProcess {
         return InputMethodProcess(pid: app.processIdentifier, launched: app.launchDate) {
             let (ending, end) = AsyncStream<Never>.makeStream()
             // `.initial`, so a process that ended before the observation began is seen ending.
-            let observation = app.observe(\.isTerminated, options: [.initial]) { app, _ in
+            // Sendable, so it is isolated to no actor: written here it would otherwise be the
+            // main actor's, and trap if KVO tells the change on another thread.
+            let observation = app.observe(\.isTerminated, options: [.initial]) { @Sendable app, _ in
                 if app.isTerminated { end.finish() }
             }
             // Ends when the stream finishes or the task is cancelled, whichever is first.

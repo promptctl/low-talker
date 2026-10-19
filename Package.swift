@@ -35,7 +35,8 @@ let package = Package(
         .target(name: "Identity"),
         .testTarget(name: "IdentityTests", dependencies: ["Identity"]),
         // The Text Input Sources framework as this program uses it: where the
-        // input source stands on this Mac, and the steps that put it there. It links only
+        // input source stands on this Mac, the steps that put it there, and the input method's
+        // process kept running through LaunchServices. It links only
         // Identity and the Text Input Sources lock beneath it, so the app reaches it without
         // the input method process linking anything of the app's. [LAW:one-way-deps]
         .target(name: "InputSource", dependencies: ["Identity", "TextInputSources"]),
@@ -53,8 +54,6 @@ let package = Package(
                 // The app's end of the hotkey port, which the input method tells the modifier
                 // keys to.
                 "Insertion",
-                // The input method whose process the hotkey keeps running while it hears through it.
-                "InputSource",
                 "CoreAudioCalls",
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "TOMLKit", package: "TOMLKit"),

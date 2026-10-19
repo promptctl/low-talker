@@ -1,6 +1,5 @@
 import Dispatch
 import Identity
-import InputSource
 import Insertion
 import os
 
@@ -23,16 +22,17 @@ import os
 /// sandbox lets it reach the app on; that notice is no key, and goes to `cursorArrived`.
 ///
 /// An input method whose process has ended tells nothing, and nothing but the app starts it
-/// again, so while the feed is open its process is kept running, and what becomes of it goes
-/// to `inputMethodProcess`. [LAW:no-silent-failure]
+/// again, so while the feed is open its process is supervised by `superviseInputMethod`,
+/// which answers how to stop. [LAW:no-silent-failure] [LAW:effects-at-boundaries] The
+/// supervision is the app's to bring: launching a process is no part of hearing keys.
 public struct InputMethodModifiers: ModifierFeed {
     private let cursorArrived: @MainActor () -> Void
-    private let inputMethodProcess: @MainActor (InputMethodSupervisor.Event) -> Void
+    private let superviseInputMethod: @MainActor () -> Disposal
 
     public init(cursorArrived: @escaping @MainActor () -> Void,
-                inputMethodProcess: @escaping @MainActor (InputMethodSupervisor.Event) -> Void) {
+                superviseInputMethod: @escaping @MainActor () -> Disposal) {
         self.cursorArrived = cursorArrived
-        self.inputMethodProcess = inputMethodProcess
+        self.superviseInputMethod = superviseInputMethod
     }
 
     /// How often a held key is looked for in the session: how late, at most, a release the
@@ -143,12 +143,12 @@ public struct InputMethodModifiers: ModifierFeed {
                 }
             })
         installed.open = (port, handle)
-        // Kept running only once the port is hosted, so its first notice has somewhere to go.
-        let supervisor = InputMethodSupervisor(told: inputMethodProcess)
+        // Supervised only once the port is hosted, so its first notice has somewhere to go.
+        let unsupervise = superviseInputMethod()
         // Closed here and now, so a hotkey rebuilt straight after hosts the name again.
         return {
             installed.open = nil
-            supervisor.stop()
+            unsupervise()
         }
     }
 }
