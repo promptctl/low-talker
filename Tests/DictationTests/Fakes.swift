@@ -26,8 +26,8 @@ final class FakeHardware: AudioHardware {
         func open(
             appending: @escaping @Sendable ([Float], HostTime) -> Void,
             onFailure: @escaping @MainActor (any Error) -> Void
-        ) throws -> Disposal {
-            try hardware.openEngine(appending: appending, onFailure: onFailure)
+        ) throws -> OpenedInput {
+            OpenedInput(dispose: try hardware.openEngine(appending: appending, onFailure: onFailure), input: FakeHardware.microphone)
         }
 
         /// This hardware's default input never changes; nothing here watches it.
@@ -45,6 +45,9 @@ final class FakeHardware: AudioHardware {
             self.onFailure = onFailure
         }
     }
+
+    /// The one device this hardware has.
+    static let microphone = MicrophoneInput(device: 1, name: .success("Fake Microphone"), sampleRate: 48_000, channels: 1)
 
     private(set) var engines: [Engine] = []
     /// What a launch does, once set: throw, as a device that cannot feed the pipeline

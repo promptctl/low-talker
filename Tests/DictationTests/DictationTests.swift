@@ -30,7 +30,7 @@ final class Rig {
     let inputMethod = FakeInputMethod()
     let turns = EngineTurns()
     let dictation: Dictation
-    private let reports: AsyncStream<Result<Dictation.Session, Dictation.Failed>>
+    private let reports: AsyncStream<Dictation.Report>
     /// Raised by the first outcome to be reported. The stream says what the next report
     /// is, this says whether one has come at all - the difference a `finish` that
     /// returned before its session was reported would show.
@@ -50,7 +50,7 @@ final class Rig {
         // Shut between presses unless a test says otherwise, which is the loop the app
         // runs when no config file asks for the microphone to be held.
         try capture.start(try MicrophonePermission(authority: Authorized()).current.grant(), atRest: atRest)
-        let (stream, feed) = AsyncStream.makeStream(of: Result<Dictation.Session, Dictation.Failed>.self)
+        let (stream, feed) = AsyncStream.makeStream(of: Dictation.Report.self)
         reports = stream
         let reported = reported
         let shown = shown
@@ -62,9 +62,9 @@ final class Rig {
             executor: Executor(insertingThrough: inputMethod),
             hold: hold,
             frontmost: frontmost,
-            report: { outcome in
+            report: { press in
                 reported.raise()
-                feed.yield(outcome)
+                feed.yield(press)
             },
             showing: { shown.activities.append($0) }
         )
@@ -133,7 +133,12 @@ final class Rig {
 
     /// The next session's outcome, in press order.
     func report() async -> Result<Dictation.Session, Dictation.Failed> {
-        for await outcome in reports { return outcome }
+        await pressReport().outcome
+    }
+
+    /// The next press's whole report: its outcome and what its microphone delivered.
+    func pressReport() async -> Dictation.Report {
+        for await report in reports { return report }
         preconditionFailure("the report stream ended while a test was still reading it")
     }
 
@@ -1096,6 +1101,43 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold(speaking: [1, 2])
         #expect(try await rig.session().transcript.text == "a")
         #expect(rig.inputMethod.inserted == ["a"])
+    }
+
+    // MARK: - what a press's microphone delivered
+
+    /// [LAW:nothing-unseen] Every press's report carries what its microphone delivered, so a
+    /// press that was heard says through which input, how much and how loud.
+    @Test func aHeardPressReportsWhatItsMicrophoneDelivered() async throws {
+        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.hold(speaking: [0.5, -0.25])
+        let report = await rig.pressReport()
+        #expect(try report.outcome.get().transcript.text == "a")
+        #expect(report.capture == CapturedAudio.Reading(input: FakeHardware.microphone, samples: 2, peak: 0.5, firstSample: .zero))
+        #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
+    }
+
+    /// The press the ticket was filed for: the microphone opened and delivered nothing, and
+    /// the record says so beside the refusal, rather than leaving nothing to read.
+    @Test func aPressWhoseMicrophoneDeliveredNothingReportsItWithTheLoss() async throws {
+        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.refusedHold()
+        let report = await rig.pressReport()
+        let lost = try #require(report.outcome.failure as? SpeechLost)
+        #expect(lost.lost.unopened)
+        #expect(report.capture == CapturedAudio.Reading(input: FakeHardware.microphone, samples: 0, peak: 0, firstSample: nil))
+        #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel) delivered nothing after the key went down")
+    }
+
+    /// A press refused before any microphone opened has no reading, and its record says that
+    /// beside the reason it was refused.
+    @Test func aPressRefusedBeforeItsMicrophoneOpenedReportsNoReading() async throws {
+        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.hardware.failingToLaunch = BadBuffer()
+        rig.refusedHold()
+        let report = await rig.pressReport()
+        #expect(report.outcome.failure is NoMicrophone)
+        #expect(report.capture == nil)
+        #expect(report.microphone == "no microphone opened for it")
     }
 
     /// [LAW:no-silent-failure] The engine failed under an open press - a driver going down
