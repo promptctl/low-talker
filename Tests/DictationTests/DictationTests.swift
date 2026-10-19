@@ -1147,20 +1147,21 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     }
 
     /// A cursor that arrives while a press is open is offered what is held once that press
-    /// ends, when the press placed nothing of its own.
+    /// ends, when the press placed nothing of its own. What a lapsed press heard is held
+    /// behind what was, so the offer carries both.
     @Test func aCursorArrivingDuringAPressThatLapsesIsOfferedTheHeldWordsAfterIt() async throws {
-        // The lapsed press has nothing said in it, so it holds nothing of its own.
-        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples.isEmpty ? "" : "a") })
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [4, 5] ? " b" : "a") })
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         rig.hold()
         _ = await rig.report()
         rig.inputMethod.refusing(nil)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([4, 5])
         rig.dictation.cursorArrived()
         rig.dictation.press(.ended(.lapsed))
         #expect(await rig.report().failure is PressLapsed)
         try await rig.dictation.finish()
-        #expect(rig.inputMethod.inserted == ["a"])
+        #expect(rig.inputMethod.inserted == ["a b"])
         #expect(rig.hold.held == nil)
     }
 
