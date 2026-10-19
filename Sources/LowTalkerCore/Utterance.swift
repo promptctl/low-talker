@@ -12,8 +12,10 @@ import Foundation
 /// before the first speech and between speech alike: Whisper reads words into silence it
 /// is handed ("Thank you."), so an utterance that opens on minutes of it, as a Realtime
 /// item does between a client's turns, or holds minutes of it after a click, would
-/// otherwise carry words nobody said (low-serve-axq.ium). What was let go is kept as a
-/// `Timeline`, which times the words a pass reads in the audio appended. Trailing
+/// otherwise carry words nobody said (low-serve-axq.ium). Speech is sound that holds as a
+/// syllable does (`syllable`); a click sounds too briefly, and goes with the quiet around
+/// it, since a pass over a click is a pass over the quiet it sits in. What was let go is
+/// kept as a `Timeline`, which times the words a pass reads in the audio appended. Trailing
 /// quiet is never worth a pass, during the hold or after it: a pass over the same
 /// speech and more silence reads the same words, and the encoder's cost does not
 /// shrink with the tail. So the pass in flight when the key comes up is the last
@@ -31,18 +33,19 @@ actor Utterance {
     /// the floor refuses is quiet, which Whisper would read words into: a hold with
     /// nothing in it, and all but the lead-in of the quiet before the first speech,
     /// however softly a word in it was said. Level is all a peak knows, so a click
-    /// this loud is a speaker too, and a clip under it is speech only when it also
-    /// stands above the room (`aboveRoom`).
+    /// this loud sounds as a speaker does, and is told from one by how long it sounds
+    /// (`syllable`); a clip under it sounds only when it also stands above the room
+    /// (`aboveRoom`).
     static let audible: Float = 0.01
-    /// A clip holds speech when its peak stands within this factor of the loudest
-    /// clip so far: 16, 24 dB, one speaker's spread from a stressed vowel to a soft
-    /// consonant per tenth of a second. A ratio does not move when the level does,
+    /// A clip sounds when its peak stands within this factor of the loudest speech
+    /// so far, of the run it may carry on, or of its own: 16, 24 dB, one speaker's spread from a
+    /// stressed vowel to a soft consonant per tenth of a second. A ratio does not move when the level does,
     /// so a soft speaker or a low-gain microphone is cut into the same speech and
     /// quiet as a loud one. On the bench fixtures it names the same last clip of
     /// speech as the absolute -34 dBFS gate it replaces, differing on 18 of some
     /// 800 clip judgements, all mid-utterance.
     static let dynamicRange: Float = 16
-    /// A clip under the audible floor holds speech only when its peak also stands this
+    /// A clip under the audible floor sounds only when its peak also stands this
     /// far above the room's noise floor, the quietest frame of the last `roomSpan`
     /// (minimum statistics): 3, about 10 dB. The range says how soft a speaker gets
     /// below their loudest; it reaches into the room whenever the loudest is a click
@@ -55,6 +58,18 @@ actor Utterance {
     /// is a pause between words rather than the softest of them, and short enough that a
     /// room grown louder is soon the room again.
     static let roomSpan: TimeInterval = 3
+    /// How long a burst must sound without a break to be speech: 0.06 s of `envelope`
+    /// windows in a row peaking at or above the gate. A click, a keystroke or a door can peak
+    /// past the floor and fill a frame as a word does, and Whisper reads " Thank you." into
+    /// the 0.7 s around it (low-unfiled-50ff.7r3); what tells them apart is how long they
+    /// sound unbroken, so typing, a run of keystrokes, is no more speech than one is. The
+    /// clicks and keystrokes measured sound 0.02 to 0.04 s. Replaying the gate over the bench
+    /// fixtures, at full level and 20 dB down, clean and over -51 dBFS of noise, hands every
+    /// pass the same samples at anything from 0.05 to 0.08 s; at 0.1 s the softest loses its
+    /// opening words. A run carries across frames: a syllable can sound 0.03 s in one.
+    static let syllable = AudioClip.sampleCount(for: 0.06)
+    /// The window a burst's sounding is measured in: a hundredth of a second.
+    static let envelope = AudioClip.sampleCount(for: 0.01)
     /// Audio kept past the last clip with speech in it, so a word's soft tail rides
     /// with the word. Silence to the encoder either way, so it costs the pass nothing.
     static let hangover = AudioClip.sampleCount(for: 0.3)
@@ -65,7 +80,7 @@ actor Utterance {
     private var samples: [Float] = []
     /// Where `samples` lie in the audio appended: the quiet let go from between them.
     private var timeline = Timeline()
-    /// Samples through the end of the last clip that held speech, once one has.
+    /// Samples through the end of the last burst that was speech, once one has been.
     /// Each frame is judged as it fills, against the loudest and the room so far, and
     /// never again: a louder clip later may put an earlier one outside the range, but
     /// the speech only ever grows, which is what a pass waiting on it relies on.
@@ -73,9 +88,57 @@ actor Utterance {
     /// zero: the hangover rides on speech, so with none there is no audio to hand a
     /// pass, and an utterance that ends in this state is refused rather than heard.
     private var spoken: Int?
-    /// The loudest clip peak so far: what every clip is judged against, and what an
-    /// utterance that never reached the floor is refused with.
-    private var loudest: Float = 0
+    /// Frames that sound, joined while no quiet between them is let go: a word, a phrase,
+    /// or a click. Its audio is kept while it lasts and handed to a pass once it is speech.
+    private struct Burst {
+        /// Samples through the end of its last frame that sounded.
+        var through: Int
+        /// Samples its `envelope` windows have sounded without a break, through its last
+        /// window, the loudest of them, and the most they ever ran to.
+        var run: Int
+        var runPeak: Float
+        var longest: Int
+        /// The loudest window of a run that sounded as long as a syllable; zero until one has.
+        var speechPeak: Float
+        var isSpeech: Bool { longest >= Utterance.syllable }
+        /// Its longest run, when that was too brief to be speech.
+        var transient: Int? { isSpeech ? nil : longest }
+
+        /// A burst nothing has sounded in yet, for a clip that sounds to open.
+        static let opening = Burst(through: 0, run: 0, runPeak: 0, longest: 0, speechPeak: 0)
+
+        /// The burst carried on through `clip`, which sounded and ends at `through`: each window
+        /// peaking at or above `gate` runs on, and any other breaks the run.
+        func sounding(_ clip: AudioClip, through end: Int, gate: Float) -> Burst {
+            var next = self
+            next.through = end
+            for start in stride(from: 0, to: clip.samples.count, by: Utterance.envelope) {
+                let window = clip.samples[start..<min(start + Utterance.envelope, clip.samples.count)]
+                let peak = window.reduce(0) { max($0, abs($1)) }
+                next.run = peak >= gate ? next.run + window.count : 0
+                next.runPeak = peak >= gate ? max(next.runPeak, peak) : 0
+                next.longest = max(next.longest, next.run)
+                next.speechPeak = next.run >= Utterance.syllable ? max(next.speechPeak, next.runPeak) : next.speechPeak
+            }
+            return next
+        }
+
+        /// The burst carried on through a clip that did not sound, which breaks its run.
+        var broken: Burst {
+            var next = self
+            (next.run, next.runPeak) = (0, 0)
+            return next
+        }
+    }
+    /// The last burst, until quiet past its hangover is let go.
+    private var burst: Burst?
+    /// The loudest clip peak heard: what an utterance with no speech in it is refused with.
+    private var loudestHeard: Float = 0
+    /// The loudest window of a run that sounded as long as a syllable: with the run a clip
+    /// may carry on and its own peak, what the clip is judged against. A click's run ends
+    /// short of a syllable, so a click sets no range unless nothing breaks it from the speech
+    /// after it, and a soft speaker after one is heard.
+    private var loudestSpeech: Float = 0
     /// The room readings of the last `roomSpan` before the frame being judged, the newest last.
     private var recent: [Float] = []
     private static let roomFrames = Int((roomSpan / frame).rounded())
@@ -111,7 +174,8 @@ actor Utterance {
         let start = samples.count
         samples += clip.samples
         let peak = clip.peak
-        loudest = max(loudest, peak)
+        loudestHeard = max(loudestHeard, peak)
+        let loudest = max(loudestSpeech, burst?.runPeak ?? 0, peak)
         // A room reading is a whole frame that heard something: digital silence is no
         // microphone, whose own noise is never exactly zero, and a frame the end cut short
         // is no tenth of a second.
@@ -123,52 +187,62 @@ actor Utterance {
         let roomGate = min(Self.audible, room * Self.aboveRoom)
         // [LAW:dataflow-not-control-flow] One judgement for every clip, the loudest
         // included: it stands within range of itself, so the clip that lifts the
-        // loudest past the floor is the first speech.
+        // loudest past the floor sounds.
         let withinRange = loudest >= Self.audible && peak >= loudest / Self.dynamicRange
-        let speech = withinRange && peak >= roomGate
+        let sounds = withinRange && peak >= roomGate
         // [LAW:nothing-unseen] What the room refused that the range alone would have kept.
-        timeline.heard(reading, refusedAsRoom: withinRange && !speech ? clip.samples.count : 0)
+        timeline.heard(reading, refusedAsRoom: withinRange && !sounds ? clip.samples.count : 0)
         let softest = max(loudest / Self.dynamicRange, roomGate)
         // Where the audio kept must resume: the lead-in before the clip's first sample
-        // of speech when the clip is speech, the lead-in before its end when it is not,
+        // that sounds when the clip sounds, the lead-in before its end when it does not,
         // since the next clip may open on speech.
-        let onset = speech ? clip.samples.firstIndex { abs($0) >= softest } : nil
+        let onset = sounds ? clip.samples.firstIndex { abs($0) >= softest } : nil
         let resume = start + (onset ?? clip.samples.count) - Self.leadIn
-        // [LAW:dataflow-not-control-flow] Every clip lets go the quiet between the speech's
-        // hangover and where the audio resumes, which is none while either is still
-        // arriving. No pass has been handed a sample past the hangover, so every sample
-        // a pass has read keeps its place.
-        let kept = min(speechCount, samples.count)
+        // The burst this clip carries on: the last one, while the audio resumes within its hangover.
+        let joined = burst.flatMap { resume <= $0.through + Self.hangover ? $0 : nil }
+        // [LAW:dataflow-not-control-flow] Every clip lets go the quiet between the audio kept
+        // and where the audio resumes, which is none while either is still arriving. What is
+        // kept is the speech's hangover, or the burst's while it lasts: a burst not yet speech
+        // goes whole with the quiet once it dies, so no click is left among later speech for
+        // a pass to read. No pass has been handed a sample past the speech's hangover, so
+        // every sample a pass has read keeps its place.
+        let kept = min(joined.map { $0.through + Self.hangover } ?? speechCount, samples.count)
         let letGo = max(0, resume - kept)
         samples.removeSubrange(kept..<kept + letGo)
         timeline.letGo(letGo, at: kept)
-        spoken = speech ? samples.count : spoken
+        // [LAW:nothing-unseen] A burst that died short of speech was a transient.
+        timeline.refused(transient: joined == nil ? burst?.transient : nil)
+        burst = sounds ? (joined ?? .opening).sounding(clip, through: samples.count, gate: softest) : joined?.broken
+        spoken = burst.flatMap { $0.isSpeech ? $0.through : nil } ?? spoken
+        loudestSpeech = max(loudestSpeech, burst?.speechPeak ?? 0)
     }
 
     /// The key came up: nothing more arrives.
     func end() {
         frame(unframed)
         unframed = []
+        // A burst still short of speech when the key comes up was a transient too.
+        timeline.refused(transient: burst?.transient)
+        burst = nil
         ended = true
         wake()
     }
 
     /// Appends every clip of `audio` as it arrives, then ends the utterance.
     ///
-    /// [LAW:parse-dont-validate] An utterance no clip of which reached the floor is
-    /// refused here, with its loudest peak and its quiet: an empty transcript would not
-    /// say whether nothing was said or the audio was too soft to be a speaker. No pass is
-    /// handed any of it, so the samples still kept are quiet too.
+    /// [LAW:parse-dont-validate] An utterance with no speech in it is refused here, with its
+    /// loudest peak and its quiet, the transients among it: an empty transcript would not say
+    /// whether nothing was said, the audio was too soft to be a speaker, or all it held was
+    /// a click. No pass is handed any of it, so the samples still kept are quiet too.
     func fill(from audio: some AsyncSequence<AudioClip, Never> & Sendable) async throws(TranscriptionFailure) {
         for await clip in audio {
             append(clip)
         }
         end()
-        guard spoken != nil else { throw .nothingSpoken(peak: loudest, quiet: timeline.quiet(lettingGo: samples.count)) }
+        guard spoken != nil else { throw .nothingSpoken(peak: loudestHeard, quiet: timeline.quiet(lettingGo: samples.count)) }
     }
 
-    /// How much audio the speech so far is worth a pass over: none until a clip
-    /// has reached the floor.
+    /// How much audio the speech so far is worth a pass over: none until a burst is speech.
     private var speechCount: Int {
         spoken.map { $0 + Self.hangover } ?? 0
     }
@@ -198,7 +272,8 @@ actor Utterance {
 /// Where an utterance's samples lie in the audio appended: each stretch of quiet let go,
 /// at the kept sample it was let go before. A pass reads kept samples, so the words it
 /// reads are timed from the first kept sample; placed here, they are timed from the
-/// audio's first sample, as a caller sent it. It also keeps the room the quiet was judged against.
+/// audio's first sample, as a caller sent it. It also keeps the room the quiet was judged
+/// against and the transients refused.
 struct Timeline: Sendable {
     /// Samples let go, by the kept sample they were let go before: quiet let go at one
     /// place across many clips is one gap.
@@ -207,13 +282,24 @@ struct Timeline: Sendable {
     private var room: Float?
     /// Samples within range of the loudest that stood too near the room to be speech.
     private var refusedAsRoom = 0
+    /// The bursts refused as too brief to be speech.
+    private var transients = Transients.none
 
     /// The quiet no pass is handed, and the room it was judged against.
     var quiet: Quiet { quiet(lettingGo: 0) }
 
     /// The quiet, with `kept` samples more that no pass will be handed.
     func quiet(lettingGo kept: Int) -> Quiet {
-        Quiet(letGo: AudioClip.duration(for: gaps.values.reduce(0, +) + kept), room: room, refusedAsRoom: AudioClip.duration(for: refusedAsRoom))
+        Quiet(
+            letGo: AudioClip.duration(for: gaps.values.reduce(0, +) + kept), room: room, refusedAsRoom: AudioClip.duration(for: refusedAsRoom),
+            transients: transients
+        )
+    }
+
+    /// A burst that died having sounded `longest` samples at most without a break, too few to
+    /// be speech; none for one that was speech or that did not die.
+    mutating func refused(transient longest: Int?) {
+        transients = longest.map { Transients(count: transients.count + 1, longest: max(transients.longest, AudioClip.duration(for: $0))) } ?? transients
     }
 
     mutating func heard(_ reading: Float?, refusedAsRoom refused: Int) {

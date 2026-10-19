@@ -15,7 +15,7 @@ final class Stub: Transcriber {
     let answer: Result<Transcript, TranscriptionFailure>
     let quiet: Quiet
 
-    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0)) {
+    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none)) {
         self.answer = answer
         self.quiet = quiet
     }

@@ -46,9 +46,9 @@ import Testing
         #expect(fromBuffers == fromWhole)
 
         let partway = Utterance()
-        await partway.append(Self.speech(1_599))
+        await partway.append(Self.speech(3_199))
         await partway.end()
-        #expect(await partway.audio(beyond: 0).samples.count == 1_599 + Utterance.hangover)
+        #expect(await partway.audio(beyond: 0).samples.count == 3_199 + Utterance.hangover)
     }
 
     /// Quiet after speech is not more speech: the audio is what was spoken plus the
@@ -122,11 +122,11 @@ import Testing
     @Test func theEndWakesAWaitWithWhatArrived() async {
         let utterance = Utterance()
         async let heard = utterance.audio(beyond: 100_000)
-        await utterance.append(Self.speech(5))
+        await utterance.append(Self.speech(1_605))
         await utterance.end()
         let (samples, arrived, ended, _) = await heard
-        #expect(samples.count == 5 + Utterance.hangover)
-        #expect(arrived == 5)
+        #expect(samples.count == 1_605 + Utterance.hangover)
+        #expect(arrived == 1_605)
         #expect(ended)
     }
 
@@ -162,14 +162,14 @@ import Testing
     @Test func fillingFromASequenceAppendsEveryClipThenEnds() async throws {
         let utterance = Utterance()
         let clips = AsyncStream<AudioClip> { continuation in
-            continuation.yield(AudioClip(samples: [1, 2]))
-            continuation.yield(AudioClip(samples: [3]))
+            continuation.yield(Self.speech(1_000))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.25, count: 600)))
             continuation.finish()
         }
         try await utterance.fill(from: clips)
         let (samples, _, ended, _) = await utterance.audio(beyond: 0)
-        #expect(Array(samples.prefix(3)) == [1, 2, 3])
-        #expect(samples.count == 3 + Utterance.hangover)
+        #expect(Array(samples.prefix(1_600)) == Self.speech(1_000).samples + Array(repeating: 0.25, count: 600))
+        #expect(samples.count == 1_600 + Utterance.hangover)
         #expect(ended)
     }
 
@@ -238,7 +238,7 @@ import Testing
         // Let go: all of the room but the click's lead-in and hangover, and the lead-in of
         // speech that may yet follow.
         // The room before the click is under the floor, so only the minute after it was refused as room.
-        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60))
+        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, transients: .none))
 
         await utterance.append(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
         // The few samples the end cuts a frame short to are no tenth of a second, so no room reading.
@@ -247,5 +247,106 @@ import Testing
         let ended = await utterance.audio(beyond: 0)
         #expect(ended.samples.count == Utterance.leadIn + 1_600 + Utterance.hangover + Utterance.leadIn + 1_600 + Utterance.hangover)
         #expect(ended.timeline.quiet.room == 0.002)
+    }
+
+    /// A frame opening on a click as loud as speech, 0.03 s of it, and quiet for the rest.
+    static let click = AudioClip(samples: Array(repeating: 0.4, count: 480) + Array(repeating: 0.001, count: 1_120))
+
+    /// A click in a pause goes with the quiet around it (low-unfiled-50ff.7r3): no pass is handed it
+    /// while speech might yet follow, and once quiet past its hangover is let go, it goes too, so
+    /// the speech after the pause carries the pause and nothing else.
+    @Test func aClickInAPauseGoesWithTheQuiet() async {
+        let utterance = Utterance()
+        await utterance.append(Self.speech(1_600))
+        await utterance.append(Self.quiet(32_000))
+        await utterance.append(Self.click)
+        #expect(await utterance.audio(beyond: 0).samples.count == 1_600 + Utterance.hangover)
+        await utterance.append(Self.quiet(32_000))
+        await utterance.append(Self.speech(1_600))
+        await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        let pause = Utterance.hangover + Utterance.leadIn
+        #expect(samples.count == 1_600 + pause + 1_600 + Utterance.hangover)
+        #expect(!samples.contains(0.4))
+        #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
+    }
+
+    /// A click a tenth of a second before speech is one burst with it, and rides with it.
+    @Test func aClickJustBeforeSpeechRidesWithIt() async {
+        let utterance = Utterance()
+        await utterance.append(Self.click)
+        await utterance.append(Self.quiet(1_600))
+        await utterance.append(Self.speech(1_600))
+        await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == 3 * 1_600 + Utterance.hangover)
+        #expect(samples.prefix(480).allSatisfy { $0 == 0.4 })
+        #expect(timeline.quiet.transients == .none)
+    }
+
+    /// Typing is no speech: keystrokes five a second join one burst, and however many of them
+    /// there are, none sounds long enough without a break to be a syllable, so the utterance is
+    /// refused with the run of them as one transient.
+    @Test func typingIsNoSpeech() async {
+        let utterance = Utterance()
+        let clips = AsyncStream<AudioClip> { continuation in
+            for _ in 0..<20 {
+                continuation.yield(Self.click)
+                continuation.yield(Self.quiet(1_600))
+            }
+            continuation.finish()
+        }
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            try await utterance.fill(from: clips)
+        }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.4)
+        #expect(quiet.transients == Transients(count: 1, longest: 0.03))
+    }
+
+    /// A soft speaker after a loud click is heard: the click, refused as a transient, is no
+    /// speaker to judge what follows against, so speech 24 dB under it is speech once the
+    /// click has gone with the quiet.
+    @Test func aSoftSpeakerAfterALoudClickIsHeard() async {
+        let utterance = Utterance()
+        await utterance.append(Self.click)
+        await utterance.append(Self.quiet(16_000))
+        await utterance.append(AudioClip(samples: Array(repeating: 0.02, count: 16_000)))
+        await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 16_000 + Utterance.hangover)
+        #expect(!samples.contains(0.4))
+        #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
+    }
+
+    /// A soft speaker near the floor is heard though a syllable runs from a frame over the floor
+    /// into one under it: the run carries the range across the frames, so the second frame is
+    /// judged against the first, not against itself alone.
+    @Test func aRunAtTheFloorCarriesItsRangeAcrossFrames() async throws {
+        let utterance = Utterance()
+        let clips = AsyncStream<AudioClip> { continuation in
+            continuation.yield(Self.quiet(16_000))
+            continuation.yield(AudioClip(samples: Self.quiet(960).samples + Array(repeating: 0.012, count: 640)))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
+            continuation.finish()
+        }
+        try await utterance.fill(from: clips)
+        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 640 + 1_600 + Utterance.hangover)
+    }
+
+    /// A click in the same burst as speech sets no range either: the speech is judged against
+    /// its own loudest syllable, so a softer word after it, within range of the speaker but not
+    /// of the click, is speech.
+    @Test func aClickJoinedToSpeechSetsNoRange() async {
+        let utterance = Utterance()
+        await utterance.append(Self.click)
+        await utterance.append(Self.quiet(1_600))
+        await utterance.append(AudioClip(samples: Array(repeating: 0.05, count: 1_600)))
+        await utterance.append(AudioClip(samples: Array(repeating: 0.02, count: 1_600)))
+        await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == 4 * 1_600 + Utterance.hangover)
+        #expect(timeline.quiet.transients == .none)
     }
 }

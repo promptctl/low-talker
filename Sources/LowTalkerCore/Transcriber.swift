@@ -43,7 +43,7 @@ public struct Transcription: Hashable, Sendable {
 }
 
 /// What the speech gate made of an utterance's quiet: how much it let go, the room it judged
-/// it against, and what the room refused.
+/// it against, and what the room and the transients refused.
 public struct Quiet: Hashable, Sendable {
     /// Seconds no pass was handed, before the speech and between it: heard as nothing,
     /// while the words are still timed in the audio as it was sent.
@@ -53,11 +53,28 @@ public struct Quiet: Hashable, Sendable {
     public let room: Float?
     /// Seconds within range of the loudest that stood too near the room to be speech.
     public let refusedAsRoom: TimeInterval
+    public let transients: Transients
 
-    public init(letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval) {
+    public init(letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, transients: Transients) {
         self.letGo = letGo
         self.room = room
         self.refusedAsRoom = refusedAsRoom
+        self.transients = transients
+    }
+}
+
+/// The bursts of sound the gate refused as too brief to be speech, a click, a door or a run of
+/// keystrokes, let go with the quiet around them.
+public struct Transients: Hashable, Sendable {
+    public let count: Int
+    /// Seconds the longest of them sounded without a break.
+    public let longest: TimeInterval
+
+    public static let none = Transients(count: 0, longest: 0)
+
+    public init(count: Int, longest: TimeInterval) {
+        self.count = count
+        self.longest = longest
     }
 }
 
@@ -68,8 +85,9 @@ public struct Quiet: Hashable, Sendable {
 public enum TranscriptionFailure: Error, CustomStringConvertible {
     /// The caller stopped waiting for the engine before its turn came.
     case cancelled
-    /// No clip reached the audible floor; `peak` is the loudest sample heard, and `quiet`
-    /// all of the audio, with the room it was judged against.
+    /// Nothing sounded as long as a syllable: no clip reached the audible floor, or what did was
+    /// a transient. `peak` is the loudest sample heard, and `quiet` all of the audio, with the
+    /// room it was judged against and the transients it refused.
     case nothingSpoken(peak: Float, quiet: Quiet)
     case vocabulary(VocabularyError)
     /// The engine read the audio and its reading could not become a transcript.
@@ -81,7 +99,8 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .cancelled: "the decode was cancelled before the engine took it"
-        case .nothingSpoken(let peak, _): "nothing spoken: the loudest sample was \(peak), under the audible floor \(Utterance.audible)"
+        case .nothingSpoken(let peak, let quiet):
+            "nothing spoken: the loudest sample was \(peak) against the audible floor \(Utterance.audible), and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"

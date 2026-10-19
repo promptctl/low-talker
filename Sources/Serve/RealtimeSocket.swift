@@ -647,8 +647,12 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
         /// too near the room to be speech.
         public internal(set) var roomPeak: Double?
         public internal(set) var refusedAsRoomSeconds: Double = 0
-        /// Completed items no clip of which reached the audible floor, answered as nothing said,
-        /// and the loudest sample any of them held: how near the floor a quiet microphone came.
+        /// Bursts of sound in the completed items refused as too brief to be speech, and seconds the
+        /// longest of them sounded.
+        public internal(set) var transients = 0
+        public internal(set) var longestTransientSeconds: Double = 0
+        /// Completed items refused as nothing spoken, answered as nothing said, and the loudest
+        /// sample any of them held: how near the floor a quiet microphone came.
         public internal(set) var nothingSpoken = 0
         public internal(set) var nothingSpokenPeak: Double?
 
@@ -661,6 +665,8 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
                 quietSeconds += heard.transcription.quiet.letGo
                 roomPeak = [roomPeak, heard.transcription.quiet.room.map(Double.init)].compactMap { $0 }.min()
                 refusedAsRoomSeconds += heard.transcription.quiet.refusedAsRoom
+                transients += heard.transcription.quiet.transients.count
+                longestTransientSeconds = max(longestTransientSeconds, heard.transcription.quiet.transients.longest)
                 if let peak = heard.nothingSpokenPeak {
                     nothingSpoken += 1
                     nothingSpokenPeak = max(nothingSpokenPeak ?? 0, Double(peak))

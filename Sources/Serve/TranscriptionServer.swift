@@ -446,6 +446,8 @@ private struct Answering: Sendable {
         event.quietSeconds = heard.transcription.quiet.letGo
         event.roomPeak = heard.transcription.quiet.room.map(Double.init)
         event.refusedAsRoomSeconds = heard.transcription.quiet.refusedAsRoom
+        event.transients = heard.transcription.quiet.transients.count
+        event.longestTransientSeconds = heard.transcription.quiet.transients.longest
         event.nothingSpokenPeak = heard.nothingSpokenPeak.map(Double.init)
         let segment = try Segment(heard.transcription.transcript)
         (event.avgLogprob, event.compressionRatio) = (segment?.avgLogprob, segment?.compressionRatio)
@@ -583,8 +585,11 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     /// against, and seconds within range of its loudest that stood too near the room to be speech.
     public internal(set) var roomPeak: Double?
     public internal(set) var refusedAsRoomSeconds: Double?
-    /// The loudest sample of an upload no clip of which reached the audible floor, which was
-    /// answered as nothing said.
+    /// Bursts of sound in the upload refused as too brief to be speech, and seconds the longest sounded.
+    public internal(set) var transients: Int?
+    public internal(set) var longestTransientSeconds: Double?
+    /// The loudest sample of an upload refused as nothing spoken, which was answered as
+    /// nothing said.
     public internal(set) var nothingSpokenPeak: Double?
     /// The upload's scores as verbose_json serves them, whatever format was asked for; nil
     /// when nothing was said.
