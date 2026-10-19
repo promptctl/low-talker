@@ -119,10 +119,12 @@ struct Hearing: Equatable {
 }
 
 extension Hearing {
-    /// What one pass is asked to read: the speech so far, where in it to start, and
-    /// the confirmed words to say first.
+    /// What one pass is asked to read: the speech so far, how much of it arrived before
+    /// the silence run out past it, where in it to start, and the confirmed words to say
+    /// first.
     struct Pass: Equatable, Sendable {
         let samples: [Float]
+        let arrived: Int
         let cut: Int
         let saying: String
     }
@@ -155,7 +157,7 @@ extension Hearing {
         var hearing = Hearing(margin: margin, context: context)
         var heard = await utterance.audio(beyond: hearing.passable)
         while heard.samples.count > hearing.heard {
-            let words = try await pass(Pass(samples: heard.samples, cut: hearing.cut, saying: hearing.saying))
+            let words = try await pass(Pass(samples: heard.samples, arrived: heard.arrived, cut: hearing.cut, saying: hearing.saying))
             hearing.hear(words, through: heard.samples.count)
             if heard.ended { break }
             partial(heard.timeline.place(hearing.partial))
