@@ -36,14 +36,14 @@ import Testing
         let feeding = Task { await feed(clipFeed, seen) }
         var passes: [Hearing.Pass] = []
         var partials: [Partial] = []
-        let transcript = try await Hearing.transcribe(clips, margin: margin, context: 3, pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: margin, context: 3, pass: { pass in
             passes.append(pass)
             record.yield(pass)
             return reading
         }, partial: { partials.append($0) })
         record.finish()
         await feeding.value
-        return (passes, partials, transcript)
+        return (passes, partials, transcription.transcript)
     }
 
     /// Nothing reaching the gate is no pass at all and a refusal, not a decode of
@@ -85,15 +85,15 @@ import Testing
         }
         feed.finish()
         var passes: [Hearing.Pass] = []
-        let transcript = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, pass: { pass in
             passes.append(pass)
             return Self.hallucinating(pass)
         }, partial: { _ in })
         #expect(!passes.isEmpty)
-        #expect(transcript.text == " see you")
-        #expect(abs(transcript.words[0].time.lowerBound - AudioClip.duration(for: quiet.count)) < 1e-9)
+        #expect(transcription.transcript.text == " see you")
+        #expect(abs(transcription.transcript.words[0].time.lowerBound - AudioClip.duration(for: quiet.count)) < 1e-9)
         let kept = click ? 2 * Utterance.leadIn + AudioClip.sampleCount(for: Utterance.frame) + Utterance.hangover : Utterance.leadIn
-        #expect(abs(transcript.quiet - AudioClip.duration(for: quiet.count - kept)) < 1e-9)
+        #expect(abs(transcription.quiet.letGo - AudioClip.duration(for: quiet.count - kept)) < 1e-9)
     }
 
     /// Speech under a second, well under what a pass waits for during the hold,

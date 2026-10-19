@@ -132,7 +132,8 @@ extension Hearing {
     /// Hears an utterance out as it arrives: fills it from `audio`, and runs `pass`
     /// over the speech so far whenever the engine is free and speech worth a pass has
     /// arrived, feeding the words back in and telling `partial` what is heard so far.
-    /// The last pass's reading is the transcript. Engine-agnostic: `pass` is the
+    /// The last pass's reading is the transcript, told with the quiet the utterance let
+    /// go. Engine-agnostic: `pass` is the
     /// engine, `margin` the span it decodes no window under, and `context` how many
     /// confirmed words it is told to say first.
     ///
@@ -150,7 +151,7 @@ extension Hearing {
         context: Int,
         pass: (Pass) async throws(TranscriptionFailure) -> [Transcript.Word],
         partial: (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcript {
+    ) async throws(TranscriptionFailure) -> Transcription {
         let utterance = Utterance()
         // A value, because an `async let` throws untyped.
         async let fed = Result { () async throws(TranscriptionFailure) in try await utterance.fill(from: audio) }
@@ -165,6 +166,6 @@ extension Hearing {
         }
         try await fed.get()
         // Timed from the audio's first sample, not from the quiet the utterance let go.
-        return heard.timeline.place(hearing.transcript)
+        return Transcription(transcript: heard.timeline.place(hearing.transcript), quiet: heard.timeline.quiet)
     }
 }

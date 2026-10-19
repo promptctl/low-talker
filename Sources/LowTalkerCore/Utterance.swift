@@ -203,13 +203,13 @@ struct Timeline: Sendable {
     /// place across many clips is one gap.
     private var gaps: [Int: Int] = [:]
     /// The quietest room reading, the least room any frame was judged against; none before one is read.
-    private(set) var room: Float?
+    private var room: Float?
     /// Samples within range of the loudest that stood too near the room to be speech.
     private var refusedAsRoom = 0
 
-    /// Seconds of the audio no pass is handed.
-    var quiet: TimeInterval {
-        AudioClip.duration(for: gaps.values.reduce(0, +))
+    /// The quiet no pass is handed, and the room it was judged against.
+    var quiet: Quiet {
+        Quiet(letGo: AudioClip.duration(for: gaps.values.reduce(0, +)), room: room, refusedAsRoom: AudioClip.duration(for: refusedAsRoom))
     }
 
     mutating func heard(_ reading: Float?, refusedAsRoom refused: Int) {
@@ -237,9 +237,9 @@ struct Timeline: Sendable {
         return Word(text: word.text, time: start...max(start, place(word.time.upperBound, ending: true)), confidence: word.confidence)
     }
 
-    /// The words, timed in the audio appended, and the quiet let go from it.
+    /// The words, timed in the audio appended.
     func place(_ transcript: Transcript) -> Transcript {
-        Transcript(words: transcript.words.map(place), quiet: quiet, room: room, refusedAsRoom: AudioClip.duration(for: refusedAsRoom))
+        Transcript(words: transcript.words.map(place))
     }
 
     func place(_ partial: Partial) -> Partial {

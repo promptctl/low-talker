@@ -160,7 +160,7 @@ public enum LatencyHarness {
         // What the served engine makes of the upload with nothing else asking, which every
         // upload heard during a hold must match. Heard last, so the first hold after the load
         // still finds the engine as the first press after launch does.
-        let servedReading = servings.contains(.served) ? try await engine.served.transcribe(Serving.upload(of: fixtures), expecting: .empty).text : ""
+        let servedReading = servings.contains(.served) ? try await engine.served.transcribe(Serving.upload(of: fixtures), expecting: .empty).transcript.text : ""
         return LatencyReport(load: load, fixtures: rows.map { $0.result($0.uploads.count { $0 != servedReading }) })
     }
 
@@ -181,7 +181,7 @@ public enum LatencyHarness {
         let served = requests.map { request in
             Task {
                 let text = try await Self.feed(request.clip.chunks(of: request.arrival.chunk(of: request.clip)), from: start.advanced(by: .seconds(request.at)), arriving: request.arrival, clock: clock) { audio in
-                    try await engine.served.transcribe(audio, expecting: .empty) { _ in }
+                    try await engine.served.transcribe(audio, expecting: .empty) { _ in }.transcript
                 }.text
                 return request.arrival == .batch ? text : nil
             }
@@ -193,7 +193,7 @@ public enum LatencyHarness {
         let hold = engine.turns.hold()
         let firstText = Mutex<C.Instant?>(nil)
         let (audio, feed) = AsyncStream<AudioClip>.makeStream()
-        async let transcript = engine.dictation.transcribe(audio, expecting: vocabulary) { partial in
+        async let transcription = engine.dictation.transcribe(audio, expecting: vocabulary) { partial in
             // A pass over leading quiet reads nothing; the text shown is the first
             // partial with words in it.
             let shown: C.Instant? = partial.text.isEmpty ? nil : clock.now
@@ -210,7 +210,7 @@ public enum LatencyHarness {
         let keyUp = clock.now
         feed.finish()
         let heard: Result<Transcript, any Error>
-        do { heard = .success(try await transcript) } catch { heard = .failure(error) }
+        do { heard = .success(try await transcription.transcript) } catch { heard = .failure(error) }
         let shown = clock.now
         // Let go of whatever became of the transcript, so a failed hold leaves no served
         // request waiting on it.

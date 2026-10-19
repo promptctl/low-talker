@@ -96,7 +96,7 @@ import TestProbes
     /// An mp3 is decoded as a wav is, and the engine hears all of it. The event carries
     /// the quiet the engine let go and the room it was judged against.
     @Test func hearsAnMP3() async throws {
-        let stub = Stub(.success(Transcript(words: Transcript(typed: " Hello world, this is LowTalker.").words, quiet: 1.5, room: 0.25, refusedAsRoom: 0.5)))
+        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])

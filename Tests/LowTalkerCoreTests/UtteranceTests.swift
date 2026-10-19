@@ -83,7 +83,7 @@ import Testing
         #expect(samples.count == 1_600 + pause + 1_600 + Utterance.hangover)
         #expect(samples[1_600..<1_600 + pause].allSatisfy { $0 == 0.001 })
         #expect(samples[1_600 + pause..<3_200 + pause].allSatisfy { $0 == 0.5 })
-        #expect(timeline.quiet == AudioClip.duration(for: 16_000 - pause))
+        #expect(timeline.quiet.letGo == AudioClip.duration(for: 16_000 - pause))
     }
 
     /// Quiet before speech is let go but for the lead-in, however long it ran and
@@ -100,7 +100,7 @@ import Testing
         #expect(samples.count == Utterance.leadIn + 1_600 + Utterance.hangover)
         #expect(samples.prefix(Utterance.leadIn).allSatisfy { $0 == 0.001 })
         #expect(samples[Utterance.leadIn..<Utterance.leadIn + 1_600].allSatisfy { $0 == 0.5 })
-        #expect(timeline.quiet == AudioClip.duration(for: 60 * 16_000 - Utterance.leadIn))
+        #expect(timeline.quiet.letGo == AudioClip.duration(for: 60 * 16_000 - Utterance.leadIn))
     }
 
     /// The timeline places a time in the kept samples back in the audio appended: past
@@ -113,7 +113,7 @@ import Testing
         #expect(timeline.place(0.25) == 1.25)
         #expect(timeline.place(0.5) == 3.5)
         #expect(timeline.place(0.5, ending: true) == 1.5)
-        #expect(timeline.quiet == 3)
+        #expect(timeline.quiet.letGo == 3)
         let words = [Transcript.Word(text: " hello", time: 0.2...0.5, confidence: 1.0), Transcript.Word(text: " oh", time: 0.5...0.5, confidence: 1.0)]
         #expect(timeline.place(Transcript(words: words)).words.map(\.time) == [1.2...1.5, 3.5...3.5])
     }
@@ -237,9 +237,8 @@ import Testing
         #expect(samples.count == Utterance.leadIn + 1_600 + Utterance.hangover)
         // Let go: all of the room but the click's lead-in and hangover, and the lead-in of
         // speech that may yet follow.
-        #expect(timeline.quiet == AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover))
         // The room before the click is under the floor, so only the minute after it was refused as room.
-        #expect(timeline.place(Transcript(words: [])) == Transcript(words: [], quiet: timeline.quiet, room: 0.002, refusedAsRoom: 60))
+        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60))
 
         await utterance.append(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
         // The few samples the end cuts a frame short to are no tenth of a second, so no room reading.
@@ -247,6 +246,6 @@ import Testing
         await utterance.end()
         let ended = await utterance.audio(beyond: 0)
         #expect(ended.samples.count == Utterance.leadIn + 1_600 + Utterance.hangover + Utterance.leadIn + 1_600 + Utterance.hangover)
-        #expect(ended.timeline.place(Transcript(words: [])).room == 0.002)
+        #expect(ended.timeline.quiet.room == 0.002)
     }
 }

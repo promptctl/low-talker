@@ -119,7 +119,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
 
     /// The socket's one event says what happened on it.
     @Test func theSocketsEventCountsWhatHappenedOnIt() async throws {
-        let running = try await Running.start(.ready(Stub(.success(Transcript(words: Transcript(typed: " Hello world, this is LowTalker.").words, quiet: 1.5, room: 0.25, refusedAsRoom: 0.5)))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 1)
@@ -487,7 +487,7 @@ private struct Starting: Transcriber {
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcript {
+    ) async throws(TranscriptionFailure) -> Transcription {
         started.yield()
         return try await stub.transcribe(audio, expecting: vocabulary, partial: partial)
     }

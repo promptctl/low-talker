@@ -172,7 +172,7 @@ private final class FixedEar: Transcriber {
         (clipsHeard, clipHeard) = AsyncStream.makeStream()
     }
 
-    func transcribe(_ audio: some AsyncSequence<AudioClip, Never> & Sendable, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void) async throws(TranscriptionFailure) -> Transcript {
+    func transcribe(_ audio: some AsyncSequence<AudioClip, Never> & Sendable, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void) async throws(TranscriptionFailure) -> Transcription {
         var clips = 0
         for await _ in audio {
             clips += 1
@@ -181,7 +181,7 @@ private final class FixedEar: Transcriber {
         }
         holds.withLock { $0.append(clips) }
         told.withLock { $0.append(vocabulary) }
-        return Transcript(typed: heard)
+        return Transcription(transcript: Transcript(typed: heard), quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0))
     }
 }
 
@@ -278,8 +278,8 @@ private final class FixedEar: Transcriber {
     /// The protocol's one-clip form is a batch hold.
     @Test func aClipAloneIsAOneClipUtterance() async throws {
         let ear = FixedEar(heard: "hi")
-        let transcript = try await ear.transcribe(BenchDirectory.tone, expecting: .empty)
-        #expect(transcript.text == "hi")
+        let transcription = try await ear.transcribe(BenchDirectory.tone, expecting: .empty)
+        #expect(transcription.transcript.text == "hi")
         #expect(ear.holds.withLock { $0 } == [1])
     }
 

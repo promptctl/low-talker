@@ -111,21 +111,25 @@ final class FakeTranscriber: Transcriber {
     private let reading: @Sendable ([Float]) -> Transcript
     private let confirming: @Sendable ([Float]) -> Transcript
     private let repunctuating: @Sendable ([Float]) -> Int
+    private let quiet: Quiet
     private let answer: @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
 
     /// `reading` is what a pass makes of the audio so far and `confirming` the words two
     /// passes have agreed on, which the answer has to begin with, and `repunctuating` how
     /// many passes so far changed a settled word's punctuation; one pass runs per clip as
-    /// it arrives, and reads and confirms nothing unless a test says otherwise.
+    /// it arrives, and reads and confirms nothing unless a test says otherwise. Every answer
+    /// is told with `quiet`, none unless a test says otherwise.
     init(
         reading: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
         confirming: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
         repunctuating: @escaping @Sendable ([Float]) -> Int = { _ in 0 },
+        quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0),
         _ answer: @escaping @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
     ) {
         self.reading = reading
         self.confirming = confirming
         self.repunctuating = repunctuating
+        self.quiet = quiet
         self.answer = answer
     }
 
@@ -136,7 +140,7 @@ final class FakeTranscriber: Transcriber {
     /// The audio of the utterance being heard, as far as it has arrived and been read.
     var hearing: [Float] { arrived.withLock { $0 } }
 
-    func transcribe(_ audio: some AsyncSequence<AudioClip, Never> & Sendable, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void) async throws(TranscriptionFailure) -> Transcript {
+    func transcribe(_ audio: some AsyncSequence<AudioClip, Never> & Sendable, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void) async throws(TranscriptionFailure) -> Transcription {
         told.withLock { $0.append(vocabulary) }
         var samples: [Float] = []
         for await clip in audio {
@@ -146,7 +150,7 @@ final class FakeTranscriber: Transcriber {
         }
         let clip = AudioClip(samples: samples)
         heard.withLock { $0.append(clip) }
-        return try await answer(clip)
+        return Transcription(transcript: try await answer(clip), quiet: quiet)
     }
 }
 

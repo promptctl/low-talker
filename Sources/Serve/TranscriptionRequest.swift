@@ -83,16 +83,18 @@ struct Usage: Encodable, Sendable {
 /// [LAW:one-source-of-truth] The upload and the Realtime item are both answered through here.
 struct Heard: Sendable {
     let transcript: Transcript
+    let quiet: Quiet
     /// The loudest sample of an utterance no clip of which reached the audible floor.
     let nothingSpokenPeak: Float?
 
     /// `seconds` of audio, heard by `transcribing`; any failure but nothing spoken is thrown.
-    init(seconds: TimeInterval, transcribing: () async throws -> Transcript) async throws {
+    init(seconds: TimeInterval, transcribing: () async throws -> Transcription) async throws {
         do {
-            transcript = try await transcribing()
+            let transcription = try await transcribing()
+            (transcript, quiet) = (transcription.transcript, transcription.quiet)
             nothingSpokenPeak = nil
         } catch TranscriptionFailure.nothingSpoken(let peak) {
-            transcript = Transcript(words: [], quiet: seconds)
+            (transcript, quiet) = (Transcript(words: []), Quiet(letGo: seconds, room: nil, refusedAsRoom: 0))
             nothingSpokenPeak = peak
         }
     }

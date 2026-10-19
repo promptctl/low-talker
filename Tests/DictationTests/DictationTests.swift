@@ -216,7 +216,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
     /// The press's line says the room its quiet was judged against and what that room refused.
     @Test func aPressLineSaysTheRoomItsQuietWasJudgedAgainst() async throws {
-        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(words: Transcript(typed: "hi").words, quiet: 2, room: 0.001, refusedAsRoom: 1.5) })
+        let rig = try Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5)) { _ in Transcript(typed: "hi") })
         rig.hold(speaking: [1, 2, 3])
         let line = try await rig.session().description
         #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room)"), "\(line)")

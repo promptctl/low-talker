@@ -159,9 +159,9 @@ struct RealtimeSocket {
         private func open(after previous: Task<Void, Never>?, _ transcriber: any Transcriber, _ activity: inout RealtimeActivity, _ items: inout DiscardingTaskGroup) -> Buffer {
             let opened = Buffer(transcriber: transcriber, vocabulary: session.vocabulary, outbox: outbox, keeping: held.kept, after: previous)
             activity.items += 1
-            let transcript = opened.transcript
+            let transcription = opened.transcription
             items.addTask {
-                await withTaskCancellationHandler { _ = await transcript.result } onCancel: { transcript.cancel() }
+                await withTaskCancellationHandler { _ = await transcription.result } onCancel: { transcription.cancel() }
             }
             return opened
         }
@@ -174,12 +174,12 @@ struct RealtimeSocket {
         /// only then, and once the last one committed is answered.
         private func startOver(_ item: Buffer, transcriber: any Transcriber, _ activity: inout RealtimeActivity, _ items: inout DiscardingTaskGroup) -> Buffer {
             let kept = item.letGo()
-            let (held, freed, transcript, previous) = (held, item.bytes - kept.count, item.transcript, last?.answered)
+            let (held, freed, transcription, previous) = (held, item.bytes - kept.count, item.transcription, last?.answered)
             activity.letGo(seconds: RealtimeAudio.duration(bytes: freed))
             // [LAW:no-ambient-temporal-coupling] The new item's turn follows the release, so
             // a transcribe that has started proves what the item before it held is free.
             let turn = Task {
-                _ = await transcript.result
+                _ = await transcription.result
                 held.release(bytes: freed, items: 0)
                 await previous?.value
             }
@@ -199,12 +199,12 @@ struct RealtimeSocket {
                 outbox.emit(event)
             }
             let deltas = buffer.deltas
-            let transcript = buffer.transcript
+            let transcription = buffer.transcription
             let (held, bytes) = (held, buffer.bytes)
             // [LAW:no-ambient-temporal-coupling] Freed before the item is answered, so a
             // client that appends on hearing it finds the room already there.
             let answered = Task {
-                let result = await transcript.result
+                let result = await transcription.result
                 held.release(bytes: bytes, items: 1)
                 await deltas.settle(result, heard: heard)
             }
@@ -265,7 +265,7 @@ private final class HeldAudio: Sendable {
 private final class Buffer {
     let id: String
     let deltas: Deltas
-    let transcript: Task<Transcript, any Error>
+    let transcription: Task<Transcription, any Error>
     private let clips: AsyncStream<AudioClip>.Continuation
     private let converter: AudioClip.Converter
     /// A byte of a sample whose other byte the next append carries.
@@ -300,7 +300,7 @@ private final class Buffer {
         // the engine takes decodes in turn, but an item's several passes are not one turn.
         // Its audio waits in `stream` meanwhile, within the socket's held audio, until the
         // item is heard or, let go while it waits, cancelled.
-        transcript = Task {
+        transcription = Task {
             if let previous { await ended(previous) }
             try Task.checkCancellation()
             return try await transcriber.transcribe(stream, expecting: vocabulary, partial: deltas.heard)
@@ -336,7 +336,7 @@ private final class Buffer {
     /// Returns its newest `keeping` bytes, starting on a whole sample.
     func letGo() -> Data {
         // Cancelled first, so ending its audio cannot start a last pass the engine admits.
-        transcript.cancel()
+        transcription.cancel()
         clips.finish()
         let newest = newest.bytes
         deltas.letGo()
@@ -461,9 +461,9 @@ final class Deltas: Sendable {
 
     /// Answers the item, `seconds` of audio, with what it was heard as: the words not yet
     /// sent, then the transcript, or the reason there is none.
-    func settle(_ transcript: Result<Transcript, any Error>, heard seconds: TimeInterval) async {
+    func settle(_ transcription: Result<Transcription, any Error>, heard seconds: TimeInterval) async {
         do {
-            let heard = try await Heard(seconds: seconds) { try transcript.get() }
+            let heard = try await Heard(seconds: seconds) { try transcription.get() }
             send(heard.transcript.words)
             outbox.emit(.completed(item: item, heard: heard, usage: Usage(heard: seconds)))
         } catch TranscriptionFailure.vocabulary(let refusal) {
@@ -658,9 +658,9 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
             case .delta: deltas += 1
             case .completed(_, let heard, _):
                 completed += 1
-                quietSeconds += heard.transcript.quiet
-                roomPeak = [roomPeak, heard.transcript.room.map(Double.init)].compactMap { $0 }.min()
-                refusedAsRoomSeconds += heard.transcript.refusedAsRoom
+                quietSeconds += heard.quiet.letGo
+                roomPeak = [roomPeak, heard.quiet.room.map(Double.init)].compactMap { $0 }.min()
+                refusedAsRoomSeconds += heard.quiet.refusedAsRoom
                 if let peak = heard.nothingSpokenPeak {
                     nothingSpoken += 1
                     nothingSpokenPeak = max(nothingSpokenPeak ?? 0, Double(peak))

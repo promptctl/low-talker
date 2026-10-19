@@ -443,9 +443,9 @@ private struct Answering: Sendable {
             throw APIError.engineFailed("\(error)")
         }
         event.words = heard.transcript.words.count
-        event.quietSeconds = heard.transcript.quiet
-        event.roomPeak = heard.transcript.room.map(Double.init)
-        event.refusedAsRoomSeconds = heard.transcript.refusedAsRoom
+        event.quietSeconds = heard.quiet.letGo
+        event.roomPeak = heard.quiet.room.map(Double.init)
+        event.refusedAsRoomSeconds = heard.quiet.refusedAsRoom
         event.nothingSpokenPeak = heard.nothingSpokenPeak.map(Double.init)
         let segment = try Segment(heard.transcript)
         (event.avgLogprob, event.compressionRatio) = (segment?.avgLogprob, segment?.compressionRatio)

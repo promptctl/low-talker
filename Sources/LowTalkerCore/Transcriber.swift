@@ -1,4 +1,6 @@
-/// Turns an utterance into a Transcript. The engine behind it is a config choice:
+import Foundation
+
+/// Turns an utterance into a Transcription. The engine behind it is a config choice:
 /// WhisperKit first, with Parakeet and Apple's SpeechAnalyzer behind the same seam.
 ///
 /// [LAW:no-ambient-temporal-coupling] A Transcriber is ready the moment it exists.
@@ -10,8 +12,8 @@ public protocol Transcriber: Sendable {
     /// Hears an utterance while it is being spoken. `audio` is the utterance's clips
     /// in the order they were captured, ending when the key comes up; the engine
     /// decodes as they arrive and tells `partial` what it has heard so far, so a HUD
-    /// can show text before the key is released. The transcript returned once
-    /// `audio` ends is the final one: it replaces every partial. `vocabulary` is
+    /// can show text before the key is released. The transcription returned once
+    /// `audio` ends is the final one: its transcript replaces every partial. `vocabulary` is
     /// what the speaker is expected to say beyond ordinary speech, told to the
     /// engine before it hears anything, so the mode that started the utterance
     /// biases every reading of it.
@@ -22,7 +24,41 @@ public protocol Transcriber: Sendable {
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcript
+    ) async throws(TranscriptionFailure) -> Transcription
+}
+
+/// An utterance as the engine heard it: the words it read, and the account of the quiet
+/// around them that no pass was handed.
+///
+/// [LAW:types-are-the-program] The quiet is the utterance's, not its words': a slice of the
+/// words, a partial, or a run handed to the cursor is a Transcript, and has no quiet to lose.
+public struct Transcription: Hashable, Sendable {
+    public let transcript: Transcript
+    public let quiet: Quiet
+
+    public init(transcript: Transcript, quiet: Quiet) {
+        self.transcript = transcript
+        self.quiet = quiet
+    }
+}
+
+/// What the speech gate made of an utterance's quiet: how much it let go, the room it judged
+/// it against, and what the room refused.
+public struct Quiet: Hashable, Sendable {
+    /// Seconds no pass was handed, before the speech and between it: heard as nothing,
+    /// while the words are still timed in the audio as it was sent.
+    public let letGo: TimeInterval
+    /// The peak of the quietest tenth of a second heard, digital silence aside: the least
+    /// room the quiet was judged against. None when no room was heard.
+    public let room: Float?
+    /// Seconds within range of the loudest that stood too near the room to be speech.
+    public let refusedAsRoom: TimeInterval
+
+    public init(letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval) {
+        self.letGo = letGo
+        self.room = room
+        self.refusedAsRoom = refusedAsRoom
+    }
 }
 
 /// Why an utterance has no transcript. A closed set, so whoever reports one decides what
@@ -58,7 +94,7 @@ extension Transcriber {
     ///
     /// [LAW:one-type-per-behavior] Batch decoding is the one-clip utterance, not a
     /// second path through the engine.
-    public func transcribe(_ clip: AudioClip, expecting vocabulary: Vocabulary) async throws(TranscriptionFailure) -> Transcript {
+    public func transcribe(_ clip: AudioClip, expecting vocabulary: Vocabulary) async throws(TranscriptionFailure) -> Transcription {
         try await transcribe(AsyncStream { continuation in
             continuation.yield(clip)
             continuation.finish()
