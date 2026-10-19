@@ -27,8 +27,10 @@ public final class ErrorRow: NSMenuItem {
     /// The warning sign in the colours macOS draws it in, so a failure stands out from the
     /// readouts around it the moment the menu opens. Not a template: a menu draws a template
     /// image in its text colour, which is the colour of every other row.
-    private static let warningSign = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Error")!
-        .withSymbolConfiguration(.preferringMulticolor())!
+    private static var warningSign: NSImage {
+        NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Error")!
+            .withSymbolConfiguration(.preferringMulticolor())!
+    }
 
     @available(*, unavailable)
     required init(coder: NSCoder) {
