@@ -642,6 +642,11 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
         public internal(set) var other = 0
         /// Seconds of the completed items' quiet the engine was not handed.
         public internal(set) var quietSeconds: Double = 0
+        /// The peak of the quietest tenth of a second any completed item held, the room their
+        /// quiet was judged against, and seconds within range of an item's loudest that stood
+        /// too near the room to be speech.
+        public internal(set) var roomPeak: Double?
+        public internal(set) var refusedAsRoomSeconds: Double = 0
         /// Completed items no clip of which reached the audible floor, answered as nothing said,
         /// and the loudest sample any of them held: how near the floor a quiet microphone came.
         public internal(set) var nothingSpoken = 0
@@ -654,6 +659,8 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
             case .completed(_, let heard, _):
                 completed += 1
                 quietSeconds += heard.transcript.quiet
+                roomPeak = [roomPeak, heard.transcript.room.map(Double.init)].compactMap { $0 }.min()
+                refusedAsRoomSeconds += heard.transcript.refusedAsRoom
                 if let peak = heard.nothingSpokenPeak {
                     nothingSpoken += 1
                     nothingSpokenPeak = max(nothingSpokenPeak ?? 0, Double(peak))

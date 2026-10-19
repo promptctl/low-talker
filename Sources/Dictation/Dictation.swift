@@ -1,3 +1,4 @@
+import Foundation
 import Insertion
 import LowTalkerCore
 import Synchronization
@@ -61,7 +62,8 @@ public final class Dictation {
         /// went to, so the first names the one app all of them went to.
         public var description: String {
             let destination = performed.first.map { " into \($0.into.rawValue)" } ?? ""
-            return "heard \(transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", transcript.quiet)) s of quiet \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
+            let room = transcript.room.map { $0 == 0 ? "digital silence" : String(format: "%.1f dBFS", 20 * log10($0)) } ?? "none heard"
+            return "heard \(transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", transcript.quiet)) s of quiet (room \(room), \(String(format: "%.1f", transcript.refusedAsRoom)) s refused as room) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
         }
     }
 

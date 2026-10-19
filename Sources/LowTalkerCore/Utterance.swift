@@ -77,7 +77,7 @@ actor Utterance {
     /// The loudest clip peak so far: what every clip is judged against, and what an
     /// utterance that never reached the floor is refused with.
     private var loudest: Float = 0
-    /// The peaks of the last `roomSpan` of frames, the newest last: the room is the least of them.
+    /// The peaks of the last `roomSpan` of frames before the one being judged, the newest last.
     private var recent: [Float] = []
     private static let roomFrames = Int((roomSpan / frame).rounded())
     private var ended = false
@@ -113,14 +113,19 @@ actor Utterance {
         samples += clip.samples
         let peak = clip.peak
         loudest = max(loudest, peak)
+        // The room: the quietest of this frame and those of the last `roomSpan` before it.
+        let room = recent.reduce(peak, min)
         recent = Array((recent + [peak]).suffix(Self.roomFrames))
         // The softest a sample of speech may be: within range of the loudest, and above
         // the room too unless it reaches the audible floor.
-        let softest = max(loudest / Self.dynamicRange, min(Self.audible, recent.reduce(peak, min) * Self.aboveRoom))
+        let softest = max(loudest / Self.dynamicRange, min(Self.audible, room * Self.aboveRoom))
         // [LAW:dataflow-not-control-flow] One judgement for every clip, the loudest
         // included: it stands within range of itself, so the clip that lifts the
         // loudest past the floor is the first speech.
         let speech = loudest >= Self.audible && peak >= softest
+        // [LAW:nothing-unseen] What the room refused that the range alone would have kept.
+        let refused = loudest >= Self.audible && peak >= loudest / Self.dynamicRange && !speech
+        timeline.heard(peak, refusedAsRoom: refused ? clip.samples.count : 0)
         // Where the audio kept must resume: the lead-in before the clip's first sample
         // of speech when the clip is speech, the lead-in before its end when it is not,
         // since the next clip may open on speech.
@@ -189,15 +194,24 @@ actor Utterance {
 /// Where an utterance's samples lie in the audio appended: each stretch of quiet let go,
 /// at the kept sample it was let go before. A pass reads kept samples, so the words it
 /// reads are timed from the first kept sample; placed here, they are timed from the
-/// audio's first sample, as a caller sent it.
+/// audio's first sample, as a caller sent it. It also keeps the room the quiet was judged against.
 struct Timeline: Sendable {
     /// Samples let go, by the kept sample they were let go before: quiet let go at one
     /// place across many clips is one gap.
     private var gaps: [Int: Int] = [:]
+    /// The peak of the quietest frame judged, none before one is.
+    private(set) var room: Float?
+    /// Samples within range of the loudest that stood too near the room to be speech.
+    private var refusedAsRoom = 0
 
     /// Seconds of the audio no pass is handed.
     var quiet: TimeInterval {
         AudioClip.duration(for: gaps.values.reduce(0, +))
+    }
+
+    mutating func heard(_ peak: Float, refusedAsRoom refused: Int) {
+        room = min(room ?? peak, peak)
+        refusedAsRoom += refused
     }
 
     mutating func letGo(_ count: Int, at sample: Int) {
@@ -222,7 +236,7 @@ struct Timeline: Sendable {
 
     /// The words, timed in the audio appended, and the quiet let go from it.
     func place(_ transcript: Transcript) -> Transcript {
-        Transcript(words: transcript.words.map(place), quiet: quiet)
+        Transcript(words: transcript.words.map(place), quiet: quiet, room: room, refusedAsRoom: AudioClip.duration(for: refusedAsRoom))
     }
 
     func place(_ partial: Partial) -> Partial {
