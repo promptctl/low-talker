@@ -77,12 +77,13 @@ import Testing
     /// Right Option down at 0, Shift down at 100 ms, Right Option up at 400 ms, and the Shift
     /// event handled at 500 ms: the reading already shows Right Option up, and the release is
     /// told at 400 ms. Dated by the event, it would be told at 100 ms, and a 400 ms hold would
-    /// be heard as a tap.
+    /// be heard as a tap. The key the session last saw typed crosses with it.
     @Test(.timeLimit(.minutes(1))) func aReadingAheadOfItsEventIsDatedByTheChangeItShows() async {
-        let shiftAloneSinceTheRelease = SessionModifiers(session: 0x20102, fnKeyDown: false, changedAt: 7_000.4)
+        let shiftAloneSinceTheRelease = SessionModifiers(session: 0x20102, fnKeyDown: false, changedAt: 7_000.4, typedAt: 7_000.2)
         Notices.shared.moved(at: 7_000.1, reading: shiftAloneSinceTheRelease)
         let told = await Notices.shared.notices.compactMap(\.held).first { @Sendable in $0.flags == 0x20102 }
         #expect(told?.uptimeNanoseconds == 7_000_400_000_000)
+        #expect(told?.typedUptimeNanoseconds == 7_000_200_000_000)
     }
 
     /// A cursor given focus is told to the app, which offers it words no cursor took.

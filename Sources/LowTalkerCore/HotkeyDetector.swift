@@ -4,7 +4,7 @@
 /// [LAW:one-source-of-truth] `modifiers` is the whole modifier state as the event
 /// reports it, not a running tally kept here: a tally would drift the first time an
 /// event was missed, and nothing could tell it had. `lastTyped` is the session's own
-/// record, for the same reason.
+/// record, read with `modifiers`, for the same reason.
 public struct KeyEvent: Hashable, Sendable {
     public enum Direction: Hashable, Sendable {
         case down, up
@@ -16,12 +16,13 @@ public struct KeyEvent: Hashable, Sendable {
     public let modifiers: Set<Modifier>
     /// When the key moved.
     public let time: HostTime
-    /// When a key that is not a modifier last went down, as the session had it when this
-    /// event was read: what tells a chord pressed alone from a chord held as the modifier of
-    /// a typed key, which the input method is never handed.
-    public let lastTyped: HostTime
+    /// When a key that is not a modifier last went down before this key moved: what tells a
+    /// chord pressed alone from a chord held as the modifier of a typed key, which the input
+    /// method is never handed. Nil when the session's record is of a key typed after the move,
+    /// since it keeps only the latest and that one hides any typed before.
+    public let lastTyped: HostTime?
 
-    public init(key: Modifier, direction: Direction, modifiers: Set<Modifier>, time: HostTime, lastTyped: HostTime) {
+    public init(key: Modifier, direction: Direction, modifiers: Set<Modifier>, time: HostTime, lastTyped: HostTime?) {
         self.key = key
         self.direction = direction
         self.modifiers = modifiers
@@ -148,7 +149,9 @@ public struct HotkeyDetector: Sendable {
     private mutating func up(of event: KeyEvent) -> Transition? {
         switch phase {
         case .held(let chord, let since) where chord.modifiers.contains(event.key):
-            let typedUnderChord = since < event.lastTyped && event.lastTyped <= event.time
+            // A typed key the session's record hides leaves the press told by its length, as
+            // every press was before the record was read.
+            let typedUnderChord = event.lastTyped.map { since < $0 } ?? false
             let press: PressKind = event.time - since < tapThreshold ? .tap : .hold
             switch (typedUnderChord, press) {
             case (true, _):

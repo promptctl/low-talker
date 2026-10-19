@@ -229,13 +229,22 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     }
 
     /// Only a key typed while the chord was down makes it a modifier: one typed before it
-    /// went down, or after it came up and before the release was read, leaves a tap.
-    @Test(arguments: [Int64(-5), 0, 101])
+    /// went down leaves a tap.
+    @Test(arguments: [Int64(-5), 0])
     func aKeyTypedOutsideTheChordLeavesATap(typedAt ms: Int64) {
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
         keyboard.type(at: ms)
         #expect(keyboard.release(.rightOption, at: 100) == nil)
+        #expect(keyboard.detector.phase == .latched(rightOption.chord))
+    }
+
+    /// A release whose reading cannot say when a key was typed before it, because one typed
+    /// after hides it, is told by its length.
+    @Test func aReleaseThatCannotSayWhatWasTypedIsToldByItsLength() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        #expect(keyboard.detector.handle(KeyEvent(key: .rightOption, direction: .up, modifiers: [], time: at(100), lastTyped: nil)) == nil)
         #expect(keyboard.detector.phase == .latched(rightOption.chord))
     }
 

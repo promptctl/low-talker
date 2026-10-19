@@ -22,21 +22,28 @@ public struct HeldModifiers: Equatable, Sendable {
     /// When the latest change in `flags` happened, in nanoseconds on the clock the machine has
     /// been up on.
     public let uptimeNanoseconds: UInt64
+    /// When a key that is not a modifier last went down, on the same clock: what tells a chord
+    /// pressed alone from one held as the modifier of a typed key, which the input method is
+    /// never handed.
+    public let typedUptimeNanoseconds: UInt64
 
-    public init(flags: UInt64, uptimeNanoseconds: UInt64) {
+    public init(flags: UInt64, uptimeNanoseconds: UInt64, typedUptimeNanoseconds: UInt64) {
         self.flags = flags
         self.uptimeNanoseconds = uptimeNanoseconds
+        self.typedUptimeNanoseconds = typedUptimeNanoseconds
     }
 
-    /// What a reading of the session says is held, and since when.
+    /// What a reading of the session says is held, since when, and when a key was last typed.
     public init(_ reading: SessionModifiers) {
         // Rounded: seconds as a double do not land on whole nanoseconds.
-        self.init(flags: reading.flags, uptimeNanoseconds: UInt64((reading.changedAt * 1_000_000_000).rounded()))
+        func nanoseconds(_ seconds: TimeInterval) -> UInt64 { UInt64((seconds * 1_000_000_000).rounded()) }
+        self.init(flags: reading.flags, uptimeNanoseconds: nanoseconds(reading.changedAt),
+                  typedUptimeNanoseconds: nanoseconds(reading.typedAt))
     }
 }
 
 /// One reading of the window server's session: its modifier flags as it gives them, whether
-/// the Fn key itself is down, and when its modifiers last changed. The session sets the secondary-Fn bit
+/// the Fn key itself is down, when its modifiers last changed, and when a key was last typed. The session sets the secondary-Fn bit
 /// (`NX_SECONDARYFNMASK`) for the arrow, Home, End, Page Up/Down and Forward Delete keys too,
 /// Fn held or not, so `flags` takes that bit from the Fn key's own state, read from the same
 /// session like the rest, with no tally kept of its presses.
@@ -50,11 +57,17 @@ public struct SessionModifiers: Equatable, Sendable, CustomStringConvertible {
     /// `NSEvent.timestamp`'s clock. Measured on studious, 2026-10-03: for keys pressed through
     /// vhid it lands 1.5-9 ms after each one was sent.
     public let changedAt: TimeInterval
+    /// When a key that is not a modifier last went down in the session, on the same clock.
+    /// Reading it needs no grant: measured on studious, 2026-10-19, an app with neither Input
+    /// Monitoring nor Accessibility read the moment of an A typed under a held Right Option.
+    /// A session that has seen no key typed gives a moment near when the machine came up.
+    public let typedAt: TimeInterval
 
-    public init(session: UInt64, fnKeyDown: Bool, changedAt: TimeInterval) {
+    public init(session: UInt64, fnKeyDown: Bool, changedAt: TimeInterval, typedAt: TimeInterval) {
         self.session = session
         self.fnKeyDown = fnKeyDown
         self.changedAt = changedAt
+        self.typedAt = typedAt
     }
 
     /// The session now, read in answer to a change that happened at `event`, or to none.
@@ -62,9 +75,12 @@ public struct SessionModifiers: Equatable, Sendable, CustomStringConvertible {
         let readAt = ProcessInfo.processInfo.systemUptime
         let session = CGEventSource.flagsState(.combinedSessionState).rawValue
         let fnKeyDown = CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(kVK_Function))
-        let since = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .flagsChanged)
+        let sinceChange = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .flagsChanged)
+        let sinceTyped = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        let now = ProcessInfo.processInfo.systemUptime
         return SessionModifiers(session: session, fnKeyDown: fnKeyDown,
-                                changedAt: date(lastChange: ProcessInfo.processInfo.systemUptime - since, after: event, readAt: readAt))
+                                changedAt: date(lastChange: now - sinceChange, after: event, readAt: readAt),
+                                typedAt: now - sinceTyped)
     }
 
     /// When a reading taken at `readAt` has held its keys since, given the session's last
@@ -89,7 +105,7 @@ public struct SessionModifiers: Equatable, Sendable, CustomStringConvertible {
     public var description: String {
         "session 0x\(String(session, radix: 16)), Fn key \(fnKeyDown ? "down" : "up")"
             + (flags == session ? "" : ", held 0x\(String(flags, radix: 16))")
-            + ", changed at \(changedAt)"
+            + ", changed at \(changedAt), typed at \(typedAt)"
     }
 }
 

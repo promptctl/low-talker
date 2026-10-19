@@ -11,8 +11,8 @@ import os
 /// The input method is handed keys only by an app in front that takes typing, and by none
 /// under Secure Event Input, so a press anywhere else never arrives. It never keeps a key
 /// back, since the input method hands every key back. It is handed no typed key at all, so
-/// every reading carries when the session last saw one, which is how a chord held as a
-/// modifier is told from one pressed alone.
+/// every reading of the session, the input method's and the app's, carries when it last saw
+/// one, which is how a chord held as a modifier is told from one pressed alone.
 ///
 /// A release is the one change it cannot wait to be told. One made where the input method
 /// is handed nothing, or told while the app's port was full, would leave the microphone open
@@ -59,17 +59,14 @@ public struct InputMethodModifiers: ModifierFeed {
         private var confirming: DispatchSourceTimer?
         /// The port's queue, where the session is read too.
         private let hearing: DispatchQueue
-        /// [LAW:effects-at-boundaries] The readings of the session: its modifier keys, and when
-        /// a key was last typed.
-        private let session: @Sendable () -> Set<Modifier>
-        private let lastTyped: @Sendable () -> HostTime
+        /// [LAW:effects-at-boundaries] The reading of the session, the one the input method
+        /// sends.
+        private let session: @Sendable () -> HeldModifiers
 
-        init(told: ToldModifiers, hearing: DispatchQueue, session: @escaping @Sendable () -> Set<Modifier>,
-             lastTyped: @escaping @Sendable () -> HostTime) {
+        init(told: ToldModifiers, hearing: DispatchQueue, session: @escaping @Sendable () -> HeldModifiers) {
             self.told = told
             self.hearing = hearing
             self.session = session
-            self.lastTyped = lastTyped
         }
 
         func heard(_ moves: [KeyEvent]) {
@@ -82,15 +79,12 @@ public struct InputMethodModifiers: ModifierFeed {
             open.map { _ in arrived() }
         }
 
-        /// The input method's reading, with when a key was last typed as this side read it
-        /// on taking the message.
-        func heard(_ state: HeldModifiers, lastTyped: HostTime) {
-            heard(told.take(Modifier.held(in: state.flags),
-                            at: HostTime(uptime: .nanoseconds(state.uptimeNanoseconds)), lastTyped: lastTyped))
+        func heard(_ state: HeldModifiers) {
+            heard(told.take(state.held, at: state.changed, lastTyped: state.lastTyped))
         }
 
-        func confirmed(_ session: Set<Modifier>, at time: HostTime, lastTyped: HostTime) {
-            heard(told.confirm(session: session, at: time, lastTyped: lastTyped))
+        func confirmed(_ session: HeldModifiers, at time: HostTime) {
+            heard(told.confirm(session: session.held, at: time, lastTyped: session.lastTyped))
         }
 
         /// [LAW:dataflow-not-control-flow] The session is read for as long as the feed is
@@ -110,9 +104,9 @@ public struct InputMethodModifiers: ModifierFeed {
                 // main queue still has somewhere to land. Sendable, so it is isolated to no
                 // actor: written in this main-actor class it would otherwise be the main
                 // actor's, and trap when the timer runs it on `hearing`.
-                timer.setEventHandler { @Sendable [self, session, lastTyped] in
-                    let (session, time, lastTyped) = (session(), HostTime.now, lastTyped())
-                    DispatchQueue.main.async { MainActor.assumeIsolated { self.confirmed(session, at: time, lastTyped: lastTyped) } }
+                timer.setEventHandler { @Sendable [self, session] in
+                    let (session, time) = (session(), HostTime.now)
+                    DispatchQueue.main.async { MainActor.assumeIsolated { self.confirmed(session, at: time) } }
                 }
                 timer.resume()
                 confirming = timer
@@ -132,22 +126,19 @@ public struct InputMethodModifiers: ModifierFeed {
         // already down when this comes up is not heard going down when it next moves.
         let hearing = DispatchQueue(label: AppIdentity.hotkeyPortName)
         let installed = Installed<NoticePort>(told: ToldModifiers(held: Modifier.heldInSession()), hearing: hearing,
-                                                session: Modifier.heldInSession, lastTyped: HostTime.lastTypedInSession)
+                                                session: { HeldModifiers(SessionModifiers.read()) })
         let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
         // Checked and read off the main thread, where the keys and the menu are, and handed
         // to it in the order the input method sent them: the main queue is first in, first
         // out, which keeps a key's down ahead of its up. [LAW:no-ambient-temporal-coupling]
-        // When a key was last typed is read here too, as the message is taken, since the
-        // main queue can be late by more than the gap to the next key typed.
         let port = try NoticePort(
             queue: hearing,
             told: { event in log.error("\(event.description, privacy: .public)") },
             heard: { [cursorArrived] notice in
-                let lastTyped = HostTime.lastTypedInSession()
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         switch notice {
-                        case .modifiersMoved(let state): installed.heard(state, lastTyped: lastTyped)
+                        case .modifiersMoved(let state): installed.heard(state)
                         case .cursorArrived: installed.heard(cursorArrivedTo: cursorArrived)
                         }
                     }
@@ -184,19 +175,19 @@ public struct ToldModifiers: Sendable {
 
     /// The key events that take the detector to holding `now`, as the input method read it
     /// at `time`, with a key last typed at `lastTyped`.
-    public mutating func take(_ now: Set<Modifier>, at time: HostTime, lastTyped: HostTime) -> [KeyEvent] {
+    public mutating func take(_ now: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
         // A later message has nothing older left to be overtaken by. [LAW:dataflow-not-control-flow]
         letGo = letGo.filter { $0.value > time }
         return move(to: now.subtracting(letGo.keys), at: time, lastTyped: lastTyped)
     }
 
     /// The key events that let go of what `session`, read at `time`, no longer holds.
-    public mutating func confirm(session: Set<Modifier>, at time: HostTime, lastTyped: HostTime) -> [KeyEvent] {
+    public mutating func confirm(session: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
         held.subtracting(session).forEach { letGo[$0] = time }
         return move(to: held.intersection(session), at: time, lastTyped: lastTyped)
     }
 
-    private mutating func move(to now: Set<Modifier>, at time: HostTime, lastTyped: HostTime) -> [KeyEvent] {
+    private mutating func move(to now: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
         defer { held = now }
         return KeyEvent.moves(from: held, to: now, at: time, lastTyped: lastTyped)
     }
@@ -214,7 +205,7 @@ extension KeyEvent {
     /// next had already come, is every key that came up and then one key down carrying the
     /// whole state: keys that went down together were never seen held apart, so no chord
     /// that some of them make is completed on the way to the one they make together.
-    public static func moves(from before: Set<Modifier>, to after: Set<Modifier>, at time: HostTime, lastTyped: HostTime) -> [KeyEvent] {
+    public static func moves(from before: Set<Modifier>, to after: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
         let released = Modifier.allCases.filter { before.contains($0) && !after.contains($0) }
         let pressed = Modifier.allCases.filter { after.contains($0) && !before.contains($0) }
         var held = before
@@ -224,5 +215,21 @@ extension KeyEvent {
         }
         let downs = pressed.suffix(1).map { KeyEvent(key: $0, direction: .down, modifiers: after, time: time, lastTyped: lastTyped) }
         return ups + downs
+    }
+}
+
+extension HeldModifiers {
+    /// The modifiers the reading shows held.
+    var held: Set<Modifier> { Modifier.held(in: flags) }
+
+    /// When they changed to what the reading shows.
+    var changed: HostTime { HostTime(uptime: .nanoseconds(uptimeNanoseconds)) }
+
+    /// When a key was last typed, if that was before the change: the session keeps only its
+    /// latest key, so one typed after the change hides any typed before. A reading the app
+    /// takes itself is dated by the session's last change, so a release only the app saw is
+    /// judged at the release and not at the reading, up to `confirming` later.
+    var lastTyped: HostTime? {
+        typedUptimeNanoseconds <= uptimeNanoseconds ? HostTime(uptime: .nanoseconds(typedUptimeNanoseconds)) : nil
     }
 }

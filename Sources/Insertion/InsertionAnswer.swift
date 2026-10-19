@@ -302,10 +302,10 @@ enum Wire {
         try? JSONDecoder().decode(InsertionAnswer.self, from: data)
     }
 
-    /// Two words, the flags and then the moment, in this Mac's own byte order: both ends run
-    /// on the one machine.
+    /// Three words, the flags, the moment and when a key was last typed, in this Mac's own
+    /// byte order: both ends run on the one machine.
     static func modifiers(_ held: HeldModifiers) -> Data {
-        withUnsafeBytes(of: (held.flags, held.uptimeNanoseconds)) { Data($0) }
+        withUnsafeBytes(of: (held.flags, held.uptimeNanoseconds, held.typedUptimeNanoseconds)) { Data($0) }
     }
 
     static func notice(_ notice: Notice) -> (id: mach_msg_id_t, payload: Data) {
@@ -328,8 +328,8 @@ enum Wire {
     /// [LAW:parse-dont-validate] Held modifiers or nothing at all: bytes of any other length
     /// are not a message this wire sends.
     static func heldModifiers(of data: Data) -> HeldModifiers? {
-        guard data.count == MemoryLayout<(UInt64, UInt64)>.size else { return nil }
-        let (flags, uptime) = data.withUnsafeBytes { $0.loadUnaligned(as: (UInt64, UInt64).self) }
-        return HeldModifiers(flags: flags, uptimeNanoseconds: uptime)
+        guard data.count == MemoryLayout<(UInt64, UInt64, UInt64)>.size else { return nil }
+        let (flags, uptime, typed) = data.withUnsafeBytes { $0.loadUnaligned(as: (UInt64, UInt64, UInt64).self) }
+        return HeldModifiers(flags: flags, uptimeNanoseconds: uptime, typedUptimeNanoseconds: typed)
     }
 }
