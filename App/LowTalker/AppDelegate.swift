@@ -790,7 +790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func report(_ press: Dictation.Report) {
         switch press.outcome {
         case .success(let session):
-            sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcript.text, privacy: .private)")
+            sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
         case .failure(let failed):
             reportFailure(failed, of: press)
         }

@@ -36,18 +36,18 @@ import Testing
         let feeding = Task { await feed(clipFeed, seen) }
         var passes: [Hearing.Pass] = []
         var partials: [Partial] = []
-        let transcript = try await Hearing.transcribe(clips, margin: margin, context: 3, pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: margin, context: 3, pass: { pass in
             passes.append(pass)
             record.yield(pass)
             return reading
         }, partial: { partials.append($0) })
         record.finish()
         await feeding.value
-        return (passes, partials, transcript)
+        return (passes, partials, transcription.transcript)
     }
 
     /// Nothing reaching the gate is no pass at all and a refusal, not a decode of
-    /// silence that comes back empty.
+    /// silence that comes back empty. All of it is quiet, judged against the room it heard.
     @Test func aSilentHoldMakesNoPassAndIsRefused() async {
         var passes: [Hearing.Pass] = []
         let refusal = await #expect(throws: TranscriptionFailure.self) {
@@ -56,9 +56,27 @@ import Testing
                 feed.finish()
             }
         }
-        guard case .nothingSpoken(let peak)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0))
         #expect(passes.isEmpty)
+    }
+
+    /// The transcription's quiet is the gate's: what it let go, the room it judged against,
+    /// and what the room refused, as the utterance's own timeline has them.
+    @Test func theTranscriptionCarriesTheQuietTheGateKept() async throws {
+        let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
+        let clips = [room, AudioClip(samples: Array(repeating: 0.03, count: 1_600))] + Array(repeating: room, count: 60)
+        let utterance = Utterance()
+        for clip in clips { await utterance.append(clip) }
+        await utterance.end()
+        let gate = await utterance.audio(beyond: 0).timeline.quiet
+        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60)
+        let transcription = try await Hearing.transcribe(AsyncStream { feed in
+            for clip in clips { feed.yield(clip) }
+            feed.finish()
+        }, margin: Self.margin, context: 3, pass: { _ in Self.reading }, partial: { _ in })
+        #expect(transcription.quiet == gate)
     }
 
     /// An engine that reads words into any second of quiet it is handed, as Whisper does
@@ -85,15 +103,15 @@ import Testing
         }
         feed.finish()
         var passes: [Hearing.Pass] = []
-        let transcript = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, pass: { pass in
             passes.append(pass)
             return Self.hallucinating(pass)
         }, partial: { _ in })
         #expect(!passes.isEmpty)
-        #expect(transcript.text == " see you")
-        #expect(abs(transcript.words[0].time.lowerBound - AudioClip.duration(for: quiet.count)) < 1e-9)
+        #expect(transcription.transcript.text == " see you")
+        #expect(abs(transcription.transcript.words[0].time.lowerBound - AudioClip.duration(for: quiet.count)) < 1e-9)
         let kept = click ? 2 * Utterance.leadIn + AudioClip.sampleCount(for: Utterance.frame) + Utterance.hangover : Utterance.leadIn
-        #expect(abs(transcript.quiet - AudioClip.duration(for: quiet.count - kept)) < 1e-9)
+        #expect(abs(transcription.quiet.letGo - AudioClip.duration(for: quiet.count - kept)) < 1e-9)
     }
 
     /// Speech under a second, well under what a pass waits for during the hold,

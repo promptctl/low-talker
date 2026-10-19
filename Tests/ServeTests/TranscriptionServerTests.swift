@@ -96,7 +96,7 @@ import TestProbes
     /// An mp3 is decoded as a wav is, and the engine hears all of it. The event carries
     /// the quiet the engine let go and the room it was judged against.
     @Test func hearsAnMP3() async throws {
-        let stub = Stub(.success(Transcript(words: Transcript(typed: " Hello world, this is LowTalker.").words, quiet: 1.5, room: 0.25, refusedAsRoom: 0.5)))
+        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -121,7 +121,7 @@ import TestProbes
         ("verbose_json", Data(#"{"duration":2.5,"language":"english","segments":[],"task":"transcribe","text":"","usage":{"seconds":3,"type":"duration"}}"#.utf8)),
     ])
     func anUploadWithNothingSpokenIsEmptyText(format: String, answer: Data) async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0))))
         defer { running.server.stop() }
         // 0.0025, about -52 dBFS: a quiet room's hold, under the -40 dBFS floor.
         let (response, body) = try await running.post([
@@ -131,7 +131,8 @@ import TestProbes
         #expect(body == answer, "\(String(decoding: body, as: UTF8.self))")
         let event = try await running.nextEvent()
         #expect(event.status == 200 && event.error == nil && event.words == 0)
-        #expect(event.quietSeconds == 2.5)
+        // The quiet the engine refused it with, the room it heard included.
+        #expect(event.quietSeconds == 2.5 && event.roomPeak == Double(Float(0.002)))
         let peak = try #require(event.nothingSpokenPeak)
         // Within a 16-bit step of the peak written.
         #expect(abs(peak - 0.0025) < 0.0001)

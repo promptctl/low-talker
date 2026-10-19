@@ -80,7 +80,7 @@ public struct WhisperKitTranscriber: Transcriber {
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcript {
+    ) async throws(TranscriptionFailure) -> Transcription {
         let pipeline = pipeline
         // The vocabulary is encoded once and refused, if it must be, before any
         // audio is taken in, so a hold never gets as far as the gate with a prompt

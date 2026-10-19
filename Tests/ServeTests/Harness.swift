@@ -9,20 +9,22 @@ import Testing
 /// what it was given. While audio streams in it confirms a word per half second heard, up
 /// to half the words, so a streamed utterance has words confirmed before it ends and
 /// words left for the final transcript. Audio that never reaches the engine's audible floor
-/// it refuses as nothing spoken, as the engine does, and noise it hears its words in doubtfully.
+/// it refuses as nothing spoken, as the engine does, with `quiet`, and noise it hears its words in doubtfully.
 final class Stub: Transcriber {
     let heard = Mutex<[(seconds: TimeInterval, vocabulary: Vocabulary, cancelled: Bool)]>([])
     let answer: Result<Transcript, TranscriptionFailure>
+    let quiet: Quiet
 
-    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker."))) {
+    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0)) {
         self.answer = answer
+        self.quiet = quiet
     }
 
     func transcribe(
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcript {
+    ) async throws(TranscriptionFailure) -> Transcription {
         let words = (try? answer.get())?.words ?? []
         var seconds: TimeInterval = 0
         var loudest: Float = 0
@@ -39,12 +41,12 @@ final class Stub: Transcriber {
             partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0))
         }
         heard.withLock { $0.append((seconds, vocabulary, Task.isCancelled)) }
-        guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest) }
+        guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest, quiet: quiet) }
         let transcript = try answer.get()
         // White noise changes sign on about half its samples, speech and a tone on far fewer.
         // Noise is read as the engine reads a primed hallucination over it: words, barely believed.
-        guard Double(crossings) / Double(samples) > 0.3 else { return transcript }
-        return Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: Self.doubted) }, quiet: transcript.quiet)
+        let noise = Double(crossings) / Double(samples) > 0.3
+        return Transcription(transcript: noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: Self.doubted) }) : transcript, quiet: quiet)
     }
 
     /// The probability the stub gives every word it reads into noise.
@@ -59,7 +61,7 @@ struct Turning: Transcriber {
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcript {
+    ) async throws(TranscriptionFailure) -> Transcription {
         var clip: [Float] = []
         for await chunk in audio { clip += chunk.samples }
         return try await turns.decode(as: .served) { [clip] () async throws(TranscriptionFailure) in
@@ -79,7 +81,7 @@ final class Gated: Transcriber {
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcript {
+    ) async throws(TranscriptionFailure) -> Transcription {
         started.withLock { $0.append(answered.withLock { $0 }) }
         await gate.value
         defer { answered.withLock { $0 += 1 } }

@@ -77,22 +77,23 @@ struct Usage: Encodable, Sendable {
     }
 }
 
-/// What an utterance was heard as: the engine's transcript, or, for one it refused as nothing
-/// spoken, no words with every second quiet. OpenAI answers audio with nothing said in it 200
-/// with empty text, so a push-to-talk hold where nothing was said is an answer, not a failure.
+/// What an utterance was heard as: the engine's transcription, or, for one it refused as
+/// nothing spoken, no words with the quiet it refused. OpenAI answers audio with nothing said
+/// in it 200 with empty text, so a push-to-talk hold where nothing was said is an answer, not
+/// a failure.
 /// [LAW:one-source-of-truth] The upload and the Realtime item are both answered through here.
 struct Heard: Sendable {
-    let transcript: Transcript
+    let transcription: Transcription
     /// The loudest sample of an utterance no clip of which reached the audible floor.
     let nothingSpokenPeak: Float?
 
-    /// `seconds` of audio, heard by `transcribing`; any failure but nothing spoken is thrown.
-    init(seconds: TimeInterval, transcribing: () async throws -> Transcript) async throws {
+    /// The utterance `transcribing` hears; any failure but nothing spoken is thrown.
+    init(transcribing: () async throws -> Transcription) async throws {
         do {
-            transcript = try await transcribing()
+            transcription = try await transcribing()
             nothingSpokenPeak = nil
-        } catch TranscriptionFailure.nothingSpoken(let peak) {
-            transcript = Transcript(words: [], quiet: seconds)
+        } catch TranscriptionFailure.nothingSpoken(let peak, let quiet) {
+            transcription = Transcription(transcript: Transcript(words: []), quiet: quiet)
             nothingSpokenPeak = peak
         }
     }

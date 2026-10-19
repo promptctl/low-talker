@@ -41,7 +41,7 @@ public final class Dictation {
     /// type says it is: one the speaker ended, heard from every sample it covered.
     public struct Session: Sendable, CustomStringConvertible {
         public let context: Context
-        public let transcript: Transcript
+        public let transcription: Transcription
         /// What the engine had shown by the time the key came up.
         public let duringPress: DuringPress
         /// From the key coming up to the transcript: `keyUpDelivery`, then the engine's share.
@@ -62,8 +62,9 @@ public final class Dictation {
         /// went to, so the first names the one app all of them went to.
         public var description: String {
             let destination = performed.first.map { " into \($0.into.rawValue)" } ?? ""
-            let room = transcript.room.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? "none heard"
-            return "heard \(transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", transcript.quiet)) s of quiet (room \(room), \(String(format: "%.1f", transcript.refusedAsRoom)) s refused as room) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
+            let quiet = transcription.quiet
+            let room = quiet.room.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? "none heard"
+            return "heard \(transcription.transcript.words.count) words in a \(context.press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(duringPress); \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
         }
     }
 
@@ -278,11 +279,11 @@ public final class Dictation {
         }
     }
 
-    /// A press's decode, begun at key-down: the transcript it came to, when, and what the
-    /// press's hold put off. The hold is let go inside it the moment the transcript is out,
+    /// A press's decode, begun at key-down: the transcription it came to, when, and what the
+    /// press's hold put off. The hold is let go inside it the moment the transcription is out,
     /// so served callers wait for this press's engine and not for an earlier press's insert.
     private struct Decoded: Sendable {
-        let transcript: Result<Transcript, Failed>
+        let transcription: Result<Transcription, Failed>
         let at: ContinuousClock.Instant
         let displaced: EngineHold.Displaced
     }
@@ -563,7 +564,7 @@ public final class Dictation {
         let before = latestDecode
         let decode = Task { [transcriber] in
             _ = await before?.value
-            let transcript = await Result { () async throws(Failed) in
+            let transcription = await Result { () async throws(Failed) in
                 let engine: any Transcriber
                 do throws(EngineUnavailable) { engine = try await transcriber() } catch { throw Failed(error) }
                 do throws(TranscriptionFailure) {
@@ -571,7 +572,7 @@ public final class Dictation {
                 } catch { throw Failed(error) }
             }
             streaming.decoded()
-            return Decoded(transcript: transcript, at: .now, displaced: hold.release())
+            return Decoded(transcription: transcription, at: .now, displaced: hold.release())
         }
         latestDecode = decode
         return decode
@@ -666,18 +667,18 @@ public final class Dictation {
         case (.lost(let lost), nil): throw Failed(SpeechLost(lost: lost, landed: landed.words))
         }
         let decoded = await heard.decode.value
-        let transcript: Transcript
-        switch decoded.transcript {
-        case .success(let decodedTranscript): transcript = decodedTranscript
+        let transcription: Transcription
+        switch decoded.transcription {
+        case .success(let decodedTranscription): transcription = decodedTranscription
         case .failure(let failed): throw stopped(failed.failure)
         }
         let placed: Placed
         do throws(InsertFailure) {
-            placed = try await place(heard.streaming.rest(of: transcript), following: landed.performed.last, since: .keyUp(keyUp))
+            placed = try await place(heard.streaming.rest(of: transcription.transcript), following: landed.performed.last, since: .keyUp(keyUp))
         } catch { throw stopped(error) }
         // A rest of nothing leaves what the commits could not place where it was.
         if placed.performed == nil, let unplaced { throw stopped(unplaced) }
-        return Session(context: context, transcript: transcript, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 })
+        return Session(context: context, transcription: transcription, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 })
     }
 }
 

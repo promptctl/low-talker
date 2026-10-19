@@ -252,7 +252,7 @@ enum ServerEvent: Sendable {
                 "content": [["type": "input_audio", "transcript": NSNull()]],
             ]
         case .completed(let item, let heard, let usage):
-            fields.merge(["item_id": item, "content_index": 0, "transcript": heard.transcript.served,
+            fields.merge(["item_id": item, "content_index": 0, "transcript": heard.transcription.transcript.served,
                           "usage": ["type": usage.type, "seconds": usage.seconds]]) { $1 }
         case .failed(let item, let error):
             fields.merge(["item_id": item, "content_index": 0, "error": Self.detail(error, clientEvent: nil)]) { $1 }
