@@ -1,6 +1,7 @@
 import AppKit
 import Identity
 import Onboarding
+import os
 
 /// The guided setup's window: one requirement at a time, explained in plain words before
 /// the person presses the button that makes macOS ask.
@@ -19,11 +20,13 @@ import Onboarding
 final class SetUpWindow: NSObject, NSWindowDelegate {
     /// The list as it stands now.
     private let read: () -> Readiness
-    /// Asks macOS for one row's grant, and answers with what went wrong when something did.
-    private let ask: (Requirement.Row) async -> String?
+    /// Asks macOS for one row's grant, and answers with how the request ended.
+    private let ask: (Requirement.Row) async -> Request
     /// Told the reading taken after a request and on coming back to the front, the moments
     /// a grant may have arrived.
     private let settle: (Readiness) -> Void
+    /// The app's log, where each request says how it ended.
+    private let log: Logger
 
     private var walk = GuidedSetup()
     /// What the last request said went wrong, shown on the step it was made from.
@@ -57,27 +60,45 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private static let width: CGFloat = 520
 
     init(
-        read: @escaping () -> Readiness, ask: @escaping (Requirement.Row) async -> String?,
-        settle: @escaping (Readiness) -> Void
+        read: @escaping () -> Readiness, ask: @escaping (Requirement.Row) async -> Request,
+        settle: @escaping (Readiness) -> Void, log: Logger
     ) {
         self.read = read
         self.ask = ask
         self.settle = settle
+        self.log = log
     }
 
-    /// Opens the walk at its first step, with nothing set aside. The page is drawn from the
-    /// one reading taken as the window becomes key; a window macOS did not let become key
-    /// is drawn here instead, so it is never shown empty, and so is one that was key
-    /// already, which does not become key again.
+    /// Opens the walk at its first step, with nothing set aside.
     func show() {
         walk = GuidedSetup()
         failure = nil
         asked = []
-        let wasKey = window.isKeyWindow
         window.center()
-        NSApp.activate()
+        comeToFront()
+    }
+
+    /// Takes the front, drawn from a reading taken now and again from the one taken as the
+    /// window becomes key, so it is never shown stale while the front is on its way.
+    ///
+    /// The front is asked of LaunchServices, as `open -a` asks for it, not of `NSApp.activate`:
+    /// since macOS 14 activation is cooperative, and an app the front was not yielded to is
+    /// refused, `ignoringOtherApps` or not. Measured on studious 2026-10-18 (macOS 15.0.1):
+    /// once the microphone dialog was answered, both were refused and the app in front before
+    /// took it back; LaunchServices was not refused.
+    private func comeToFront() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        // Taking the front back is not the person opening the app, so Recent Items is left alone.
+        configuration.addsToRecentItems = false
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { [log] _, error in
+            if let error {
+                log.error("setup: LaunchServices refused the front: \(error, privacy: .public)")
+            } else {
+                log.notice("setup: LaunchServices gave the front")
+            }
+        }
         window.makeKeyAndOrderFront(nil)
-        if wasKey || !window.isKeyWindow { draw(read()) }
+        redrawFromAFreshReading()
     }
 
     /// Back at the front, most often from System Settings: read again, and hand the
@@ -149,7 +170,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         // Every step can be read again by hand: a grant made where this window cannot see
         // it arriving - System Settings left open beside it - clears its step here.
         let checkAgain = button("Check Again") { [unowned self] in redrawFromAFreshReading() }
-        let openSettings = button("Open System Settings") { NSWorkspace.shared.open(row.settingsPane) }
+        let openSettings = button("Open System Settings") { [unowned self] in openSystemSettings(row) }
         // The default is the one button that makes macOS ask, so Return is the person
         // choosing to be asked; once asked, System Settings.
         let primary = ask ?? openSettings
@@ -182,17 +203,59 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         asking = true
         failure = nil
         draw(shown)
+        log.notice("setup: asking for \(row.rawValue, privacy: .public)")
         Task {
-            let reason = await ask(row)
+            let request = await ask(row)
+            let level: OSLogType = if case .failed = request { .error } else { .default }
+            log.log(level: level, "setup: asked for \(row.rawValue, privacy: .public): \(String(describing: request), privacy: .public)")
             asking = false
-            // Only a request that went through counts as asked: one that failed showed no
-            // dialog, so its button stays, beside the reason, to be tried again.
-            if reason == nil { asked.insert(row) }
-            failure = reason.map { (row, $0) }
-            let readiness = read()
-            draw(readiness)
-            settle(readiness)
+            // Only a request that went through counts as asked: the others showed no dialog,
+            // so their button stays, beside the reason, to be tried again.
+            switch request {
+            case .answered where window.isVisible:
+                asked.insert(row)
+                comeToFront()
+            case .answered, .made:
+                asked.insert(row)
+                redrawFromAFreshReading()
+            case .failed(let reason):
+                failure = (row, reason)
+                redrawFromAFreshReading()
+            case .sentToSystemSettings(let reason):
+                failure = (row, reason)
+                redrawFromAFreshReading()
+                openSystemSettings(row)
+            }
         }
+    }
+
+    /// The step's pane in System Settings, where its words send the person.
+    private func openSystemSettings(_ row: Requirement.Row) {
+        // [LAW:no-silent-failure] A pane that does not open leaves the step pointing at nothing.
+        if !NSWorkspace.shared.open(row.settingsPane) {
+            log.error("setup: System Settings did not open \(row.settingsPane, privacy: .public)")
+        }
+    }
+
+    /// How a request for one step's grant ended, which says where the person is left.
+    ///
+    /// [LAW:types-are-the-program] Only a dialog answered before the request returned took the
+    /// front away, so only `answered` takes it back; the arm that sends the person to System
+    /// Settings cannot also pull this window over it.
+    enum Request {
+        /// macOS showed its dialog and it was answered. Answering hands the front to the app
+        /// that had it before this one, so the window takes it back, unless the person closed
+        /// it meanwhile.
+        case answered
+        /// The request went through and took nothing from the front: macOS had nothing left
+        /// to ask, or its dialog may still be up when the request returns, as the input
+        /// method's may (`InstalledInputMethod.switchOn`).
+        case made
+        /// Nothing was asked, for the reason shown on the step.
+        case failed(String)
+        /// macOS will not ask again, and the switch is in System Settings, which opens with
+        /// the reason shown on the step behind it.
+        case sentToSystemSettings(String)
     }
 
     // MARK: - pieces
