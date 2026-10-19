@@ -199,3 +199,44 @@ func error(_ body: Data) throws -> [String: Any] {
     let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     return try #require(object["error"] as? [String: Any])
 }
+
+/// A Realtime socket to a running server, speaking JSON events.
+struct Client {
+    let task: URLSessionWebSocketTask
+    /// Every event received so far, in order.
+    private(set) var received: [[String: Any]] = []
+
+    init(_ running: Running) {
+        task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(running.server.port.rawValue)/v1/realtime?intent=transcription")!)
+        task.resume()
+    }
+
+    func send(_ event: [String: Any]) async throws {
+        try await task.send(.string(String(decoding: JSONSerialization.data(withJSONObject: event), as: UTF8.self)))
+    }
+
+    /// Events up to and including the first of `type`.
+    mutating func until(_ type: String) async throws -> [String: Any] {
+        while true {
+            guard case .string(let text) = try await task.receive() else { throw Unexpected.binary }
+            let event = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+            received.append(event)
+            if event["type"] as? String == type { return event }
+        }
+    }
+
+    func types() -> [String] {
+        received.compactMap { $0["type"] as? String }
+    }
+
+    /// `seconds` of a 440 Hz tone at 24 kHz peaking at `peak`, as appends of 100 ms each.
+    func append(seconds: Double, peak: Double = 8_000) async throws {
+        let samples = (0..<Int(seconds * 24_000)).map { Int16(peak * sin(Double($0) * 2 * .pi * 440 / 24_000)) }
+        for chunk in stride(from: 0, to: samples.count, by: 2_400) {
+            let bytes = samples[chunk..<min(chunk + 2_400, samples.count)].withUnsafeBytes { Data($0) }
+            try await send(["type": "input_audio_buffer.append", "audio": bytes.base64EncodedString()])
+        }
+    }
+
+    enum Unexpected: Error { case binary }
+}
