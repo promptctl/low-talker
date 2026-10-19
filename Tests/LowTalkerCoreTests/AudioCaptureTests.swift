@@ -617,9 +617,9 @@ private struct Authorized: MicrophoneAuthority {
         #expect(hardware.engines.count == 1)
     }
 
-    /// A saved config that asks for the microphone held opens it when nobody is pressing, and
-    /// one that asks for it shut closes it, each once the input a press would open is
-    /// readied - with that input readied already, as soon as the main actor is free.
+    /// A saved config that asks for the microphone held opens it when nobody is pressing, once
+    /// the input a press would open is readied - with that input readied already, as soon as
+    /// the main actor is free - and one that asks for it shut closes it.
     @Test func aRestingModeChangedBetweenPressesTakesEffectOnceTheInputIsReadied() async throws {
         let hardware = FakeHardware()
         let reports = Reports()
@@ -640,11 +640,13 @@ private struct Authorized: MicrophoneAuthority {
     /// the microphone it opened, keeps every sample, and only then is the device let go.
     @Test func aRestingModeChangedMidPressWaitsForTheKeyUp() async throws {
         let hardware = FakeHardware()
-        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        let reports = Reports()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
         try await capture.start(grant, atRest: .open)
         let session = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
         capture.rest(as: .shut)
+        try await untilItHolds { reports.said == ["rest shut: left for the key-up"] }
         #expect(!hardware.engines[0].disposed)
         #expect(isRunning(capture))
         hardware.engines[0].appending([3, 4], after(2))
@@ -684,6 +686,8 @@ private struct Authorized: MicrophoneAuthority {
         capture.rest(as: .open)
         try await untilItHolds { hardware.inputs[1].waiters == 1 }
         #expect(hardware.engines.isEmpty)
+        // The menu reads this, and a dark microphone is not called held open.
+        #expect("\(capture.doing)" == "held open once its input is reached")
         try await Task.sleep(for: .milliseconds(20))
         hardware.inputs[1].finishReadying()
         try await untilItHolds { reports.said.count == 2 }
@@ -749,8 +753,9 @@ private struct Authorized: MicrophoneAuthority {
         #expect(isListening(capture))
     }
 
-    /// Two saves in one wait, held then shut: the microphone ends shut and never opened, and
-    /// the first move says it was superseded rather than claiming a mode it did not set.
+    /// Two saves in one wait, held then shut: the microphone ends shut and never opened. The
+    /// shut lands without waiting, and the held move says it was superseded rather than
+    /// claiming a mode it did not set.
     @Test func aMoveSupersededDuringTheWaitSaysSoAndTheLaterOneDecides() async throws {
         let hardware = FakeHardware(holdsReadying: true)
         let reports = Reports()
@@ -758,13 +763,34 @@ private struct Authorized: MicrophoneAuthority {
         try await readyingASecondInput(hardware, capture)
 
         capture.rest(as: .open)
+        try await untilItHolds { hardware.inputs[1].waiters == 1 }
         capture.rest(as: .shut)
-        try await untilItHolds { hardware.inputs[1].waiters == 2 }
+        try await untilItHolds { reports.said.count == 2 }
         hardware.inputs[1].finishReadying()
         try await untilItHolds { reports.said.count == 3 }
-        // The two moves resume in whatever order the waits are let go in.
-        #expect(Set(reports.said.dropFirst()) == ["rest open: superseded", "rest shut: reached"])
+        #expect(Array(reports.said.dropFirst()) == ["rest shut: reached", "rest open: superseded"])
         #expect(hardware.engines.isEmpty)
+    }
+
+    /// Closing needs nothing of the input, so a save asking for a held microphone shut takes
+    /// it dark at once, though the input it is held on is still being reached.
+    @Test func aMoveToShutWhileAnInputIsReachedClosesTheMicrophoneWithoutWaiting() async throws {
+        let hardware = FakeHardware(holdsReadying: true)
+        let reports = Reports()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
+        let starting = Task { try await capture.start(grant, atRest: .open) }
+        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        hardware.inputs[0].finishReadying()
+        try await starting.value
+        // The device change relaunches the held microphone in place, on an input still being
+        // reached.
+        try hardware.changeDefaultInput()
+        #expect(hardware.engines.map(\.readying) == [1, 2])
+
+        capture.rest(as: .shut)
+        try await untilItHolds { hardware.engines[1].disposed }
+        #expect(!hardware.inputs[1].isReadied)
+        #expect(reports.said.last == "rest shut: reached")
     }
 
     /// A key-down the input method delivered late is the press `unopened` exists to catch, and it is
@@ -1387,7 +1413,7 @@ private struct Authorized: MicrophoneAuthority {
 
         try hardware.changeDefaultInput()
         _ = capture.endSession(session)
-        #expect(reports.said == ["defaultInputChanged: left for the key-up", "pressEndedOffTheDefault: \(did)"])
+        #expect(reports.said == ["defaultInputChanged: left for the key-up", "restedOffTheDefault: \(did)"])
     }
 
     /// An unplug under a press whose bound device reports first is answered then and there,

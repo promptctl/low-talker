@@ -189,10 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if case .listening = hotkeyStatus { showHotkeyStatus(.listening(listeningStatus)) }
                 return "modes \(now.modes)"
             case .microphone:
-                // What the microphone came to is the move's report: it lands once the input
-                // is readied, after this event.
+                // What the move comes to is its own report, once it lands.
                 capture.rest(as: now.microphone)
-                return "microphone to \(now.microphone)"
+                return "microphone \(capture.doing)"
             case .serve:
                 serving?.resume(at: config.map(\.serve))
                 return "server binding"
