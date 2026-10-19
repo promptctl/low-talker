@@ -32,6 +32,10 @@ import Testing
             }
         }
 
+        // Never asked here: whether a cursor takes words is decided before it reaches the
+        // committer, by `FocusedClient`.
+        @MainActor var givesDocumentAccess: Bool { true }
+
         func release() { held?.signal() }
         var committed: [String] { lock.withLock { landed } }
         var committedOnMain: [Bool] { lock.withLock { onMain } }
@@ -113,7 +117,7 @@ import Testing
         let cursor = Cursor()
 
         #expect(committer.answer("hello", at: .success(cursor)) == .inserted(characters: 5, into: cursor.application))
-        #expect(committer.answer("hello", at: .failure(.noClientHasFocus)) == .refused(.noClientHasFocus))
+        #expect(committer.answer("hello", at: .failure(.noTextFieldHasFocus)) == .refused(.noTextFieldHasFocus))
         #expect(committer.answer("hello", at: nil) == .refused(.inputMethodIsBusy))
         #expect(cursor.committed == ["hello"])
     }

@@ -24,6 +24,13 @@ public protocol TextCursor: AnyObject, Sendable {
     /// its constructor establishes rather than leaving every reader of this to ask again.
     /// [LAW:parse-dont-validate]
     var application: String { get }
+    /// Whether the client answers that it gives document access, which is the client's own
+    /// statement that a text field has focus in it.
+    ///
+    /// Read from the client each time it is asked and never kept, because focus moves
+    /// between fields and page bodies in ways the text input system does not always report.
+    /// On the main actor, since it is a call on the client (IMK rule 4).
+    @MainActor var givesDocumentAccess: Bool { get }
     /// Commits `text` at the insertion point, taking nothing away.
     func commit(_ text: String)
 }
@@ -111,12 +118,48 @@ public final class FocusedClient {
     /// dictation's first go only to the app those went to, so a person who moved on mid-press
     /// is refused rather than typed into, and told that they moved - whatever the app they
     /// moved to holds, which is not where the words were going anyway.
-    public func cursor(for destination: Destination, whileInFrontIs frontmost: String?, secureInputIsOn: Bool) -> Result<any TextCursor, Refusal> {
+    ///
+    /// Last, the cursor has to answer that it gives document access. Every app hands the
+    /// input method a client, a window with no field focused included, and what is committed
+    /// into such a client goes nowhere while the commit returns as if it landed. So the
+    /// client's own answer is asked, and only of the one cursor the words would go to.
+    /// [LAW:no-silent-failure]
+    func cursor(for destination: Destination, whileInFrontIs frontmost: String?, secureInputIsOn: Bool) -> Result<any TextCursor, Refusal> {
         guard destination.admits(frontmost) else { return .failure(.dictationIsInAnotherApp) }
         guard !secureInputIsOn else { return .failure(.secureInputIsOn) }
-        guard let focus else { return .failure(.noClientHasFocus) }
+        guard let focus else { return .failure(.noTextFieldHasFocus) }
         guard focus.application == frontmost else { return .failure(.cursorIsInAnotherApp) }
+        guard focus.givesDocumentAccess else { return .failure(.noTextFieldHasFocus) }
         return .success(focus)
+    }
+
+    /// The decision for an insert, with the facts it was made from, in one turn on this
+    /// actor, so the insert's log line names what the decision saw rather than reading it
+    /// again. [LAW:one-source-of-truth]
+    public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?) -> InFront {
+        InFront(frontmost: frontmost, secureInputHolder: holder, cursorApplication: focus?.application,
+                cursor: cursor(for: destination, whileInFrontIs: frontmost, secureInputIsOn: holder != nil))
+    }
+}
+
+/// What an insert saw on the main actor: the app in front, the app holding secure input,
+/// the cursor held, and the decision made from them.
+///
+/// The app in front is named because the refusal that matters most is the one where it is
+/// not the app holding the cursor, and a line saying only the outcome leaves a reader with
+/// the question it was written to answer. The cursor held is named because it is what tells
+/// a no-text-field refusal with no client from one whose client in front gave no document
+/// access. [LAW:no-silent-failure]
+public struct InFront: Sendable, CustomStringConvertible {
+    let frontmost: String?
+    let secureInputHolder: String?
+    let cursorApplication: String?
+    public let cursor: Result<any TextCursor, Refusal>
+
+    public var description: String {
+        "with \(frontmost ?? "nothing") in front and "
+            + (cursorApplication.map { "the cursor in \($0)" } ?? "no cursor")
+            + (secureInputHolder.map { ", secure input held by \($0)" } ?? "")
     }
 }
 
@@ -128,15 +171,19 @@ public final class FocusedClient {
 /// terminals, browsers and Electron apps that no synthesised keystroke would.
 ///
 /// [LAW:no-ambient-temporal-coupling] exception: `@unchecked`, because `IMKTextInput` is a
-/// proxy the language cannot see into. This type calls it twice: the name once, on the main
-/// thread, as the cursor is made, and every commit on its app's serial queue in `Committer`.
+/// proxy the language cannot see into. This type calls it three ways: the name once, on the
+/// main thread, as the cursor is made; document access on the main actor, at each insert;
+/// and every commit on its app's serial queue in `Committer`.
 /// Measured on low-input-method-s71.c7d: committed from there, the words reach the app, in
 /// order, and the main thread stays free. Measured on low-input-method-s71.03j: the main
 /// thread making a new cursor over the same client, by a reactivation, at the instant a
 /// commit is in flight does not crash or hang IMK. Against 15,991 reactivations landing
 /// inside an accepted commit's round trip, one of 3,471 accepted words never reached the
 /// app - a loss neither this process nor IMK can see, since an off-main commit returns
-/// before the app has taken the words. No word arrived doubled or out of order.
+/// before the app has taken the words. No word arrived doubled or out of order. The
+/// document-access read can land inside the previous insert's round trip the same way, and
+/// whether a read loses words as a reactivation did is not measured; the overlap ends when
+/// commits move onto the main actor (low-imk-rules-w3g.3ky).
 ///
 /// That one loss in 3,471 is left unmitigated, for the reason `Committer` already gives
 /// for the hung-app case: there is no moment at which this process can ask whether the
@@ -163,6 +210,10 @@ final class Client: TextCursor, @unchecked Sendable {
         guard let application = client.bundleIdentifier(), !application.isEmpty else { return nil }
         self.client = client
         self.application = application
+    }
+
+    @MainActor var givesDocumentAccess: Bool {
+        client.supportsProperty(TSMDocumentPropertyTag(kTSMDocumentSupportDocumentAccessPropertyTag))
     }
 
     func commit(_ text: String) {

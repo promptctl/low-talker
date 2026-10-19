@@ -98,11 +98,19 @@ public struct Inserted: Equatable, Sendable {
 /// says which reasons it has not considered; each one is also what the log line says, so
 /// there is one spelling of each fact. [LAW:one-source-of-truth]
 public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, CustomStringConvertible {
-    /// Nothing has focus, so there is no client to commit into. The desktop is the plain
-    /// case: no text field, nowhere for words to go.
-    case noClientHasFocus
+    /// No text field has focus, so there is nowhere for words to go. Two ways in, with one
+    /// fix for the person, which is clicking into a field: no client has focus at all, or
+    /// the client in front answers that it gives no document access. The second is every
+    /// window without a focused field, since each one still hands the input method a client
+    /// and drops what is committed into it: Calculator, Installer, a web page's body text
+    /// (measured on studious, low-reliability-z2z.sk9). The input method's log tells the
+    /// two apart by naming the cursor it held.
+    ///
+    /// Spelled on the wire as it was before the second way in, so an app from either side
+    /// of the change reads it as the same refusal. [LAW:one-type-per-behavior]
+    case noTextFieldHasFocus = "noClientHasFocus"
     /// There is a cursor, and it belongs to an app the person has since switched away
-    /// from. Its own reason and not `noClientHasFocus`, because the two are fixed
+    /// from. Its own reason and not `noTextFieldHasFocus`, because the two are fixed
     /// differently: this one is words arriving while the person is somewhere else.
     case cursorIsInAnotherApp
     /// The cursor in front is in another app than the one the dictation's words already
@@ -118,7 +126,7 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     case requestWasNotReadable = "requestWasNotText"
     /// Some app holds Secure Event Input - Secure Keyboard Entry in Terminal or iTerm2, or a
     /// password field - and while it does, macOS switches every input method off. Its own
-    /// reason and not `noClientHasFocus`, because it is fixed somewhere else entirely: not
+    /// reason and not `noTextFieldHasFocus`, because it is fixed somewhere else entirely: not
     /// by clicking into a text field, which is what that one asks for, but in the app that
     /// holds it. Measured on 2026-09-22: iTerm2 with Secure Keyboard Entry on greys this
     /// input method out of the Input menu and it is never handed a client.
@@ -136,7 +144,7 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
 
     public var description: String {
         switch self {
-        case .noClientHasFocus: "WARNING: No text field has focus. Your dictation was not inserted."
+        case .noTextFieldHasFocus: "WARNING: No text field has focus. Your dictation was not inserted."
         case .cursorIsInAnotherApp: "WARNING: The cursor is in an app that is not in front. Your dictation was not inserted."
         case .dictationIsInAnotherApp: "WARNING: You moved to another app while dictating."
         case .requestWasNotReadable: "WARNING: The input method was asked something it could not read. Nothing was inserted."
