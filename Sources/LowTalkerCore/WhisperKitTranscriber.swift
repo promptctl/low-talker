@@ -1,4 +1,6 @@
 import Foundation
+import Identity
+import os
 import WhisperKit
 
 /// Whisper on the Neural Engine through WhisperKit.
@@ -155,6 +157,8 @@ public struct WhisperKitTranscriber: Transcriber {
         /// the same as decoding it, so the prefix is a few words, not every confirmed one.
         static let contextWords = 3
 
+        static let alignmentLog = Logger(subsystem: AppIdentity.bundleIdentifier, category: "alignment")
+
         /// Nonisolated on purpose: the non-Sendable WhisperKit is created and wrapped
         /// here without crossing an isolation boundary.
         nonisolated init(installed: InstalledModel) async throws {
@@ -218,18 +222,23 @@ public struct WhisperKitTranscriber: Transcriber {
             options.promptTokens = prompt
             options.prefixTokens = tokenizer.encode(text: prefix)
             // The seeker is ours so that a prompted pass keeps its word timings and no
-            // word is timed past its audio. It is this pass's, set as the pass begins:
-            // `EngineTurns` lets no other decode reach the pipeline until it ends.
-            // [LAW:no-ambient-temporal-coupling]
-            whisperKit.segmentSeeker = SpeechAlignedSegmentSeeker(arrived: arrived)
-            let results: [TranscriptionResult]
+            // word is timed past its audio, and it is this pass's: the task WhisperKit's
+            // `transcribe` runs over a window it does not chunk is built here with it,
+            // rather than reading one the shared pipeline holds.
+            let seeker = SpeechAlignedSegmentSeeker(arrived: arrived, told: { Self.alignmentLog.info("\($0.description, privacy: .public)") })
+            let task = TranscribeTask(
+                currentTimings: whisperKit.currentTimings, progress: nil, audioProcessor: whisperKit.audioProcessor,
+                audioEncoder: whisperKit.audioEncoder, featureExtractor: whisperKit.featureExtractor, segmentSeeker: seeker,
+                textDecoder: whisperKit.textDecoder, tokenizer: tokenizer
+            )
+            let result: TranscriptionResult
             do {
-                results = try await whisperKit.transcribe(audioArray: Self.window(samples, from: cut), decodeOptions: options)
+                result = try await task.run(audioArray: Self.window(samples, from: cut), decodeOptions: options)
             } catch {
                 throw .engine(error)
             }
             do throws(WhisperKitTranscriberError) {
-                return try Transcript(whisperKit: results.flatMap(\.segments)).words
+                return try Transcript(whisperKit: result.segments).words
             } catch {
                 throw .unreadable(error)
             }

@@ -62,12 +62,12 @@ import WhisperKit
     /// A window's speech is counted in whole frames from its seek to the speech's end,
     /// and never less than the one frame the speech starts in.
     @Test func theSpeechColumnsAreTheWholeFramesOfSpeechInTheWindow() {
-        let seeker = SpeechAlignedSegmentSeeker(arrived: 48_000)
+        let seeker = Self.seeker(arrived: 48_000)
         #expect(seeker.speechColumns(seek: 0, segmentSize: 48_000) == 150)
         #expect(seeker.speechColumns(seek: 16_000, segmentSize: 32_000) == 100)
-        #expect(SpeechAlignedSegmentSeeker(arrived: 8_000).speechColumns(seek: 0, segmentSize: 16_001) == 25)
-        #expect(SpeechAlignedSegmentSeeker(arrived: 8_319).speechColumns(seek: 0, segmentSize: 16_001) == 25)
-        #expect(SpeechAlignedSegmentSeeker(arrived: 100).speechColumns(seek: 0, segmentSize: 16_001) == 1)
+        #expect(Self.seeker(arrived: 8_000).speechColumns(seek: 0, segmentSize: 16_001) == 25)
+        #expect(Self.seeker(arrived: 8_319).speechColumns(seek: 0, segmentSize: 16_001) == 25)
+        #expect(Self.seeker(arrived: 100).speechColumns(seek: 0, segmentSize: 16_001) == 1)
     }
 
     /// The noise case (low-serve-nac): 3 s of noise read as words whose attention lies in
@@ -77,7 +77,7 @@ import WhisperKit
         let attention = try Self.attention(spans: [1_450, 1_453, 1_456, 1_460, 1_462])
         let padded = try Self.words(SegmentSeeker(), attention: attention, segmentSize: 48_000)
         #expect(padded.contains { $0.end > 3 })
-        let words = try Self.words(SpeechAlignedSegmentSeeker(arrived: 48_000), attention: attention, segmentSize: 48_000)
+        let words = try Self.words(Self.seeker(arrived: 48_000), attention: attention, segmentSize: 48_000)
         #expect(words.count == 3)
         #expect(words.allSatisfy { 0 <= $0.start && $0.start <= $0.end && $0.end <= 3 })
     }
@@ -89,7 +89,7 @@ import WhisperKit
         let attention = try Self.attention(spans: [0, 10, 20, 40, 50])
         let padded = try Self.words(SegmentSeeker(), attention: attention, segmentSize: 16_001)
         #expect(padded.contains { $0.end > 0.5 })
-        let words = try Self.words(SpeechAlignedSegmentSeeker(arrived: 8_000), attention: attention, segmentSize: 16_001)
+        let words = try Self.words(Self.seeker(arrived: 8_000), attention: attention, segmentSize: 16_001)
         #expect(words.count == 3)
         #expect(words.allSatisfy { $0.start <= $0.end && $0.end <= 0.5 })
     }
@@ -98,7 +98,7 @@ import WhisperKit
     /// its span as the warping steps down a row, as WhisperKit's own seeker times them.
     @Test func wordsInTheAudioAreTimedAsWhisperKitTimesThem() throws {
         let attention = try Self.attention(spans: [0, 25, 50, 75, 150])
-        let words = try Self.words(SpeechAlignedSegmentSeeker(arrived: 48_000), attention: attention, segmentSize: 48_000)
+        let words = try Self.words(Self.seeker(arrived: 48_000), attention: attention, segmentSize: 48_000)
         let theirs = try Self.words(SegmentSeeker(), attention: attention, segmentSize: 48_000)
         #expect(words.map(\.start) == [0, 0.48, 0.98])
         #expect(words.map(\.end) == [0.48, 0.98, 1.48])
@@ -106,15 +106,42 @@ import WhisperKit
     }
 
     /// Whisper's boundary heuristic lengthens a last word shorter than the median to the
-    /// median: over 3.5 s of speech, to 3.1 s. Over 3 s, the same word ends at the last
-    /// frame of the speech.
-    @Test func aLastWordLengthenedPastTheSpeechEndsAtItsLastFrame() throws {
+    /// median: over 3.5 s of speech, to 3.1 s. Over 3 s, the same word ends where the
+    /// speech does, and the hold is told.
+    @Test func aLastWordLengthenedPastTheSpeechEndsWithIt() throws {
         let attention = try Self.attention(spans: [0, 33, 121, 149, 150])
-        let words = try Self.words(SpeechAlignedSegmentSeeker(arrived: 48_000), attention: attention, segmentSize: 48_000, segmentEnd: 2.45)
-        let longer = try Self.words(SpeechAlignedSegmentSeeker(arrived: 56_000), attention: attention, segmentSize: 56_000, segmentEnd: 2.45)
+        var holds: [SpeechAlignedSegmentSeeker.Hold] = []
+        let words = try Self.words(Self.seeker(arrived: 48_000) { holds.append($0) }, attention: attention, segmentSize: 48_000, segmentEnd: 2.45)
+        let longer = try Self.words(Self.seeker(arrived: 56_000), attention: attention, segmentSize: 56_000, segmentEnd: 2.45)
         #expect(try #require(longer.last).end > 3)
         #expect(words.map(\.start) == [0, 0.64, 2.4])
-        #expect(words.map(\.end) == [0.64, 2.4, 2.98])
+        #expect(words.map(\.end) == [0.64, 2.4, 3])
+        #expect(holds.map(\.word.word) == [" w3"] && holds.map(\.speechEnd) == [3])
+    }
+
+    /// A pass that ends on a word, with no end token, has that word in the last row. With its
+    /// attention in the padding and below zero on the speech's last frame, the warping steps
+    /// into that row just past the speech, not on its last frame: the word starts where the
+    /// speech ends and is held to end there too, never before it starts.
+    @Test func aLastWordEnteredPastTheSpeechStartsAndEndsWhereItEnds() throws {
+        let attention = try Self.attention(spans: [0, 75, 150, 1_460])
+        attention[[2, 149] as [NSNumber]] = -1
+        var holds: [SpeechAlignedSegmentSeeker.Hold] = []
+        let words = try Self.words(Self.seeker(arrived: 48_000) { holds.append($0) }, attention: attention, segmentSize: 48_000, tokens: [1, 2, 3])
+        let last = try #require(words.last)
+        #expect(last.start == 3 && last.end == 3)
+        #expect(holds.count == 1)
+        #expect(throws: Never.self) { try words.map(Transcript.Word.init(whisperKit:)) }
+    }
+
+    /// A prompted pass reads its words from the rows after the prompt's: the same words,
+    /// timed the same, as the pass without one.
+    @Test func aPromptedPassIsTimedByTheRowsAfterThePrompt() throws {
+        let spans = [0, 25, 50, 75, 150]
+        let prompted = try Self.words(Self.seeker(arrived: 48_000), attention: Self.attention(spans: spans, promptRows: 4), segmentSize: 48_000,
+                                      prompt: [12812, 77, 45533])
+        let plain = try Self.words(Self.seeker(arrived: 48_000), attention: Self.attention(spans: spans), segmentSize: 48_000)
+        #expect(prompted.map(\.start) == plain.map(\.start) && prompted.map(\.end) == plain.map(\.end))
     }
 
     // MARK: - WhisperKit's aligner over a hand-built window
@@ -136,25 +163,36 @@ import WhisperKit
         }
     }
 
+    /// The seeker for `arrived` samples of audio, telling `told` of each hold.
+    static func seeker(arrived: Int, told: @escaping (SpeechAlignedSegmentSeeker.Hold) -> Void = { _ in }) -> SpeechAlignedSegmentSeeker {
+        SpeechAlignedSegmentSeeker(arrived: arrived, told: told)
+    }
+
     /// A window's cross-attention as the model hands it over, half precision in a pixel
-    /// buffer's padded rows: one row a token, the whole of it over the columns from one
-    /// bound in `spans` to the next.
-    static func attention(spans: [Int]) throws -> MLMultiArray {
-        let attention = try MLMultiArray(shape: [spans.count - 1, 1_500] as [NSNumber], dataType: .float16, initialValue: FloatType(0))
+    /// buffer's padded rows: after `promptRows` rows attending to the window's end, one
+    /// row a token, the whole of it over the columns from one bound in `spans` to the next.
+    static func attention(spans: [Int], promptRows: Int = 0) throws -> MLMultiArray {
+        let attention = try MLMultiArray(shape: [promptRows + spans.count - 1, 1_500] as [NSNumber], dataType: .float16, initialValue: FloatType(0))
+        for row in 0..<promptRows {
+            for column in 1_400..<1_500 { attention[[row, column] as [NSNumber]] = 1 }
+        }
         for (row, span) in zip(spans, spans.dropFirst()).enumerated() {
-            for column in span.0..<span.1 { attention[[row, column] as [NSNumber]] = 1 }
+            for column in span.0..<span.1 { attention[[promptRows + row, column] as [NSNumber]] = 1 }
         }
         return attention
     }
 
-    /// The words `seeker` times for a segment of three words and its end token, one row each.
-    static func words(_ seeker: some SegmentSeeking, attention: MLMultiArray, segmentSize: Int, segmentEnd: Float = 0) throws -> [WordTiming] {
-        let tokens = [1, 2, 3, 50257]
+    /// The words `seeker` times for a segment of `tokens`, one row each, by default three
+    /// words and the end token, decoded after `prompt`.
+    static func words(
+        _ seeker: some SegmentSeeking, attention: MLMultiArray, segmentSize: Int, segmentEnd: Float = 0,
+        tokens: [Int] = [1, 2, 3, 50257], prompt: [Int] = []
+    ) throws -> [WordTiming] {
         let segment = TranscriptionSegment(end: segmentEnd, tokens: tokens, tokenLogProbs: tokens.map { [$0: -0.1] })
         let timed = try seeker.addWordTimestamps(
             segments: [segment], alignmentWeights: attention, tokenizer: Tokenizer(), seek: 0, segmentSize: segmentSize,
             prependPunctuations: Constants.defaultPrependPunctuations, appendPunctuations: Constants.defaultAppendPunctuations,
-            lastSpeechTimestamp: 0, options: DecodingOptions(), timings: TranscriptionTimings()
+            lastSpeechTimestamp: 0, options: DecodingOptions(promptTokens: prompt), timings: TranscriptionTimings()
         )
         return try #require(timed?.first?.words)
     }

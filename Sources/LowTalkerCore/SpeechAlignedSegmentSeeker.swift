@@ -1,6 +1,4 @@
 import CoreML
-import Identity
-import os
 import WhisperKit
 
 /// WhisperKit's segment seeker, aligning the transcript's tokens against the speech
@@ -36,6 +34,8 @@ struct SpeechAlignedSegmentSeeker: SegmentSeeking {
     /// How many samples of the audio WhisperKit is handed arrived as audio, counted as
     /// WhisperKit counts `seek`; the rest is silence run out past them.
     let arrived: Int
+    /// Told of every word held to the end of the speech.
+    let told: (Hold) -> Void
 
     /// The most prompt tokens WhisperKit prefills; a longer prompt keeps its last
     /// this many.
@@ -43,8 +43,6 @@ struct SpeechAlignedSegmentSeeker: SegmentSeeking {
 
     /// The samples one alignment column spans: one encoder frame, which is one time token.
     static let samplesPerColumn = Int((Float(WhisperKit.sampleRate) * WhisperKit.secondsPerTimeToken).rounded())
-
-    static let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "alignment")
 
     /// How many rows the prompt took before the transcript's first row: none for
     /// no prompt, else `<|startofprev|>` and the tokens WhisperKit kept of it.
@@ -114,19 +112,30 @@ struct SpeechAlignedSegmentSeeker: SegmentSeeking {
         // A last row that is a word ends where the alignment does, past the speech, and
         // Whisper's boundary heuristic (timing.py, add_word_timestamps) lengthens a last
         // word shorter than the median to the median, with no audio to back the time.
-        // So no word ends past the speech's last column, timed as WhisperKit times it,
-        // and each one held there is told.
-        let lastColumn = (Float(seek) / Float(WhisperKit.sampleRate) + Float(columns - 1) * WhisperKit.secondsPerTimeToken).rounded(2)
+        // So no word is timed past the end of the speech's last whole frame, which is
+        // where a row entered just past the speech begins.
+        let speechEnd = (Float(seek) / Float(WhisperKit.sampleRate) + Float(columns) * WhisperKit.secondsPerTimeToken).rounded(2)
         return timed?.map { segment in
             var segment = segment
             segment.words = segment.words?.map { word in
-                guard word.end > lastColumn else { return word }
-                Self.log.info("held \"\(word.word, privacy: .public)\" ending \(word.end, privacy: .public) s to the speech's last frame at \(lastColumn, privacy: .public) s")
-                var word = word
-                word.end = lastColumn
-                return word
+                guard word.end > speechEnd else { return word }
+                told(Hold(word: word, speechEnd: speechEnd))
+                var held = word
+                held.start = min(word.start, speechEnd)
+                held.end = speechEnd
+                return held
             }
             return segment
+        }
+    }
+
+    /// A word the alignment timed past the speech, and the end of the speech it is held to.
+    struct Hold: Equatable, CustomStringConvertible {
+        let word: WordTiming
+        let speechEnd: Float
+
+        var description: String {
+            "held \"\(word.word)\" at \(word.start)-\(word.end) s to the speech's end at \(speechEnd) s"
         }
     }
 }
@@ -147,43 +156,28 @@ extension MLMultiArray {
     /// than descending to the last row through the speech could, so every token but the
     /// last is placed in the speech.
     func speechAlignment(rows: Range<Int>, columns: Int) throws -> MLMultiArray {
-        guard shape.count == 2, rows.upperBound <= shape[0].intValue, columns <= shape[1].intValue else {
-            throw WhisperError.segmentingFailed("alignment \(shape) has no rows \(rows) of \(columns) columns")
+        guard dataType == .float16, shape.count == 2, rows.upperBound <= shape[0].intValue, columns <= shape[1].intValue else {
+            throw WhisperError.segmentingFailed("alignment \(shape) has no half-precision rows \(rows) of \(columns) columns")
         }
-        let width = try MLMultiArray(shape: [rows.count, columns] as [NSNumber], dataType: dataType, initialValue: FloatType(0)).strides[0].intValue
+        let width = try MLMultiArray(shape: [1, columns] as [NSNumber], dataType: dataType, initialValue: FloatType(0)).strides[0].intValue
         let alignment = try MLMultiArray(shape: [rows.count, width] as [NSNumber], dataType: dataType)
-        let size = dataType.bytesPerElement
         let rowStride = strides[0].intValue
         withUnsafeBytes { source in
             alignment.withUnsafeMutableBytes { target, _ in
+                // Elements are read as WhisperKit's aligner reads them, and a tensor with
+                // rows has an address.
+                let source = source.baseAddress!.assumingMemoryBound(to: FloatType.self)
+                let target = target.baseAddress!.assumingMemoryBound(to: FloatType.self)
                 for row in 0..<rows.count {
-                    // A tensor with rows has an address; a row is contiguous, as WhisperKit reads it.
-                    (target.baseAddress! + row * width * size)
-                        .copyMemory(from: source.baseAddress! + (rows.lowerBound + row) * rowStride * size, byteCount: columns * size)
+                    let padded = target + row * width
+                    padded.update(from: source + (rows.lowerBound + row) * rowStride, count: columns)
+                    (padded + columns).update(repeating: row == rows.count - 1 ? 0 : Self.closed, count: width - columns)
                 }
-            }
-        }
-        for row in 0..<rows.count {
-            for column in columns..<width {
-                alignment[[row, column] as [NSNumber]] = NSNumber(value: row == rows.count - 1 ? 0 : Self.closed)
             }
         }
         return alignment
     }
 
     /// The least attention half precision holds: a cell the warping avoids at any cost.
-    static let closed: Float = -65_504
-}
-
-extension MLMultiArrayDataType {
-    /// The unit the strides count in.
-    var bytesPerElement: Int {
-        switch self {
-        case .float16: 2
-        case .float32: 4
-        case .double: 8
-        case .int32: 4
-        @unknown default: fatalError("MLMultiArrayDataType \(rawValue) has no known element size")
-        }
-    }
+    static let closed: FloatType = -65_504
 }
