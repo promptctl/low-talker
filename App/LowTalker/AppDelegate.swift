@@ -862,7 +862,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginLog.notice("open at login: \(openAtLogin, privacy: .public)")
 
         menu.removeAllItems()
-        menu.addItem(readout("Whisper model: \(engineReadiness.readout(at: .now))"))
+        let model = "Whisper model: \(engineReadiness.readout(at: .now))"
+        let modelRow = if case .failed = engineReadiness { errorRow(model) } else { readout(model) }
+        menu.addItem(modelRow)
         // A press made during the wait is not lost, and nothing else on screen says so.
         if case .preparing = engineReadiness { menu.addItem(readout("A press now is heard once the model is ready")) }
         // Beside the model it answers with. [LAW:dataflow-not-control-flow] The offline build
@@ -872,8 +874,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(readout("Hotkey: \(hotkeyStatus)"))
         for reason in unheard { menu.addItem(readout("    Not heard now: \(reason)")) }
         globeKey.map { menu.addItem(readout("    \($0)")) }
-        lastFailure.map { menu.addItem(readout($0)) }
-        if running.refusal != nil { menu.addItem(readout("Config: \(running)")) }
+        lastFailure.map { menu.addItem(errorRow($0)) }
+        if running.refusal != nil { menu.addItem(errorRow("Config: \(running)")) }
         if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: presses are refused until it ends")) }
         // Every requirement, met or not, and its step under it as the lines it was
         // written in - one item per line, so nothing here wraps text the requirement
@@ -911,6 +913,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// one AppKit disables on its own, which is the whole of what "readout" means here.
     private func readout(_ title: String) -> NSMenuItem {
         NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    }
+
+    /// A line that says what failed, which a click copies whole to the clipboard.
+    private func errorRow(_ text: String) -> NSMenuItem {
+        ErrorRow(text, copyingTo: .general) { [menuBarLog] copied in
+            // [LAW:nothing-unseen] The count, not the text: a failure line can carry dictated words.
+            if copied.taken {
+                menuBarLog.notice("menu: copied an error row, \(copied.characters, privacy: .public) characters")
+            } else {
+                menuBarLog.error("menu: the pasteboard refused an error row's \(copied.characters, privacy: .public) characters")
+            }
+        }
     }
 }
 
