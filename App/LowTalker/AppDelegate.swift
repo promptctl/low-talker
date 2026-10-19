@@ -215,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// one's and leave a hotkey up that nothing can take down. Each rebuild awaits the one
     /// before it, so there is only ever one loop being built.
     private var rebuilding: Task<Void, Never>?
-    /// Set the moment a quit is asked for, and never cleared.
+    /// Set the moment a quit is asked for, and never cleared. `rebuild` refuses once it is set.
     ///
     /// A rebuild taken after that point would chain behind the one the quit is waiting on,
     /// and put a fresh hotkey up after the quit has taken the old one down, with nothing
@@ -254,8 +254,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Queued behind any rebuild still in progress; see `rebuilding`. Counted in flight in the
     /// step that asks for it, so a reading taken after the decision is owed to its end, as a
     /// come-up's is. [LAW:no-ambient-temporal-coupling]
+    ///
+    /// Refused once a quit is asked for, and nothing is handed back; see `quitting`. Refused
+    /// here rather than by each caller, so a caller that suspended before asking needs no
+    /// check of its own. [LAW:single-enforcer]
     @discardableResult
-    private func rebuild() -> Task<Void, Never> {
+    private func rebuild() -> Task<Void, Never>? {
+        guard !quitting else {
+            log.notice("rebuild: not started, as \(AppIdentity.displayName, privacy: .public) is quitting")
+            return nil
+        }
         let before = rebuilding
         rebuildsInFlight += 1
         let this = Task {
@@ -678,10 +686,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 showHotkeyStatus(.off("\(error)\(whereToAllow)"))
                 return
             }
-            // A rebuild started after a quit asked for during the start is one the quit never
-            // waits on, and would put up a hotkey nothing takes down; see `quitting`.
-            guard !quitting else { return }
-            await rebuild().value
+            await rebuild()?.value
         }
         comingUp = this
         return this
