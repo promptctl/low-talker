@@ -155,8 +155,8 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
             add(label(requirement.stepLines.joined(separator: " "), size: 12, color: .secondaryLabelColor))
         }
         // Names, on the step itself, what a person cannot see coming: that this row's dialog
-        // returns after a No, and that a source installed this session waits for the next
-        // login before it can switch on. Only the input method has one. [LAW:no-silent-failure]
+        // returns after a No, and where to go when none comes. Only the input method has one.
+        // [LAW:no-silent-failure]
         if let note = row.switchOnNote {
             add(label(note, size: 12, color: .secondaryLabelColor))
         }
@@ -169,8 +169,8 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         let skip = button("Skip for Now") { [unowned self] in walk.skip(row); failure = nil; draw(shown) }
         // Every step can be read again by hand: a grant made where this window cannot see
         // it arriving - System Settings left open beside it - clears its step here.
-        let checkAgain = button("Check Again") { [unowned self] in redrawFromAFreshReading() }
-        let openSettings = button("Open System Settings") { [unowned self] in openSystemSettings(row) }
+        let checkAgain = button(GuidedSetup.checkAgainTitle) { [unowned self] in redrawFromAFreshReading() }
+        let openSettings = button(GuidedSetup.openSettingsTitle) { [unowned self] in openSystemSettings(row) }
         // The default is the one button that makes macOS ask, so Return is the person
         // choosing to be asked; once asked, System Settings.
         let primary = ask ?? openSettings

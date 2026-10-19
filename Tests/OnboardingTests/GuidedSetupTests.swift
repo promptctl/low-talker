@@ -53,16 +53,29 @@ import Testing
         }
     }
 
-    /// The note names both facts a person cannot see coming and would otherwise be left to
-    /// discover: that declining is not the end because the dialog returns, and that nothing
-    /// happening means the source waits for the next login. [LAW:no-silent-failure] Naming
-    /// neither is the silent failure; naming the login as unconditional would be the false
-    /// claim the previous wording made.
-    @Test func theInputMethodNoteNamesTheReturningDialogAndTheLogin() throws {
+    /// The note names what a person cannot see coming: that declining is not the end because
+    /// the dialog returns, and, when no dialog comes, the buttons on this page that lead on.
+    /// [LAW:no-silent-failure]
+    @Test func theInputMethodNoteNamesTheReturningDialogAndTheWayOnWithoutIt() throws {
         let note = try #require(Requirement.Row.inputMethod.switchOnNote)
         #expect(note.contains("Allow"), "the note never names the dialog to allow it")
         #expect(note.contains("again"), "the note never says the dialog returns after a No")
-        #expect(note.contains("log out") && note.contains("back in"), "the note never names the login")
+        #expect(note.contains(GuidedSetup.openSettingsTitle) && note.contains(GuidedSetup.checkAgainTitle),
+                "the note never names the buttons that lead on when no dialog comes")
+    }
+
+    /// No step asks the person to log out or restart: an install that needed one would have
+    /// broken a macOS rule, and the fix is the install, not words sending the person away.
+    @Test func noStepAsksForALogoutOrARestart() {
+        let requirements = MicrophoneAuthorization.Withheld.allCases.map { Requirement.microphone($0) }
+            + [.microphone(nil), .inputMethod(switchedOn: false), .inputMethod(switchedOn: true)]
+        let shown: [String?] = requirements.flatMap { [$0.name, $0.reads, $0.step] as [String?] }
+            + Requirement.Row.allCases.flatMap { [$0.explanation.why, $0.explanation.ifSkipped, $0.askTitle, $0.switchOnNote] as [String?] }
+        for text in shown.compactMap({ $0?.lowercased() }) {
+            for asking in ["log out", "log in", "logout", "login", "restart", "reboot"] {
+                #expect(!text.contains(asking), "\"\(text)\" asks for a \(asking)")
+            }
+        }
     }
 
     /// A note that tells the person to press the button again is claiming the same fact
