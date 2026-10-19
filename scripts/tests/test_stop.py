@@ -1,23 +1,26 @@
-"""scripts/pkg/functions' `stop`, sourced whole by /bin/bash under the package scripts' options,
-against children that end only when the test lets them. Nothing here waits on a clock for
-`stop` to act: the bound on each read is there so a regression fails rather than hangs."""
+"""scripts/pkg/functions' `stop`, and the preinstall that stops the app with it, sourced whole by
+/bin/bash under the package scripts' options, against children that end only when the test
+lets them. Nothing here waits on a clock for `stop` to act: the bound on each read is there so
+a regression fails rather than hangs."""
 import os
-import re
 import select
 import signal
 import subprocess
 import tempfile
 import time
 import unittest
+import uuid
 from pathlib import Path
 
-functions = Path(__file__).resolve().parent.parent / "pkg" / "functions"
+pkg = Path(__file__).resolve().parent.parent / "pkg"
+functions = pkg / "functions"
+preinstall = pkg / "preinstall"
 bound = 30
 
 # Answers TERM by saying so, then waiting on its stdin for the test to let it go, then
 # writing its marker: what a KILL would never let it write.
 child = """
-trap 'kill $sleeper; echo asked; read -r _; echo quit > "$1"; exit 0' TERM
+trap 'kill $sleeper; echo asked; read -r _; echo quit > "$MARKER"; exit 0' TERM
 sleep 1000 & sleeper=$!
 echo ready
 wait $sleeper
@@ -61,9 +64,16 @@ class StopTests(unittest.TestCase):
         self.addCleanup(process.__exit__, None, None, None)
         self.addCleanup(lambda: process.poll() is None and process.kill())
 
-    def spawn(self, name):
-        marker = Path(self.directory.name) / name
-        process = subprocess.Popen(["/bin/bash", "-c", child, "child", str(marker)],
+    def spawn(self, name, executable="child"):
+        directory = Path(self.directory.name)
+        marker = directory / name
+        script = directory / f"{name}.sh"
+        script.write_text(child)
+        # Run as an app's executable is, with nothing after its path, so `running` finds it.
+        binary = directory / f"{name}.app" / "Contents" / "MacOS" / executable
+        binary.parent.mkdir(parents=True)
+        binary.symlink_to("/bin/bash")
+        process = subprocess.Popen([str(binary)], env={**os.environ, "BASH_ENV": str(script), "MARKER": str(marker)},
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, start_new_session=True)
         self.own(process)
         # Its sleep outlives a KILL of the shell, so a test that fails first ends the whole group.
@@ -77,6 +87,14 @@ class StopTests(unittest.TestCase):
             # Run as the preinstall, the script that stops the app, so its lines carry that name.
             ["/bin/bash", "-c", 'set -euo pipefail; . "$1"; shift; stop_every=1; stop "$@"', "preinstall", str(functions), *map(str, pids)],
             stdout=subprocess.PIPE)
+        self.own(process)
+        return process, Lines(process.stdout)
+
+    def preinstall(self, executable):
+        # Its $0 is a path in the test's directory, where it leaves the list of what it stopped.
+        process = subprocess.Popen(
+            ["/bin/bash", "-c", '. "$1"; stop_every=1; . "$2"', str(Path(self.directory.name) / "preinstall"), str(functions), str(preinstall)],
+            env={**os.environ, "app_executable": executable}, stdout=subprocess.PIPE)
         self.own(process)
         return process, Lines(process.stdout)
 
@@ -132,6 +150,24 @@ class StopTests(unittest.TestCase):
         self.release(process, marker)
         self.ended(said, process.pid)
         self.assertEqual(stopping.wait(timeout=bound), 1)
+
+    def test_the_preinstall_waits_for_the_running_app_and_leaves_who_it_ran_for(self):
+        executable = f"LowTalkerTest-{uuid.uuid4().hex}"
+        process, out, marker = self.spawn("app", executable)
+        stopping, said = self.preinstall(executable)
+        self.assertEqual(said.next(), f"preinstall: found 1 running {executable}")
+        self.assertEqual(out.next(), "asked")
+        self.release(process, marker)
+        self.ended(said, process.pid)
+        self.assertEqual(stopping.wait(timeout=bound), 0)
+        self.assertEqual((Path(self.directory.name) / "stopped").read_text(), f"{process.pid} {os.getuid()}\n")
+
+    def test_the_preinstall_with_no_app_running_leaves_no_one_to_start_again(self):
+        executable = f"LowTalkerTest-{uuid.uuid4().hex}"
+        stopping, said = self.preinstall(executable)
+        self.assertEqual(said.next(), f"preinstall: found 0 running {executable}")
+        self.assertEqual(stopping.wait(timeout=bound), 0)
+        self.assertEqual((Path(self.directory.name) / "stopped").read_text().strip(), "")
 
 
 if __name__ == "__main__":
