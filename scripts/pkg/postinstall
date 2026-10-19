@@ -55,8 +55,8 @@ done
 failed=0
 
 apps=$(running "$app_executable")
+say "found $(lines "$apps") running $app_executable"
 stop $(cut -d ' ' -f 1 <<<"$apps") || failed=1
-say "stopped $(lines "$apps") running $app_executable"
 
 # LowTalker was once installed as two apps side by side, the second under identifiers of its
 # own, "dev" after the family and "dev.inputmethod.dictation" (low-build-41v). Whatever of
@@ -79,7 +79,7 @@ for bundle in /Applications/*.app "/Library/Input Methods"/*.app; do
   fi
   case "$bundle" in /Applications/*) apps+=$'\n'"$older" ;; esac
   rm -rf "$bundle"
-  say "removed $bundle ($id), an installation from before LowTalker was one app, and stopped $(lines "$older") running from it"
+  say "removed $bundle ($id), an installation from before LowTalker was one app, which had $(lines "$older") running"
 done
 
 # No build installs into a home folder any more, so every LowTalker input method there is one
@@ -190,8 +190,8 @@ for uid in $(dscl . -list /Users UniqueID | awk '$2 >= 501 { print $2 }'); do
 done
 
 methods=$(running "$input_method_executable")
+say "found $(lines "$methods") running $input_method_executable"
 stop $(cut -d ' ' -f 1 <<<"$methods") || failed=1
-say "stopped $(lines "$methods") running $input_method_executable"
 
 for uid in $(cut -s -d ' ' -f 2 <<<"$apps" | sort -u); do
   # The files are installed whether or not this start takes, so a failed one is said and

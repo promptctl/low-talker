@@ -4,6 +4,7 @@ against children that end only when the test lets them. Nothing here waits on a 
 import os
 import re
 import select
+import signal
 import subprocess
 import tempfile
 import time
@@ -21,6 +22,13 @@ sleep 1000 & sleeper=$!
 echo ready
 wait $sleeper
 """
+
+
+def end_group(leader):
+    try:
+        os.killpg(leader, signal.SIGKILL)
+    except ProcessLookupError:
+        pass  # A child that was let go took its group with it.
 
 
 class Lines:
@@ -56,8 +64,10 @@ class StopTests(unittest.TestCase):
     def spawn(self, name):
         marker = Path(self.directory.name) / name
         process = subprocess.Popen(["/bin/bash", "-c", child, "child", str(marker)],
-                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, start_new_session=True)
         self.own(process)
+        # Its sleep outlives a KILL of the shell, so a test that fails first ends the whole group.
+        self.addCleanup(end_group, process.pid)
         out = Lines(process.stdout)
         self.assertEqual(out.next(), "ready")
         return process, out, marker
