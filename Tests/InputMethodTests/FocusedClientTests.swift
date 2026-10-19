@@ -21,8 +21,18 @@ import Testing
     /// which cursor is chosen.
     private final class Cursor: TextCursor {
         let application: String
+        /// What the client answers when asked, which a window with no field focused
+        /// answers no to. Isolated to the main actor, where it is asked, so a case can
+        /// change it between inserts and the cursor stays Sendable.
+        @MainActor final class Answer { var givesDocumentAccess: Bool; nonisolated init(_ gives: Bool) { givesDocumentAccess = gives } }
+        let answer: Answer
 
-        init(in application: String = "com.example.editor") { self.application = application }
+        init(in application: String = "com.example.editor", givingDocumentAccess: Bool = true) {
+            self.application = application
+            answer = Answer(givingDocumentAccess)
+        }
+
+        @MainActor var givesDocumentAccess: Bool { answer.givesDocumentAccess }
 
         func commit(_ text: String) { Issue.record("the decision committed \(text.debugDescription)") }
     }
@@ -62,7 +72,34 @@ import Testing
 
     /// Nothing in front is an answer, not a failure, and it is said by name.
     @Test func nothingInFrontIsRefusedByName() {
-        #expect(throws: Refusal.noClientHasFocus) { try FocusedClient().cursor(for: .cursorInFront, whileInFrontIs: Self.inFront, secureInputIsOn: false).get() }
+        #expect(throws: Refusal.noTextFieldHasFocus) { try FocusedClient().cursor(for: .cursorInFront, whileInFrontIs: Self.inFront, secureInputIsOn: false).get() }
+    }
+
+    /// A window with no field focused still hands the input method a client, and what is
+    /// committed into it goes nowhere while the commit answers that it landed: Calculator,
+    /// Installer, a page's body text. The client says so itself by giving no document
+    /// access, and the words are refused rather than lost. [LAW:no-silent-failure]
+    @Test func aCursorGivingNoDocumentAccessIsRefusedAsNoTextField() {
+        let client = FocusedClient()
+        client.took(Cursor(in: "com.apple.calculator", givingDocumentAccess: false))
+
+        #expect(throws: Refusal.noTextFieldHasFocus) {
+            try client.cursor(for: .cursorInFront, whileInFrontIs: "com.apple.calculator", secureInputIsOn: false).get()
+        }
+    }
+
+    /// Document access is asked when the words are, not when the cursor arrived: a page
+    /// whose body was clicked after its field had focus answers no from then on.
+    @Test func documentAccessIsTheAnswerAtTheMomentOfTheInsert() throws {
+        let client = FocusedClient()
+        let cursor = Cursor(in: "com.google.Chrome")
+        client.took(cursor)
+        #expect(try client.cursor(for: .cursorInFront, whileInFrontIs: "com.google.Chrome", secureInputIsOn: false).get() === cursor)
+
+        cursor.answer.givesDocumentAccess = false
+        #expect(throws: Refusal.noTextFieldHasFocus) {
+            try client.cursor(for: .cursorInFront, whileInFrontIs: "com.google.Chrome", secureInputIsOn: false).get()
+        }
     }
 
     /// A cursor does not outlive the app it belongs to. Without this the person could
@@ -75,7 +112,7 @@ import Testing
         client.took(cursor)
         client.applicationQuit("com.apple.TextEdit")
 
-        #expect(throws: Refusal.noClientHasFocus) { try client.cursor(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputIsOn: false).get() }
+        #expect(throws: Refusal.noTextFieldHasFocus) { try client.cursor(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputIsOn: false).get() }
     }
 
     /// Some other app quitting is not this cursor's business.
@@ -94,7 +131,7 @@ import Testing
         client.took(cursor)
         client.left(cursor)
 
-        #expect(throws: Refusal.noClientHasFocus) { try client.cursor(for: .cursorInFront, whileInFrontIs: Self.inFront, secureInputIsOn: false).get() }
+        #expect(throws: Refusal.noTextFieldHasFocus) { try client.cursor(for: .cursorInFront, whileInFrontIs: Self.inFront, secureInputIsOn: false).get() }
     }
 
     /// Committing into a window the person has left is the one outcome worse than

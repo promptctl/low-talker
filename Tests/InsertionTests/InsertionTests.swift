@@ -13,7 +13,7 @@ import Testing
     @Test(arguments: [
         InsertionAnswer.inserted(characters: 0, into: "com.example.editor"),
         .inserted(characters: 12, into: "com.example.editor"),
-        .refused(.noClientHasFocus),
+        .refused(.noTextFieldHasFocus),
         .refused(.cursorIsInAnotherApp),
         .refused(.dictationIsInAnotherApp),
         .refused(.requestWasNotReadable),
@@ -52,6 +52,13 @@ import Testing
     /// Pinned to the bytes, because those bytes are what a build from then sends.
     @Test func theRefusalOfAnInputMethodThatReadsTextIsARefusal() {
         #expect(Wire.answer(of: Data(#"{"refused":{"_0":"requestWasNotText"}}"#.utf8)) == .refused(.requestWasNotReadable))
+    }
+
+    /// An input method from before a client without document access was refused names its
+    /// no-focus refusal as it always has, and this app reads it as the no-text-field refusal.
+    /// Pinned to the bytes for the same reason as the one above.
+    @Test func theNoFocusRefusalOfAnEarlierInputMethodIsTheNoTextFieldRefusal() {
+        #expect(Wire.answer(of: Data(#"{"refused":{"_0":"noClientHasFocus"}}"#.utf8)) == .refused(.noTextFieldHasFocus))
     }
 
     @Test func bytesThatAreNotARequestAreNotARequest() {
@@ -132,7 +139,7 @@ private let anEditor = "com.example.editor"
             portName: name, senders: try OwnProcess.identity(), queue: DispatchQueue(label: name),
             told: { Issue.record("the port was told \($0)") }
         ) { request in
-            Optional(request.text).map { InsertionAnswer.inserted(characters: $0.count, into: anEditor) } ?? .refused(.noClientHasFocus)
+            Optional(request.text).map { InsertionAnswer.inserted(characters: $0.count, into: anEditor) } ?? .refused(.noTextFieldHasFocus)
         }
 
         #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(characters: 5, into: anEditor))
@@ -165,9 +172,9 @@ private let anEditor = "com.example.editor"
     /// it is a failure like any other, since the words are not at the cursor.
     @Test func aRefusalIsThrownByName() async throws {
         let name = aPortNobodyElseUses()
-        let port = try hostInsertion(name: name) { _ in .refused(.noClientHasFocus) }
+        let port = try hostInsertion(name: name) { _ in .refused(.noTextFieldHasFocus) }
 
-        await #expect(throws: InsertFailure.refused(.noClientHasFocus)) { try await inserter(name).insert("hello", into: .cursorInFront) }
+        await #expect(throws: InsertFailure.refused(.noTextFieldHasFocus)) { try await inserter(name).insert("hello", into: .cursorInFront) }
         withExtendedLifetime(port) {}
     }
 
@@ -201,7 +208,7 @@ private let anEditor = "com.example.editor"
         let first = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor) }
 
         #expect {
-            _ = try hostInsertion(name: name) { _ in .refused(.noClientHasFocus) }
+            _ = try hostInsertion(name: name) { _ in .refused(.noTextFieldHasFocus) }
         } throws: { error in
             guard case PortNotHosted.nameIsTaken(name)? = error as? PortNotHosted else { return false }
             return true
@@ -318,7 +325,7 @@ private let anEditor = "com.example.editor"
         let read = Read()
         let port = try InsertionPort(portName: name, queue: DispatchQueue(label: name), told: { _ in }) { request in
             read.record(Result { () throws(PeerIdentity.Unreadable) in try PeerIdentity.of(request.sender) })
-            return Wire.answer(.refused(.noClientHasFocus))
+            return Wire.answer(.refused(.noTextFieldHasFocus))
         }
 
         _ = try await Probe.send("hello", to: name, answeredBy: try OwnProcess.identity(), from: probe.url)
@@ -335,7 +342,7 @@ private let anEditor = "com.example.editor"
         let read = Read()
         let port = try InsertionPort(portName: name, queue: DispatchQueue(label: name), told: { _ in }) { request in
             read.record(Result { () throws(PeerIdentity.Unreadable) in try PeerIdentity.of(request.sender) })
-            return Wire.answer(.refused(.noClientHasFocus))
+            return Wire.answer(.refused(.noTextFieldHasFocus))
         }
 
         _ = try await Probe.send("hello", to: name, answeredBy: try OwnProcess.identity(), from: probe.url)

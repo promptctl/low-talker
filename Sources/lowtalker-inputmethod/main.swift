@@ -90,17 +90,21 @@ let insertions: InsertionPort? = {
                 MainActor.assumeIsolated {
                     let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
                     let securing = secureInputHolder()
-                    return (frontmost: frontmost, securing: securing, cursor: FocusedClient.shared.cursor(for: request.destination, whileInFrontIs: frontmost, secureInputIsOn: securing != nil))
+                    return (frontmost: frontmost, securing: securing, held: FocusedClient.shared.cursorApplication,
+                            cursor: FocusedClient.shared.cursor(for: request.destination, whileInFrontIs: frontmost, secureInputIsOn: securing != nil))
                 }
             }
             let answer = committer.answer(request.text, at: seen?.cursor)
             // The app in front is named because the refusal that matters here is the one
             // where it is not the app holding the cursor, and a line saying only the outcome
-            // leaves a reader with the question it was written to answer. A main thread that
-            // did not look is said as not knowing, never as nothing in front.
-            // [LAW:no-silent-failure]
+            // leaves a reader with the question it was written to answer. The cursor held is
+            // named too, which is what tells a no-text-field refusal with no client from one
+            // whose client in front gave no document access. A main thread that did not look
+            // is said as not knowing, never as nothing in front. [LAW:no-silent-failure]
             let context = seen.map { seen in
-                "with \(seen.frontmost ?? "nothing") in front" + (seen.securing.map { ", secure input held by \($0)" } ?? "")
+                "with \(seen.frontmost ?? "nothing") in front and "
+                    + (seen.held.map { "the cursor in \($0)" } ?? "no cursor")
+                    + (seen.securing.map { ", secure input held by \($0)" } ?? "")
             } ?? "without knowing what is in front, since the main thread did not look in time"
             logger.notice("""
                 insert of \(request.text.count, privacy: .public) characters into \(request.destination, privacy: .public): \
