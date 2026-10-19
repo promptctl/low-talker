@@ -131,8 +131,16 @@ final class Rig {
         dictation.press(.ended(.lapsed))
     }
 
+    /// The same hold, its chord the modifier of a key typed while it was down: Right Option
+    /// held for a special character.
+    func usedAsModifier(speaking samples: [Float] = [1, 2, 3]) {
+        dictation.press(.began(Self.dictation, at: now))
+        speak(samples)
+        dictation.press(.ended(.usedAsModifier))
+    }
+
     /// The next session's outcome, in press order.
-    func report() async -> Result<Dictation.Session, Dictation.Failed> {
+    func report() async -> Dictation.Report.Outcome {
         await pressReport().outcome
     }
 
@@ -160,10 +168,24 @@ private func engineFailed(_ cause: any Accounted, with error: any Error.Type) ->
     return type(of: thrown) == error
 }
 
-extension Result<Dictation.Session, Dictation.Failed> {
+/// A press that came to something other than a session or a failure.
+struct NotASession: Error {
+    let outcome: Dictation.Report.Outcome
+}
+
+extension Dictation.Report.Outcome {
+    /// The session, or why there was none, thrown.
+    func get() throws -> Dictation.Session {
+        switch self {
+        case .session(let session): return session
+        case .failed(let failed): throw failed
+        case .usedAsModifier: throw NotASession(outcome: self)
+        }
+    }
+
     /// What failed, when the press did.
     var failure: (any Accounted)? {
-        if case .failure(let failed) = self { return failed.failure }
+        if case .failed(let failed) = self { return failed.failure }
         return nil
     }
 }
@@ -985,7 +1007,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func aFailedPressIsReportedByKindWithItsCauseInTheClear() async throws {
         let rig = try Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) })
         rig.hold()
-        guard case .failure(let failed) = await rig.report() else { Issue.record("expected the press to fail"); return }
+        guard case .failed(let failed) = await rig.report() else { Issue.record("expected the press to fail"); return }
         #expect(failed.kind == "PressStopped")
         #expect(failed.failure.account == Account(facts: "0 words inserted before: NoEngine()"))
     }
@@ -1039,6 +1061,21 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { stopped.raised && rig.turns.reading.holds == 0 })
         rig.hold(speaking: [4, 5])
         #expect(try await rig.session().transcription.transcript.text == "a")
+    }
+
+    /// A chord that was a typed key's modifier was never dictation: nothing of it is
+    /// inserted, it is reported as what it was rather than as a failure, its decode stops
+    /// and lets go of the engine, and the next press is heard.
+    @Test func aPressUsedAsAModifierInsertsNothingAndIsNoFailure() async throws {
+        let rig = try Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.usedAsModifier(speaking: [1, 2, 3])
+        guard case .usedAsModifier(let landed) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        #expect(landed == 0)
+        #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.turns.reading.holds == 0 })
+        rig.hold(speaking: [4, 5])
+        #expect(try await rig.session().transcription.transcript.text == "a")
+        #expect(rig.inputMethod.inserted == ["a"])
     }
 
     /// [LAW:no-silent-failure] Two presses the speaker made identically, told apart by

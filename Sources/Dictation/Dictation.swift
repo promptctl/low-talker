@@ -71,13 +71,25 @@ public final class Dictation {
     /// One press, done: how it came out, and what its microphone delivered for it.
     ///
     /// [LAW:nothing-unseen] Every press reaches `report` as one of these, in the order the
-    /// presses came, whether it was inserted, refused, or heard nothing: the record of a
-    /// press that captured nothing says which input it was, how much arrived and how loud,
-    /// so the record alone says why.
+    /// presses came, whether it was inserted, refused, heard nothing, or was never dictation:
+    /// the record of a press that captured nothing says which input it was, how much arrived
+    /// and how loud, so the record alone says why.
     public struct Report: Sendable {
+        /// How a press came out.
+        ///
+        /// [LAW:types-are-the-program] A press that was never dictation is neither a session
+        /// nor a failure: nothing went wrong, and nobody is told anything went wrong.
+        public enum Outcome: Sendable {
+            case session(Session)
+            /// The chord was a typed key's modifier, so nothing more of the press went in.
+            /// `landed` is how many of its words were committed while the chord was down.
+            case usedAsModifier(landed: Int)
+            case failed(Failed)
+        }
+
         /// The mode whose chord began the press, whatever came of it.
         public let mode: Mode
-        public let outcome: Result<Session, Failed>
+        public let outcome: Outcome
         /// Nil for a press refused before a microphone opened for it, which its outcome
         /// says the reason for.
         public let capture: CapturedAudio.Reading?
@@ -132,10 +144,12 @@ public final class Dictation {
         }
 
         /// How the press ended. [LAW:types-are-the-program] A lapse ends the press with no
-        /// key-up, so "over" and "when the key came up" are not one optional.
+        /// key-up, and a chord that was a typed key's modifier with nothing to time from one,
+        /// so "over" and "when the key came up" are not one optional.
         enum Ended {
             case up(ContinuousClock.Instant)
-            case lapsed
+            /// Over, committing nothing more: a lapse, or a chord used as a modifier.
+            case stopped
         }
 
         private struct State {
@@ -222,15 +236,15 @@ public final class Dictation {
             let missing = state.withLock { state -> (@MainActor @Sendable () -> CapturedAudio.Loss?)? in
                 switch state.ended {
                 case nil: state.hearing?.missing
-                case .up, .lapsed: nil
+                case .up, .stopped: nil
                 }
             }
             if let missing, missing() != nil { stop() }
             return state.withLock { state in
-                // A lapsed press commits nothing more, so the key-down it is timed from is moot.
+                // A stopped press commits nothing more, so the key-down it is timed from is moot.
                 let since: Executor.Since = switch state.ended {
                 case .up(let keyUp): .keyUp(keyUp)
-                case nil, .lapsed: .keyDown(keyDown)
+                case nil, .stopped: .keyDown(keyDown)
                 }
                 // A stopped press takes no words, so it has no run.
                 let run = state.cursor.advance(through: state.committing ? state.confirmed : [])
@@ -270,7 +284,7 @@ public final class Dictation {
             read.finish()
         }
 
-        /// The press is over, its key up or lapsed: what the press showed while it was open.
+        /// The press is over, its key up or stopped: what the press showed while it was open.
         func ended(_ ended: Ended) -> DuringPress {
             state.withLock { state in
                 state.ended = ended
@@ -323,6 +337,7 @@ public final class Dictation {
         /// after it.
         case released(Context, keyUp: ContinuousClock.Instant, delivery: Duration)
         case lapsed
+        case usedAsModifier
         case lost(CapturedAudio.Loss)
     }
 
@@ -453,10 +468,11 @@ public final class Dictation {
             let told = ContinuousClock.now
             // [LAW:one-source-of-truth] The key event's own stamp, as key-down's is: a key-up
             // told late is timed from where the key came up, by every figure timed from it.
-            // A lapse had no key-up and is given none.
+            // A lapse had no key-up, and a chord used as a modifier inserts nothing to time
+            // from one, so neither is given one.
             let released: (kind: PressKind, keyUp: ContinuousClock.Instant)? = switch ending {
             case .released(let kind, let moment): (kind, ContinuousClock.Instant(moment))
-            case .lapsed: nil
+            case .lapsed, .usedAsModifier: nil
             }
             let open = press
             press = .up
@@ -481,7 +497,7 @@ public final class Dictation {
                 mode = began
                 // Read before the session ends, so it holds only what the press showed
                 // while it was open.
-                let duringPress = down.streaming.ended(released.map { .up($0.keyUp) } ?? .lapsed)
+                let duringPress = down.streaming.ended(released.map { .up($0.keyUp) } ?? .stopped)
                 // The marks are closed and the microphone with them, however the press
                 // ended, so a session left open cannot carry its beginning into the next
                 // press's clip and cannot leave the device held after the key came up.
@@ -490,15 +506,16 @@ public final class Dictation {
                 delivered = end.reading
                 // How the press ended, read once. [LAW:no-silent-failure] A hotkey that
                 // stopped and audio the capture could not stream whole each leave
-                // something this loop must not report as an utterance. The lapse is asked
-                // first: a press the hotkey stopped during says so rather than describing the
-                // clip it left behind, which was never the whole utterance anyway. A
-                // microphone that was not there at all was refused at key-down, so it
-                // never reaches here.
-                let ended: Ending = switch (released, end.lost) {
-                case (nil, _): .lapsed
-                case (let released?, nil): .released(Context(press: released.kind, frontmostApp: down.into), keyUp: released.keyUp, delivery: told - released.keyUp)
-                case (_?, let lost?): .lost(lost)
+                // something this loop must not report as an utterance, and a chord used as a
+                // modifier leaves no utterance at all. Those are asked first: a press the
+                // hotkey stopped during says so rather than describing the clip it left
+                // behind, which was never the whole utterance anyway. A microphone that was
+                // not there at all was refused at key-down, so it never reaches here.
+                let ended: Ending = switch (ending, released, end.lost) {
+                case (.usedAsModifier, _, _): .usedAsModifier
+                case (_, nil, _): .lapsed
+                case (_, let released?, nil): .released(Context(press: released.kind, frontmostApp: down.into), keyUp: released.keyUp, delivery: told - released.keyUp)
+                case (_, _?, let lost?): .lost(lost)
                 }
                 // A press that will not be inserted commits nothing more and has no use for
                 // the rest of its decode. What it already committed stays: the person watched
@@ -506,7 +523,7 @@ public final class Dictation {
                 // pass the ended audio lets the engine finish is never committed.
                 switch ended {
                 case .released: break
-                case .lapsed, .lost: down.streaming.stop()
+                case .lapsed, .usedAsModifier, .lost: down.streaming.stop()
                 }
                 heard = .success(Heard(ending: ended, duringPress: duringPress, decode: down.decode, streaming: down.streaming, committing: down.committing))
             }
@@ -517,11 +534,11 @@ public final class Dictation {
                 // drain that waited for the one has waited for the other.
                 // [LAW:no-ambient-temporal-coupling] [LAW:single-enforcer]
                 try sessions.submit {
-                    let outcome: Result<Session, Failed>
+                    let outcome: Report.Outcome
                     do throws(Failed) {
-                        outcome = .success(try await self.hear(heard))
+                        outcome = try await self.hear(heard)
                     } catch {
-                        outcome = .failure(error)
+                        outcome = .failed(error)
                     }
                     await self.settle(Report(mode: mode, outcome: outcome, capture: delivered))
                 }
@@ -530,7 +547,7 @@ public final class Dictation {
                 // to accept it reaches here, and then nothing will ever read the decode, so
                 // it is stopped and lets go of the engine as it does. [LAW:no-silent-failure]
                 if case .success(let heard) = heard { heard.decode.cancel() }
-                settle(Report(mode: mode, outcome: .failure(Failed(error)), capture: delivered))
+                settle(Report(mode: mode, outcome: .failed(Failed(error)), capture: delivered))
             }
             arrivedDuringPress.map(offer(since:))
             arrivedDuringPress = nil
@@ -648,7 +665,7 @@ public final class Dictation {
     /// and not yet committed. A press that will not be inserted is reported in its turn
     /// without waiting on its decode, which was told to stop and may still be waiting for
     /// the model to load.
-    private func hear(_ heard: Result<Heard, Failed>) async throws(Failed) -> Session {
+    private func hear(_ heard: Result<Heard, Failed>) async throws(Failed) -> Report.Outcome {
         let heard = try heard.get()
         let unplaced = await heard.committing.value
         let landed = heard.streaming.landed
@@ -662,8 +679,9 @@ public final class Dictation {
         case (.released(let released, let up, let late), _): (context, keyUp, delivery) = (released, up, late)
         // [LAW:no-silent-failure] The report names what left the press's words unplaced
         // first: a refused commit came before whatever the key-up found.
-        case (.lapsed, let unplaced?), (.lost, let unplaced?): throw stopped(unplaced)
+        case (.lapsed, let unplaced?), (.usedAsModifier, let unplaced?), (.lost, let unplaced?): throw stopped(unplaced)
         case (.lapsed, nil): throw Failed(PressLapsed(landed: landed.words))
+        case (.usedAsModifier, nil): return .usedAsModifier(landed: landed.words)
         case (.lost(let lost), nil): throw Failed(SpeechLost(lost: lost, landed: landed.words))
         }
         let decoded = await heard.decode.value
@@ -678,7 +696,7 @@ public final class Dictation {
         } catch { throw stopped(error) }
         // A rest of nothing leaves what the commits could not place where it was.
         if placed.performed == nil, let unplaced { throw stopped(unplaced) }
-        return Session(context: context, transcription: transcription, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 })
+        return .session(Session(context: context, transcription: transcription, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 }))
     }
 }
 

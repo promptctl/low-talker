@@ -1,8 +1,10 @@
-/// A modifier key going down or up, with what the keyboard held once it had.
+/// A modifier key going down or up, with what the keyboard held once it had, and when a key
+/// was last typed.
 ///
 /// [LAW:one-source-of-truth] `modifiers` is the whole modifier state as the event
 /// reports it, not a running tally kept here: a tally would drift the first time an
-/// event was missed, and nothing could tell it had.
+/// event was missed, and nothing could tell it had. `lastTyped` is the session's own
+/// record, for the same reason.
 public struct KeyEvent: Hashable, Sendable {
     public enum Direction: Hashable, Sendable {
         case down, up
@@ -14,12 +16,17 @@ public struct KeyEvent: Hashable, Sendable {
     public let modifiers: Set<Modifier>
     /// When the key moved.
     public let time: HostTime
+    /// When a key that is not a modifier last went down, as the session had it when this
+    /// event was read: what tells a chord pressed alone from a chord held as the modifier of
+    /// a typed key, which the input method is never handed.
+    public let lastTyped: HostTime
 
-    public init(key: Modifier, direction: Direction, modifiers: Set<Modifier>, time: HostTime) {
+    public init(key: Modifier, direction: Direction, modifiers: Set<Modifier>, time: HostTime, lastTyped: HostTime) {
         self.key = key
         self.direction = direction
         self.modifiers = modifiers
         self.time = time
+        self.lastTyped = lastTyped
     }
 }
 
@@ -40,8 +47,10 @@ extension KeyChord {
 /// another mode's vocabulary, and its end cannot name a mode it did not begin in.
 /// Releasing within `tapThreshold` makes it a tap: listening stays on, latched,
 /// until the next chord press ends it. Releasing later makes it a hold, which ends
-/// as the key comes up. The chord that began a press owns it: keys added during a
-/// hold change nothing, and the press ends when any key of its chord comes up.
+/// as the key comes up. The chord that began a press owns it: modifiers added during a
+/// hold change nothing, and the press ends when any key of its chord comes up. A key typed
+/// while the chord was down makes it neither: the chord was that key's modifier, and the
+/// press ends as the chord comes up, however long it was down.
 ///
 /// [LAW:effects-at-boundaries] A value with no clock and no feed. Time comes in on
 /// each event, so a test drives it with timestamps of its choosing.
@@ -55,16 +64,16 @@ public struct HotkeyDetector: Sendable {
         case ended(Ending)
     }
 
-    /// What stopped the listening: the speaker let go, or the hotkey stopped hearing and
-    /// the press was ended without them.
+    /// What stopped the listening: the speaker let go, the chord turned out to be a typed
+    /// key's modifier, or the hotkey stopped hearing and the press was ended without them.
     ///
-    /// [LAW:types-are-the-program] Two facts a caller could never pull back apart if
-    /// they shared a value - "that was the whole utterance" and "that is as much of it
-    /// as reached us". Only a release carries a press kind, because a tap and a hold
-    /// are told apart by how long the key was down and only a release has the key-up
-    /// that measures it. Only a release carries a moment, the stamp of the event that
-    /// ended it, for the same reason `began` carries one: an ending with no event behind
-    /// it could only invent one.
+    /// [LAW:types-are-the-program] Three facts a caller could never pull back apart if
+    /// they shared a value - "that was the whole utterance", "there was no utterance" and
+    /// "that is as much of it as reached us". Only a release carries a press kind, because
+    /// a tap and a hold are told apart by how long the key was down and only a release has
+    /// the key-up that measures it. Only a release carries a moment, the stamp of the event
+    /// that ended it, for the same reason `began` carries one; the other endings insert
+    /// nothing more, so no moment times anything after them.
     public enum Ending: Hashable, Sendable, CustomStringConvertible {
         /// The key came up on a hold, or the chord went down again on a latched tap, at
         /// this moment.
@@ -72,6 +81,10 @@ public struct HotkeyDetector: Sendable {
         /// The hotkey stopped hearing while the press was open. Nothing was heard past the
         /// last event it was told, and whether the speaker had even finished is unknown.
         case lapsed
+        /// The chord came up after a key was typed while it was down: it was that key's
+        /// modifier - Option for a special character, Meta in a terminal - and the press was
+        /// never dictation.
+        case usedAsModifier
 
         /// An ending in a person's words. A case added here has to say what it is before
         /// it compiles, so nothing prints an ending it has no word for.
@@ -79,6 +92,7 @@ public struct HotkeyDetector: Sendable {
             switch self {
             case .released(let kind, _): kind.rawValue
             case .lapsed: "lapsed"
+            case .usedAsModifier: "used as a modifier"
             }
         }
     }
@@ -134,12 +148,16 @@ public struct HotkeyDetector: Sendable {
     private mutating func up(of event: KeyEvent) -> Transition? {
         switch phase {
         case .held(let chord, let since) where chord.modifiers.contains(event.key):
+            let typedUnderChord = since < event.lastTyped && event.lastTyped <= event.time
             let press: PressKind = event.time - since < tapThreshold ? .tap : .hold
-            switch press {
-            case .tap:
+            switch (typedUnderChord, press) {
+            case (true, _):
+                phase = .idle
+                return .ended(.usedAsModifier)
+            case (false, .tap):
                 phase = .latched(chord)
                 return nil
-            case .hold:
+            case (false, .hold):
                 phase = .idle
                 return .ended(.released(.hold, at: event.time))
             }

@@ -11,6 +11,9 @@ private struct Keyboard {
     /// The modifiers down right now, so each event reports the whole state the way
     /// the input method does.
     private var held: Set<Modifier> = []
+    /// When a key was last typed, which every event carries as the session does. Long
+    /// before the run starts until the test types one.
+    private var lastTyped = at(-60_000)
 
     init(modes: Modes = modes(rightOption), tapThreshold: Duration = .milliseconds(250)) {
         detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
@@ -18,12 +21,18 @@ private struct Keyboard {
 
     mutating func press(_ modifier: Modifier, at ms: Int64) -> HotkeyDetector.Transition? {
         held.insert(modifier)
-        return detector.handle(KeyEvent(key: modifier, direction: .down, modifiers: held, time: at(ms)))
+        return detector.handle(KeyEvent(key: modifier, direction: .down, modifiers: held, time: at(ms), lastTyped: lastTyped))
     }
 
     mutating func release(_ modifier: Modifier, at ms: Int64) -> HotkeyDetector.Transition? {
         held.remove(modifier)
-        return detector.handle(KeyEvent(key: modifier, direction: .up, modifiers: held, time: at(ms)))
+        return detector.handle(KeyEvent(key: modifier, direction: .up, modifiers: held, time: at(ms), lastTyped: lastTyped))
+    }
+
+    /// A key that is not a modifier typed at `ms`, which the detector is never handed and
+    /// learns of from the next event.
+    mutating func type(at ms: Int64) {
+        lastTyped = at(ms)
     }
 }
 
@@ -206,5 +215,36 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         _ = keyboard.release(.rightOption, at: 100)
         _ = keyboard.press(.leftShift, at: 1000)
         #expect(keyboard.press(.rightOption, at: 1010) == ended(.tap, at: 1010))
+    }
+
+    /// Right Option held to type a special character, quicker than a tap: the chord was the
+    /// key's modifier, so it ends there and latches nothing.
+    @Test(arguments: [Int64(110), 900])
+    func aKeyTypedUnderTheChordEndsThePressAsItComesUp(releasedAt ms: Int64) {
+        var keyboard = Keyboard()
+        #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
+        keyboard.type(at: 40)
+        #expect(keyboard.release(.rightOption, at: ms) == .ended(.usedAsModifier))
+        #expect(keyboard.detector.phase == .idle)
+    }
+
+    /// Only a key typed while the chord was down makes it a modifier: one typed before it
+    /// went down, or after it came up and before the release was read, leaves a tap.
+    @Test(arguments: [Int64(-5), 0, 101])
+    func aKeyTypedOutsideTheChordLeavesATap(typedAt ms: Int64) {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        keyboard.type(at: ms)
+        #expect(keyboard.release(.rightOption, at: 100) == nil)
+        #expect(keyboard.detector.phase == .latched(rightOption.chord))
+    }
+
+    /// Typing while a tap is latched is what a latched tap is for, and ends nothing.
+    @Test func aKeyTypedWhileLatchedChangesNothing() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+        keyboard.type(at: 500)
+        #expect(keyboard.press(.rightOption, at: 1000) == ended(.tap, at: 1000))
     }
 }

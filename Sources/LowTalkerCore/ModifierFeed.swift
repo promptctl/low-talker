@@ -1,3 +1,4 @@
+import CoreGraphics
 import IOKit.hidsystem
 import Insertion
 
@@ -41,5 +42,15 @@ extension Modifier {
     /// The modifiers the session holds now.
     static func heldInSession() -> Set<Modifier> {
         held(in: SessionModifiers.read().flags)
+    }
+}
+
+extension HostTime {
+    /// When a key that is not a modifier last went down in the session. Reading it needs no
+    /// grant: measured on studious, 2026-10-19, an app with neither Input Monitoring nor
+    /// Accessibility read the moment of an A typed under a held Right Option.
+    static func lastTypedInSession() -> HostTime {
+        let since = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        return HostTime(uptime: HostTime.now.uptime - .seconds(since))
     }
 }
