@@ -10,7 +10,9 @@ import os
 ///
 /// The input method is handed keys only by an app in front that takes typing, and by none
 /// under Secure Event Input, so a press anywhere else never arrives. It never keeps a key
-/// back, since the input method hands every key back.
+/// back, since the input method hands every key back. It is handed no typed key at all, so
+/// each change it tells carries when the session last saw one, which is how a chord held as a
+/// modifier is told from one pressed alone.
 ///
 /// A release is the one change it cannot wait to be told. One made where the input method
 /// is handed nothing, or told while the app's port was full, would leave the microphone open
@@ -35,8 +37,9 @@ public struct InputMethodModifiers: ModifierFeed {
         self.superviseInputMethod = superviseInputMethod
     }
 
-    /// How often a held key is looked for in the session: how late, at most, a release the
-    /// input method never told is heard.
+    /// How often a held key is looked for in the session. A release the input method never
+    /// told is heard within two of these, since one younger than `ToldModifiers.telling` is
+    /// left for the next.
     static let confirming: DispatchTimeInterval = .milliseconds(200)
 
     /// What the port's messages reach on the main actor: while the feed is open, the port
@@ -57,10 +60,11 @@ public struct InputMethodModifiers: ModifierFeed {
         private var confirming: DispatchSourceTimer?
         /// The port's queue, where the session is read too.
         private let hearing: DispatchQueue
-        /// [LAW:effects-at-boundaries] The reading of the session's modifier keys.
-        private let session: @Sendable () -> Set<Modifier>
+        /// [LAW:effects-at-boundaries] The reading of the session, the one the input method
+        /// sends.
+        private let session: @Sendable () -> HeldModifiers
 
-        init(told: ToldModifiers, hearing: DispatchQueue, session: @escaping @Sendable () -> Set<Modifier>) {
+        init(told: ToldModifiers, hearing: DispatchQueue, session: @escaping @Sendable () -> HeldModifiers) {
             self.told = told
             self.hearing = hearing
             self.session = session
@@ -77,12 +81,11 @@ public struct InputMethodModifiers: ModifierFeed {
         }
 
         func heard(_ state: HeldModifiers) {
-            heard(told.take(Modifier.held(in: state.flags),
-                            at: HostTime(uptime: .nanoseconds(state.uptimeNanoseconds))))
+            heard(told.take(state.held, at: state.changed, lastTyped: state.lastTyped))
         }
 
-        func confirmed(_ session: Set<Modifier>, at time: HostTime) {
-            heard(told.confirm(session: session, at: time))
+        func confirmed(_ session: HeldModifiers, at time: HostTime) {
+            heard(told.confirm(session: session.held, changed: session.changed, at: time))
         }
 
         /// [LAW:dataflow-not-control-flow] The session is read for as long as the feed is
@@ -124,7 +127,7 @@ public struct InputMethodModifiers: ModifierFeed {
         // already down when this comes up is not heard going down when it next moves.
         let hearing = DispatchQueue(label: AppIdentity.hotkeyPortName)
         let installed = Installed<NoticePort>(told: ToldModifiers(held: Modifier.heldInSession()), hearing: hearing,
-                                                session: Modifier.heldInSession)
+                                                session: { HeldModifiers(SessionModifiers.read()) })
         let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
         // Checked and read off the main thread, where the keys and the menu are, and handed
         // to it in the order the input method sent them: the main queue is first in, first
@@ -172,22 +175,32 @@ public struct ToldModifiers: Sendable {
     }
 
     /// The key events that take the detector to holding `now`, as the input method read it
-    /// at `time`.
-    public mutating func take(_ now: Set<Modifier>, at time: HostTime) -> [KeyEvent] {
+    /// at `time`, with a key last typed at `lastTyped`.
+    public mutating func take(_ now: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
         // A later message has nothing older left to be overtaken by. [LAW:dataflow-not-control-flow]
         letGo = letGo.filter { $0.value > time }
-        return move(to: now.subtracting(letGo.keys), at: time)
+        return move(to: now.subtracting(letGo.keys), at: time, lastTyped: lastTyped)
     }
 
-    /// The key events that let go of what `session`, read at `time`, no longer holds.
-    public mutating func confirm(session: Set<Modifier>, at time: HostTime) -> [KeyEvent] {
-        held.subtracting(session).forEach { letGo[$0] = time }
-        return move(to: held.intersection(session), at: time)
+    /// How long after a change the app's own reading leaves it for the input method to tell.
+    /// The input method's release carries the key typed under the chord, and the app's reading
+    /// answers no change, so it can place none: a release it let go of first would be told by
+    /// its length, and the input method's word would come too late. Measured on studious,
+    /// 2026-10-03: the input method reads a change 1.5-9 ms after it.
+    public static let telling: Duration = .milliseconds(100)
+
+    /// The key events that let go of what `session`, read at `time`, no longer holds, once the
+    /// session's last change, at `changed`, is `telling` old. They place no typed key, since a
+    /// reading of the app's own answers no change. [LAW:single-enforcer]
+    public mutating func confirm(session: Set<Modifier>, changed: HostTime, at time: HostTime) -> [KeyEvent] {
+        let released = time - changed < Self.telling ? [] : held.subtracting(session)
+        released.forEach { letGo[$0] = time }
+        return move(to: held.subtracting(released), at: time, lastTyped: nil)
     }
 
-    private mutating func move(to now: Set<Modifier>, at time: HostTime) -> [KeyEvent] {
+    private mutating func move(to now: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
         defer { held = now }
-        return KeyEvent.moves(from: held, to: now, at: time)
+        return KeyEvent.moves(from: held, to: now, at: time, lastTyped: lastTyped)
     }
 }
 
@@ -203,15 +216,26 @@ extension KeyEvent {
     /// next had already come, is every key that came up and then one key down carrying the
     /// whole state: keys that went down together were never seen held apart, so no chord
     /// that some of them make is completed on the way to the one they make together.
-    public static func moves(from before: Set<Modifier>, to after: Set<Modifier>, at time: HostTime) -> [KeyEvent] {
+    public static func moves(from before: Set<Modifier>, to after: Set<Modifier>, at time: HostTime, lastTyped: HostTime?) -> [KeyEvent] {
         let released = Modifier.allCases.filter { before.contains($0) && !after.contains($0) }
         let pressed = Modifier.allCases.filter { after.contains($0) && !before.contains($0) }
         var held = before
         let ups = released.map { modifier in
             held.remove(modifier)
-            return KeyEvent(key: modifier, direction: .up, modifiers: held, time: time)
+            return KeyEvent(key: modifier, direction: .up, modifiers: held, time: time, lastTyped: lastTyped)
         }
-        let downs = pressed.suffix(1).map { KeyEvent(key: $0, direction: .down, modifiers: after, time: time) }
+        let downs = pressed.suffix(1).map { KeyEvent(key: $0, direction: .down, modifiers: after, time: time, lastTyped: lastTyped) }
         return ups + downs
     }
+}
+
+extension HeldModifiers {
+    /// The modifiers the reading shows held.
+    var held: Set<Modifier> { Modifier.held(in: flags) }
+
+    /// When they changed to what the reading shows.
+    var changed: HostTime { HostTime(uptime: .nanoseconds(uptimeNanoseconds)) }
+
+    /// When a key was last typed before the change the reading answers.
+    var lastTyped: HostTime? { typedUptimeNanoseconds.map { HostTime(uptime: .nanoseconds($0)) } }
 }

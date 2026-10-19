@@ -20,7 +20,7 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
     return (port, arrivals)
 }
 
-private let rightOptionHeld = HeldModifiers(flags: 0x80140, uptimeNanoseconds: 1_000_000_000)
+private let rightOptionHeld = HeldModifiers(flags: 0x80140, uptimeNanoseconds: 1_000_000_000, typedUptimeNanoseconds: 400_000_000)
 
 /// The modifier keys cross from the input method to the app whole, in order, and from the
 /// input method alone.
@@ -34,13 +34,15 @@ private let rightOptionHeld = HeldModifiers(flags: 0x80140, uptimeNanoseconds: 1
     /// The log line says what was held whenever that is not the session's flags as given.
     @Test func theFnBitIsTheFnKeyItself() {
         let fn: UInt64 = 0x800000
-        let anArrowWithRightOption = SessionModifiers(session: 0x80140 | fn, fnKeyDown: false, changedAt: 2.5)
+        let anArrowWithRightOption = SessionModifiers(session: 0x80140 | fn, fnKeyDown: false, changedAt: 2.5, typedAt: 1.5)
         #expect(anArrowWithRightOption.flags == 0x80140)
-        #expect(anArrowWithRightOption.description == "session 0x880140, Fn key up, held 0x80140, changed at 2.5")
-        let fnAlone = SessionModifiers(session: 0x100 | fn, fnKeyDown: true, changedAt: 2.5)
+        #expect(anArrowWithRightOption.description == "session 0x880140, Fn key up, held 0x80140, changed at 2.5, typed at 1.5")
+        let fnAlone = SessionModifiers(session: 0x100 | fn, fnKeyDown: true, changedAt: 2.5, typedAt: 1.5)
         #expect(fnAlone.flags == 0x100 | fn)
-        #expect(fnAlone.description == "session 0x800100, Fn key down, changed at 2.5")
-        #expect(SessionModifiers(session: 0x80140, fnKeyDown: true, changedAt: 2.5).flags == 0x80140 | fn)
+        #expect(fnAlone.description == "session 0x800100, Fn key down, changed at 2.5, typed at 1.5")
+        #expect(SessionModifiers(session: 0x80140, fnKeyDown: true, changedAt: 2.5, typedAt: 1.5).flags == 0x80140 | fn)
+        #expect(SessionModifiers(session: 0x100, fnKeyDown: false, changedAt: 2.5, typedAt: nil).description
+            == "session 0x100, Fn key up, changed at 2.5, a key typed since")
     }
 
     /// A reading is dated by the session's last change, unless that change came after the
@@ -52,21 +54,42 @@ private let rightOptionHeld = HeldModifiers(flags: 0x80140, uptimeNanoseconds: 1
         #expect(SessionModifiers.date(lastChange: 7_000.5 - 1.8e10, after: 0, readAt: 7_000.5) == 0)
     }
 
-    /// A reading from the session now is dated no later than it was taken.
+    /// A key typed counts only before the event the reading answers, by the event's own stamp:
+    /// Right Option up at 7_000.4 with an A at 7_000.2 places the A; Return at 7_000.5, after
+    /// the release and before a Shift that dates the reading, places nothing, since it hides
+    /// whatever was typed before it. A reading answering no event places no key, and a session
+    /// that reports a key before the machine came up has typed none since.
+    @Test func aKeyTypedIsPlacedOnlyBeforeTheEventTheReadingAnswers() {
+        #expect(SessionModifiers.typed(lastKeyDown: 7_000.2, before: 7_000.4) == 7_000.2)
+        #expect(SessionModifiers.typed(lastKeyDown: 7_000.5, before: 7_000.4) == nil)
+        #expect(SessionModifiers.typed(lastKeyDown: 7_000.2, before: 0) == nil)
+        #expect(SessionModifiers.typed(lastKeyDown: -0.5, before: 7_000.4) == 0)
+    }
+
+    /// A reading from the session now is dated no later than it was taken, and so is the key
+    /// it says was last typed.
     @Test func aLiveReadingIsDatedNoLaterThanItIsTaken() {
-        let reading = SessionModifiers.read()
-        #expect(0...ProcessInfo.processInfo.systemUptime ~= reading.changedAt)
+        let answering = ProcessInfo.processInfo.systemUptime
+        let reading = SessionModifiers.read(after: answering)
+        let taken = ProcessInfo.processInfo.systemUptime
+        #expect(0...taken ~= reading.changedAt)
+        #expect(reading.typedAt.map { 0..<answering ~= $0 } != false)
+        #expect(SessionModifiers.read().typedAt == nil)
     }
 
     @Test func heldModifiersSurviveTheWire() {
         #expect(Wire.heldModifiers(of: Wire.modifiers(rightOptionHeld)) == rightOptionHeld)
-        #expect(Wire.heldModifiers(of: Data(repeating: 0, count: 15)) == nil)
+        let nothingTypedBefore = HeldModifiers(flags: 0x100, uptimeNanoseconds: 2, typedUptimeNanoseconds: nil)
+        #expect(Wire.heldModifiers(of: Wire.modifiers(nothingTypedBefore)) == nothingTypedBefore)
+        #expect(Wire.heldModifiers(of: Data(repeating: 0, count: 23)) == nil)
     }
 
     @Test(.timeLimit(.minutes(1))) func changesAreHeardWholeAndInTheOrderTold() async throws {
         let name = aPortNobodyElseUses()
         let (port, arrivals) = try hostNotices(name: name, senders: try OwnProcess.identity())
-        let told = (0..<3).map { HeldModifiers(flags: UInt64(0x100 | $0 << 6), uptimeNanoseconds: UInt64($0)) }
+        let told: [HeldModifiers] = (0..<3).map { (n: UInt64) in
+            HeldModifiers(flags: 0x100 | n << 6, uptimeNanoseconds: n, typedUptimeNanoseconds: n == 1 ? nil : n)
+        }
         let sender = NoticeSender(portName: name)
         #expect(told.map { sender.tell(.modifiersMoved($0)) } == Array(repeating: .told, count: 3))
         var arrived: [Arrival] = []
@@ -80,7 +103,7 @@ private let rightOptionHeld = HeldModifiers(flags: 0x80140, uptimeNanoseconds: 1
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsHeardInItsPlace() async throws {
         let name = aPortNobodyElseUses()
         let (port, arrivals) = try hostNotices(name: name, senders: try OwnProcess.identity())
-        let told: [Notice] = [.modifiersMoved(rightOptionHeld), .cursorArrived, .modifiersMoved(HeldModifiers(flags: 0x100, uptimeNanoseconds: 2))]
+        let told: [Notice] = [.modifiersMoved(rightOptionHeld), .cursorArrived, .modifiersMoved(HeldModifiers(flags: 0x100, uptimeNanoseconds: 2, typedUptimeNanoseconds: 1))]
         #expect(told.map(NoticeSender(portName: name).tell) == Array(repeating: .told, count: 3))
         var arrived: [Arrival] = []
         for await arrival in arrivals.prefix(3) { arrived.append(arrival) }

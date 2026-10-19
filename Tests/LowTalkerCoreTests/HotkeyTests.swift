@@ -48,8 +48,11 @@ private let rightOption = Mode.dictation
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }
 
-private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEvent {
-    KeyEvent(key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [], time: at(ms))
+/// Right Option moving at `ms`, with a key last typed at `typed`: long before the run, unless
+/// the test says.
+private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: Int64 = -60_000) -> KeyEvent {
+    KeyEvent(key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [], time: at(ms),
+             lastTyped: at(typed))
 }
 
 @MainActor
@@ -67,6 +70,21 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
         installation.handle(rightOption(.up, at: 400))
         await settle()
         #expect(transitions == [.began(rightOption, at: at(0)), .ended(.released(.hold, at: at(400)))])
+    }
+
+    /// The repro of low-unfiled-50ff.28v: Right Option down, A typed under it, Right Option
+    /// up, all within 150 ms. The press ends at the release instead of latching open.
+    @Test func aChordThatWasATypedKeysModifierLeavesNothingListening() async throws {
+        let feed = FakeFeed()
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
+        var transitions: [HotkeyDetector.Transition] = []
+        try hotkey.start { transitions.append($0) }
+        let installation = try #require(feed.installations.first)
+        installation.handle(rightOption(.down, at: 0))
+        installation.handle(rightOption(.up, at: 110, typed: 40))
+        await settle()
+        #expect(transitions == [.began(rightOption, at: at(0)), .ended(.usedAsModifier)])
+        #expect(hotkey.phase == .idle)
     }
 
     /// Every transition leaves by the main queue, never from inside the feed's call, so a

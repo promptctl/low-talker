@@ -804,9 +804,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The words are private: they are what the user dictated.
     private func report(_ press: Dictation.Report) {
         switch press.outcome {
-        case .success(let session):
+        case .session(let session):
             sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
-        case .failure(let failed):
+        case .usedAsModifier(let landed):
+            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so the press was not dictation; \(landed, privacy: .public) words inserted before; microphone: \(press.microphone, privacy: .public)")
+        case .failed(let failed):
             reportFailure(failed, of: press)
         }
     }
