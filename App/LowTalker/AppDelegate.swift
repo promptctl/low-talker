@@ -174,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let was, case .success(let now) = next.config else {
             configLog.notice("config: \(next, privacy: .public)")
             serving?.resume(at: config.map(\.serve))
-            Task { await comeUp() }
+            comeUp()
             return
         }
         // [LAW:nothing-unseen] Each moved setting lands on the event with what came of moving it.
@@ -251,18 +251,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// ending any press it had open, its sessions are waited out, and then the input method
     /// is installed and the hotkey goes up in front of a new loop.
     ///
-    /// Queued behind any rebuild still in progress; see `rebuilding`.
-    private func rebuild() async {
+    /// Queued behind any rebuild still in progress; see `rebuilding`. Counted in flight in the
+    /// step that asks for it, so a reading taken after the decision is owed to its end, as a
+    /// come-up's is. [LAW:no-ambient-temporal-coupling]
+    @discardableResult
+    private func rebuild() -> Task<Void, Never> {
         let before = rebuilding
+        rebuildsInFlight += 1
         let this = Task {
             await before?.value
             await adopt()
+            rebuildsInFlight -= 1
+            settleOwedReading()
         }
         rebuilding = this
-        rebuildsInFlight += 1
-        await this.value
-        rebuildsInFlight -= 1
-        settleOwedReading()
+        return this
     }
 
     /// How many rebuilds are queued or running. While any is, the loop is being rebuilt by
@@ -610,7 +613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// A launch asks for no grant. Every grant is asked for from its own step in setup,
     /// after that step has said why; see `ask(_:)`.
     private func listen() async {
-        await comeUp()
+        await comeUp().value
         if !readReadiness().unmet.isEmpty { setUp.show() }
     }
 
@@ -632,42 +635,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// one as the first would hold or release the microphone on settings its owner never
     /// chose. The menu says what is wrong with it.
     /// [LAW:no-silent-failure]
-    private func comeUp() async {
-        guard !quitting, !comingUp else { return }
-        comingUp = true
-        defer {
-            comingUp = false
-            settleOwedReading()
+    ///
+    /// Called while a come-up is under way, it hands back that one rather than starting a
+    /// second. [LAW:no-ambient-temporal-coupling] The come-up is claimed in the same step that
+    /// starts it, so a reading taken after the decision finds it claimed and is owed to its end.
+    @discardableResult
+    private func comeUp() -> Task<Void, Never> {
+        if let comingUp {
+            log.notice("come-up: one is under way; joining it rather than starting a second")
+            return comingUp
         }
-        do {
-            // A capture already running is left running: the microphone was held before, and
-            // what came up short was the hotkey or the input method, which `rebuild` redoes.
-            // Restarting it would close and reopen an engine the resting mode holds open.
-            if capture.atRest == nil {
-                try capture.start(try readMicrophone().grant(), atRest: try config.get().microphone)
-                // Readied before the hotkey goes up, so the first press opens a microphone
-                // already reached rather than paying for reaching one.
-                capture.waitUntilReadied()
+        let this = Task {
+            defer {
+                comingUp = nil
+                settleOwedReading()
             }
-        } catch {
-            // Stopping is idempotent, so a grant withheld and a capture that failed to
-            // start leave by one path. [LAW:dataflow-not-control-flow]
-            capture.stop()
-            // A microphone macOS was never asked about, or was told no, is a step in setup,
-            // and the status says where it is the way the input method's refusal does.
-            let whereToAllow = switch error {
-            case MicrophoneAuthorization.Withheld.notDetermined, MicrophoneAuthorization.Withheld.denied:
-                "; allow it in \(GuidedSetup.title) in this menu"
-            default: ""
+            guard !quitting else { return }
+            do {
+                // A capture already running is left running: the microphone was held before, and
+                // what came up short was the hotkey or the input method, which `rebuild` redoes.
+                // Restarting it would close and reopen an engine the resting mode holds open.
+                if capture.atRest == nil {
+                    try capture.start(try readMicrophone().grant(), atRest: try config.get().microphone)
+                    // Readied before the hotkey goes up, so the first press opens a microphone
+                    // already reached rather than paying for reaching one.
+                    capture.waitUntilReadied()
+                }
+            } catch {
+                // Stopping is idempotent, so a grant withheld and a capture that failed to
+                // start leave by one path. [LAW:dataflow-not-control-flow]
+                capture.stop()
+                // A microphone macOS was never asked about, or was told no, is a step in setup,
+                // and the status says where it is the way the input method's refusal does.
+                let whereToAllow = switch error {
+                case MicrophoneAuthorization.Withheld.notDetermined, MicrophoneAuthorization.Withheld.denied:
+                    "; allow it in \(GuidedSetup.title) in this menu"
+                default: ""
+                }
+                showHotkeyStatus(.off("\(error)\(whereToAllow)"))
+                return
             }
-            showHotkeyStatus(.off("\(error)\(whereToAllow)"))
-            return
+            await rebuild().value
         }
-        await rebuild()
+        comingUp = this
+        return this
     }
 
-    /// True while `comeUp` runs, so readings taken meanwhile do not start a second one.
-    private var comingUp = false
+    /// The come-up under way, from the moment it is decided until it ends.
+    private var comingUp: Task<Void, Never>?
 
     /// Once every requirement is met: brings the loop up when no hotkey is watching, whatever
     /// took it down - a grant given since, or an install that refused while an app held Secure
@@ -686,7 +701,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !quitting else { return }
         // A rebuild or a comeUp in flight may have read the grants before this reading did,
         // so the reading is owed to the moment it ends rather than dropped.
-        guard !comingUp, rebuildsInFlight == 0 else {
+        guard comingUp == nil, rebuildsInFlight == 0 else {
             readingOwed = true
             return
         }
@@ -694,11 +709,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if listening?.hotkey.isWatching != true {
             inputMethodSwitchedOn = false
             log.notice("setup: every requirement is met and no hotkey is watching; bringing it up")
-            Task { await comeUp() }
+            comeUp()
         } else if inputMethodSwitchedOn {
             inputMethodSwitchedOn = false
             log.notice("setup: the input method was switched on; rebuilding the loop to select it")
-            Task { await rebuild() }
+            rebuild()
         }
     }
 
@@ -712,7 +727,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The one place an owed reading is paid: once nothing is rebuilding the loop.
     private func settleOwedReading() {
-        guard readingOwed, rebuildsInFlight == 0, !comingUp else { return }
+        guard readingOwed, rebuildsInFlight == 0, comingUp == nil else { return }
         readingOwed = false
         comeUpIfGranted(readReadiness())
     }
