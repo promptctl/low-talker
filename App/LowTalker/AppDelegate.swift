@@ -251,18 +251,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// ending any press it had open, its sessions are waited out, and then the input method
     /// is installed and the hotkey goes up in front of a new loop.
     ///
-    /// Queued behind any rebuild still in progress; see `rebuilding`.
-    private func rebuild() async {
+    /// Queued behind any rebuild still in progress; see `rebuilding`. Counted in flight in the
+    /// step that asks for it, so a reading taken after the decision is owed to its end, as a
+    /// come-up's is. [LAW:no-ambient-temporal-coupling]
+    @discardableResult
+    private func rebuild() -> Task<Void, Never> {
         let before = rebuilding
+        rebuildsInFlight += 1
         let this = Task {
             await before?.value
             await adopt()
+            rebuildsInFlight -= 1
+            settleOwedReading()
         }
         rebuilding = this
-        rebuildsInFlight += 1
-        await this.value
-        rebuildsInFlight -= 1
-        settleOwedReading()
+        return this
     }
 
     /// How many rebuilds are queued or running. While any is, the loop is being rebuilt by
@@ -638,7 +641,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// starts it, so a reading taken after the decision finds it claimed and is owed to its end.
     @discardableResult
     private func comeUp() -> Task<Void, Never> {
-        if let comingUp { return comingUp }
+        if let comingUp {
+            log.notice("come-up: one is under way; joining it rather than starting a second")
+            return comingUp
+        }
         let this = Task {
             defer {
                 comingUp = nil
@@ -669,7 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 showHotkeyStatus(.off("\(error)\(whereToAllow)"))
                 return
             }
-            await rebuild()
+            await rebuild().value
         }
         comingUp = this
         return this
@@ -707,7 +713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if inputMethodSwitchedOn {
             inputMethodSwitchedOn = false
             log.notice("setup: the input method was switched on; rebuilding the loop to select it")
-            Task { await rebuild() }
+            rebuild()
         }
     }
 
