@@ -507,6 +507,19 @@ private struct Authorized: MicrophoneAuthority {
         #expect(end.reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 2, peak: 0.5, firstSample: .zero))
     }
 
+    /// A key-down handled after a held microphone's buffers already reached past the key:
+    /// the samples from the key on are the press's head, so the reading dates them from the
+    /// key and counts them, and the press is whole rather than one nothing reached.
+    @Test func aHeldPressHandledLateIsDatedFromTheKey() throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try capture.start(grant, atRest: .open)
+        hardware.engines[0].appending([0.25, 0.25, 0.5, 0.5], origin)
+        let end = capture.endSession(capture.stream(try capture.beginSession(at: after(2), preRoll: 0)))
+        #expect(end.reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 2, peak: 0.5, firstSample: .zero))
+        #expect(end.lost == nil)
+    }
+
     /// The key-up does not close a microphone the user asked to have held, and does not
     /// relaunch it either: a relaunch would splice the ring at every release, which is the
     /// look-back being thrown away once per press by the mode that exists to keep it.

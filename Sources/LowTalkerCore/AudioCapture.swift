@@ -180,7 +180,8 @@ public final class AudioCapture {
         /// first sample it captures, which is after the key; one the resting mode was
         /// already holding is dated by a sample captured at or before the key, since its
         /// buffers were already running, and `AudioSession.unheard` answers zero for
-        /// those. Empty means nothing has been delivered since the session began, which is
+        /// those, as for one whose key landed among samples it had already delivered, which
+        /// is dated by the key. Empty means nothing has been delivered since the session began, which is
         /// a microphone that never opened for it at all - and which a held microphone can
         /// arrive at too, by dying quietly rather than by opening late.
         var first: HostTime?
@@ -398,12 +399,18 @@ public final class AudioCapture {
             // One floor for the mark and for what the mark reaches back over: the
             // position this run of capture began at. [LAW:one-source-of-truth]
             let opened = stream.continuousSince
-            return AudioSession(
+            let session = AudioSession(
                 beginningAt: min(max(stream.timeline.position(at: moment), opened), stream.ring.end),
                 at: moment,
                 preRoll: preRoll,
                 notReachingBefore: opened
             )
+            // A key that lands among samples already delivered - a held microphone, and a
+            // handler that ran after its buffers - has its head among them, captured from
+            // the key on. [LAW:one-source-of-truth] The session's first sample is the one at
+            // its begin mark, whichever lock it landed under.
+            stream.arrivals.first = stream.arrivals.first ?? (session.begin < stream.ring.end ? moment : nil)
+            return session
         }
     }
 
