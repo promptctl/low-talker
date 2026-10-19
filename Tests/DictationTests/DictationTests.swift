@@ -1074,6 +1074,47 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.held == .unaccounted(part("a b", "\(notYetTaken)")))
     }
 
+    /// A second ask made before the first is answered vouches for what the first set out to
+    /// insert, so when the first's words may have landed, the second is let go and inserts
+    /// nothing, though the same words stand under the same warning.
+    @Test func anAskMadeAgainBeforeTheFirstIsAnsweredIsLetGo() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        let notYetTaken = NotYetTaken(characters: 1, into: "com.apple.TextEdit")
+        rig.inputMethod.refusing(.notYetTaken(notYetTaken))
+        rig.hold()
+        _ = await rig.report()
+        rig.inputMethod.hold()
+        rig.dictation.insertHeld()
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        rig.dictation.insertHeld()
+        rig.inputMethod.letGo()
+        try await rig.dictation.finish()
+        #expect(rig.inputMethod.asked == 2)
+        #expect(rig.hold.held == .unaccounted(part("a", "\(notYetTaken)")))
+    }
+
+    /// An ask let go places nothing, though by its turn words a cursor is offered are held:
+    /// two asks queued behind an insert vouch for the same words, the first takes them, and
+    /// when its insert is refused the words it carried wait for a cursor.
+    @Test func anAskLetGoPlacesNothing() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        rig.inputMethod.refusing(.notYetTaken(NotYetTaken(characters: 1, into: "com.apple.TextEdit")))
+        rig.hold()
+        _ = await rig.report()
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.hold(speaking: [4])
+        _ = await rig.report()
+        rig.inputMethod.hold()
+        rig.dictation.cursorArrived()
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        rig.dictation.insertHeld()
+        rig.dictation.insertHeld()
+        rig.inputMethod.letGo()
+        try await rig.dictation.finish()
+        #expect(rig.inputMethod.asked == 4)
+        #expect(rig.hold.held == .unplaced(part("a b", "\(Refusal.noTextFieldHasFocus)")))
+    }
+
     /// Held words the person dismisses while an insert carrying only them is on its way stay
     /// dismissed when its answer says they may have landed: nothing is held, and no warning
     /// stands over nothing.

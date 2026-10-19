@@ -162,6 +162,10 @@ public final class Hold {
         }
     }
 
+    /// Which words that may have landed stand: a new one each time they are set anew, so an ask
+    /// can say which it saw, though the same words come back under the same warning.
+    public private(set) var standingGeneration = 0
+
     /// What reading the store at launch failed with, for the life of the app. Nothing it held
     /// is offered, since nothing could read it.
     public let unrestored: HeldUnreadable?
@@ -199,6 +203,7 @@ public final class Hold {
 
     /// The person let the held words go.
     public func dismiss() {
+        standingGeneration += 1
         held = nil
     }
 
@@ -220,13 +225,14 @@ public final class Hold {
         held = Held(unplaced: nil, unaccounted: held?.standing)
     }
 
-    /// The person asked for every held word at the cursor, saying `vouched`, the words that may
-    /// have landed as they saw them, were not typed: those are offered with the rest, under the
-    /// latest warning. Only while `vouched` still stands as it was, since an insert whose words
-    /// may have landed folds them into it, and of those the person has said nothing. Says
-    /// whether it was taken.
-    func asked(vouching vouched: Held.Part?) -> Bool {
-        guard held?.standing == vouched else { return false }
+    /// The person asked for every held word at the cursor, saying the words that may have landed
+    /// as they saw them, in `generation`, were not typed: those are offered with the rest, under
+    /// the latest warning. Only while that generation stands, since an insert whose words may
+    /// have landed sets them anew, and of those the person has said nothing. Says whether it
+    /// was taken.
+    func asked(vouching generation: Int) -> Bool {
+        guard generation == standingGeneration else { return false }
+        standingGeneration += 1
         held = held.flatMap { held in Held(unplaced: Held.Part(words: held.allWords, warning: held.latest.warning), unaccounted: nil) }
         return true
     }
@@ -244,6 +250,7 @@ public final class Hold {
         let warning = failure.account.facts
         guard failure.wordsMayHaveLanded else { return heldBack(words, warning: warning) }
         let carried = Transcript(words: (held?.allWords.words ?? []) + words.words)
+        standingGeneration += 1
         held = Held(unplaced: nil, unaccounted: Held.Part(words: carried, warning: warning))
     }
 

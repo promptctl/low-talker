@@ -558,7 +558,7 @@ public final class Dictation {
                 if case .success(let heard) = heard { heard.decode.cancel() }
                 settle(Report(mode: mode, outcome: .failed(Failed(error)), capture: delivered))
             }
-            arrivedDuringPress.map { offer(since: .cursorArrived($0)) {} }
+            arrivedDuringPress.map { offer(since: .cursorArrived($0)) }
             arrivedDuringPress = nil
         }
     }
@@ -653,41 +653,48 @@ public final class Dictation {
         let arrived = ContinuousClock.now
         switch press {
         case .down: arrivedDuringPress = hold.held.map { _ in arrived } ?? arrivedDuringPress
-        case .up, .refused: offer(since: .cursorArrived(arrived)) {}
+        case .up, .refused: offer(since: .cursorArrived(arrived))
         }
     }
 
     /// The person asked for every held word at the cursor in front, saying the words that may
-    /// have landed, as they stood when they asked, were not typed. Made only while no press is
-    /// open, since the panel offers it only then: one made as a press begins is let go, and
-    /// offered again once the press ends.
+    /// have landed, as they stood when they asked, were not typed. The panel offers it only
+    /// once a press is closed: one made as a press begins is let go, and the panel offers
+    /// Insert again once the press is over.
     public func insertHeld() {
-        let vouched = hold.held?.standing
+        let asked = ContinuousClock.now
+        let vouched = hold.standingGeneration
         switch press {
         case .down: Executor.log.notice("an ask to insert the held words came as a press began and was let go")
         case .up, .refused:
-            offer(since: .asked(.now)) {
+            queue("an ask to insert the held words") {
                 // [LAW:no-ambient-temporal-coupling] Taken in its own turn, once every insert
                 // queued before it is answered, so none of those settles words it never carried
                 // or leaves the store offering words on their way.
-                guard self.hold.asked(vouching: vouched) else {
-                    return Executor.log.notice("an ask to insert the held words was let go: what may have landed changed before its turn")
+                guard await self.hold.asked(vouching: vouched) else {
+                    return Executor.log.notice("an ask to insert the held words was let go: what may have landed was set anew before its turn")
                 }
+                // A failure is the hold's to show, and `place` has told it.
+                _ = try? await self.place(Transcript(words: []), following: nil, since: .asked(asked))
             }
         }
     }
 
-    /// Offers what is held to the cursor in front, in its turn on the queue, once `first` has run.
-    private func offer(since: Executor.Since, first: @escaping @MainActor () -> Void) {
+    /// Offers what is held to the cursor in front.
+    private func offer(since: Executor.Since) {
+        queue("an offer of the held words, for \(since.key.rawValue)") {
+            // A failure is the hold's to show, and `place` has told it.
+            _ = try? await self.place(Transcript(words: []), following: nil, since: since)
+        }
+    }
+
+    /// Runs `operation` in its turn on the queue.
+    private func queue(_ what: String, _ operation: @escaping @Sendable () async -> Void) {
         do throws(SerialQueueError) {
-            try sessions.submit {
-                await first()
-                // A failure is the hold's to show, and `place` has told it.
-                _ = try? await self.place(Transcript(words: []), following: nil, since: since)
-            }
+            try sessions.submit(operation)
         } catch {
             // The queue refuses only a wait from inside itself, which the main actor is not.
-            preconditionFailure("an offer of the held words, for \(since.key.rawValue), could not be queued: \(error)")
+            preconditionFailure("\(what) could not be queued: \(error)")
         }
     }
 

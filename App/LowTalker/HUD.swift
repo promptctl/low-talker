@@ -159,14 +159,15 @@ final class HUD {
     /// `insertable` is whether a loop is listening to insert what is held through, without which
     /// Insert is not offered.
     func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
-        // A press on its way carries what is held in its own insert, so only a panel with no
-        // press asks for a click or offers Insert, and a click only for words a cursor arriving
-        // is offered: not those that may have landed.
+        // A press on its way carries the words a cursor is offered in its own insert, so only a
+        // panel with nothing on its way asks for a click, and only for those words: not those
+        // that may have landed. Insert is offered once the press is closed, since an ask is
+        // queued behind its insert; while it is open the face shows what it heard instead.
         let allHeld = held?.allWords ?? Transcript(words: [])
         let shown: (state: String?, words: Transcript, offer: String, insert: Bool) = switch activity {
         case .idle: (nil, allHeld, held.flatMap(Self.offer) ?? "", insertable)
         case .listening(let heard): ("Listening", heard, "", false)
-        case .transcribing: ("Transcribing", allHeld, "", false)
+        case .transcribing: ("Transcribing", allHeld, "", insertable)
         }
         guard shown.state != nil || held != nil else { return hide() }
         draw(state: shown.state, held: held, words: shown.words, offer: shown.offer, insert: shown.insert)
