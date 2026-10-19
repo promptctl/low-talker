@@ -1,13 +1,10 @@
 /// Everything known before the user spoke, as the session reports it; nothing writes it
-/// after the hotkey goes down.
+/// after the hotkey goes down. The mode the press began in is its report's to say.
 public struct Context: Hashable, Sendable {
-    /// The chord that started listening. It selects the mode; the transcript never does.
-    public let chord: KeyChord
     public let press: PressKind
     public let frontmostApp: BundleID
 
-    public init(chord: KeyChord, press: PressKind, frontmostApp: BundleID) {
-        self.chord = chord
+    public init(press: PressKind, frontmostApp: BundleID) {
         self.press = press
         self.frontmostApp = frontmostApp
     }

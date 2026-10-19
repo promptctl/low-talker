@@ -17,7 +17,7 @@ import TestProbes
             throw .unreadable(.speechWithoutWords(text: said))
         }
         let rig = try Rig(hearing: engine)
-        rig.dictation.press(.began(Rig.rightOption, at: rig.now))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
         rig.keyUp()

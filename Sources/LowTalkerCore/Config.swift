@@ -5,34 +5,19 @@ import Foundation
 /// listens. Nothing here is read from disk;
 /// `Config(toml:)` is where a file becomes one.
 ///
-/// [LAW:parse-dont-validate] A Config in hand is one that holds together: it has at
-/// least one mode, no two modes answer to one chord, and no two share a name or go
-/// without one. The initializer is the only way to make a Config, so those facts are
-/// established once here and never asked again downstream - which is why
-/// `mode(for:)` can speak of *the* mode a chord selects.
 public struct Config: Hashable, Sendable {
     public let model: ModelName
     /// What the microphone does while nobody is dictating. The config file is its only
     /// writer, so a microphone held at rest is one the user asked for in writing.
     /// [LAW:single-enforcer]
     public let microphone: MicrophoneAtRest
-    /// In the order the file declared them, because that is the order any listing
-    /// should speak of them in.
-    public let modes: [Mode]
+    public let modes: Modes
     public let serve: ServeBinding
 
     public init(model: ModelName, microphone: MicrophoneAtRest, modes: [Mode], serve: ServeBinding) throws(ConfigError) {
-        guard !modes.isEmpty else { throw ConfigError.noModes }
-        var names: Set<String> = []
-        var chords: Set<KeyChord> = []
-        for mode in modes {
-            guard !mode.name.isEmpty else { throw ConfigError.modeUnnamed }
-            guard names.insert(mode.name).inserted else { throw ConfigError.twoModesNamed(mode.name) }
-            guard chords.insert(mode.chord).inserted else { throw ConfigError.twoModesOnOneChord(mode.name) }
-        }
         self.model = model
         self.microphone = microphone
-        self.modes = modes
+        self.modes = try Modes(modes)
         self.serve = serve
     }
 
@@ -48,20 +33,42 @@ public struct Config: Hashable, Sendable {
     /// force-try says the author vouches for this one: a default that does not hold
     /// together is a bug in this file, and it traps where it is written.
     public static let `default` = try! Config(model: .default, microphone: .shut, modes: [.dictation], serve: .loopback)
+}
 
-    /// The mode the chord that started listening selects, or none when no mode claims it.
-    /// `chords` is what the hotkey is told to listen for, so in a running app a Context
-    /// always names one; a Context assembled by hand need not.
-    public func mode(for chord: KeyChord) -> Mode? {
-        modes.first { $0.chord == chord }
+/// The modes a config runs, in the order the file declared them, because that is the order
+/// any listing should speak of them in.
+///
+/// [LAW:parse-dont-validate] Modes in hand hold together: there is at least one, and no two
+/// answer to one chord, share a name, or go without one. The initializer is the only way to
+/// make them, so those facts are established once here and never asked again downstream -
+/// which is why a chord pressed selects *the* mode it belongs to.
+public struct Modes: RandomAccessCollection, Hashable, Sendable, CustomStringConvertible {
+    private let modes: [Mode]
+
+    public init(_ modes: [Mode]) throws(ConfigError) {
+        guard !modes.isEmpty else { throw ConfigError.noModes }
+        var names: Set<String> = []
+        var chords: Set<KeyChord> = []
+        for mode in modes {
+            guard !mode.name.isEmpty else { throw ConfigError.modeUnnamed }
+            guard names.insert(mode.name).inserted else { throw ConfigError.twoModesNamed(mode.name) }
+            guard chords.insert(mode.chord).inserted else { throw ConfigError.twoModesOnOneChord(mode.name) }
+        }
+        self.modes = modes
     }
 
-    /// What the hotkey listens for. One chord per mode, and never empty.
-    ///
-    /// [LAW:one-source-of-truth] The hotkey reads its chords here, and so does every surface
-    /// that names them, so the chord a person edits is the chord that is heard.
+    public var startIndex: Int { modes.startIndex }
+    public var endIndex: Int { modes.endIndex }
+    public subscript(position: Int) -> Mode { modes[position] }
+
+    /// Every chord a mode answers to. One chord per mode, and never empty.
     public var chords: Set<KeyChord> {
-        Set(modes.map(\.chord))
+        Set(map(\.chord))
+    }
+
+    /// Each mode as a log line names it, in order.
+    public var description: String {
+        "[\(map(\.description).joined(separator: ", "))]"
     }
 }
 
@@ -70,11 +77,11 @@ public struct Config: Hashable, Sendable {
 ///
 /// [LAW:one-type-per-behavior] Dictation is not a case in code. It is a Mode like
 /// every other, the one `Config.default` supplies when no file names any.
-public struct Mode: Hashable, Sendable {
+public struct Mode: Hashable, Sendable, CustomStringConvertible {
     /// How the mode is spoken of in errors.
     public let name: String
-    /// The chord that selects this mode. `Context.chord` carries the one that was held, so
-    /// which mode is running is settled before a word is heard.
+    /// The chord that selects this mode. The press it begins carries the mode, so which
+    /// mode is running is settled before a word is heard.
     public let chord: KeyChord
     /// What the engine is told to expect, so a name it could not have guessed is
     /// spelled the way this mode wants it.
@@ -86,6 +93,12 @@ public struct Mode: Hashable, Sendable {
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         self.chord = chord
         self.vocabulary = vocabulary
+    }
+
+    /// The mode as a log line names it: its name, its chord, and how many terms it expects,
+    /// never the terms, which can be the names of people.
+    public var description: String {
+        "mode \"\(name)\" (\(Hotkey.named(chord)), \(vocabulary.terms.count) vocabulary term\(vocabulary.terms.count == 1 ? "" : "s"))"
     }
 
     /// Hold the hotkey, speak, and the words are typed wherever the focus is, on the

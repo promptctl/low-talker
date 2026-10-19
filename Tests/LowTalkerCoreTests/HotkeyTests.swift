@@ -44,7 +44,7 @@ private func settle() async {
     }
 }
 
-private let rightOption = KeyChord(modifiers: .rightOption)
+private let rightOption = Mode.dictation
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }
 
@@ -56,17 +56,17 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
 @Suite struct HotkeyTests {
     @Test func aPressReachesTheHandler() async throws {
         let feed = FakeFeed()
-        let hotkey = Hotkey(chords: [rightOption], feed: feed)
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
         let installation = try #require(feed.installations.first)
         installation.handle(rightOption(.down, at: 0))
-        #expect(hotkey.phase == .held(rightOption, since: at(0)))
+        #expect(hotkey.phase == .held(rightOption.chord, since: at(0)))
         await settle()
         #expect(transitions == [.began(rightOption, at: at(0))])
         installation.handle(rightOption(.up, at: 400))
         await settle()
-        #expect(transitions == [.began(rightOption, at: at(0)), .ended(rightOption, .released(.hold, at: at(400)))])
+        #expect(transitions == [.began(rightOption, at: at(0)), .ended(.released(.hold, at: at(400)))])
     }
 
     /// Every transition leaves by the main queue, never from inside the feed's call, so a
@@ -75,7 +75,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
     /// hand with the handler not yet run.
     @Test func theHandlerRunsAfterTheEventIsRead() async throws {
         let feed = FakeFeed()
-        let hotkey = Hotkey(chords: [rightOption], feed: feed)
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
         let installation = try #require(feed.installations.first)
@@ -89,7 +89,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
     /// no longer arrive, and a later start begins from rest.
     @Test func stopEndsAnOpenPressAndDisposesTheFeed() async throws {
         let feed = FakeFeed()
-        let hotkey = Hotkey(chords: [rightOption], feed: feed)
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
         feed.installations[0].handle(rightOption(.down, at: 0))
@@ -99,7 +99,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
         #expect(hotkey.phase == .idle)
         await settle()
         // The ending goes out the same way the beginning did, so it cannot overtake it.
-        #expect(transitions == [.began(rightOption, at: at(0)), .ended(rightOption, .lapsed)])
+        #expect(transitions == [.began(rightOption, at: at(0)), .ended(.lapsed)])
         hotkey.stop()
         await settle()
         #expect(transitions.count == 2)
@@ -108,7 +108,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
     /// A start puts a fresh feed up and takes the last one down.
     @Test func aStartReplacesTheFeedThatWasUp() throws {
         let feed = FakeFeed()
-        let hotkey = Hotkey(chords: [rightOption], feed: feed)
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         try hotkey.start { _ in }
         try hotkey.start { _ in }
         #expect(feed.installations.count == 2)
@@ -118,7 +118,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
     }
 
     @Test func aRefusedFeedThrowsFromStart() {
-        let hotkey = Hotkey(chords: [rightOption], feed: FakeFeed(refusing: Refused()))
+        let hotkey = Hotkey(modes: Config.default.modes, feed: FakeFeed(refusing: Refused()))
         #expect(throws: Refused.self) { try hotkey.start { _ in } }
         #expect(!hotkey.isWatching)
         #expect(hotkey.phase == .idle)
@@ -127,7 +127,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64) -> KeyEv
     @Test func releasingTheHotkeyDisposesTheFeed() throws {
         let feed = FakeFeed()
         do {
-            let hotkey = Hotkey(chords: [rightOption], feed: feed)
+            let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             try hotkey.start { _ in }
         }
         #expect(feed.installations[0].disposed)

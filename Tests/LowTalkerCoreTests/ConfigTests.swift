@@ -98,21 +98,18 @@ import Testing
     /// this fails the moment a second spelling of one appears.
     @Test func theDefaultsAreTheValuesTheirOwnersName() {
         #expect(Config.default.model == ModelName.default)
-        #expect(Config.default.modes == [Mode.dictation])
+        #expect(Array(Config.default.modes) == [Mode.dictation])
         #expect(Mode.dictation.chord == Hotkey.defaultChord)
         #expect(Mode.dictation.vocabulary == .empty)
     }
 
-    /// The chord that started listening picks the mode, and the hotkey is told exactly the
-    /// chords the modes claim.
-    @Test func theChordSelectsTheMode() throws {
-        let config = try Self.config(Self.full)
-        let dictation = KeyChord(modifiers: .rightOption)
-        #expect(config.mode(for: dictation)?.name == "dictation")
-        #expect(config.mode(for: KeyChord(modifiers: .rightCommand))?.name == "notes")
-        #expect(config.mode(for: KeyChord(modifiers: .function)) == nil)
-        #expect(config.chords == Set(config.modes.map(\.chord)))
-        #expect(config.chords.contains(dictation))
+    /// The modes as the log names them: each one's name, chord and how many terms it
+    /// expects, never the terms, which can be the names of people.
+    @Test func modesAreLoggedByNameChordAndTermCount() throws {
+        let notes = Mode(name: "notes", chord: KeyChord(modifiers: .rightCommand),
+                         vocabulary: Vocabulary([try Vocabulary.Term("Brynleigh Fryslie"), try Vocabulary.Term("Kubernetes")]))
+        let modes = try Modes([.dictation, notes])
+        #expect("\(modes)" == #"[mode "dictation" (Right Option, 0 vocabulary terms), mode "notes" (Right Command, 2 vocabulary terms)]"#)
     }
 
     /// [LAW:one-source-of-truth] A mode with no chord listens for the default one, the

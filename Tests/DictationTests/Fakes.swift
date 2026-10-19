@@ -106,6 +106,7 @@ struct Authorized: MicrophoneAuthority {
 /// gate - since the answer is a value. [LAW:composability]
 final class FakeTranscriber: Transcriber {
     private let heard = Mutex<[AudioClip]>([])
+    private let told = Mutex<[Vocabulary]>([])
     private let arrived = Mutex<[Float]>([])
     private let reading: @Sendable ([Float]) -> Transcript
     private let confirming: @Sendable ([Float]) -> Transcript
@@ -130,10 +131,13 @@ final class FakeTranscriber: Transcriber {
 
     /// Every utterance so far, each as the one clip its audio added up to.
     var clips: [AudioClip] { heard.withLock { $0 } }
+    /// What each utterance so far was heard expecting, in the order they were begun.
+    var expected: [Vocabulary] { told.withLock { $0 } }
     /// The audio of the utterance being heard, as far as it has arrived and been read.
     var hearing: [Float] { arrived.withLock { $0 } }
 
     func transcribe(_ audio: some AsyncSequence<AudioClip, Never> & Sendable, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void) async throws(TranscriptionFailure) -> Transcript {
+        told.withLock { $0.append(vocabulary) }
         var samples: [Float] = []
         for await clip in audio {
             samples += clip.samples
