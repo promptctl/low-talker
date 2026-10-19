@@ -80,29 +80,36 @@ struct HeldRecord: Codable, Equatable {
     var unplaced: Transcript?
     /// Why the latest of them were held.
     var warning: String?
-    /// The warning for words that may have landed, which stands until dismissed.
-    var unaccounted: String?
+    /// The words that may have landed, which stand until placed or dismissed.
+    var unaccounted: Transcript?
+    /// Why they may have.
+    var unaccountedWarning: String?
 
-    init(unplaced: Transcript? = nil, warning: String? = nil, unaccounted: String? = nil) {
+    init(unplaced: Transcript? = nil, warning: String? = nil, unaccounted: Transcript? = nil, unaccountedWarning: String? = nil) {
         self.unplaced = unplaced
         self.warning = warning
         self.unaccounted = unaccounted
+        self.unaccountedWarning = unaccountedWarning
     }
 
     init(_ held: Held) {
-        switch held {
-        case .unplaced(let words, let warning, let unaccounted): self.init(unplaced: words, warning: warning, unaccounted: unaccounted)
-        case .unaccounted(let warning): self.init(unaccounted: warning)
-        }
+        self.init(unplaced: held.offered?.words, warning: held.offered?.warning, unaccounted: held.standing?.words, unaccountedWarning: held.standing?.warning)
     }
 
-    /// [LAW:parse-dont-validate] The one place a record becomes `Held`.
+    /// [LAW:parse-dont-validate] The one place a record becomes `Held`: each part whole or
+    /// absent, its words said, and at least one part.
     func held() throws(Unfitting) -> Held {
-        switch (unplaced, warning, unaccounted) {
-        case let (words?, warning?, unaccounted): .unplaced(words, warning: warning, unaccounted: unaccounted)
-        case let (nil, nil, warning?): .unaccounted(warning: warning)
-        default: throw Unfitting(record: self)
+        func part(_ words: Transcript?, _ warning: String?) throws(Unfitting) -> Held.Part? {
+            switch (words, warning) {
+            case (nil, nil): return nil
+            case let (words?, warning?):
+                guard let part = Held.Part(words: words, warning: warning) else { throw Unfitting(record: self) }
+                return part
+            default: throw Unfitting(record: self)
+            }
         }
+        guard let held = Held(unplaced: try part(unplaced, warning), unaccounted: try part(unaccounted, unaccountedWarning)) else { throw Unfitting(record: self) }
+        return held
     }
 
     /// Fields that fit no `Held`.
@@ -110,7 +117,7 @@ struct HeldRecord: Codable, Equatable {
         let record: HeldRecord
 
         var description: String {
-            let present = [("unplaced", record.unplaced != nil), ("warning", record.warning != nil), ("unaccounted", record.unaccounted != nil)]
+            let present = [("unplaced", record.unplaced != nil), ("warning", record.warning != nil), ("unaccounted", record.unaccounted != nil), ("unaccountedWarning", record.unaccountedWarning != nil)]
             let fields = present.filter(\.1).map(\.0)
             return "a held record with \(fields.isEmpty ? "no fields" : fields.joined(separator: ", ")) fits nothing held"
         }

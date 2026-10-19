@@ -14,9 +14,9 @@ final class HeldFileTests {
     }
 
     nonisolated static let held: [Held] = [
-        .unplaced(Transcript(words: [Transcript.Word(text: " hello", time: 0.12...0.48, confidence: 0.73), Transcript.Word(text: " there.", time: 0.5...0.9, confidence: 0.91)]), warning: "refused"),
-        .unplaced(Transcript(typed: "a"), warning: "refused", unaccounted: "may have landed"),
-        .unaccounted(warning: "may have landed"),
+        .unplaced(Held.Part(words: Transcript(words: [Transcript.Word(text: " hello", time: 0.12...0.48, confidence: 0.73), Transcript.Word(text: " there.", time: 0.5...0.9, confidence: 0.91)]), warning: "refused")!),
+        .unplaced(part(" b", "refused"), unaccounted: part("a", "may have landed")),
+        .unaccounted(part("a", "may have landed")),
     ]
 
     @Test(arguments: held) func whatIsWrittenIsReadBack(_ held: Held) throws {
@@ -26,14 +26,24 @@ final class HeldFileTests {
 
     /// Nothing held is no file, and removing a file that is not there is nothing to fail at.
     @Test func nothingHeldIsNoFile() throws {
-        try file.write(.unaccounted(warning: "u"))
+        try file.write(.unaccounted(part("a", "u")))
         try file.write(nil)
         #expect(!FileManager.default.fileExists(atPath: file.url.path))
         #expect(try file.read() == nil)
         try file.write(nil)
     }
 
-    @Test(arguments: ["not json", #"{"warning":"refused"}"#])
+    /// Not JSON; a warning with no words; words that may have landed with no warning; blank
+    /// words; no part at all; and the shape builds of 2026-10-19 wrote before words that may
+    /// have landed were kept.
+    @Test(arguments: [
+        "not json",
+        #"{"warning":"refused"}"#,
+        #"{"unaccounted":{"words":[{"text":"a","time":[0,1],"confidence":1}]}}"#,
+        #"{"unplaced":{"words":[]},"warning":"refused"}"#,
+        "{}",
+        #"{"unaccounted":"may have landed"}"#,
+    ])
     func aFileThatCannotBeReadIsMovedWhereNoWriteReplacesIt(_ text: String) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Data(text.utf8).write(to: file.url)
@@ -50,22 +60,24 @@ final class HeldFileTests {
     /// read it with fails here rather than at the upgrade.
     @Test func aFileAsThisBuildWritesItReads() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data(#"{"unplaced":{"words":[{"text":" hello","time":[0.12,0.48],"confidence":0.73}]},"warning":"refused"}"#.utf8).write(to: file.url)
-        #expect(try file.read() == .unplaced(Transcript(words: [Transcript.Word(text: " hello", time: 0.12...0.48, confidence: 0.73)]), warning: "refused"))
+        try Data(#"{"unplaced":{"words":[{"text":" hello","time":[0.12,0.48],"confidence":0.73}]},"warning":"refused","unaccounted":{"words":[{"text":"a","time":[0,0.1],"confidence":0.5}]},"unaccountedWarning":"may have landed"}"#.utf8).write(to: file.url)
+        let hello = Transcript(words: [Transcript.Word(text: " hello", time: 0.12...0.48, confidence: 0.73)])
+        let a = Transcript(words: [Transcript.Word(text: "a", time: 0...0.1, confidence: 0.5)])
+        #expect(try file.read() == .unplaced(Held.Part(words: hello, warning: "refused")!, unaccounted: Held.Part(words: a, warning: "may have landed")!))
     }
 
     /// A field this build does not know is one a later build added, and the rest still reads.
     @Test func aFieldALaterBuildAddsLeavesTheFileReadable() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data(#"{"unaccounted":"may have landed","mayHaveLanded":{"words":[]}}"#.utf8).write(to: file.url)
-        #expect(try file.read() == .unaccounted(warning: "may have landed"))
+        try Data(#"{"unaccounted":{"words":[{"text":"a","time":[0,1],"confidence":1}]},"unaccountedWarning":"may have landed","later":{"words":[]}}"#.utf8).write(to: file.url)
+        #expect(try file.read() == .unaccounted(Held.Part(words: Transcript(words: [Transcript.Word(text: "a", time: 0...1, confidence: 1.0)]), warning: "may have landed")!))
     }
 
     /// A write that fails removes what stood at the path, so no older state is offered at the
     /// next launch: here a directory the atomic rename cannot replace, and removal can.
     @Test func aWriteThatFailsLeavesNothingKept() throws {
         try FileManager.default.createDirectory(at: file.url.appending(path: "in-the-way"), withIntermediateDirectories: true)
-        let error = try #require(throws: HeldUnkept.self) { try file.write(.unaccounted(warning: "u")) }
+        let error = try #require(throws: HeldUnkept.self) { try file.write(.unaccounted(part("a", "u"))) }
         guard case .lost = error else {
             Issue.record("not lost: \(error)")
             return
@@ -74,9 +86,9 @@ final class HeldFileTests {
     }
 
     /// A write that cannot remove the older file either says the older state still stands.
-    @Test(arguments: [Held?.some(.unaccounted(warning: "newer")), nil])
+    @Test(arguments: [Held?.some(.unaccounted(part("b", "newer"))), nil])
     func aWriteThatCannotRemoveTheOlderFileSaysItStands(_ held: Held?) throws {
-        try file.write(.unaccounted(warning: "older"))
+        try file.write(.unaccounted(part("a", "older")))
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
         let error = #expect(throws: HeldUnkept.self) { try file.write(held) }
@@ -84,6 +96,6 @@ final class HeldFileTests {
             Issue.record("not stale: \(String(describing: error))")
             return
         }
-        #expect(try file.read() == .unaccounted(warning: "older"))
+        #expect(try file.read() == .unaccounted(part("a", "older")))
     }
 }

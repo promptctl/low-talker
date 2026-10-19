@@ -26,13 +26,14 @@ public struct Executor {
     nonisolated public static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "lowtalker", category: "insert")
 
     /// The event an insert is timed from: key-down for words committed while the press is
-    /// still open, key-up for what is inserted once it is over, and a cursor arriving for
-    /// words held since no cursor took them.
+    /// still open, key-up for what is inserted once it is over, and a cursor arriving or the
+    /// person asking for words held since no cursor took them.
     public struct Since: Sendable {
         public enum Key: String, Sendable {
             case down = "key-down"
             case up = "key-up"
             case cursorArrived = "a cursor arriving"
+            case asked = "the person asking"
         }
 
         public let key: Key
@@ -41,6 +42,7 @@ public struct Executor {
         public static func keyDown(_ instant: ContinuousClock.Instant) -> Since { Since(key: .down, instant: instant) }
         public static func keyUp(_ instant: ContinuousClock.Instant) -> Since { Since(key: .up, instant: instant) }
         public static func cursorArrived(_ instant: ContinuousClock.Instant) -> Since { Since(key: .cursorArrived, instant: instant) }
+        public static func asked(_ instant: ContinuousClock.Instant) -> Since { Since(key: .asked, instant: instant) }
     }
 
     /// One insert, done. The time is from the key event it is timed from to the input

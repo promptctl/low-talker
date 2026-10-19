@@ -374,8 +374,9 @@ public final class Dictation {
     private var shown: Activity = .idle
     /// Presses ended and not yet reported.
     private var unreported = 0
-    /// When a cursor last arrived while the open press was down, for the offer queued behind it.
-    private var arrivedDuringPress: ContinuousClock.Instant?
+    /// What last offered the held words while the open press was down, for the offer queued
+    /// behind it.
+    private var offeredDuringPress: Executor.Since?
     /// The decode of the latest press, which the next press's decode waits out before it
     /// takes the engine. Nil until the first press.
     private var latestDecode: Task<Decoded, Never>?
@@ -558,8 +559,8 @@ public final class Dictation {
                 if case .success(let heard) = heard { heard.decode.cancel() }
                 settle(Report(mode: mode, outcome: .failed(Failed(error)), capture: delivered))
             }
-            arrivedDuringPress.map(offer(since:))
-            arrivedDuringPress = nil
+            offeredDuringPress.map(submitOffer)
+            offeredDuringPress = nil
         }
     }
 
@@ -650,23 +651,34 @@ public final class Dictation {
     /// moves to mid-press arrives before the words refused there for it, and those are not
     /// typed into the app they moved to unless a cursor arrives after they are held.
     public func cursorArrived() {
-        let arrived = ContinuousClock.now
+        offer(.cursorArrived(.now))
+    }
+
+    /// The person asked for every held word at the cursor in front, the words that may have
+    /// landed with the rest, which they are saying were not typed. Offered as a cursor
+    /// arriving is, so an open press carries them in its own insert.
+    public func insertHeld() {
+        hold.asked()
+        offer(.asked(.now))
+    }
+
+    private func offer(_ since: Executor.Since) {
         switch press {
-        case .down: arrivedDuringPress = hold.held.map { _ in arrived } ?? arrivedDuringPress
-        case .up, .refused: offer(since: arrived)
+        case .down: offeredDuringPress = hold.held.map { _ in since } ?? offeredDuringPress
+        case .up, .refused: submitOffer(since)
         }
     }
 
     /// Offers what is held to the cursor in front.
-    private func offer(since arrived: ContinuousClock.Instant) {
+    private func submitOffer(_ since: Executor.Since) {
         do throws(SerialQueueError) {
             try sessions.submit {
                 // A failure is the hold's to show, and `place` has told it.
-                _ = try? await self.place(Transcript(words: []), following: nil, since: .cursorArrived(arrived))
+                _ = try? await self.place(Transcript(words: []), following: nil, since: since)
             }
         } catch {
             // The queue refuses only a wait from inside itself, which the main actor is not.
-            preconditionFailure("a cursor's arrival could not be queued: \(error)")
+            preconditionFailure("an offer of the held words, for \(since.key.rawValue), could not be queued: \(error)")
         }
     }
 
