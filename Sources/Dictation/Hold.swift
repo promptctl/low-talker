@@ -6,45 +6,85 @@ import LowTalkerCore
 /// [LAW:types-are-the-program] Two cases because a landing settles one and not the other.
 public enum Held: Sendable, Equatable {
     /// Words at no cursor, in the order they were said, which the next insert carries ahead
-    /// of its own, beside what an earlier insert whose words may have landed was told, while
-    /// that warning stands.
-    case unplaced(Transcript, warning: String, unaccounted: String? = nil)
+    /// of its own, beside words an earlier insert may have landed, while those stand.
+    case unplaced(Part, unaccounted: Part? = nil)
     /// Words handed to an app that may yet take them, or sent with no answer to say what became
-    /// of them. They are not offered again, since that is the one way to type them twice, and
-    /// no later insert says what became of them, so the warning stands until the person
-    /// dismisses it.
-    case unaccounted(warning: String)
+    /// of them. No insert carries them unless the person asks, since that is the one way to
+    /// type them twice, and no later insert says what became of them, so they stand until the
+    /// person places or dismisses them.
+    case unaccounted(Part)
+
+    /// Words held, and why the latest of them were.
+    public struct Part: Sendable, Equatable {
+        public let words: Transcript
+        public let warning: String
+
+        /// [LAW:single-enforcer] The one check that what is held holds words: nothing said is
+        /// nothing held.
+        public init?(words: Transcript, warning: String) {
+            guard !words.isBlank else { return nil }
+            self.words = words
+            self.warning = warning
+        }
+    }
+
+    /// [LAW:single-enforcer] Every held state the hold moves to is made here, so neither part
+    /// can be held empty, and a hold of neither is nothing held.
+    init?(unplaced: Part?, unaccounted: Part?) {
+        switch (unplaced, unaccounted) {
+        case let (unplaced?, unaccounted): self = .unplaced(unplaced, unaccounted: unaccounted)
+        case let (nil, unaccounted?): self = .unaccounted(unaccounted)
+        case (nil, nil): return nil
+        }
+    }
+
+    /// The words a cursor is offered.
+    public var offered: Part? {
+        switch self {
+        case .unplaced(let unplaced, _): unplaced
+        case .unaccounted: nil
+        }
+    }
+
+    /// The words that may have landed, which a landing leaves standing.
+    public var standing: Part? {
+        switch self {
+        case .unplaced(_, let unaccounted): unaccounted
+        case .unaccounted(let unaccounted): unaccounted
+        }
+    }
 
     /// The words the next insert carries.
     public var words: Transcript {
-        switch self {
-        case .unplaced(let words, _, _): words
-        case .unaccounted: Transcript(words: [])
-        }
+        offered?.words ?? Transcript(words: [])
+    }
+
+    /// Every word held, in the order said: those that may have landed came first, since an
+    /// insert that may have landed took every word held before it.
+    public var allWords: Transcript {
+        Transcript(words: [standing, offered].compactMap { $0?.words.words }.flatMap { $0 })
     }
 
     /// What the person is told, oldest first.
     public var warnings: [String] {
-        switch self {
-        case .unplaced(_, let warning, let unaccounted): [unaccounted, warning].compactMap { $0 }
-        case .unaccounted(let warning): [warning]
-        }
+        [standing, offered].compactMap { $0?.warning }
     }
 
-    /// The warning a landing leaves standing.
-    var standing: String? {
+    /// The part held last.
+    var latest: Part {
         switch self {
-        case .unplaced(_, _, let unaccounted): unaccounted
-        case .unaccounted(let warning): warning
+        case .unplaced(let unplaced, _): unplaced
+        case .unaccounted(let unaccounted): unaccounted
         }
     }
 
     /// What an end of the process leaves held while an insert carrying the held words is on
     /// its way: words handed to an app that may yet take them, like any insert that may have
     /// landed, and like it standing in for a warning before it.
-    var sent: Held {
+    var sent: Held? {
         switch self {
-        case .unplaced(let words, _, _): .unaccounted(warning: "LowTalker ended while inserting \(words.words.count) held words, so they may have been typed")
+        case .unplaced:
+            Held(unplaced: nil, unaccounted: Part(words: allWords, warning: "LowTalker ended while inserting held words, so they may have been typed"))
         case .unaccounted: self
         }
     }
@@ -122,6 +162,10 @@ public final class Hold {
         }
     }
 
+    /// Which words that may have landed stand: a new one each time they are set anew, so an ask
+    /// can say which it saw, though the same words come back under the same warning.
+    public private(set) var standingGeneration = 0
+
     /// What reading the store at launch failed with, for the life of the app. Nothing it held
     /// is offered, since nothing could read it.
     public let unrestored: HeldUnreadable?
@@ -159,6 +203,7 @@ public final class Hold {
 
     /// The person let the held words go.
     public func dismiss() {
+        standingGeneration += 1
         held = nil
     }
 
@@ -166,7 +211,7 @@ public final class Hold {
     /// store holds what an end of the process would leave, so a launch after a crash mid-insert
     /// does not type the held words a second time.
     func sending(_ words: Transcript) -> Transcript {
-        keep(held?.sent)
+        keep(held.flatMap(\.sent))
         return offering(words)
     }
 
@@ -174,31 +219,45 @@ public final class Hold {
         Transcript(words: (held?.words.words ?? []) + words.words)
     }
 
-    /// An insert carrying what was held landed, which says nothing of words unaccounted for.
+    /// An insert carrying what was held landed, which says nothing of words that may have
+    /// landed before it.
     func landed() {
-        held = held?.standing.map { .unaccounted(warning: $0) }
+        held = Held(unplaced: nil, unaccounted: held?.standing)
+    }
+
+    /// The person asked for every held word at the cursor, saying the words that may have landed
+    /// as they saw them, in `generation`, were not typed: those are offered with the rest, under
+    /// the latest warning. Only while that generation stands, since an insert whose words may
+    /// have landed sets them anew, and of those the person has said nothing. Says whether it
+    /// was taken.
+    func asked(vouching generation: Int) -> Bool {
+        guard generation == standingGeneration else { return false }
+        standingGeneration += 1
+        held = held.flatMap { held in Held(unplaced: Held.Part(words: held.allWords, warning: held.latest.warning), unaccounted: nil) }
+        return true
     }
 
     /// An insert of what is held and then `words` failed with `failure`. What is held is read
     /// now, not when the insert was offered, so words the person dismissed while it was on its
-    /// way stay dismissed, and a warning that stands still stands. [LAW:one-source-of-truth]
+    /// way stay dismissed, and words that may have landed still stand. [LAW:one-source-of-truth]
     /// One whose words may have landed covers everything it carried, the held words with it,
-    /// and stands in for a warning before it, which told the person the same thing.
+    /// after the words that may have landed before it, and its warning stands in for theirs,
+    /// which told the person the same thing.
     ///
     /// The person reads the warning, and the app logs it, so it is the failure's facts, which
     /// its account keeps clear of the words.
     func failed(_ words: Transcript, with failure: InsertFailure) {
         let warning = failure.account.facts
-        failure.wordsMayHaveLanded ? (held = .unaccounted(warning: warning)) : heldBack(words, warning: warning)
+        guard failure.wordsMayHaveLanded else { return heldBack(words, warning: warning) }
+        let carried = Transcript(words: (held?.allWords.words ?? []) + words.words)
+        standingGeneration += 1
+        held = Held(unplaced: nil, unaccounted: Held.Part(words: carried, warning: warning))
     }
 
     /// What is held and then `words` are at no cursor, for the reason `warning` gives the
-    /// person, and a warning that stands still stands. [LAW:single-enforcer] Every word held
-    /// is held here: those an insert did not place, and those a press cut short never offered.
-    /// Nothing said changes nothing, since `.unplaced` holds words.
+    /// person, and words that may have landed still stand: those an insert did not place, and
+    /// those a press cut short never offered. Nothing said leaves the hold as it was.
     func heldBack(_ words: Transcript, warning: String) {
-        let unplaced = offering(words)
-        guard !unplaced.isBlank else { return }
-        held = .unplaced(unplaced, warning: warning, unaccounted: held?.standing)
+        held = Held(unplaced: Held.Part(words: offering(words), warning: warning), unaccounted: held?.standing)
     }
 }

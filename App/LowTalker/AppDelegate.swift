@@ -56,15 +56,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activity: Dictation.Activity = .idle
     /// The loop's activity again, floating over the app being dictated into, with the words
     /// no cursor took.
-    private lazy var hud: HUD = HUD { [unowned self] in hold.dismiss() }
+    private lazy var hud: HUD = HUD(dismiss: { [unowned self] in hold.dismiss() }, insert: { [unowned self] in
+        // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
+        let words = hold.held?.allWords.words.count ?? 0
+        let unheard = listening == nil ? ", with no loop listening to insert them" : ""
+        sessions.notice("asked to insert \(words) held words\(unheard, privacy: .public)")
+        listening?.dictation.insertHeld()
+    })
     /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
     /// new config keeps offering them, and so does the next launch.
     private lazy var hold: Hold = Hold(store: HeldFile.app, failedToKeep: { [unowned self] unkept in
         sessions.fault("held words: \(unkept, privacy: .public)")
     }) { [unowned self] held in
-        hud.show(activity, held: held)
+        showHUD(held: held)
         // [LAW:nothing-unseen] Counted, never the words themselves: they are what the user dictated.
-        sessions.notice("held: \(held.map { "\($0.words.words.count) words, \($0.warnings.joined(separator: " "))" } ?? "nothing", privacy: .public)")
+        sessions.notice("held: \(held.map { "\($0.allWords.words.count) words, \($0.standing?.words.words.count ?? 0) of them may have been typed, \($0.warnings.joined(separator: " "))" } ?? "nothing", privacy: .public)")
     }
 
     /// When this process began, which every readout of the engine's wait counts from.
@@ -89,12 +95,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func show(_ activity: Dictation.Activity) {
         self.activity = activity
         drawStatusIcon()
-        hud.show(activity, held: hold.held)
+        showHUD(held: hold.held)
         sessions.info("activity: \(String(describing: activity), privacy: .public)")
     }
 
     private func showHotkeyStatus(_ status: HotkeyStatus) {
         hotkeyStatus = status
+        showHUD(held: hold.held)
         log.notice("hotkey: \(status, privacy: .public)")
     }
 
@@ -212,6 +219,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var listening: Listening?
+
+    /// [LAW:one-source-of-truth] The panel, drawn from the loop's activity, what is held, and
+    /// whether LowTalker is listening, as the menu says, to insert it. `held` is passed by the
+    /// hold as it changes, since the hold calls here before it is assigned.
+    private func showHUD(held: Held?) {
+        let insertable = if case .listening = hotkeyStatus { true } else { false }
+        hud.show(activity, held: held, insertable: insertable)
+    }
 
     /// When the loop comes up, is rebuilt, or is left as it stands, and the one owner of the
     /// quit's refusal of anything new. Its events are the loop's lines in the log.

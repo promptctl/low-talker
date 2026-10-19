@@ -202,6 +202,7 @@ final class FakeInputMethod: Inserter, Sendable {
         var refusal: InsertFailure?
         var gate: DispatchSemaphore?
         var holding = 0
+        var asked = 0
     }
 
     private let state = Mutex(State())
@@ -210,6 +211,8 @@ final class FakeInputMethod: Inserter, Sendable {
     var inserted: [String] { state.withLock { $0.inserted } }
     /// How many inserts are held at the gate now.
     var holding: Int { state.withLock { $0.holding } }
+    /// How many inserts it was asked for, answered or refused.
+    var asked: Int { state.withLock { $0.asked } }
 
     /// The app the next inserts say they reached.
     func reaching(_ app: BundleID) { state.withLock { $0.into = app.rawValue } }
@@ -228,6 +231,7 @@ final class FakeInputMethod: Inserter, Sendable {
     }
 
     func insert(_ text: String, into destination: Destination) throws(InsertFailure) -> Inserted {
+        state.withLock { $0.asked += 1 }
         if let gate = state.withLock({ $0.gate }) {
             state.withLock { $0.holding += 1 }
             gate.wait()
