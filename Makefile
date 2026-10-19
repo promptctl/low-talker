@@ -54,7 +54,7 @@ APP := $(PRODUCTS)/LowTalker.app
 INPUT_METHOD := $(PRODUCTS)/LowTalker Input Method.app
 XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 
-.PHONY: app package install run variants test model-tool sbom check-sbom check-licenses clean signing-identity
+.PHONY: app package install run variants test model-tool sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure
 
 # Regeneration is unconditional: xcodegen is idempotent and sub-second, and a
 # timestamp rule cannot see removed sources or in-place rewrites of the project.
@@ -141,6 +141,26 @@ MODEL_TOOL := .build/debug/model-tool
 model-tool:
 	swift build --product model-tool
 	@echo "$(MODEL_TOOL)"
+
+# The speech gate replayed over the bench, with transients inserted, talk mixed under it and
+# rooms of every level, reported against master's gate. `gate-replay-baseline` records the
+# tree's rows as that baseline: on master, or as a gate change's last commit, so the committed
+# baseline is always master's gate. [LAW:one-source-of-truth] Both run the one measurement.
+# The ESC-50 clips it inserts are fetched into $(GATE_REPLAY), never committed.
+GATE_REPLAY := .build/gate-replay
+GATE_REPLAY_BASELINE := scripts/gate-replay/baseline.tsv
+
+gate-replay: gate-replay-measure
+	scripts/gate-replay/report $(GATE_REPLAY_BASELINE) $(GATE_REPLAY)/measured.tsv
+
+gate-replay-baseline: gate-replay-measure
+	cp $(GATE_REPLAY)/measured.tsv $(GATE_REPLAY_BASELINE)
+
+gate-replay-measure:
+	scripts/gate-replay/fetch-esc50 $(GATE_REPLAY)/esc50
+	rm -f $(GATE_REPLAY)/measured.tsv
+	GATE_REPLAY_OUT="$(abspath $(GATE_REPLAY))/measured.tsv" GATE_REPLAY_ESC50="$(abspath $(GATE_REPLAY))/esc50" \
+		swift test --filter GateReplayTests
 
 # What a release ships and under what license, as CycloneDX, read off the resolved
 # build: Package.resolved, the checkouts `swift build` resolves under .build, and the

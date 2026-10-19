@@ -1,0 +1,39 @@
+#!/bin/bash
+# The ESC-50 clips the gate replay inserts into speech, fetched into <folder>/<category>/:
+#
+#     scripts/gate-replay/fetch-esc50 <folder>
+#
+# Every clip of the sounds a person makes or meets mid-press, louder than their voice and
+# not speech. ESC-50 is CC BY-NC, so the clips are fetched here, never committed. They come
+# from one commit of the dataset, so every replay, and the baseline, hears the same audio.
+# A clip already fetched is not fetched again; one that fails stops the run.
+set -euo pipefail
+
+COMMIT=33c8ce9eb2cf0b1c2f8bcf322eb349b6be34dbb6
+CATEGORIES="coughing sneezing door_wood_knock clapping"
+BASE="https://raw.githubusercontent.com/karolpiczak/ESC-50/$COMMIT"
+
+folder=${1:?usage: fetch-esc50 <folder>}
+mkdir -p "$folder"
+meta="$folder/esc50.csv"
+
+# set -e stops on a failed command only outside a condition, so the fetch is an if's body,
+# never the right side of || or a link in &&.
+fetch() {
+  if [ ! -s "$2" ]; then
+    curl -sSfL "$1" -o "$2.part"
+    mv "$2.part" "$2"
+  fi
+}
+
+fetch "$BASE/meta/esc50.csv" "$meta"
+count=0
+for category in $CATEGORIES; do
+  mkdir -p "$folder/$category"
+  for file in $(awk -F, -v category="$category" '$4 == category { print $1 }' "$meta"); do
+    fetch "$BASE/audio/$file" "$folder/$category/$file"
+    count=$((count + 1))
+  done
+done
+[ "$count" -gt 0 ] || { echo "fetch-esc50: $meta lists none of $CATEGORIES" >&2; exit 1; }
+echo "fetch-esc50: $count clips of $CATEGORIES at ESC-50 $COMMIT in $folder" >&2
