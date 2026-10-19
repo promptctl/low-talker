@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var hold: Hold = Hold(store: HeldFile.app, failedToKeep: { [unowned self] unkept in
         sessions.fault("held words: \(unkept, privacy: .public)")
     }) { [unowned self] held in
-        hud.show(activity, held: held)
+        showHUD(held: held)
         // [LAW:nothing-unseen] Counted, never the words themselves: they are what the user dictated.
         sessions.notice("held: \(held.map { "\($0.words.words.count) words, \($0.standing?.words.words.count ?? 0) that may have been typed, \($0.warnings.joined(separator: " "))" } ?? "nothing", privacy: .public)")
     }
@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func show(_ activity: Dictation.Activity) {
         self.activity = activity
         drawStatusIcon()
-        hud.show(activity, held: hold.held)
+        showHUD(held: hold.held)
         sessions.info("activity: \(String(describing: activity), privacy: .public)")
     }
 
@@ -217,7 +217,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dictation: Dictation
     }
 
-    private var listening: Listening?
+    /// The loop, while one is up. The panel offers Insert only while it is.
+    private var listening: Listening? {
+        didSet { showHUD(held: hold.held) }
+    }
+
+    /// [LAW:one-source-of-truth] The panel, drawn from the loop's activity, what is held, and
+    /// whether a loop is listening to insert it. `held` is passed by the hold as it changes,
+    /// since the hold calls here before it is assigned.
+    private func showHUD(held: Held?) {
+        hud.show(activity, held: held, insertable: listening != nil)
+    }
 
     /// When the loop comes up, is rebuilt, or is left as it stands, and the one owner of the
     /// quit's refusal of anything new. Its events are the loop's lines in the log.

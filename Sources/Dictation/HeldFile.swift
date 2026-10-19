@@ -4,7 +4,7 @@ import LowTalkerCore
 /// What is held, kept in one file as a record of its own.
 ///
 /// [LAW:locality-or-seam] The file is the record's shape, not `Held`'s: a later build that
-/// reshapes `Held` changes the parse below, and still reads what an earlier one wrote.
+/// reshapes `Held` changes the parse below, and still reads what an earlier release wrote.
 public struct HeldFile: HeldStore, Sendable {
     public let url: URL
 

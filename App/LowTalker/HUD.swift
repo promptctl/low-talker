@@ -156,18 +156,20 @@ final class HUD {
         return place
     }()
 
-    func show(_ activity: Dictation.Activity, held: Held?) {
+    /// `insertable` is whether a loop is listening to insert what is held through, without which
+    /// Insert is not offered.
+    func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
         // A press on its way carries what is held in its own insert, so only a panel with no
         // press asks for a click or offers Insert, and a click only for words a cursor arriving
         // is offered: not those that may have landed.
         let allHeld = held?.allWords ?? Transcript(words: [])
-        let shown: (state: String?, words: Transcript, offer: String) = switch activity {
-        case .idle: (nil, allHeld, held.flatMap(Self.offer) ?? "")
-        case .listening(let heard): ("Listening", heard, "")
-        case .transcribing: ("Transcribing", allHeld, "")
+        let shown: (state: String?, words: Transcript, offer: String, insert: Bool) = switch activity {
+        case .idle: (nil, allHeld, held.flatMap(Self.offer) ?? "", insertable)
+        case .listening(let heard): ("Listening", heard, "", false)
+        case .transcribing: ("Transcribing", allHeld, "", false)
         }
         guard shown.state != nil || held != nil else { return hide() }
-        draw(state: shown.state, held: held, words: shown.words, offer: shown.offer)
+        draw(state: shown.state, held: held, words: shown.words, offer: shown.offer, insert: shown.insert)
     }
 
     /// What a click into a text field places of what is held, shown after it: the words after
@@ -185,7 +187,7 @@ final class HUD {
     }
 
     /// The panel with these lines, centred low on the screen the person is working on.
-    private func draw(state: String?, held: Held?, words: Transcript, offer: String) {
+    private func draw(state: String?, held: Held?, words: Transcript, offer: String, insert: Bool) {
         self.state.stringValue = state ?? ""
         self.state.isHidden = state == nil
         // One line per warning, each after the symbol, which says it is a warning, so the text
@@ -212,13 +214,12 @@ final class HUD {
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
         // The circle's centre sits on the face's top-left arc, as a Notification Center
-        // banner's does, and the button sits under the face's right edge. The circle is there
-        // while something is held, and Insert only while no press is on its way, which a
-        // panel with no state is.
+        // banner's does, and the button sits under the face's right edge. Both are there only
+        // while something is held.
         let onTheArc = Self.cornerRadius * (1 - 1 / 2.squareRoot())
         corner.setFrameOrigin(NSPoint(x: frame.minX + onTheArc - Self.circleSide / 2, y: frame.maxY - onTheArc - Self.circleSide / 2))
         below.setFrameOrigin(NSPoint(x: frame.maxX - below.frame.width, y: frame.minY - 6 - below.frame.height))
-        for (control, shown) in [(corner, held != nil), (below, held != nil && state == nil)] {
+        for (control, shown) in [(corner, held != nil), (below, held != nil && insert)] {
             if shown { control.orderFrontRegardless() } else { control.orderOut(nil) }
         }
     }

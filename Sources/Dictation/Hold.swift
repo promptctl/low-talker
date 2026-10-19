@@ -220,11 +220,15 @@ public final class Hold {
         held = Held(unplaced: nil, unaccounted: held?.standing)
     }
 
-    /// The person asked for every held word at the cursor, saying none of it was typed: the
-    /// words that may have landed are offered with the rest, under the latest warning. Made in
-    /// the ask's turn on the queue, with no insert on its way.
-    func asked() {
+    /// The person asked for every held word at the cursor, saying `vouched`, the words that may
+    /// have landed as they saw them, were not typed: those are offered with the rest, under the
+    /// latest warning. Only while `vouched` still stands as it was, since an insert whose words
+    /// may have landed folds them into it, and of those the person has said nothing. Says
+    /// whether it was taken.
+    func asked(vouching vouched: Held.Part?) -> Bool {
+        guard held?.standing == vouched else { return false }
         held = held.flatMap { held in Held(unplaced: Held.Part(words: held.allWords, warning: held.latest.warning), unaccounted: nil) }
+        return true
     }
 
     /// An insert of what is held and then `words` failed with `failure`. What is held is read

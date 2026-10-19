@@ -1029,23 +1029,49 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.store.kept == nil)
     }
 
-    /// An ask made while a press is open waits for the press, and a cursor arriving after it in
-    /// the same press does not take it back.
-    @Test func anAskDuringAPressOutlastsACursorArrivingAfterIt() async throws {
+    /// An ask made as a press begins is let go, and words that may have landed still stand for
+    /// one made once it ends.
+    @Test func anAskAsAPressBeginsIsLetGo() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
-        rig.inputMethod.refusing(.notYetTaken(NotYetTaken(characters: 1, into: "com.apple.TextEdit")))
+        let notYetTaken = NotYetTaken(characters: 1, into: "com.apple.TextEdit")
+        rig.inputMethod.refusing(.notYetTaken(notYetTaken))
         rig.hold()
         _ = await rig.report()
         rig.inputMethod.refusing(nil)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([4])
         rig.dictation.insertHeld()
-        rig.dictation.cursorArrived()
         rig.keyUp()
         _ = try await rig.session()
         try await rig.dictation.finish()
+        #expect(rig.inputMethod.inserted == [" b"])
+        #expect(rig.hold.held == .unaccounted(part("a", "\(notYetTaken)")))
+        rig.dictation.insertHeld()
+        try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted == [" b", "a"])
-        #expect(rig.hold.held == nil)
+    }
+
+    /// An ask vouches for the words that may have landed as the person saw them: an insert
+    /// queued ahead of it whose own words may have landed folds them in, and the ask is let go
+    /// rather than type those a second time.
+    @Test func anAskIsLetGoWhenWhatMayHaveLandedChangesBeforeItsTurn() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        let notYetTaken = NotYetTaken(characters: 1, into: "com.apple.TextEdit")
+        rig.inputMethod.refusing(.notYetTaken(notYetTaken))
+        rig.hold()
+        _ = await rig.report()
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.hold(speaking: [4])
+        _ = await rig.report()
+        rig.inputMethod.hold()
+        rig.dictation.cursorArrived()
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        rig.dictation.insertHeld()
+        rig.inputMethod.refusing(.notYetTaken(notYetTaken))
+        rig.inputMethod.letGo()
+        try await rig.dictation.finish()
+        #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(rig.hold.held == .unaccounted(part("a b", "\(notYetTaken)")))
     }
 
     /// Held words the person dismisses while an insert carrying only them is on its way stay

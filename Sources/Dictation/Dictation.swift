@@ -374,9 +374,8 @@ public final class Dictation {
     private var shown: Activity = .idle
     /// Presses ended and not yet reported.
     private var unreported = 0
-    /// What last offered the held words while the open press was down, for the offer queued
-    /// behind it.
-    private var offeredDuringPress: Executor.Since?
+    /// When a cursor last arrived while the open press was down, for the offer queued behind it.
+    private var arrivedDuringPress: ContinuousClock.Instant?
     /// The decode of the latest press, which the next press's decode waits out before it
     /// takes the engine. Nil until the first press.
     private var latestDecode: Task<Decoded, Never>?
@@ -559,8 +558,8 @@ public final class Dictation {
                 if case .success(let heard) = heard { heard.decode.cancel() }
                 settle(Report(mode: mode, outcome: .failed(Failed(error)), capture: delivered))
             }
-            offeredDuringPress.map(submitOffer)
-            offeredDuringPress = nil
+            arrivedDuringPress.map { offer(since: .cursorArrived($0)) {} }
+            arrivedDuringPress = nil
         }
     }
 
@@ -651,34 +650,38 @@ public final class Dictation {
     /// moves to mid-press arrives before the words refused there for it, and those are not
     /// typed into the app they moved to unless a cursor arrives after they are held.
     public func cursorArrived() {
-        offer(.cursorArrived(.now))
-    }
-
-    /// The person asked for every held word at the cursor in front, the words that may have
-    /// landed with the rest, which they are saying were not typed. Offered as a cursor
-    /// arriving is, so an open press lands its own words first.
-    public func insertHeld() {
-        offer(.asked(.now))
-    }
-
-    private func offer(_ since: Executor.Since) {
+        let arrived = ContinuousClock.now
         switch press {
-        case .down:
-            // An ask stands over a cursor arriving after it in the same press.
-            let asked = offeredDuringPress.flatMap { $0.key == .asked ? $0 : nil }
-            offeredDuringPress = hold.held.map { _ in asked ?? since } ?? offeredDuringPress
-        case .up, .refused: submitOffer(since)
+        case .down: arrivedDuringPress = hold.held.map { _ in arrived } ?? arrivedDuringPress
+        case .up, .refused: offer(since: .cursorArrived(arrived)) {}
         }
     }
 
-    /// Offers what is held to the cursor in front.
-    private func submitOffer(_ since: Executor.Since) {
+    /// The person asked for every held word at the cursor in front, saying the words that may
+    /// have landed, as they stood when they asked, were not typed. Made only while no press is
+    /// open, since the panel offers it only then: one made as a press begins is let go, and
+    /// offered again once the press ends.
+    public func insertHeld() {
+        let vouched = hold.held?.standing
+        switch press {
+        case .down: Executor.log.notice("an ask to insert the held words came as a press began and was let go")
+        case .up, .refused:
+            offer(since: .asked(.now)) {
+                // [LAW:no-ambient-temporal-coupling] Taken in its own turn, once every insert
+                // queued before it is answered, so none of those settles words it never carried
+                // or leaves the store offering words on their way.
+                guard self.hold.asked(vouching: vouched) else {
+                    return Executor.log.notice("an ask to insert the held words was let go: what may have landed changed before its turn")
+                }
+            }
+        }
+    }
+
+    /// Offers what is held to the cursor in front, in its turn on the queue, once `first` has run.
+    private func offer(since: Executor.Since, first: @escaping @MainActor () -> Void) {
         do throws(SerialQueueError) {
             try sessions.submit {
-                // [LAW:no-ambient-temporal-coupling] An ask is taken in its own turn, once every
-                // insert queued before it is answered, so none of those settles words it never
-                // carried, and none is left in the store as words a cursor is offered.
-                if since.key == .asked { await self.hold.asked() }
+                await first()
                 // A failure is the hold's to show, and `place` has told it.
                 _ = try? await self.place(Transcript(words: []), following: nil, since: since)
             }
