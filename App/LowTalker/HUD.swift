@@ -4,7 +4,8 @@ import Identity
 import LowTalkerCore
 
 /// The small panel near the bottom of the screen while a press is on its way, or while words
-/// no cursor took are held: listening, with what the engine has read of the press so far, then
+/// no cursor took are held: not listening, and why, while a refused press is open;
+/// listening, with what the engine has read of the press so far, then
 /// transcribing, then gone once the press's outcome is reported - unless an insert failed, and
 /// then it says why and holds the words until a cursor takes them, the person places them with
 /// the Insert button below it, or dismisses them with the circle on its corner.
@@ -165,14 +166,16 @@ final class HUD {
         // panel with nothing on its way asks for a click, and only for those words: not those
         // that may have landed. Insert is offered once the press is closed, since an ask is
         // queued behind its insert; while it is open the face shows what it heard instead.
+        // A refused press's reason is warned of first, above why any words are held.
         let allHeld = held?.allWords ?? Transcript(words: [])
-        let shown: (state: String?, words: Transcript, offer: String, insert: Bool) = switch activity {
-        case .idle: (nil, allHeld, held.flatMap(Self.offer) ?? "", insertable)
-        case .listening(let heard): ("Listening", heard, "", false)
-        case .transcribing: ("Transcribing", allHeld, "", insertable)
+        let shown: (state: String?, refusal: String?, words: Transcript, offer: String, insert: Bool) = switch activity {
+        case .idle: (nil, nil, allHeld, held.flatMap(Self.offer) ?? "", insertable)
+        case .listening(let heard): ("Listening", nil, heard, "", false)
+        case .refused(let why): ("Not listening", why, allHeld, "", false)
+        case .transcribing: ("Transcribing", nil, allHeld, "", insertable)
         }
         guard shown.state != nil || held != nil else { return hide() }
-        draw(state: shown.state, held: held, words: shown.words, offer: shown.offer, insert: shown.insert)
+        draw(state: shown.state, warnings: [shown.refusal].compactMap { $0 } + (held?.warnings ?? []), held: held, words: shown.words, offer: shown.offer, insert: shown.insert)
     }
 
     /// What a click into a text field places of what is held, shown after it: the words after
@@ -190,12 +193,12 @@ final class HUD {
     }
 
     /// The panel with these lines, centred low on the screen the person is working on.
-    private func draw(state: String?, held: Held?, words: Transcript, offer: String, insert: Bool) {
+    private func draw(state: String?, warnings: [String], held: Held?, words: Transcript, offer: String, insert: Bool) {
         self.state.stringValue = state ?? ""
         self.state.isHidden = state == nil
         // One line per warning, each after the symbol, which says it is a warning, so the text
         // drops the word. The offer ends the last.
-        let reasons = (held?.warnings ?? []).map { String($0.trimmingPrefix("WARNING: ")) }
+        let reasons = warnings.map { String($0.trimmingPrefix("WARNING: ")) }
         let warned = NSMutableAttributedString()
         for (index, reason) in reasons.enumerated() {
             let symbol = NSTextAttachment()
@@ -205,7 +208,7 @@ final class HUD {
             warned.append(NSAttributedString(string: " \(reason)\(index == reasons.count - 1 ? offer : "")"))
         }
         warning.attributedStringValue = warned
-        warning.isHidden = held == nil
+        warning.isHidden = reasons.isEmpty
         heard.stringValue = words.truncatingHead { height($0) <= heardHeight }
         // A press with nothing read yet shows only its state, rather than an empty line.
         heard.isHidden = words.isBlank
