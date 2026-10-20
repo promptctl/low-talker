@@ -40,6 +40,15 @@ import Testing
 
     private static let seenLine = "with com.example.editor in front and the cursor in com.example.editor"
 
+    /// Runs the blocking `body` on a thread of its own and awaits what it returned: a test body
+    /// runs on the cooperative pool, and a wait there holds one of a three-core runner's three
+    /// threads. `onAThreadOfItsOwn` in InsertionTests, which this target cannot import.
+    private static func onAThreadOfItsOwn<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            Thread { continuation.resume(returning: body()) }.start()
+        }
+    }
+
     /// The words go in, and the answer counts them as a person would: an emoji is one
     /// character to whoever dictated it.
     @MainActor
@@ -139,8 +148,10 @@ import Testing
         let ends = OSAllocatedUnfairLock(initialState: [Ended]())
         let committer = Committer(bound: .seconds(20)) { ended in ends.withLock { $0.append(ended) } }
 
-        let answers = ["one", "two", "three"].map { word in
-            committer.insert(InsertRequest(word, into: .cursorInFront)) { Self.seen(.success(cursor)) }.answer
+        let answers = await Self.onAThreadOfItsOwn {
+            ["one", "two", "three"].map { word in
+                committer.insert(InsertRequest(word, into: .cursorInFront)) { Self.seen(.success(cursor)) }.answer
+            }
         }
 
         #expect(answers == [3, 3, 5].map { .inserted(characters: $0, into: "com.example.editor") })
@@ -148,6 +159,40 @@ import Testing
         let said = ends.withLock { $0 }
         #expect(said.map(\.insert) == [1, 2, 3])
         #expect(said.allSatisfy { if case .committed(_, _, _, _, late: false) = $0.did { true } else { false } })
+    }
+
+    /// Through the main queue while something else holds it - another app's stalled commit, or
+    /// anything at all: the port answers busy at its bound, and the main actor, reaching the
+    /// insert after that, lets it go without asking any app and says how long it waited.
+    @Test func anInsertTheMainActorDoesNotReachInTimeIsBusyAndAsksNoApp() async {
+        let cursor = Cursor()
+        let decided = OSAllocatedUnfairLock(initialState: 0)
+        let ends = OSAllocatedUnfairLock(initialState: [Ended]())
+        let committer = Committer(bound: .milliseconds(50)) { ended in ends.withLock { $0.append(ended) } }
+        let held = DispatchSemaphore(value: 0)
+        let released = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            held.signal()
+            released.wait()
+        }
+
+        let placed = await Self.onAThreadOfItsOwn {
+            held.wait()
+            defer { released.signal() }
+            return committer.insert(Self.request) {
+                decided.withLock { $0 += 1 }
+                return Self.seen(.success(cursor))
+            }
+        }
+        await MainActor.run {}
+
+        #expect(placed.outcome == .busy(reached: false))
+        #expect(placed.answer == .refused(.inputMethodIsBusy))
+        let said = ends.withLock { $0 }
+        #expect(said.map(\.did) == [.letGo])
+        #expect(said.allSatisfy { $0.waited >= .milliseconds(50) })
+        #expect(decided.withLock { $0 } == 0)
+        #expect(await cursor.committed.isEmpty)
     }
 
     /// The port's line for each way its wait can end, numbered as the main actor's line is.
@@ -165,14 +210,15 @@ import Testing
         #expect(line(.busy(reached: false))
             == head + "\(busy), without knowing what is in front, since the main thread did not reach the insert in time")
         #expect(line(.busy(reached: true))
-            == head + "\(busy), without knowing what is in front, since the main thread was still asking the client when time ran out")
+            == head + "\(busy), without knowing what is in front, since the main thread was still deciding what is in front when time ran out")
         #expect(Placed(insert: 4, request: Self.request, outcome: .busy(reached: true)).answer == .refused(.inputMethodIsBusy))
     }
 
-    /// The main actor's line for each thing a turn can do there, with how long it held it.
+    /// The main actor's line for each thing a turn can do there, with how long it waited for
+    /// it and how long it held it.
     @Test func theMainActorsLineSaysWhatTheTurnDidAndForHowLong() {
-        func line(_ did: Ended.Did) -> String { Ended(insert: 4, did: did).description }
-        let main = "insert 4 on the main thread: "
+        func line(_ did: Ended.Did) -> String { Ended(insert: 4, waited: .microseconds(800), did: did).description }
+        let main = "insert 4 on the main thread, reached after 0.8 ms: "
 
         #expect(line(.letGo) == main + "let go before any call into an app, since the port had already answered that the input method is busy")
         #expect(line(.letGoAfterDeciding(deciding: .milliseconds(2900), seen: Self.seenLine))

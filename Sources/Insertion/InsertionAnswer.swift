@@ -145,9 +145,11 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// signed by another certificate than the app fails the app's own check of who answered
     /// first, and that is the error it reports. [LAW:no-silent-failure]
     case senderIsNotThisInstallationsApp
-    /// The input method's main thread did not say which cursor is in front in time, so
-    /// nothing was committed. It is where IMK makes its own calls into apps, and a hung
-    /// app holds it there for up to 3 s at a time (measured on low-input-method-s71.c7d).
+    /// The input method's main thread did not decide where the words go in time, so nothing
+    /// was committed and nothing will be. Every call into an app is made there, IMK's and the
+    /// input method's own commits alike, and an app stalled while taking words holds it for
+    /// 3 s (measured on low-imk-rules-w3g.3ky) - so an insert into one app is refused this way
+    /// while another app's commit holds the main thread.
     case inputMethodIsBusy
 
     public var description: String {
