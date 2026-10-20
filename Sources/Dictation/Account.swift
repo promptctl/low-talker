@@ -15,10 +15,10 @@ extension InsertFailure: Accounted {
     }
 }
 
-/// The engine was not there for a press: its model failed to load, or something else holds it.
+/// The engine was not there for a press: its model failed to load.
 ///
-/// Word-free whatever its cause: the engine is asked for before it is handed any of the
-/// press's audio, so nothing it says can be a reading of what was dictated.
+/// Word-free: the engine is asked for before it is handed any of the press's audio, so
+/// nothing it says can be a reading of what was dictated.
 public struct EngineUnavailable: WordFree {
     public let cause: any Error
 

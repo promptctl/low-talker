@@ -403,7 +403,11 @@ public final class Dictation {
     }
 
     private let capture: AudioCapture
-    private let transcriber: @Sendable @MainActor () async throws(EngineUnavailable) -> any Transcriber
+    /// The engine a press decodes on, once it is resident: a press made while the model
+    /// still loads waits here, and is inserted when it lands.
+    public typealias Engine = @Sendable () async throws(EngineUnavailable) -> any Transcriber
+
+    private let engine: @MainActor () throws(EngineUnavailable) -> Engine
     private let turns: EngineTurns
     private let executor: Executor
     private let hold: Hold
@@ -425,9 +429,10 @@ public final class Dictation {
     private var latestDecode: Task<Decoded, Never>?
     private let sessions = SerialQueue()
 
-    /// `transcriber` is awaited per session, so a press that comes while the model is
-    /// still loading waits for it and inserts when it lands: loading is not a state
-    /// this loop has. `hold` keeps the words no cursor took, and every insert carries them
+    /// `engine` is asked at each key-down, before the microphone opens: it throws when no
+    /// engine can hear the press, and the press is refused before anything is said into it.
+    /// Otherwise it hands back the wait for the engine, so loading is not a state this loop
+    /// has. `hold` keeps the words no cursor took, and every insert carries them
     /// ahead of its own. `turns` is the engine's owner, which every press holds from key-down
     /// until its transcript is out, so served callers wait for the speaker rather than the
     /// speaker for them. [LAW:dataflow-not-control-flow] `report` hears every press's
@@ -436,7 +441,7 @@ public final class Dictation {
     /// press, an outcome reported.
     public init(
         capture: AudioCapture,
-        transcriber: @escaping @Sendable @MainActor () async throws(EngineUnavailable) -> any Transcriber,
+        engine: @escaping @MainActor () throws(EngineUnavailable) -> Engine,
         turns: EngineTurns,
         executor: Executor,
         hold: Hold,
@@ -445,7 +450,7 @@ public final class Dictation {
         showing: @escaping @Sendable @MainActor (Activity) -> Void
     ) {
         self.capture = capture
-        self.transcriber = transcriber
+        self.engine = engine
         self.turns = turns
         self.executor = executor
         self.hold = hold
@@ -489,6 +494,10 @@ public final class Dictation {
             let hold = turns.hold()
             let streaming = Streaming(since: moment)
             do throws(Failed) {
+                // The engine before the microphone, so a press nothing can hear is refused
+                // before the person speaks into it. [LAW:no-silent-failure]
+                let hearing: Engine
+                do throws(EngineUnavailable) { hearing = try engine() } catch { throw Failed(error) }
                 // The app in front before the microphone, so a reading that throws cannot
                 // leave a microphone open with no session to close it; it is one read of
                 // the workspace, which the engine's start dwarfs. [LAW:no-ambient-temporal-coupling]
@@ -505,7 +514,7 @@ public final class Dictation {
                 // opens here, and the look-back behind one held open since `start()`.
                 let session: AudioCapture.StreamedSession
                 do throws(NoMicrophone) { session = capture.stream(try capture.beginSession(at: moment)) } catch { throw Failed(error) }
-                let decode = decode(session.audio, expecting: mode.vocabulary, into: streaming, releasing: hold)
+                let decode = decode(session.audio, on: hearing, expecting: mode.vocabulary, into: streaming, releasing: hold)
                 streaming.hearing { [capture] in capture.missing(from: session) }
                 press = .down(mode, Open(session: session, into: into, decode: decode, streaming: streaming, committing: committing))
                 // Each pass is shown on the main actor, where the press is read, until the
@@ -632,13 +641,13 @@ public final class Dictation {
     ///
     /// The hold ends with the transcript, whatever became of it: the insert that follows is
     /// not the engine's, and served callers wait for this press and no longer.
-    private func decode(_ audio: AsyncStream<AudioClip>, expecting vocabulary: Vocabulary, into streaming: Streaming, releasing hold: EngineHold) -> Task<Decoded, Never> {
+    private func decode(_ audio: AsyncStream<AudioClip>, on hearing: @escaping Engine, expecting vocabulary: Vocabulary, into streaming: Streaming, releasing hold: EngineHold) -> Task<Decoded, Never> {
         let before = latestDecode
-        let decode = Task { [transcriber] in
+        let decode = Task {
             _ = await before?.value
             let transcription = await Result { () async throws(Failed) in
                 let engine: any Transcriber
-                do throws(EngineUnavailable) { engine = try await transcriber() } catch { throw Failed(error) }
+                do throws(EngineUnavailable) { engine = try await hearing() } catch { throw Failed(error) }
                 do throws(TranscriptionFailure) {
                     return try await engine.transcribe(audio, expecting: vocabulary) { streaming.heard($0) }
                 } catch { throw Failed(error) }

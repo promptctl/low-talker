@@ -146,15 +146,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
-    /// The engine, from the moment launch starts loading it. Awaiting the task is how
-    /// a session gets the transcriber; a task still running is the app's "still
-    /// loading" state, held here rather than inside the engine.
+    /// The engine, from the moment launch starts loading it, as each press finds it at
+    /// key-down: waited for while it loads, and loaded again by the first press after a load
+    /// that failed.
     ///
     /// [LAW:no-ambient-temporal-coupling] Nothing can call the transcriber before it
-    /// is resident: the only handle is the task, and the task yields the value only
+    /// is resident: the only handle is the supply's task, which yields the value only
     /// when the initializer has returned. Lazy so that it can name `loadEngine`, which
     /// reports to this delegate's menu; touching it is what starts the load.
-    private lazy var engine: Task<WhisperKitTranscriber, any Error> = Task { try await loadEngine() }
+    private lazy var engine = EngineSupply { [unowned self] in try await loadEngine() }
 
     /// Whose decode the engine runs next: every press holds it from key-down, so a served
     /// caller waits for the speaker. Made with the delegate rather than with the engine, so
@@ -364,16 +364,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hotkey = Hotkey(listeningFor: config)
         let dictation = Dictation(
             capture: capture,
-            // A press asks the bench first: while a run holds the Neural Engine, the press is
-            // refused and says why, so neither is measured against the other.
-            transcriber: { [unowned self] () async throws(EngineUnavailable) in
-                do {
-                    try benchRuns.admitPress()
-                    return try await engine.value
-                } catch {
-                    throw EngineUnavailable(error)
-                }
-            },
+            // Asked at key-down, so a press after a failed load is refused before the person
+            // speaks into it.
+            engine: { [unowned self] () throws(EngineUnavailable) in try engine.forPress() },
             turns: turns,
             // The words cross to the input method, which commits them at the
             // cursor through the text input system.
@@ -575,7 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - the bench
 
-    /// The one bench run at a time, which presses ask before they take the engine. It holds
+    /// The one bench run at a time, which the first press heard during it stops. It holds
     /// the app's turns for a run, so a served request waits for it as for a press.
     private lazy var benchRuns = BenchRuns(turns: turns)
 
@@ -802,6 +795,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Off the main path from the first await: the Core ML load runs on WhisperKit's
     /// own threads, and only the status text comes back here.
     private func loadEngine() async throws -> WhisperKitTranscriber {
+        // The first load's wait counts from launch, and one after a failure from the press
+        // that started it.
+        let since = if case .failed = engineReadiness { ContinuousClock.now } else { launched }
+        show(.preparing(nil, since: since))
+        serving?.answer(with: .notResident("the model is still loading"))
         do {
             // The bundle carries a store, and `carriedModel` is its model, loaded here in
             // place — read-only, verified whole where the code signature sealed it, written
@@ -827,7 +825,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let installed = try carriedModel.get()
             report(.loading)
             let transcriber = try await WhisperKitTranscriber(installed, turns: turns)
-            show(.ready(transcriber.model, after: launched.duration(to: .now)))
+            show(.ready(transcriber.model, after: since.duration(to: .now)))
             serving?.answer(with: .ready(transcriber.served))
             return transcriber
         } catch {
@@ -986,7 +984,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(withTitle: "Bring Back Dismissed Words (\(dismissed.allWords.words.count))", action: #selector(bringBackDismissed), keyEquivalent: "")
         }
         if let running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
-        if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: presses are refused until it ends")) }
+        if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: a press stops it")) }
         // Every requirement, met or not, and its step under it as the lines it was
         // written in - one item per line, so nothing here wraps text the requirement
         // already broke. A list that showed only what was missing would leave a reader
@@ -1061,3 +1059,4 @@ struct BundleCarriesNoModel: Error, CustomStringConvertible {
             + "it was built without one. Build it with `make app`, which puts the model in"
     }
 }
+

@@ -34,6 +34,29 @@ import TestProbes
         #expect(turns.reading == EngineTurns.Reading(tally: EngineTurns.Tally(cancelled: 1)))
     }
 
+    /// A hold that gives way to dictation is told to by the first dictation decode, once. A
+    /// press's hold alone, a served decode, and a dictation decode after the hold let go do
+    /// not tell it.
+    @Test func aYieldingHoldIsToldByTheFirstDictationDecodeOnly() async throws {
+        let turns = EngineTurns()
+        let yields = Count()
+        let bench = turns.hold(yieldingToDictation: { _ = yields.add() })
+        turns.hold().release()
+        let served = Task { try await turns.decode(as: .served) { () throws(TranscriptionFailure) in "asked" } }
+        #expect(yields.now == 0)
+        let press = turns.hold()
+        #expect(try await turns.decode(as: .dictation) { "spoken" } == "spoken")
+        #expect(try await turns.decode(as: .dictation) { "again" } == "again")
+        press.release()
+        #expect(yields.now == 1)
+        bench.release()
+        #expect(try await served.value == "asked")
+        let after = turns.hold(yieldingToDictation: { _ = yields.add() })
+        after.release()
+        #expect(try await turns.decode(as: .dictation) { "later" } == "later")
+        #expect(yields.now == 1)
+    }
+
     @Test func aServedDecodeAskedForDuringAHoldWaitsForEveryHoldToLetGo() async throws {
         let turns = EngineTurns()
         let first = turns.hold()
