@@ -566,8 +566,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let report = await rig.pressReport()
         let stopped = try #require(report.outcome.failure as? PressStopped)
         #expect(stopped.landed == 1)
-        #expect(report.opened?.duringPress.unread?.passes == 1)
-        #expect(report.record.contains("1 the engine failed to read, the latest as WhisperKit returned a segment of 7 characters without word timings"))
+        #expect(report.opened?.unread?.passes == 1)
+        #expect(report.record.contains("1 pass the engine failed to read, the latest as WhisperKit returned a segment of 7 characters without word timings"))
         #expect(!report.record.contains("friend"))
         guard case .unreadable(.speechWithoutWords)? = stopped.cause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.cause)"); return }
         #expect(rig.inputMethod.inserted == ["hello"])
@@ -594,12 +594,45 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(engine.clips.map(\.samples) == [[1, 2]])
         #expect(duringPress.passes >= 1)
         #expect(duringPress.repunctuated == 2)
-        #expect(duringPress.unread?.passes == 1)
+        #expect(report.opened?.unread?.passes == 1)
         #expect(!report.record.contains("hello"))
         let firstWords = try #require(duringPress.firstWords)
         #expect(firstWords > .zero && firstWords <= read - keyDown)
-        #expect(report.record.contains("passes during the press, 2 repunctuating a settled word, 1 the engine failed to read, the latest as WhisperKit returned a segment of 6 characters without word timings, first words \(Int(firstWords / .milliseconds(1))) ms after key-down"))
+        #expect(report.record.contains("passes during the press, 2 repunctuating a settled word, first words \(Int(firstWords / .milliseconds(1))) ms after key-down"))
+        #expect(report.record.contains("1 pass the engine failed to read, the latest as WhisperKit returned a segment of 6 characters without word timings; microphone: "))
         #expect(rig.inputMethod.inserted == ["hello"])
+    }
+
+    /// A pass the key came up during that the engine failed to read is counted on the press's
+    /// line: the count is read once the decode is over, not with what the press showed while
+    /// the key was down (low-reliability-z2z.5s1).
+    @Test func aPassThatFailsAfterKeyUpIsCounted() async throws {
+        let engine = FakeTranscriber(missedAtKeyUp: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " hello")))) { _ in Transcript(typed: "hello") }
+        let rig = try await Rig(hearing: engine)
+        rig.hold(speaking: [1, 2])
+        let report = await rig.pressReport()
+        #expect(try report.outcome.get().transcription.transcript.text == "hello")
+        #expect(report.opened?.unread?.passes == 1)
+        #expect(report.record.contains("1 pass the engine failed to read"))
+    }
+
+    /// A released press whose commit was refused and whose last reading then fails is reported
+    /// as the refusal, which came first, as a cut press is (low-reliability-z2z.5s1).
+    @Test func aRefusedCommitIsReportedBeforeAFailedLastReading() async throws {
+        let engine = FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
+        }) { _ throws(TranscriptionFailure) in throw .unreadable(.speechWithoutWords(text: " friend")) }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        rig.inputMethod.refusing(.refused(.cursorIsInAnotherApp))
+        rig.speak([3, 4])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2, 3, 4] })
+        rig.keyUp()
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(stopped.landed == 1)
+        #expect(stopped.cause as? InsertFailure == .refused(.cursorIsInAnotherApp))
     }
 
     /// A key-up told late is timed from where the key came up, as a key-down is: the input

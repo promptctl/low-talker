@@ -55,7 +55,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// An engine failure fails its item, not the session: no `error` event, which Pipecat
     /// would take as fatal.
     @Test func anEngineFailureFailsTheItemAndNotTheSession() async throws {
-        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())))))
+        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 0.5)
@@ -66,6 +66,9 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         #expect((detail["message"] as? String)?.contains("the stub engine was told to fail") == true)
         #expect(!client.types().contains("error"))
         client.task.cancel(with: .normalClosure, reason: nil)
+        // The socket's event counts the passes the failed item's engine failed to read first.
+        let realtime = try #require(try await running.nextEvent().realtime)
+        #expect(realtime.sent.failed == 1 && realtime.sent.unreadPasses == 1)
     }
 
     /// The prompt a session is updated with is the vocabulary its next item is heard with,

@@ -435,16 +435,18 @@ private struct Answering: Sendable {
         let clip = try request.upload.clip(longest: limits.audio)
         event.audioSeconds = clip.duration
         let heard: Heard
+        // [LAW:nothing-unseen] The passes the engine failed to read, told as its partials say
+        // them, are counted however the upload ends: a failed reading's earlier passes too.
+        let unread = Mutex<Partial.Unread?>(nil)
+        defer { (event.unreadPasses, event.latestUnreadPass) = unread.withLock { ($0?.passes ?? 0, $0?.latest.account.facts) } }
         do {
-            heard = try await Heard { try await transcriber.transcribe(clip, expecting: request.vocabulary) }
+            heard = try await Heard { try await transcriber.transcribe(clip, expecting: request.vocabulary) { partial in unread.withLock { $0 = partial.unread } } }
         } catch TranscriptionFailure.vocabulary(let refusal) {
             throw APIError.promptRefused("\(refusal)")
         } catch {
             throw APIError.engineFailed("\(error)")
         }
         event.words = heard.transcription.transcript.words.count
-        event.unreadPasses = heard.transcription.unread?.passes ?? 0
-        event.latestUnreadPass = heard.transcription.unread?.latest.account.facts
         event.quietSeconds = heard.transcription.quiet.letGo
         event.roomPeak = heard.transcription.quiet.room.map(Double.init)
         event.refusedAsRoomSeconds = heard.transcription.quiet.refusedAsRoom
@@ -584,8 +586,8 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     public internal(set) var vocabularyTerms: Int?
     public internal(set) var audioSeconds: Double?
     public internal(set) var words: Int?
-    /// Passes the engine failed to read before the transcript's, each leaving its reading to
-    /// the next, and the latest failure's facts, which leave off any words it read.
+    /// Passes the engine failed to read before the last, each leaving its reading to the next,
+    /// and the latest failure's facts, which leave off any words it read.
     public internal(set) var unreadPasses: Int?
     public internal(set) var latestUnreadPass: String?
     /// Seconds of the upload's quiet the engine was not handed.

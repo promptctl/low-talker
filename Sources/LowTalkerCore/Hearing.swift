@@ -195,6 +195,6 @@ extension Hearing {
         }
         try await fed.get()
         // Timed from the audio's first sample, not from the quiet the utterance let go.
-        return Transcription(transcript: heard.timeline.place(hearing.transcript), quiet: heard.timeline.quiet, unread: hearing.missed?.unread)
+        return Transcription(transcript: heard.timeline.place(hearing.transcript), quiet: heard.timeline.quiet)
     }
 }

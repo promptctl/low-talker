@@ -215,9 +215,10 @@ enum ServerEvent: Sendable {
     case itemAdded(item: String, previous: String?)
     case itemDone(item: String, previous: String?)
     /// Only the transcript of what was heard is sent; its quiet and nothing-spoken peak are the
-    /// server's own record of the item, for which OpenAI's event has no field.
-    case completed(item: String, heard: Heard, usage: Usage)
-    case failed(item: String, RealtimeError)
+    /// server's own record of the item, for which OpenAI's event has no field, as are the
+    /// passes the engine failed to read, on either answer.
+    case completed(item: String, heard: Heard, usage: Usage, unread: Partial.Unread?)
+    case failed(item: String, RealtimeError, unread: Partial.Unread?)
     /// A refusal of the client event whose `event_id` is given, when it gave one.
     case error(RealtimeError, clientEvent: String?)
 
@@ -251,10 +252,10 @@ enum ServerEvent: Sendable {
                 "id": item, "type": "message", "status": "completed", "role": "user",
                 "content": [["type": "input_audio", "transcript": NSNull()]],
             ]
-        case .completed(let item, let heard, let usage):
+        case .completed(let item, let heard, let usage, _):
             fields.merge(["item_id": item, "content_index": 0, "transcript": heard.transcription.transcript.served,
                           "usage": ["type": usage.type, "seconds": usage.seconds]]) { $1 }
-        case .failed(let item, let error):
+        case .failed(let item, let error, _):
             fields.merge(["item_id": item, "content_index": 0, "error": Self.detail(error, clientEvent: nil)]) { $1 }
         case .error(let error, let clientEvent):
             fields["error"] = Self.detail(error, clientEvent: clientEvent)

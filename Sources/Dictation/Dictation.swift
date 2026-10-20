@@ -96,10 +96,12 @@ public final class Dictation {
         /// says the reason for.
         public let opened: Opened?
 
-        /// A press the microphone opened for: what it showed while the key was down, and what
-        /// the microphone delivered for it.
+        /// A press the microphone opened for: what it showed while the key was down, the passes
+        /// the engine failed to read once its decode was over, none when it read every one, and
+        /// what the microphone delivered for it.
         public struct Opened: Sendable {
             public let duringPress: DuringPress
+            public let unread: Partial.Unread?
             public let capture: CapturedAudio.Reading
         }
 
@@ -109,10 +111,15 @@ public final class Dictation {
         }
 
         /// [LAW:nothing-unseen] What the press's line says however the press came out: what it
-        /// showed while the key was down, so a press that failed counts the passes the engine
-        /// failed to read as one inserted does, and what its microphone delivered.
+        /// showed while the key was down, the passes the engine failed to read, so a press that
+        /// failed counts them as one inserted does, and what its microphone delivered. A failure
+        /// is told by its facts alone: a reading's failure can carry the words.
         public var record: String {
-            opened.map { "\($0.duringPress); microphone: \(microphone)" } ?? "microphone: \(microphone)"
+            let microphone = "microphone: \(self.microphone)"
+            return opened.map { opened in
+                let unread = opened.unread.map { "\($0.passes) pass\($0.passes == 1 ? "" : "es") the engine failed to read, the latest as \($0.latest.account.facts)" } ?? "0 passes the engine failed to read"
+                return "\(opened.duringPress), \(unread); \(microphone)"
+            } ?? microphone
         }
     }
 
@@ -123,8 +130,6 @@ public final class Dictation {
         public let passes: Int
         /// Passes that changed the punctuation of a word two passes had agreed on.
         public let repunctuated: Int
-        /// The passes the engine failed to read, none when it read every one.
-        public let unread: Partial.Unread?
         /// [LAW:types-are-the-program] Absent when no pass before key-up read a word,
         /// which a short tap or a slow engine leaves - not a zero, which would say the
         /// words were there at once.
@@ -138,9 +143,7 @@ public final class Dictation {
         public var description: String {
             let words = firstWords.map { "first words \(Int($0 / .milliseconds(1))) ms after key-down" } ?? "no words before key-up"
             let committed = firstCommit.map { "\(commits) commits of \(wordsCommitted) words, the first \(Int($0 / .milliseconds(1))) ms after key-down" } ?? "nothing committed before key-up"
-            // The failure's facts only: a reading's failure can carry the words.
-            let unread = unread.map { "\($0.passes) the engine failed to read, the latest as \($0.latest.account.facts)" } ?? "0 the engine failed to read"
-            return "\(passes) passes during the press, \(repunctuated) repunctuating a settled word, \(unread), \(words), \(committed)"
+            return "\(passes) passes during the press, \(repunctuated) repunctuating a settled word, \(words), \(committed)"
         }
     }
 
@@ -206,6 +209,12 @@ public final class Dictation {
         /// Everything the latest pass read, confirmed then tentative.
         var reading: Transcript {
             state.withLock { $0.partial.reading }
+        }
+
+        /// The passes the engine failed to read so far. Unlike what the press showed, read when
+        /// asked: a pass the key came up during is a pass the decode ran for the press.
+        var unread: Partial.Unread? {
+            state.withLock { $0.partial.unread }
         }
 
         /// The text the latest pass read, without its timings: a pass that rereads the same
@@ -299,7 +308,7 @@ public final class Dictation {
         func ended(_ ended: Ended) -> DuringPress {
             state.withLock { state in
                 state.ended = ended
-                return DuringPress(passes: state.passes, repunctuated: state.partial.repunctuated, unread: state.partial.unread, firstWords: state.firstWords, commits: state.performed.count, wordsCommitted: state.words, firstCommit: state.performed.first?.acknowledged)
+                return DuringPress(passes: state.passes, repunctuated: state.partial.repunctuated, firstWords: state.firstWords, commits: state.performed.count, wordsCommitted: state.words, firstCommit: state.performed.first?.acknowledged)
             }
         }
     }
@@ -368,6 +377,19 @@ public final class Dictation {
             case .usedAsModifier: "WARNING: You typed a key while holding the dictation chord."
             case .lost(let lost): SpeechLost.warning(lost)
             }
+        }
+    }
+
+    /// A press the microphone opened for, until it is reported: what it showed while the key
+    /// was down and what the microphone delivered, read then, and its streaming, which says
+    /// what the decode failed to read once the decode is over.
+    private struct Opening: Sendable {
+        let duringPress: DuringPress
+        let capture: CapturedAudio.Reading
+        let streaming: Streaming
+
+        var opened: Report.Opened {
+            Report.Opened(duringPress: duringPress, unread: streaming.unread, capture: capture)
         }
     }
 
@@ -514,14 +536,14 @@ public final class Dictation {
             // being inserted. [LAW:dataflow-not-control-flow]
             let mode: Mode
             let heard: Result<Heard, Failed>
-            let opened: Report.Opened?
+            let opening: Opening?
             switch open {
             case .up:
                 preconditionFailure("a press ended that never began; the detector pairs every ended with a began")
             case .refused(let began, let error):
                 mode = began
                 heard = .failure(error)
-                opened = nil
+                opening = nil
             case .down(let began, let down):
                 mode = began
                 // Read before the session ends, so it holds only what the press showed
@@ -532,7 +554,7 @@ public final class Dictation {
                 // press's clip and cannot leave the device held after the key came up.
                 // Its audio ends here too, which is what lets the decode finish.
                 let end = capture.endSession(down.session)
-                opened = Report.Opened(duringPress: duringPress, capture: end.reading)
+                opening = Opening(duringPress: duringPress, capture: end.reading, streaming: down.streaming)
                 // How the press ended, read once. [LAW:no-silent-failure] A hotkey that
                 // stopped, a chord used as a modifier, and audio the capture could not stream
                 // whole each cut the press short. Those are asked first: a press the hotkey
@@ -568,14 +590,14 @@ public final class Dictation {
                     } catch {
                         outcome = .failed(error)
                     }
-                    await self.settle(Report(mode: mode, outcome: outcome, opened: opened))
+                    await self.settle(Report(mode: mode, outcome: outcome, opened: opening?.opened))
                 }
             } catch {
                 // The operation reports its own outcome; only the queue's own refusal
                 // to accept it reaches here, and then nothing will ever read the decode, so
                 // it is stopped and lets go of the engine as it does. [LAW:no-silent-failure]
                 if case .success(let heard) = heard { heard.decode.cancel() }
-                settle(Report(mode: mode, outcome: .failed(Failed(error)), opened: opened))
+                settle(Report(mode: mode, outcome: .failed(Failed(error)), opened: opening?.opened))
             }
             arrivedDuringPress.map { offer(since: .cursorArrived($0)) }
             arrivedDuringPress = nil
@@ -739,7 +761,8 @@ public final class Dictation {
                 // read past the commits is held, the words said after them missing.
                 let rest = heard.streaming.rest(of: heard.streaming.reading)
                 if !rest.isBlank { hold.heldBack(rest, warning: PressStopped.readingFailed) }
-                throw stopped(failed.failure)
+                // A refused commit came before the decode's end, so the report names it first.
+                throw stopped(unplaced ?? failed.failure)
             }
             let placed: Placed
             do throws(InsertFailure) {

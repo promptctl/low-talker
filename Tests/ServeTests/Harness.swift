@@ -10,7 +10,7 @@ import Testing
 /// to half the words, so a streamed utterance has words confirmed before it ends and
 /// words left for the final transcript. Audio that never reaches the engine's audible floor
 /// it refuses as nothing spoken, as the engine does, with `quiet`, and noise it hears its words in doubtfully.
-/// What it hears says it failed to read the passes `unread` counts.
+/// Its partials say it failed to read the passes `unread` counts.
 final class Stub: Transcriber {
     let heard = Mutex<[(seconds: TimeInterval, vocabulary: Vocabulary, cancelled: Bool)]>([])
     let answer: Result<Transcript, TranscriptionFailure>
@@ -41,7 +41,7 @@ final class Stub: Transcriber {
             }
             samples += clip.samples.count
             let confirmed = loudest < Utterance.audible ? 0 : min(words.count / 2, Int(seconds / 0.5))
-            partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0, unread: nil))
+            partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0, unread: unread))
         }
         heard.withLock { $0.append((seconds, vocabulary, Task.isCancelled)) }
         guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest, quiet: quiet) }
@@ -49,7 +49,7 @@ final class Stub: Transcriber {
         // White noise changes sign on about half its samples, speech and a tone on far fewer.
         // Noise is read as the engine reads a primed hallucination over it: words, barely believed.
         let noise = Double(crossings) / Double(samples) > 0.3
-        return Transcription(transcript: noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: Self.doubted) }) : transcript, quiet: quiet, unread: unread)
+        return Transcription(transcript: noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: Self.doubted) }) : transcript, quiet: quiet)
     }
 
     /// The probability the stub gives every word it reads into noise.

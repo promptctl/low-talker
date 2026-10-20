@@ -27,21 +27,18 @@ public protocol Transcriber: Sendable {
     ) async throws(TranscriptionFailure) -> Transcription
 }
 
-/// An utterance as the engine heard it: the words it read, the account of the quiet
-/// around them that no pass was handed, and the passes before the last it failed to read.
+/// An utterance as the engine heard it: the words it read, and the account of the quiet
+/// around them that no pass was handed.
 ///
 /// [LAW:types-are-the-program] The quiet is the utterance's, not its words': a slice of the
 /// words, a partial, or a run handed to the cursor is a Transcript, and has no quiet to lose.
 public struct Transcription: Sendable {
     public let transcript: Transcript
     public let quiet: Quiet
-    /// None when the engine read every pass.
-    public let unread: Partial.Unread?
 
-    public init(transcript: Transcript, quiet: Quiet, unread: Partial.Unread?) {
+    public init(transcript: Transcript, quiet: Quiet) {
         self.transcript = transcript
         self.quiet = quiet
-        self.unread = unread
     }
 }
 
@@ -129,15 +126,16 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
 
 extension Transcriber {
     /// A clip heard all at once: an utterance whose whole audio arrives with the
-    /// key-up, so there is nothing to hear early and no partial to show.
+    /// key-up, so there is nothing to hear early and no partial to show, unless the
+    /// caller asks to be told what the passes before the last failed to read.
     ///
     /// [LAW:one-type-per-behavior] Batch decoding is the one-clip utterance, not a
     /// second path through the engine.
-    public func transcribe(_ clip: AudioClip, expecting vocabulary: Vocabulary) async throws(TranscriptionFailure) -> Transcription {
+    public func transcribe(_ clip: AudioClip, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void = { _ in }) async throws(TranscriptionFailure) -> Transcription {
         try await transcribe(AsyncStream { continuation in
             continuation.yield(clip)
             continuation.finish()
-        }, expecting: vocabulary) { _ in }
+        }, expecting: vocabulary, partial: partial)
     }
 }
 

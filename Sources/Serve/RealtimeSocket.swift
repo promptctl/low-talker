@@ -444,6 +444,8 @@ final class Deltas: Sendable {
     /// go, after which it sends nothing. Held across the send, so deltas leave in the order
     /// their words were heard.
     private let sent = Mutex((cursor: ConfirmedCursor(), letGo: false))
+    /// The passes the engine failed to read so far, as the latest partial says them.
+    private let unread = Mutex<Partial.Unread?>(nil)
 
     init(item: String, outbox: Outbox) {
         self.item = item
@@ -451,6 +453,7 @@ final class Deltas: Sendable {
     }
 
     func heard(_ partial: Partial) {
+        unread.withLock { $0 = partial.unread }
         send(partial.confirmed.words)
     }
 
@@ -460,16 +463,18 @@ final class Deltas: Sendable {
     }
 
     /// Answers the item, `seconds` of audio, with what it was heard as: the words not yet
-    /// sent, then the transcript, or the reason there is none.
+    /// sent, then the transcript, or the reason there is none, each with the passes the engine
+    /// failed to read.
     func settle(_ transcription: Result<Transcription, any Error>, heard seconds: TimeInterval) async {
+        let unread = unread.withLock { $0 }
         do {
             let heard = try await Heard { try transcription.get() }
             send(heard.transcription.transcript.words)
-            outbox.emit(.completed(item: item, heard: heard, usage: Usage(heard: seconds)))
+            outbox.emit(.completed(item: item, heard: heard, usage: Usage(heard: seconds), unread: unread))
         } catch TranscriptionFailure.vocabulary(let refusal) {
-            outbox.emit(.failed(item: item, .promptRefused("\(refusal)")))
+            outbox.emit(.failed(item: item, .promptRefused("\(refusal)"), unread: unread))
         } catch {
-            outbox.emit(.failed(item: item, .engineFailed("\(error)")))
+            outbox.emit(.failed(item: item, .engineFailed("\(error)"), unread: unread))
         }
     }
 
@@ -660,8 +665,9 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
         /// sample any of them held: how near the floor a quiet microphone came.
         public internal(set) var nothingSpoken = 0
         public internal(set) var nothingSpokenPeak: Double?
-        /// Passes the engine failed to read during the completed items, each leaving its reading
-        /// to the next, and the latest failure's facts, which leave off any words it read.
+        /// Passes the engine failed to read during the items answered, completed or failed, each
+        /// leaving its reading to the next, and the latest failure's facts, which leave off any
+        /// words it read.
         public internal(set) var unreadPasses = 0
         public internal(set) var latestUnreadPass: String?
 
@@ -669,7 +675,8 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
             guard case .event(let event) = frame else { return }
             switch event {
             case .delta: deltas += 1
-            case .completed(_, let heard, _):
+            case .completed(_, let heard, _, let unread):
+                count(unread)
                 completed += 1
                 quietSeconds += heard.transcription.quiet.letGo
                 roomPeak = [roomPeak, heard.transcription.quiet.room.map(Double.init)].compactMap { $0 }.min()
@@ -679,16 +686,22 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
                 rangePeak = [rangePeak, heard.transcription.quiet.range.map(Double.init)].compactMap { $0 }.max()
                 keptOutPeak = [keptOutPeak, heard.transcription.quiet.keptOut.map(Double.init)].compactMap { $0 }.max()
                 keptOutFrames += heard.transcription.quiet.keptOutFrames
-                unreadPasses += heard.transcription.unread?.passes ?? 0
-                latestUnreadPass = heard.transcription.unread?.latest.account.facts ?? latestUnreadPass
                 if let peak = heard.nothingSpokenPeak {
                     nothingSpoken += 1
                     nothingSpokenPeak = max(nothingSpokenPeak ?? 0, Double(peak))
                 }
-            case .failed: failed += 1
+            case .failed(_, _, let unread):
+                failed += 1
+                count(unread)
             case .error: errors += 1
             case .sessionCreated, .sessionUpdated, .committed, .itemAdded, .itemDone: other += 1
             }
+        }
+
+        /// [LAW:single-enforcer] The one place an answered item's unread passes become the socket's.
+        private mutating func count(_ unread: Partial.Unread?) {
+            unreadPasses += unread?.passes ?? 0
+            latestUnreadPass = unread?.latest.account.facts ?? latestUnreadPass
         }
     }
 }

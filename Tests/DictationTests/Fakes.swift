@@ -145,6 +145,7 @@ final class FakeTranscriber: Transcriber {
     private let confirming: @Sendable ([Float]) -> Transcript
     private let repunctuating: @Sendable ([Float]) -> Int
     private let unreading: @Sendable ([Float]) -> Partial.Unread?
+    private let missedAtKeyUp: Partial.Unread?
     private let quiet: Quiet
     private let answer: @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
 
@@ -152,13 +153,15 @@ final class FakeTranscriber: Transcriber {
     /// passes have agreed on, which the answer has to begin with, and `repunctuating` how
     /// many passes so far changed a settled word's punctuation, and `unreading` how many
     /// the engine failed to read and why the latest did; one pass runs per clip as
-    /// it arrives, and reads and confirms nothing unless a test says otherwise. Every answer
-    /// is told with `quiet`, none unless a test says otherwise.
+    /// it arrives, and reads and confirms nothing unless a test says otherwise. A pass the key
+    /// came up during that the engine failed to read is told as `missedAtKeyUp`, once the audio
+    /// has ended. Every answer is told with `quiet`, none unless a test says otherwise.
     init(
         reading: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
         confirming: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
         repunctuating: @escaping @Sendable ([Float]) -> Int = { _ in 0 },
         unreading: @escaping @Sendable ([Float]) -> Partial.Unread? = { _ in nil },
+        missedAtKeyUp: Partial.Unread? = nil,
         quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0),
         _ answer: @escaping @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
     ) {
@@ -166,6 +169,7 @@ final class FakeTranscriber: Transcriber {
         self.confirming = confirming
         self.repunctuating = repunctuating
         self.unreading = unreading
+        self.missedAtKeyUp = missedAtKeyUp
         self.quiet = quiet
         self.answer = answer
     }
@@ -185,9 +189,10 @@ final class FakeTranscriber: Transcriber {
             partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: unreading(samples)))
             arrived.withLock { $0 = samples }
         }
+        missedAtKeyUp.map { partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: $0)) }
         let clip = AudioClip(samples: samples)
         heard.withLock { $0.append(clip) }
-        return Transcription(transcript: try await answer(clip), quiet: quiet, unread: nil)
+        return Transcription(transcript: try await answer(clip), quiet: quiet)
     }
 }
 

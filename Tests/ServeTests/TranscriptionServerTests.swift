@@ -365,12 +365,16 @@ import TestProbes
         try await running.server.finished()
     }
 
+    /// Its event counts the passes the engine failed to read before the failure
+    /// (low-reliability-z2z.5s1).
     @Test func anEngineFailureIs500WithTheReason() async throws {
-        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())))))
+        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
         #expect(response.statusCode == 500)
         #expect(try (error(body)["message"] as? String)?.contains("the stub engine was told to fail") == true)
+        let event = try await running.nextEvent()
+        #expect(event.unreadPasses == 1 && event.latestUnreadPass == "WhisperKit returned a segment of 7 characters without word timings")
     }
 
     /// Refusals the conformance suite does not send, each in OpenAI's error shape and each

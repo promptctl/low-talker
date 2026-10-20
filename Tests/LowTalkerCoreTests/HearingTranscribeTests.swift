@@ -198,14 +198,14 @@ import WhisperKit
         #expect(partials[0].confirmed.words.isEmpty)
         #expect(partials[1].confirmed.text == " see")
         #expect(transcription.transcript.text == " see you")
-        #expect(partials.allSatisfy { $0.unread == nil } && transcription.unread == nil)
+        #expect(partials.allSatisfy { $0.unread == nil })
     }
 
     /// A pass the engine fails to read during the hold leaves the reading to the next one
     /// (low-reliability-z2z.5s1): pass 3 of 6 throws once two passes have settled words, and
     /// pass 4 starts from the same cut and the same words over its audio and more. The
     /// partials say how many passes went unread and why the latest did, and the press is
-    /// heard to its transcript, which counts them too.
+    /// heard to its transcript.
     @Test func aPassThatFailsDuringTheHoldLeavesTheReadingToTheNext() async throws {
         let (passes, partials, transcription) = try await Self.transcribe(failing: { $0 == 3 }) { feed, seen in
             var passes = seen.makeAsyncIterator()
@@ -228,7 +228,6 @@ import WhisperKit
         #expect(partials.dropFirst(2).allSatisfy { $0.unread?.passes == 1 })
         guard case .unreadable(.wordEndsBeforeStart)? = partials.last?.unread?.latest else { Issue.record("latest unread \(String(describing: partials.last?.unread?.latest))"); return }
         #expect(transcription.transcript.text == " see you")
-        #expect(transcription.unread?.passes == 1)
     }
 
     /// The last pass is the transcript's own reading, so one the engine fails to read fails
