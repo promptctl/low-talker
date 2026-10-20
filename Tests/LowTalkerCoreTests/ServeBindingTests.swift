@@ -6,7 +6,7 @@ import Testing
 /// loopback anyone is answered, and off it only a caller with the token.
 @Suite struct ServeBindingTests {
     static func binding(_ toml: String) throws(ConfigError) -> ServeBinding {
-        try Config(toml: toml).serve
+        try Config(toml: toml, prompting: .countingWords()).serve
     }
 
     @Test func noTableIsLoopback() throws {

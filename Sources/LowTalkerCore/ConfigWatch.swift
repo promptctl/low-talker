@@ -73,12 +73,12 @@ public enum RunningConfig: Equatable, Sendable, CustomStringConvertible {
     }
 
     /// Every change to what the app runs on, from `running` on, as the file at `url` is
-    /// saved, until the consuming task stops.
+    /// saved and read through `prompting`, until the consuming task stops.
     ///
     /// [LAW:no-ambient-temporal-coupling] `running` was read before this stream existed, so
     /// a save that landed in between would be missed by the watch. Reading once after the
     /// watch is up and before its first tick closes that window by construction.
-    public static func reloads(of url: URL = Config.fileURL, after running: RunningConfig) -> AsyncStream<RunningConfig> {
+    public static func reloads(of url: URL = Config.fileURL, after running: RunningConfig, prompting: PromptEncoder) -> AsyncStream<RunningConfig> {
         // The default unbounded buffer, unlike the ticks underneath, which keep only the
         // newest: a tick repeated says the same thing twice, two reloads never do.
         AsyncStream { continuation in
@@ -87,7 +87,7 @@ public enum RunningConfig: Equatable, Sendable, CustomStringConvertible {
                 let ticks = DirectoryChanges.ticks(under: DirectoryChanges.nearestExistingDirectory(above: url))
 
                 func read() {
-                    guard let next = last.next(reading: Result { () throws(ConfigError) in try Config.load(url) }) else { return }
+                    guard let next = last.next(reading: Result { () throws(ConfigError) in try Config.load(url, prompting: prompting) }) else { return }
                     last = next
                     continuation.yield(next)
                 }

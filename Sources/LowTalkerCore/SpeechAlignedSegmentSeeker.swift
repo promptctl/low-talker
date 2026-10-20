@@ -28,7 +28,7 @@ import WhisperKit
 /// decoder prefills with: the prompt's last `promptTokenLimit` tokens with special
 /// tokens dropped, and `<|startofprev|>` before them when any are left. Exception:
 /// the rule is restated here because WhisperKit does not expose it, and it is
-/// restated once, so the transcriber's refusal of a long prompt derives from here.
+/// restated once, so `PromptEncoder`'s refusal of a long prompt derives from here.
 struct SpeechAlignedSegmentSeeker: SegmentSeeking {
     private let seeker = SegmentSeeker()
     /// How many samples of the audio WhisperKit is handed arrived as audio, counted as

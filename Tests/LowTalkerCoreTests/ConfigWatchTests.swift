@@ -19,13 +19,27 @@ import Testing
     static let notTOML = "model = \"base.en\"\n[[modes\n"
 
     static func config(_ toml: String) throws -> Config {
-        try Config(toml: toml)
+        try Config(toml: toml, prompting: .countingWords())
     }
 
     // MARK: - What a reading does to the running config
 
     // These hand `next(reading:)` a reading rather than a filesystem, so every rule about
     // what a save does is settled without a file, a watch, or a wait.
+
+    /// A save whose mode the engine cannot be told is refused and the running config kept,
+    /// and the `config:` event says which mode and the limit.
+    @Test func aSaveWithAVocabularyTooLongKeepsTheRunningConfig() throws {
+        let running = try Self.config(Self.onRightCommand)
+        let tooLong = """
+            [[modes]]
+            name = "names"
+            vocabulary = ["One", "Two", "Three"]
+            """
+        let next = RunningConfig.adopted(running).next(reading: Result { () throws(ConfigError) in try Config(toml: tooLong, prompting: .countingWords(limit: 2)) })
+        #expect(next == .kept(running, because: .vocabulary(mode: "names", .tooLong(tokens: 3, limit: 2))))
+        #expect(next?.description == #"the last save was refused, so the config before it still runs: mode "names": the vocabulary is 3 prompt tokens and the engine keeps at most 2"#)
+    }
 
     @Test func aReadingThatSaysWhatTheLastOneSaidIsNotReported() throws {
         let last = RunningConfig.adopted(try Self.config(Self.onRightCommand))
@@ -116,8 +130,8 @@ import Testing
     static func watching(_ file: URL, settlingOn settling: String) async throws
         -> (running: Config, reloads: AsyncStream<RunningConfig>.AsyncIterator)
     {
-        let launch = RunningConfig(reading: Result { () throws(ConfigError) in try Config.load(file) })
-        var reloads = RunningConfig.reloads(of: file, after: launch).makeAsyncIterator()
+        let launch = RunningConfig(reading: Result { () throws(ConfigError) in try Config.load(file, prompting: .countingWords()) })
+        var reloads = RunningConfig.reloads(of: file, after: launch, prompting: .countingWords()).makeAsyncIterator()
         try settling.write(to: file, atomically: true, encoding: .utf8)
         let settled = try config(settling)
         #expect(await reloads.next() == .adopted(settled))
@@ -177,10 +191,10 @@ import Testing
     func aConfigDirectoryThatDoesNotExistYetIsStillWatched() async throws {
         let (root, directory, file) = try Self.scratch(existing: false)
         defer { try? FileManager.default.removeItem(at: root) }
-        let launch = RunningConfig(reading: Result { () throws(ConfigError) in try Config.load(file) })
+        let launch = RunningConfig(reading: Result { () throws(ConfigError) in try Config.load(file, prompting: .countingWords()) })
         #expect(launch == .adopted(.default))
 
-        var reloads = RunningConfig.reloads(of: file, after: launch).makeAsyncIterator()
+        var reloads = RunningConfig.reloads(of: file, after: launch, prompting: .countingWords()).makeAsyncIterator()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Self.onRightCommand.write(to: file, atomically: true, encoding: .utf8)
         #expect(await reloads.next() == .adopted(try Self.config(Self.onRightCommand)))

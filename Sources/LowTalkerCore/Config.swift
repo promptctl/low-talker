@@ -125,6 +125,8 @@ public enum ConfigError: Error, Equatable, Sendable, CustomStringConvertible {
     case modeUnnamed
     case twoModesNamed(String)
     case twoModesOnOneChord(String)
+    /// A mode whose vocabulary the engine cannot be told, named with why.
+    case vocabulary(mode: String, VocabularyError)
     /// A `[serve]` table that names no binding a server can listen on.
     case serve(ServeBindingError)
     /// The file exists but could not be read at all, in the words the system used.
@@ -149,6 +151,8 @@ public enum ConfigError: Error, Equatable, Sendable, CustomStringConvertible {
             "two modes are named \"\(name)\""
         case .twoModesOnOneChord(let name):
             "mode \"\(name)\" answers to a chord another mode already answers to"
+        case .vocabulary(let name, let error):
+            "mode \"\(name)\": \(error)"
         case .serve(let error):
             "\(error)"
         case .unreadable(let path, let why):

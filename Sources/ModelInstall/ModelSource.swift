@@ -78,40 +78,6 @@ enum OpenSource {
     }
 }
 
-extension ModelVariant {
-    /// The Whisper size a model folder holds, read off its `config.json` the way
-    /// WhisperKit reads it off the loaded model: the vocabulary size is the decoder's
-    /// logits and `d_model` the encoder's embedding.
-    ///
-    /// [LAW:one-source-of-truth] WhisperKit decides which tokenizer a load reads, and
-    /// the store must install that same one. Its decision is internal to WhisperKit
-    /// and made after the Neural Engine load, so this mirrors it, defaults included,
-    /// and `ModelSourceTests` holds the two to agreement over every input WhisperKit
-    /// distinguishes.
-    init(logitsDim: Int, encoderDim: Int) {
-        self = switch logitsDim {
-        case 51865: [384: .tiny, 512: .base, 768: .small, 1024: .medium, 1280: .largev2][encoderDim] ?? .base
-        case 51864: [384: .tinyEn, 512: .baseEn, 768: .smallEn, 1024: .mediumEn][encoderDim] ?? .baseEn
-        case 51866: .largev3
-        default: .base
-        }
-    }
-
-    init(modelConfig data: Data) throws {
-        struct Config: Decodable {
-            let vocab_size: Int
-            let d_model: Int
-        }
-        let config = try JSONDecoder().decode(Config.self, from: data)
-        self.init(logitsDim: config.vocab_size, encoderDim: config.d_model)
-    }
-
-    /// The hub repo WhisperKit fetches this size's tokenizer from.
-    var tokenizerRepo: String {
-        "openai/whisper-\(description)"
-    }
-}
-
 /// A published model archive: a zip of a store, fetched over HTTP and unpacked with
 /// `ditto`, which is what wrote it.
 enum Archive {

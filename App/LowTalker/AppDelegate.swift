@@ -169,14 +169,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - the loop
 
-    /// The config this app runs on, read the first time it is asked for and again at every
-    /// save: what the microphone does at rest, the modes the hotkey listens for and where
+    /// The config this app runs on, read once at launch and again at every save: what the microphone does at rest, the modes the hotkey listens for and where
     /// the server listens, from one reading, so none of them comes from a different version
     /// of the file. The menu's names for the chords read it too, so what the menu says to
     /// hold is what is heard. Only `follow` changes it once it is read. [LAW:one-source-of-truth]
-    private lazy var running = RunningConfig(reading: Result { () throws(ConfigError) in try Config.load() })
-    private var config: Result<Config, ConfigError> { running.config }
+    ///
+    /// Nil until `reading` ends: the file is read only once the model's tokenizer can check
+    /// every mode's vocabulary, and everything that runs on the config awaits that reading.
+    private var running: RunningConfig?
+    private var config: Result<Config, ConfigError>? { running?.config }
+
+    /// The model the bundle carries, resolved once, so the engine and the vocabulary check
+    /// read one model. [LAW:one-source-of-truth]
+    private lazy var carriedModel = Result { () throws -> InstalledModel in
+        guard let carried = ModelStore.carried(by: .main) else { throw BundleCarriesNoModel() }
+        return try carried.installedModel(.default)
+    }
+
+    /// The carried model's tokenizer alone, loaded from launch: a fraction of a second,
+    /// where the model it belongs to can take minutes.
+    private lazy var prompting: Task<Result<PromptEncoder, PromptsUnavailable>, Never> = Task { @MainActor in
+        let loading = ContinuousClock.now
+        let model = carriedModel
+        let prompts = await Result { () async throws(PromptsUnavailable) in
+            let installed: InstalledModel
+            do { installed = try model.get() } catch { throw PromptsUnavailable(why: "\(error)") }
+            return try await PromptEncoder.load(installed)
+        }
+        // [LAW:nothing-unseen] The reading of the config waits on this, so it is told.
+        let load: PromptEncoder.Load = switch prompts {
+        case .success: .loaded(after: loading.duration(to: .now))
+        case .failure(let failure): .failed(failure)
+        }
+        configLog.notice("\(load, privacy: .public)")
+        return prompts
+    }
+
+    /// The config's reading at launch, through the tokenizer, so a mode the engine could not be
+    /// told is refused as the file is read. A tokenizer that did not load reads nothing: the
+    /// file is never run on unchecked, and it is not blamed for the store. [LAW:no-silent-failure]
+    private lazy var reading: Task<Result<RunningConfig, PromptsUnavailable>, Never> = Task { @MainActor in
+        let prompts: PromptEncoder
+        switch await prompting.value {
+        case .success(let loaded): prompts = loaded
+        case .failure(let failure): return .failure(failure)
+        }
+        let read = RunningConfig(reading: Result { () throws(ConfigError) in try Config.load(prompting: prompts) })
+        running = read
+        configLog.notice("config: \(read, privacy: .public)")
+        return .success(read)
+    }
     private let configLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "config")
+
+    /// The config as it stands once the launch reading has ended. Awaited, never assumed: a
+    /// come-up the menu or the setup starts at launch, and a server switched on then, wait
+    /// here for the reading. [LAW:no-ambient-temporal-coupling] What they then run on is the
+    /// config as it stands, which a save may have moved past the launch reading.
+    private func readConfig() async throws -> Config {
+        _ = try await reading.value.get()
+        guard let config else { preconditionFailure("the launch reading sets the running config before it ends") }
+        return try config.get()
+    }
+
+    /// Where the server listens, from `readConfig`, so a tokenizer that did not load stops a
+    /// chosen server with that reason rather than leaving it off. [LAW:no-silent-failure]
+    private func serveBinding() async throws -> ServeBinding {
+        try await readConfig().serve
+    }
 
     /// Takes up a save of the config file: each setting whose value changed is moved to the
     /// new value, and the rest are left alone. A save the file refused leaves every one where
@@ -186,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// chord's release, heard in the mode it began in, and a resting mode moved mid-hold is
     /// taken up at the key-up.
     private func follow(_ next: RunningConfig) {
-        let was = try? config.get()
+        let was = try? config?.get()
         running = next
         // No config ran before this reading: the loop was held down for want of one, and comes
         // up the way it does at launch, whose status line says what still stops it - this
@@ -194,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // that config, `.kept`, so it arrives below and moves nothing.
         guard let was, case .success(let now) = next.config else {
             configLog.notice("config: \(next, privacy: .public)")
-            serving?.resume(at: config.map(\.serve))
+            serving?.resume(at: serveBinding)
             lifecycle.comeUp()
             return
         }
@@ -212,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 capture.rest(as: now.microphone)
                 return "microphone \(capture.doing)"
             case .serve:
-                serving?.resume(at: config.map(\.serve))
+                serving?.resume(at: serveBinding)
                 return "server binding"
             }
         }
@@ -301,7 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let installed = await selectInputMethod()
         // A loop is built only over capture holding the microphone, capture starts only over
         // a config that was read, and a save the file refused keeps the one that ran.
-        guard case .success(let config) = config else { preconditionFailure("a loop is adopted only once the config has been read") }
+        guard case .success(let config)? = config else { preconditionFailure("a loop is adopted only once the config has been read") }
         let hotkey = Hotkey(listeningFor: config)
         let dictation = Dictation(
             capture: capture,
@@ -440,9 +499,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The chords the config listens for, in the words a person presses them by.
     private var chordName: String {
         switch config {
-        case .success(let config): Hotkey.named(in: config)
+        case .success(let config)?: Hotkey.named(in: config)
         // The status line already says why nothing is heard.
-        case .failure: "no chord: the config cannot be read"
+        case .failure?: "no chord: the config cannot be read"
+        case nil: preconditionFailure("only a loop `adopt` built says how to press, and it adopts only a config that was read")
         }
     }
 
@@ -489,7 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Only in the menu of a build that has a server to switch.
     @objc private func toggleServing() {
-        serving.map { $0.choose(!$0.chosen, at: config.map(\.serve)) }
+        serving.map { $0.choose(!$0.chosen, at: serveBinding) }
     }
 
     /// Opens the app at login, or stops it. An item switched off in System Settings can be
@@ -640,13 +700,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hold.unrestored.map { sessions.fault("held words: \($0, privacy: .public)") }
         // Listening from launch when the person last chose to, answering 503 until the model
         // is resident, so a client started beside the app is told to wait rather than refused.
-        serving?.resume(at: config.map(\.serve))
+        // Its binding, like the come-up's first step, awaits the config's reading, so both
+        // start now.
+        serving?.resume(at: serveBinding)
         showHotkeyStatus(.starting(step: nil))
         Task { await listen() }
-        // Read after `serving` and the loop's first reading of the config, so a save from
-        // here on is a reload of the config they started on.
-        reloading = Task { [running] in
-            for await next in RunningConfig.reloads(after: running) { follow(next) }
+        // Once the config is read, each save is a reload of the config the server and the
+        // loop started on.
+        reloading = Task {
+            guard case .success(let prompts) = await prompting.value, case .success(let read) = await reading.value, !Task.isCancelled else { return }
+            for await next in RunningConfig.reloads(after: read, prompting: prompts) { follow(next) }
         }
     }
 
@@ -685,8 +748,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // what came up short was the hotkey or the input method, which the rebuild redoes.
             // Restarting it would close and reopen an engine the resting mode holds open.
             guard capture.atRest == nil else { return .running }
+            // Read before the grant, so a tokenizer that did not load is the status line's
+            // reason even while the microphone waits on setup, whose list says that too.
+            let atRest = try await readConfig().microphone
             let grant = try readMicrophone().grant()
-            let atRest = try config.get().microphone
             // Awaited, so the menu and the readings queued behind the come-up run while
             // a slow input is reached.
             try await capture.start(grant, atRest: atRest)
@@ -738,7 +803,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// own threads, and only the status text comes back here.
     private func loadEngine() async throws -> WhisperKitTranscriber {
         do {
-            // One operation and not two: the bundle carries a store and this loads it in
+            // The bundle carries a store, and `carriedModel` is its model, loaded here in
             // place — read-only, verified whole where the code signature sealed it, written
             // to never. A read-only store cannot be installed into, only confirmed and
             // loaded, so a carried store that lacks the model fails with its reason rather
@@ -759,8 +824,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     if next != self.engineReadiness { self.show(next) }
                 }
             }
-            guard let carried = ModelStore.carried(by: .main) else { throw BundleCarriesNoModel() }
-            let transcriber = try await WhisperKitTranscriber.loadInPlace(in: carried, turns: turns, phase: report)
+            let installed = try carriedModel.get()
+            report(.loading)
+            let transcriber = try await WhisperKitTranscriber(installed, turns: turns)
             show(.ready(transcriber.model, after: launched.duration(to: .now)))
             serving?.answer(with: .ready(transcriber.served))
             return transcriber
@@ -859,9 +925,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let stored = CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString) as? Int
         let action = GlobeKeyAction(appleFnUsageType: stored)
         let clash: String? = switch config {
-        case .success(let config): action.clash(with: config.modes.chords)
+        case .success(let config)?: action.clash(with: config.modes.chords)
         // The status line already says why no chord is heard.
-        case .failure: nil
+        case .failure?, nil: nil
         }
         log.notice("hotkey: Globe key \(String(describing: action), privacy: .public); \(clash ?? "no clash with the chords", privacy: .public)")
         return clash
@@ -919,7 +985,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let dismissed = hold.dismissed {
             menu.addItem(withTitle: "Bring Back Dismissed Words (\(dismissed.allWords.words.count))", action: #selector(bringBackDismissed), keyEquivalent: "")
         }
-        if running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
+        if let running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
         if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: presses are refused until it ends")) }
         // Every requirement, met or not, and its step under it as the lines it was
         // written in - one item per line, so nothing here wraps text the requirement
@@ -944,7 +1010,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Anything but plainly on or off is said under the item, since a checkmark cannot say it.
         if openAtLogin != .on, openAtLogin != .off { menu.addItem(readout("    \(openAtLogin)")) }
-        serving.map { serving in
+        if let serving {
             let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
             item.state = serving.chosen ? .on : .off
         }
