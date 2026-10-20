@@ -916,7 +916,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(errorRow("Held words: \(trouble)", .heldWords))
         }
         // The one step back from a click on the panel's circle.
-        hold.dismissed.map { dismissed in
+        if let dismissed = hold.dismissed {
             menu.addItem(withTitle: "Bring Back Dismissed Words (\(dismissed.allWords.words.count))", action: #selector(bringBackDismissed), keyEquivalent: "")
         }
         if running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
@@ -954,8 +954,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func bringBackDismissed() {
-        sessions.notice("asked to bring back \(self.hold.dismissed?.allWords.words.count ?? 0, privacy: .public) dismissed words")
-        hold.bringBack()
+        // [LAW:nothing-unseen] A click with no loop to bring them back through moves nothing, and says so.
+        let unheard = listening == nil ? ", with no loop listening to bring them back" : ""
+        sessions.notice("asked to bring back \(self.hold.dismissed?.allWords.words.count ?? 0, privacy: .public) dismissed words\(unheard, privacy: .public)")
+        listening?.dictation.bringBackDismissed()
     }
 
     /// A line the menu says and nothing a reader can press. An item with no action is

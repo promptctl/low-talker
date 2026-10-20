@@ -301,7 +301,7 @@ public final class Hold {
 
     /// The person brought back the words they dismissed last, ahead of any held since, since
     /// they were said first.
-    public func bringBack() {
+    func bringBack() {
         guard let dismissed else { return }
         standingGeneration += 1
         let carrying: Carried? = switch carried {

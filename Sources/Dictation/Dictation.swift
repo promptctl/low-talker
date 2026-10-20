@@ -721,6 +721,16 @@ public final class Dictation {
         }
     }
 
+    /// The person brought back the words they dismissed last. A press's inserts carry what is
+    /// held ahead of their own words, so words brought back while a press is open would land amid
+    /// what it hears: one made then is let go, and the menu offers it again once it is over.
+    public func bringBackDismissed() {
+        switch press {
+        case .down: Executor.log.notice("bringing back the dismissed words came while a press was open and was let go")
+        case .up, .refused: hold.bringBack()
+        }
+    }
+
     /// Offers what is held to the cursor in front.
     private func offer(since: Executor.Since) {
         queue("an offer of the held words, for \(since.key.rawValue)") {

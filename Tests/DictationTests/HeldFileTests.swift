@@ -70,8 +70,7 @@ final class HeldFileTests {
         #expect(try file.read() == HoldState(held: .unplaced(Held.Part(words: hello, warning: "refused")!, unaccounted: Held.Part(words: a, warning: "may have landed")!)))
     }
 
-    /// A file as this build writes it with words dismissed, which an earlier build reads as
-    /// what is held alone.
+    /// A file as this build writes it with words both held and dismissed.
     @Test func aFileWithWordsDismissedReads() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Data(#"{"unaccounted":{"words":[{"text":"a","time":[0,0.1],"confidence":0.5}]},"unaccountedWarning":"may have landed","dismissed":{"unplaced":{"words":[{"text":" hello","time":[0.12,0.48],"confidence":0.73}]},"warning":"refused"}}"#.utf8).write(to: file.url)
