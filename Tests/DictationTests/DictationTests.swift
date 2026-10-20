@@ -1735,7 +1735,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// no failure, and nothing held.
     @Test func aChordUsedAsAModifierWithNothingSaidHoldsNothing() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in
-            throw .nothingSpoken(peak: 0, quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
+            throw .nothingSpoken(peak: 0, quiet: .none)
         })
         rig.usedAsModifier(speaking: [0, 0, 0])
         guard case .usedAsModifier(let landed, let held) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }

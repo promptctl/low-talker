@@ -57,7 +57,8 @@ import WhisperKit
     }
 
     /// Nothing reaching the gate is no pass at all and a refusal, not a decode of
-    /// silence that comes back empty. All of it is quiet, refused as no speech with no speaker in it.
+    /// silence that comes back empty. All of it is quiet, and none of it stood clear of the room for
+    /// the discriminator to refuse.
     @Test func aSilentHoldMakesNoPassAndIsRefused() async {
         var passes: [Hearing.Pass] = []
         let refusal = await #expect(throws: TranscriptionFailure.self) {
@@ -68,7 +69,7 @@ import WhisperKit
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
-        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, refusedAsNotSpeech: 2, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
         #expect(passes.isEmpty)
     }
 
@@ -81,7 +82,7 @@ import WhisperKit
         for clip in clips { try await utterance.append(clip) }
         try await utterance.end()
         let gate = await utterance.audio(beyond: 0).timeline.quiet
-        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60 && gate.refusedAsNotSpeech == 1)
+        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60 && gate.refusedAsNotSpeech == 0)
         let transcription = try await Hearing.transcribe(AsyncStream { feed in
             for clip in clips { feed.yield(clip) }
             feed.finish()
@@ -142,7 +143,7 @@ import WhisperKit
         #expect(quiet.letGo == AudioClip.duration(for: audio.count))
         #expect(quiet.transients == Transients(count: 1, longest: 0.03))
         #expect(passes.isEmpty)
-        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 over a room of 0.002, 11.93 s were called no speech, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
+        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 over a room of 0.002, 0.0 s clear of it were called no speech, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
     }
 
     /// Speech under a second, well under what a pass waits for during the hold,

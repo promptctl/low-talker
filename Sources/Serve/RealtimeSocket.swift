@@ -652,7 +652,7 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
         /// too near the room to be speech.
         public internal(set) var roomPeak: Double?
         public internal(set) var refusedAsRoomSeconds: Double = 0
-        /// Seconds within range of an item's loudest, before any speaker was heard, called no speech.
+        /// Seconds within range of an item's loudest and clear of the room, before any speaker was heard, called no speech.
         public internal(set) var refusedAsNotSpeechSeconds: Double = 0
         /// Bursts of sound in the completed items refused as too brief to be speech, and seconds the
         /// longest of them sounded.

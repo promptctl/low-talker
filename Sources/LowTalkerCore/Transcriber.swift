@@ -54,9 +54,9 @@ public struct Quiet: Hashable, Sendable {
     public let room: Float?
     /// Seconds within range of the loudest that stood too near the room to be speech.
     public let refusedAsRoom: TimeInterval
-    /// Seconds within range of the loudest, before any speaker was heard, that the
-    /// discriminator called something other than speech: breathing or a fan under a speaker's
-    /// level, which stands clear of a quiet room as a whisper does.
+    /// Seconds within range of the loudest and clear of the room, before any speaker was heard,
+    /// that the discriminator called something other than speech: breathing or a fan under a
+    /// speaker's level, which the room alone would have let through as it does a whisper.
     public let refusedAsNotSpeech: TimeInterval
     public let transients: Transients
     /// The peak of the loudest syllable in frames the discriminator called speech: the range
@@ -68,6 +68,9 @@ public struct Quiet: Hashable, Sendable {
     /// says what the gate did, not which. None, and zero frames, when nothing was.
     public let keptOut: Float?
     public let keptOutFrames: Int
+
+    /// Nothing let go, no room heard, nothing refused and no range.
+    public static let none = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0)
 
     public init(
         letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, refusedAsNotSpeech: TimeInterval,
@@ -85,7 +88,8 @@ public struct Quiet: Hashable, Sendable {
 }
 
 /// The bursts of sound the gate refused as too brief to be speech, a click, a door or a run of
-/// keystrokes, let go with the quiet around them.
+/// keystrokes, let go with the quiet around them. Before a speaker is heard, soft sound the
+/// discriminator called speech that never ran clear of the room is one too, sounding 0 s.
 public struct Transients: Hashable, Sendable {
     public let count: Int
     /// Seconds the longest of them sounded without a break.
@@ -107,8 +111,9 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
     /// The caller stopped waiting for the engine before its turn came.
     case cancelled
     /// Nothing sounded as long as a syllable: no clip stood clear of the room, none under a
-    /// speaker's level was called speech, or what did sound was a transient. `peak` is the loudest sample heard, and `quiet` all of the audio, with the
-    /// room it was judged against and the transients it refused.
+    /// speaker's level was called speech, or what did sound was a transient. `peak` is the
+    /// loudest sample heard, and `quiet` all of the audio, with the room it was judged against
+    /// and what it refused.
     case nothingSpoken(peak: Float, quiet: Quiet)
     case vocabulary(VocabularyError)
     /// The engine read the audio and its reading could not become a transcript.
@@ -121,7 +126,7 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
         switch self {
         case .cancelled: "the decode was cancelled before the engine took it"
         case .nothingSpoken(let peak, let quiet):
-            "nothing spoken: the loudest sample was \(peak) over a room of \(quiet.room.map { "\($0)" } ?? "none heard"), \(quiet.refusedAsNotSpeech) s were called no speech, and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
+            "nothing spoken: the loudest sample was \(peak) over a room of \(quiet.room.map { "\($0)" } ?? "none heard"), \(quiet.refusedAsNotSpeech) s clear of it were called no speech, and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"

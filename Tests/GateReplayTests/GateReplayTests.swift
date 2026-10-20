@@ -308,28 +308,30 @@ struct Fixtures {
     /// Sound under the -40 dBFS floor with no speaker in front of it: each reader as talk across
     /// the room, and each ESC-50 breathing clip, peaking at -45 and -55 dBFS over a room at -60
     /// and -70 dBFS, the built-in microphone with its input volume turned down. Alone, a press
-    /// with nothing said (`family=soft-room`); and its first 2 s before a soft reader
-    /// (`family=soft-before`), what is kept of it before the first word.
+    /// with nothing said (`family=soft-room`); and its first 2 s before a reader other than the
+    /// talk, 20 dB down and, under a speaker's level, 40 dB down (`family=soft-before`), what is
+    /// kept of it before the first word.
     var softRoom: [Case] {
         let readers = readers
         let sources = readers.map { (name: "talk/" + $0.name, samples: $0.samples) } + breaths
         let before = 2 * Self.rate
         return sources.enumerated().flatMap { index, source in
-            let reader = readers[index % readers.count]
+            let reader = readers[(index + 1) % readers.count]
             let peak = AudioClip(samples: source.samples).peak
             return [-45, -55].flatMap { db in
                 [-60, -70].flatMap { room in
                     let (gain, noise) = (Float(pow(10, Double(db) / 20)) / peak, Float(pow(10, Double(room) / 20)))
                     let fields = "source=\(source.name) db=\(db) room=\(room)"
-                    return [
-                        Case(id: "family=soft-room \(fields)", inserted: nil) {
-                            zip(source.samples, Noise.samples(source.samples.count, at: noise)).map { $0 * gain + $1 }
-                        },
-                        Case(id: "family=soft-before \(fields) fixture=\(reader.name)", inserted: nil) {
-                            let audio = (0..<before).map { $0 < source.samples.count ? source.samples[$0] * gain : 0 } + reader.samples.map { $0 * Self.soft }
+                    let alone = Case(id: "family=soft-room \(fields)", inserted: nil) {
+                        zip(source.samples, Noise.samples(source.samples.count, at: noise)).map { $0 * gain + $1 }
+                    }
+                    return [alone] + [-20, -40].map { level in
+                        Case(id: "family=soft-before \(fields) fixture=\(reader.name) level=\(level)", inserted: nil) {
+                            let scale = Float(pow(10, Double(level) / 20))
+                            let audio = (0..<before).map { $0 < source.samples.count ? source.samples[$0] * gain : 0 } + reader.samples.map { $0 * scale }
                             return zip(audio, Noise.samples(audio.count, at: noise)).map(+)
-                        },
-                    ]
+                        }
+                    }
                 }
             }
         }

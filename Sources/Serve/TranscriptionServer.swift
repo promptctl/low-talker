@@ -601,7 +601,7 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     /// against, and seconds within range of its loudest that stood too near the room to be speech.
     public internal(set) var roomPeak: Double?
     public internal(set) var refusedAsRoomSeconds: Double?
-    /// Seconds within range of its loudest, before any speaker was heard, called no speech.
+    /// Seconds within range of its loudest and clear of the room, before any speaker was heard, called no speech.
     public internal(set) var refusedAsNotSpeechSeconds: Double?
     /// Bursts of sound in the upload refused as too brief to be speech, and seconds the longest sounded.
     public internal(set) var transients: Int?

@@ -192,7 +192,7 @@ import Testing
 
     /// A room with no speaker in it is nothing spoken, however soft the room and however it
     /// swells: before a speaker is heard only a frame the discriminator calls speech sounds, and
-    /// all of it is refused as no speech.
+    /// a swell that stays near the room is no sound the discriminator refused.
     @Test func aRoomAloneIsNothingSpoken() async throws {
         let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.005))
         let clips = AsyncStream<AudioClip> { continuation in
@@ -206,7 +206,7 @@ import Testing
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.004)
-        #expect(quiet.room == 0.002 && quiet.refusedAsRoom == 0 && quiet.refusedAsNotSpeech == 2)
+        #expect(quiet.room == 0.002 && quiet.refusedAsRoom == 0 && quiet.refusedAsNotSpeech == 0)
     }
 
     /// Digital silence is no sound at all: a microphone delivering zeros is nothing spoken,
@@ -255,7 +255,8 @@ import Testing
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.004)
-        #expect(quiet.refusedAsRoom == 0 && quiet.refusedAsNotSpeech == 2)
+        // The breathing, clear of the room, is what the discriminator refused; the room before it is not.
+        #expect(quiet.refusedAsRoom == 0 && quiet.refusedAsNotSpeech == 1)
     }
 
     /// A soft speaker who opens the press is their own room until they pause, so speech before
@@ -317,8 +318,8 @@ import Testing
         #expect(samples.count == Utterance.leadIn + 1_600 + Utterance.hangover)
         // Let go: all of the room but the click's lead-in and hangover, and the lead-in of
         // speech that may yet follow.
-        // The room before the click is no speech, the minute after it the room; digital silence is neither.
-        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, refusedAsNotSpeech: opening > 0 ? 1 : 0, transients: .none, range: 0.03, keptOut: nil, keptOutFrames: 0))
+        // The minute after the click is refused as room; the room before it never stood clear of itself.
+        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, refusedAsNotSpeech: 0, transients: .none, range: 0.03, keptOut: nil, keptOutFrames: 0))
 
         try await utterance.append(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
         // The few samples the end cuts a frame short to are no tenth of a second, so no room reading.

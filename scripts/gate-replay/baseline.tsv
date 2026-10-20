@@ -250,190 +250,374 @@ family=bench fixture=say/yes level=0 trim=trimmed room=clean	11200	9d8799fe512ca
 family=bench fixture=say/yes level=0 trim=whole room=-35	12490	383142b2da15ded7	0-48
 family=bench fixture=say/yes level=0 trim=whole room=-51	11200	28f7fe6704afca1	0-48
 family=bench fixture=say/yes level=0 trim=whole room=clean	11200	9d8799fe512ca425	0-48
-family=soft-before source=breathing/1-18631-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/1-18631-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/1-18631-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/1-18631-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/1-30709-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/1-30709-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/1-30709-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/1-30709-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/1-30709-B-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/1-30709-B-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/1-30709-B-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/1-30709-B-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/1-30709-C-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/1-30709-C-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/1-30709-C-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/1-30709-C-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/1-36393-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=breathing/1-36393-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/1-36393-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=breathing/1-36393-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/1-36397-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	112978	16794a3146d7708f	205-729,738-919
-family=soft-before source=breathing/1-36397-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	114362	ed42af4d610805eb	205-919
-family=soft-before source=breathing/1-36397-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/1-36397-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	114362	ed42af4d610805eb	205-919
-family=soft-before source=breathing/1-36400-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/1-36400-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/1-36400-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/1-36400-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/1-36402-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/1-36402-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/1-36402-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/1-36402-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/2-50774-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/2-50774-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/2-50774-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/2-50774-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/2-54961-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/2-54961-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/2-54961-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/2-54961-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/2-54962-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
-family=soft-before source=breathing/2-54962-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/2-54962-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=breathing/2-54962-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/2-66205-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/2-66205-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	114382	a8d877ccb43f0e6e	205-919
-family=soft-before source=breathing/2-66205-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/2-66205-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	114382	a8d877ccb43f0e6e	205-919
-family=soft-before source=breathing/2-82455-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/2-82455-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/2-82455-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/2-82455-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/2-84965-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/2-84965-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/2-84965-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/2-84965-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/2-95567-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/2-95567-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/2-95567-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/2-95567-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/2-98392-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/2-98392-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/2-98392-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/2-98392-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/3-108160-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
-family=soft-before source=breathing/3-108160-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/3-108160-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
-family=soft-before source=breathing/3-108160-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/3-112557-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/3-112557-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	114381	d57d68c99a1211ba	205-919
-family=soft-before source=breathing/3-112557-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/3-112557-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	114382	a8d877ccb43f0e6e	205-919
-family=soft-before source=breathing/3-112557-B-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/3-112557-B-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/3-112557-B-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/3-112557-B-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/3-144128-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/3-144128-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/3-144128-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/3-144128-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/3-144128-B-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/3-144128-B-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/3-144128-B-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/3-144128-B-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/3-151206-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/3-151206-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/3-151206-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/3-151206-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/3-166125-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=breathing/3-166125-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/3-166125-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=breathing/3-166125-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/3-166125-B-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/3-166125-B-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	114381	d57d68c99a1211ba	205-919
-family=soft-before source=breathing/3-166125-B-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/3-166125-B-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	114382	a8d877ccb43f0e6e	205-919
-family=soft-before source=breathing/4-171706-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/4-171706-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/4-171706-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/4-171706-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/4-176914-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/4-176914-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/4-176914-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/4-176914-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/4-198025-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/4-198025-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/4-198025-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/4-198025-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/4-205526-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/4-205526-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/4-205526-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/4-205526-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/4-205526-B-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=breathing/4-205526-B-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/4-205526-B-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=breathing/4-205526-B-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/4-207116-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/4-207116-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	114362	ed42af4d610805eb	205-919
-family=soft-before source=breathing/4-207116-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/4-207116-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	114381	d57d68c99a1211ba	205-919
-family=soft-before source=breathing/4-210000-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/4-210000-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/4-210000-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/4-210000-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/4-210000-B-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/4-210000-B-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/4-210000-B-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/4-210000-B-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/5-213293-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/5-213293-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/5-213293-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/5-213293-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/5-232816-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/5-232816-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/5-232816-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/5-232816-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/5-233260-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
-family=soft-before source=breathing/5-233260-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/5-233260-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
-family=soft-before source=breathing/5-233260-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
-family=soft-before source=breathing/5-234335-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/5-234335-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	114381	d57d68c99a1211ba	205-919
-family=soft-before source=breathing/5-234335-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	112982	f850056e131645e1	205-729,738-919
-family=soft-before source=breathing/5-234335-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	114382	a8d877ccb43f0e6e	205-919
-family=soft-before source=breathing/5-235593-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/5-235593-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/5-235593-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	102400	f2095b3780e6a149	200-839
-family=soft-before source=breathing/5-235593-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	102400	8925edc6887f0832	200-839
-family=soft-before source=breathing/5-238492-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/5-238492-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/5-238492-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	115200	c25aa2c83e8a1d5d	210-929
-family=soft-before source=breathing/5-238492-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	115200	f943d4fcf4c1d6f7	210-929
-family=soft-before source=breathing/5-260164-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/5-260164-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/5-260164-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	104000	d32eee9ae06b8ba3	220-859
-family=soft-before source=breathing/5-260164-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	104000	5087b9134b43859a	220-859
-family=soft-before source=breathing/5-261464-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/5-261464-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=breathing/5-261464-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=breathing/5-261464-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	150400	25766e0939f4c2f3	200-1138
-family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-60 fixture=librispeech/2277-149896-0000	132837	11f159014220668c	9-839
-family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-70 fixture=librispeech/2277-149896-0000	134400	92034cbb9bee1345	0-839
-family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-60 fixture=librispeech/2277-149896-0000	132800	7abcd9f330e37e60	10-839
-family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-70 fixture=librispeech/2277-149896-0000	132837	8a0ad9d398f75e5c	9-839
-family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-60 fixture=librispeech/251-137823-0018	145600	ace5b7f87046db7d	20-929
-family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-70 fixture=librispeech/251-137823-0018	145812	739a15c9a03f1fbe	18-929
-family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-60 fixture=librispeech/251-137823-0018	144000	696748a1045f5e12	30-929
-family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-70 fixture=librispeech/251-137823-0018	145600	ec7ae60f6c06f51e	20-929
-family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-60 fixture=librispeech/2803-154328-0011	134400	71f8eac5ce27f990	30-859
-family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-70 fixture=librispeech/2803-154328-0011	134675	1bf162c4c6553bfe	28-859
-family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-60 fixture=librispeech/2803-154328-0011	131200	8a2e1edbd001caee	50-859
-family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-70 fixture=librispeech/2803-154328-0011	134400	e15df49370f552ce	30-859
-family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-60 fixture=librispeech/3536-8226-0018	168016	d2f6907f36edadb0	10-129,209-1138
-family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-70 fixture=librispeech/3536-8226-0018	180800	b7d4cedfa222d0e2	10-1138
-family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-60 fixture=librispeech/3536-8226-0018	150400	ba094654ebdd3e66	200-1138
-family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-70 fixture=librispeech/3536-8226-0018	168105	785c8040e683c14f	10-129,209-1138
-family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-60 fixture=librispeech/6313-76958-0018	116893	7dbac1ca02be48cc	42-119,166-819
-family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-70 fixture=librispeech/6313-76958-0018	128000	d121d354b99ac1a9	20-819
-family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
-family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-70 fixture=librispeech/6313-76958-0018	116893	8648d6c7395ce940	42-119,166-819
-family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-60 fixture=librispeech/777-126732-0070	143382	9b4713ed9937bdff	10-199,205-729,738-919
-family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-70 fixture=librispeech/777-126732-0070	146295	853afce74dd9f13	5-919
-family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-60 fixture=librispeech/777-126732-0070	142677	3b24299b8dbfe561	20-729,738-919
-family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-70 fixture=librispeech/777-126732-0070	144782	703fa2a0e417ad57	10-199,205-919
+family=soft-before source=breathing/1-18631-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/1-18631-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/1-18631-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/1-18631-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/1-18631-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/1-18631-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/1-18631-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/1-18631-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/1-30709-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/1-30709-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/1-30709-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/1-30709-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/1-30709-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/1-30709-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/1-30709-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/1-30709-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/1-30709-B-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/1-30709-B-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/1-30709-B-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/1-30709-B-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/1-30709-B-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/1-30709-B-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/1-30709-B-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/1-30709-B-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/1-30709-C-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/1-30709-C-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/1-30709-C-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/1-30709-C-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/1-30709-C-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/1-30709-C-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/1-30709-C-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/1-30709-C-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/1-36393-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-20	112982	f850056e131645e1	205-729,738-919
+family=soft-before source=breathing/1-36393-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/1-36393-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-20	114382	a8d877ccb43f0e6e	205-919
+family=soft-before source=breathing/1-36393-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/1-36393-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-20	112982	f850056e131645e1	205-729,738-919
+family=soft-before source=breathing/1-36393-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/1-36393-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-20	114382	a8d877ccb43f0e6e	205-919
+family=soft-before source=breathing/1-36393-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/1-36397-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/1-36397-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/1-36397-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/1-36397-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/1-36397-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/1-36397-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/1-36397-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/1-36397-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/1-36400-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/1-36400-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/1-36400-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/1-36400-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/1-36400-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/1-36400-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/1-36400-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/1-36400-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/1-36402-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/1-36402-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/1-36402-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/1-36402-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/1-36402-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/1-36402-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/1-36402-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/1-36402-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/2-50774-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/2-50774-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/2-50774-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/2-50774-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/2-50774-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/2-50774-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/2-50774-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/2-50774-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/2-54961-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/2-54961-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/2-54961-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/2-54961-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/2-54961-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/2-54961-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/2-54961-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/2-54961-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/2-54962-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-20	112978	16794a3146d7708f	205-729,738-919
+family=soft-before source=breathing/2-54962-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/2-54962-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-20	114362	ed42af4d610805eb	205-919
+family=soft-before source=breathing/2-54962-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/2-54962-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-20	112978	16794a3146d7708f	205-729,738-919
+family=soft-before source=breathing/2-54962-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/2-54962-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-20	114362	ed42af4d610805eb	205-919
+family=soft-before source=breathing/2-54962-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/2-66205-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/2-66205-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69179	38ea8d48cb20847b	210-379,427-689
+family=soft-before source=breathing/2-66205-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/2-66205-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/2-66205-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/2-66205-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69179	38ea8d48cb20847b	210-379,427-689
+family=soft-before source=breathing/2-66205-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/2-66205-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/2-82455-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/2-82455-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/2-82455-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/2-82455-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/2-82455-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/2-82455-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/2-82455-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/2-82455-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/2-84965-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/2-84965-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/2-84965-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/2-84965-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/2-84965-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/2-84965-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/2-84965-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/2-84965-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/2-95567-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/2-95567-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/2-95567-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/2-95567-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/2-95567-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/2-95567-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/2-95567-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/2-95567-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/2-98392-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/2-98392-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/2-98392-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/2-98392-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/2-98392-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/2-98392-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/2-98392-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/2-98392-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/3-108160-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-20	112978	16794a3146d7708f	205-729,738-919
+family=soft-before source=breathing/3-108160-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/3-108160-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-20	114362	ed42af4d610805eb	205-919
+family=soft-before source=breathing/3-108160-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/3-108160-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-20	112978	16794a3146d7708f	205-729,738-919
+family=soft-before source=breathing/3-108160-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/3-108160-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-20	114362	ed42af4d610805eb	205-919
+family=soft-before source=breathing/3-108160-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/3-112557-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/3-112557-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/3-112557-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/3-112557-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/3-112557-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/3-112557-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69179	38ea8d48cb20847b	210-379,427-689
+family=soft-before source=breathing/3-112557-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/3-112557-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/3-112557-B-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/3-112557-B-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/3-112557-B-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/3-112557-B-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/3-112557-B-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/3-112557-B-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/3-112557-B-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/3-112557-B-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/3-144128-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/3-144128-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/3-144128-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/3-144128-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/3-144128-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/3-144128-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/3-144128-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/3-144128-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/3-144128-B-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/3-144128-B-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/3-144128-B-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/3-144128-B-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/3-144128-B-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/3-144128-B-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/3-144128-B-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/3-144128-B-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/3-151206-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/3-151206-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/3-151206-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/3-151206-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/3-151206-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/3-151206-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/3-151206-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/3-151206-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/3-166125-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-20	112982	f850056e131645e1	205-729,738-919
+family=soft-before source=breathing/3-166125-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/3-166125-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-20	114381	d57d68c99a1211ba	205-919
+family=soft-before source=breathing/3-166125-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/3-166125-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-20	112982	f850056e131645e1	205-729,738-919
+family=soft-before source=breathing/3-166125-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/3-166125-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-20	114382	a8d877ccb43f0e6e	205-919
+family=soft-before source=breathing/3-166125-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/3-166125-B-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/3-166125-B-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/3-166125-B-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/3-166125-B-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/3-166125-B-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/3-166125-B-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/3-166125-B-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/3-166125-B-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/4-171706-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/4-171706-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/4-171706-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/4-171706-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/4-171706-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/4-171706-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/4-171706-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/4-171706-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/4-176914-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/4-176914-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/4-176914-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/4-176914-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/4-176914-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/4-176914-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/4-176914-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/4-176914-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/4-198025-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/4-198025-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/4-198025-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/4-198025-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/4-198025-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/4-198025-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/4-198025-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/4-198025-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/4-205526-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/4-205526-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/4-205526-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/4-205526-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/4-205526-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/4-205526-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/4-205526-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/4-205526-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/4-205526-B-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-20	112978	16794a3146d7708f	205-729,738-919
+family=soft-before source=breathing/4-205526-B-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/4-205526-B-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-20	114362	ed42af4d610805eb	205-919
+family=soft-before source=breathing/4-205526-B-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/4-205526-B-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-20	112982	f850056e131645e1	205-729,738-919
+family=soft-before source=breathing/4-205526-B-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/4-205526-B-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-20	114381	d57d68c99a1211ba	205-919
+family=soft-before source=breathing/4-205526-B-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/4-207116-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/4-207116-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/4-207116-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/4-207116-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/4-207116-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/4-207116-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/4-207116-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/4-207116-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/4-210000-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/4-210000-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/4-210000-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/4-210000-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/4-210000-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/4-210000-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/4-210000-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/4-210000-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/4-210000-B-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/4-210000-B-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/4-210000-B-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/4-210000-B-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/4-210000-B-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/4-210000-B-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/4-210000-B-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/4-210000-B-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/5-213293-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/5-213293-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/5-213293-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/5-213293-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/5-213293-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/5-213293-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/5-213293-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/5-213293-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/5-232816-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/5-232816-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/5-232816-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/5-232816-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/5-232816-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/5-232816-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/5-232816-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/5-232816-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/5-233260-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-20	112978	16794a3146d7708f	205-729,738-919
+family=soft-before source=breathing/5-233260-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/5-233260-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-20	114362	ed42af4d610805eb	205-919
+family=soft-before source=breathing/5-233260-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/5-233260-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-20	112978	16794a3146d7708f	205-729,738-919
+family=soft-before source=breathing/5-233260-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/5-233260-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-20	114362	ed42af4d610805eb	205-919
+family=soft-before source=breathing/5-233260-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-40	112638	4877b8388d69723a	207-729,738-919
+family=soft-before source=breathing/5-234335-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/5-234335-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69178	1f7ebce1f7fe245f	210-379,427-689
+family=soft-before source=breathing/5-234335-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/5-234335-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/5-234335-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-20	102400	f2095b3780e6a149	200-839
+family=soft-before source=breathing/5-234335-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-40	69179	38ea8d48cb20847b	210-379,427-689
+family=soft-before source=breathing/5-234335-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-20	102400	8925edc6887f0832	200-839
+family=soft-before source=breathing/5-234335-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-40	93729	9f5e7b6b3083c7ed	204-789
+family=soft-before source=breathing/5-235593-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/5-235593-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/5-235593-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/5-235593-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/5-235593-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=breathing/5-235593-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=breathing/5-235593-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	115200	f943d4fcf4c1d6f7	210-929
+family=soft-before source=breathing/5-235593-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	107410	9e7d9c623f43c884	218-889
+family=soft-before source=breathing/5-238492-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/5-238492-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/5-238492-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/5-238492-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/5-238492-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	104000	d32eee9ae06b8ba3	220-859
+family=soft-before source=breathing/5-238492-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	83074	bad1f8cfd624239d	230-429,452-539,576-649,651-729,770-849
+family=soft-before source=breathing/5-238492-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	104000	5087b9134b43859a	220-859
+family=soft-before source=breathing/5-238492-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	103827	5712d0a7b99830ee	220-549,551-859
+family=soft-before source=breathing/5-260164-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/5-260164-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/5-260164-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/5-260164-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/5-260164-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	150400	ba094654ebdd3e66	200-1138
+family=soft-before source=breathing/5-260164-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=breathing/5-260164-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	150400	25766e0939f4c2f3	200-1138
+family=soft-before source=breathing/5-260164-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	137324	af95f51ae8a97d4e	210-659,664-789,807-1089
+family=soft-before source=breathing/5-261464-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/5-261464-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/5-261464-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/5-261464-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=breathing/5-261464-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/5-261464-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=breathing/5-261464-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/5-261464-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	96000	3c072e82aff702d7	220-819
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-20	145928	2ac361331783a52b	9-209,218-929
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-60 fixture=librispeech/251-137823-0018 level=-40	126208	a635170f9e1053c8	9-209,222-689,699-819
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-20	147564	c1adf872cad1f6d1	0-209,217-929
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-70 fixture=librispeech/251-137823-0018 level=-40	141010	4d1ea91ceceefc20	0-209,218-889
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-20	115200	c25aa2c83e8a1d5d	210-929
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-60 fixture=librispeech/251-137823-0018 level=-40	94509	eb1033da8e2c1966	220-689,699-819
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-20	146001	7fe79ad9c6a18c3c	9-209,217-929
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-70 fixture=librispeech/251-137823-0018 level=-40	139447	157ceb5341dd7d85	9-209,218-889
+family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-20	136000	cb24f71a88ac7125	20-859
+family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-60 fixture=librispeech/2803-154328-0011 level=-40	113619	23a8a650892c09f2	20-229,249-429,452-539,576-649,651-729,770-849
+family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-20	136212	fa14cac536258cfd	18-859
+family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-70 fixture=librispeech/2803-154328-0011 level=-40	136039	5c5b02d07ee33db1	18-549,551-859
+family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-20	134400	df2cf0744946ae2a	30-859
+family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-60 fixture=librispeech/2803-154328-0011 level=-40	115074	8a7c91cd9dad0320	30-429,452-539,576-649,651-729,770-849
+family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-20	136000	b1de4683a9aa071d	20-859
+family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-70 fixture=librispeech/2803-154328-0011 level=-40	135827	db288d3018633b11	20-549,551-859
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-20	177600	6309c819b7a3d801	30-1138
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-60 fixture=librispeech/3536-8226-0018 level=-40	46400	75f1c6ed875bb9d2	30-319
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-20	177875	d87b9da3a7826447	28-1138
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-70 fixture=librispeech/3536-8226-0018 level=-40	166399	bef74c604b3c0de5	28-659,664-789,807-1089
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-20	174400	2716ad7eda1ef217	50-1138
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-60 fixture=librispeech/3536-8226-0018 level=-40	0	cbf29ce484222325	-
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-20	177600	ca51a48f1c415dd7	30-1138
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-70 fixture=librispeech/3536-8226-0018 level=-40	166124	5a8c1ee83a1ac8d5	30-659,664-789,807-1089
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-20	117293	857348f08a4a8289	10-129,206-819
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-60 fixture=librispeech/6313-76958-0018 level=-40	53490	c7599178cfb0c1b1	10-129,209-319,366-469
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-20	129600	34449fa697161af0	10-819
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-70 fixture=librispeech/6313-76958-0018 level=-40	129600	194d5cf28160f64b	10-819
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-20	98093	32bf311b6ae10c38	206-819
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-60 fixture=librispeech/6313-76958-0018 level=-40	30925	bda93cabb1fe8fca	230-319,366-469
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-20	120427	92736104a4fd5506	10-129,187-819
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-70 fixture=librispeech/6313-76958-0018 level=-40	116972	3e68482fe082fd17	10-129,208-819
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-20	131570	b170d8fae5996339	42-119,166-729,738-919
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-60 fixture=librispeech/777-126732-0070 level=-40	12359	ed0ef05aeda6a881	42-119
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-20	144000	10fc901294c97bdf	20-919
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-70 fixture=librispeech/777-126732-0070 level=-40	142570	ee6e556b47ad78ce	20-729,738-919
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-20	118677	140d2be5b4a4e5ba	170-729,738-919
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-60 fixture=librispeech/777-126732-0070 level=-40	0	cbf29ce484222325	-
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-20	132893	8bd59469ba60dc1a	42-119,166-919
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-70 fixture=librispeech/777-126732-0070 level=-40	131463	a96fc17e274d04a3	42-119,166-729,738-919
+family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-20	132161	7c7c9768a5bf02ed	10-199,203-839
+family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-60 fixture=librispeech/2277-149896-0000 level=-40	99053	55a9544d5abbaaac	10-199,213-379,427-689
+family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-20	133495	b0f777d7d69c23da	5-839
+family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-70 fixture=librispeech/2277-149896-0000 level=-40	125495	548ae8258956e7ce	5-789
+family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-20	131200	b26c49210956240e	20-839
+family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-60 fixture=librispeech/2277-149896-0000 level=-40	99578	7d7d746ae6c548bf	20-379,427-689
+family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-20	132288	506bb29e849c949b	10-199,203-839
+family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-70 fixture=librispeech/2277-149896-0000 level=-40	124129	b8e5380a8e840452	10-199,204-789
 family=soft-room source=breathing/1-18631-A-23 db=-45 room=-60	0	cbf29ce484222325	-
 family=soft-room source=breathing/1-18631-A-23 db=-45 room=-70	0	cbf29ce484222325	-
 family=soft-room source=breathing/1-18631-A-23 db=-55 room=-60	0	cbf29ce484222325	-

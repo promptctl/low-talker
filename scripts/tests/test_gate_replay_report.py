@@ -22,7 +22,8 @@ MASTER = {
     "family=tap-after source=coughing/1-19111-A-24 room=-35": "0-999",
     # Breathing alone hands nothing; before a reader, only the reader's lead-in from 1.70 s.
     "family=soft-room source=breathing/1-18755-A-23 db=-55 room=-70": "-",
-    "family=soft-before source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a": "170-499",
+    "family=soft-before source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a level=-20": "170-499",
+    "family=soft-before source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a level=-40": "170-499",
 }
 
 
@@ -94,14 +95,14 @@ class ReportTests(unittest.TestCase):
         self.assertIn("source=coughing/1-19111-A-24 room=-35: let in 9.70 s, lost 0.00 s", result.stdout)
 
     def test_soft_sound_handed_alone_and_kept_before_a_reader_is_counted_beside_master(self):
-        alone, before = "family=soft-room source=breathing/1-18755-A-23 db=-55 room=-70", "family=soft-before source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a"
+        alone, before = "family=soft-room source=breathing/1-18755-A-23 db=-55 room=-70", "family=soft-before source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a level=-40"
         result = self.report(rows(MASTER), rows({**MASTER, alone: "20-60", before: "20-499"}, {alone: "beef", before: "beef"}))
         self.assertEqual(result.returncode, 0, result.stderr)
-        # One press of it alone hands a pass something, none on master; 1.80 s of the 2 s before
-        # the reader is kept, 0.30 s on master.
-        self.assertRegex(result.stdout, r"breathing\s+-55\s+-70\s+1\s+1\s+0\s+1.80 s\s+0.30 s")
+        # One press of it alone hands a pass something, none on master; before the reader 20 dB
+        # down 0.30 s of the 2 s is kept as on master, and before the one 40 dB down 1.80 s.
+        self.assertRegex(result.stdout, r"breathing\s+-55\s+-70\s+1\s+1\s+0\s+0.30 s\s+0.30 s\s+1.80 s\s+0.30 s")
         self.assertIn("alone, changed: 1\n    source=breathing/1-18755-A-23 db=-55 room=-70: let in 0.41 s, lost 0.00 s", result.stdout)
-        self.assertIn("before a reader, changed: 1\n    source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a: let in 1.50 s", result.stdout)
+        self.assertIn("before a reader, changed: 1\n    source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a level=-40: let in 1.50 s", result.stdout)
 
     def test_files_holding_different_cases_are_no_comparison(self):
         case = "family=tap fixture=say/yes room=-35"

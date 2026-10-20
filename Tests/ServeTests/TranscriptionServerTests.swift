@@ -117,7 +117,7 @@ import TestProbes
         #expect(event.unreadPasses == 2 && event.latestUnreadPass == "WhisperKit returned a segment of 7 characters without word timings")
     }
 
-    /// An upload no sample of which reached the audible floor, a push-to-talk hold where
+    /// An upload the engine heard nothing spoken in, a push-to-talk hold where
     /// nothing was said, is answered as OpenAI answers one: 200 with empty text, in either
     /// format, never 500 (low-serve-7t8). Its event carries the peak that decided it.
     @Test(arguments: [
@@ -128,7 +128,7 @@ import TestProbes
     func anUploadWithNothingSpokenIsEmptyText(format: String, answer: Data) async throws {
         let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))))
         defer { running.server.stop() }
-        // 0.0025, about -52 dBFS: a quiet room's hold, under the -40 dBFS floor.
+        // 0.0025, about -52 dBFS: a quiet room's hold, under the speaker's level the stub hears words at.
         let (response, body) = try await running.post([
             ("model", nil, Data("m".utf8)), ("response_format", nil, Data(format.utf8)), ("file", "audio.wav", wav(seconds: 2.5, peak: 0.0025)),
         ])

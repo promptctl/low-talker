@@ -21,7 +21,7 @@ Seven reports, each against the baseline:
   cases whose handed samples changed;
 - soft sound with no speaker in front of it, talk across the room or breathing under the
   floor: the presses of it alone that hand a pass anything, and the windows of its 2 s
-  before a soft reader that are handed, the tree's beside master's.
+  before a reader 20 and 40 dB down that are handed, the tree's beside master's.
 
 Two files that do not hold the same cases, or hold one twice, are no comparison, and the
 report stops naming them. Differences are the report, not a failure: it exits 0 whatever it finds.
@@ -161,13 +161,15 @@ def tap_after(baseline, measured):
 
 def soft(baseline, measured):
     """Per source kind, level and room: soft-room presses handing a pass anything, and the
-    windows of the 2 s before the reader that soft-before hands, in the tree and on master."""
+    windows of the 2 s before the reader that soft-before hands at each reader level, in the
+    tree and on master."""
     before = int(2 / WINDOW)
+    levels = (-20, -40)
 
     def kept(rows, case):
         return sum(1 for window in rows[case]["windows"] if window < before)
 
-    groups = defaultdict(lambda: [0, 0, 0, 0, 0])
+    groups = defaultdict(lambda: [0] * (3 + 2 * len(levels)))
     for name in ("soft-room", "soft-before"):
         for case, row in family(measured, name).items():
             fields = row["fields"]
@@ -177,12 +179,15 @@ def soft(baseline, measured):
                 group[1] += bool(row["windows"])
                 group[2] += bool(baseline[case]["windows"])
             else:
-                group[3] += kept(measured, case)
-                group[4] += kept(baseline, case)
-    lines = ["soft sound with no speaker in front of it",
-             f"  {'source':<10} {'dB':>4} {'room':>5} {'presses':>8} {'handing':>8} {'master':>7}   {'kept before a reader':>20} {'master':>8}"]
-    for (source, db, room), (count, handing, was, kept_now, kept_was) in sorted(groups.items(), key=lambda item: (item[0][0], -item[0][1], -item[0][2])):
-        lines.append(f"  {source:<10} {db:>4} {room:>5} {count:>8} {handing:>8} {was:>7}   {seconds(kept_now):>20} {seconds(kept_was):>8}")
+                at = 3 + 2 * levels.index(int(fields["level"]))
+                group[at] += kept(measured, case)
+                group[at + 1] += kept(baseline, case)
+    lines = ["soft sound with no speaker in front of it, and what of its 2 s is kept before a reader at each level",
+             f"  {'source':<10} {'dB':>4} {'room':>5} {'presses':>8} {'handing':>8} {'master':>7}"
+             + "".join(f"   {f'kept, {level} dB':>14} {'master':>8}" for level in levels)]
+    for (source, db, room), (count, handing, was, *kept_by_level) in sorted(groups.items(), key=lambda item: (item[0][0], -item[0][1], -item[0][2])):
+        lines.append(f"  {source:<10} {db:>4} {room:>5} {count:>8} {handing:>8} {was:>7}"
+                     + "".join(f"   {seconds(now):>14} {seconds(was):>8}" for now, was in zip(kept_by_level[::2], kept_by_level[1::2])))
     return (lines + listed(changes(baseline, family(measured, "soft-room")), "alone, changed")
             + listed(changes(baseline, family(measured, "soft-before")), "before a reader, changed"))
 

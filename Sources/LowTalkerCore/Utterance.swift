@@ -211,16 +211,17 @@ actor Utterance {
         // loudest sounds. Digital silence stands within range of nothing, not even itself.
         let withinRange = peak * Self.dynamicRange > loudest
         // Once a speaker is heard, a clip sounds when it stands clear of the room. Before one is,
-        // the room is no test, since a soft speaker who opens the press is their own room, and a
-        // clip sounds when the discriminator calls it speech: breathing, a fan or a clap's tail
-        // stands clear of a quiet room as a whisper does, and Whisper reads " Thank you." into it.
-        let called = speaker ? peak >= roomGate : verdict == .speech
+        // whether it sounds is the discriminator's call, not the room's, since a soft speaker who
+        // opens the press is their own room: breathing, a fan or a clap's tail stands clear of a
+        // quiet room as a whisper does, and Whisper reads " Thank you." into it.
+        let clear = peak >= roomGate
+        let called = speaker ? clear : verdict == .speech
         let sounds = withinRange && called
-        // [LAW:nothing-unseen] What the room, and before a speaker the discriminator, refused
-        // that the range alone would have kept.
+        // [LAW:nothing-unseen] What the room refused that the range alone would have kept, and
+        // before a speaker, what the discriminator refused that the room alone would have.
         timeline.heard(
-            reading, refusedAsRoom: withinRange && !called && speaker ? clip.samples.count : 0,
-            refusedAsNotSpeech: withinRange && !called && !speaker ? clip.samples.count : 0
+            reading, refusedAsRoom: withinRange && speaker && !clear ? clip.samples.count : 0,
+            refusedAsNotSpeech: withinRange && !speaker && clear && verdict != .speech ? clip.samples.count : 0
         )
         let louder = sounds && peak > loudestSpeech && verdict == .other ? peak : nil
         // The room still sets how loud a run must sound to hold a syllable, before a speaker as
@@ -379,7 +380,8 @@ struct Timeline: Sendable {
     private var room: Float?
     /// Samples within range of the loudest that stood too near the room to be speech.
     private var refusedAsRoom = 0
-    /// Samples within range of the loudest, before any speaker, that the discriminator called no speech.
+    /// Samples within range of the loudest and clear of the room, before any speaker, that the
+    /// discriminator called no speech.
     private var refusedAsNotSpeech = 0
     /// The bursts refused as too brief to be speech.
     private var transients = Transients.none
