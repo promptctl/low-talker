@@ -1420,9 +1420,9 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.state == HoldState(held: .unaccounted(part("a b", "\(notYetTaken)"))))
     }
 
-    /// Bringing dismissed words back while a press is open is let go, since the press's
+    /// Words asked back while a press is down come back once it is inserted, since the press's
     /// inserts would carry them amid its own words.
-    @Test func bringingBackDuringAPressIsLetGo() async throws {
+    @Test func bringingBackDuringAPressWaitsForItsKeyUp() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         rig.hold()
@@ -1434,8 +1434,9 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.speak([4])
         rig.keyUp()
         _ = try await rig.session()
+        try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted == [" b"])
-        #expect(rig.hold.state == HoldState(dismissed: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)"))))
+        #expect(rig.hold.state == HoldState(held: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)"))))
     }
 
     /// Words asked back once a press's key is up come back after its key-up insert, which

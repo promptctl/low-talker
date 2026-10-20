@@ -100,14 +100,9 @@ public enum Held: Sendable, Equatable {
         }
     }
 
-    /// What is left once an insert carrying `carried` landed. The words at no cursor end with
-    /// them, since words brought back while it was on its way go ahead of them.
-    func placing(_ carried: Part) -> Held? {
-        guard case .unplaced(let unplaced, let unaccounted) = self, unplaced.words.words.suffix(carried.words.words.count).elementsEqual(carried.words.words) else {
-            preconditionFailure("the words an insert carried are not the last of the words at no cursor")
-        }
-        let rest = Transcript(words: Array(unplaced.words.words.dropLast(carried.words.words.count)))
-        return Held(unplaced: Part(words: rest, warning: unplaced.warning), unaccounted: unaccounted)
+    /// What is left once an insert carrying the words at no cursor landed.
+    var placed: Held? {
+        Held(unplaced: nil, unaccounted: standing)
     }
 
     /// Every word held, as words that may have landed, for the reason `warning` gives.
@@ -216,13 +211,13 @@ public final class Hold {
     public var held: Held? { state.held }
     public var dismissed: Held? { state.dismissed }
 
-    /// The held words an insert on its way carries, and where they are now. The loop makes one
-    /// insert at a time and changes nothing else while it is on its way, so only the person moves
-    /// them: a dismissal takes them with what is held, and bringing that back returns them.
+    /// Where the held words an insert on its way carries are now. The loop makes one insert at
+    /// a time, changes nothing else while it is on its way, and brings words back in its turn
+    /// behind it, so only a dismissal moves them, taking them with what is held.
     /// [LAW:no-ambient-temporal-coupling] Its answer settles these words wherever they are.
     private enum Carried {
-        case held(Held.Part)
-        case dismissed(Held.Part)
+        case held
+        case dismissed
     }
 
     private var carried: Carried?
@@ -293,27 +288,25 @@ public final class Hold {
         guard let held else { return }
         standingGeneration += 1
         let carrying: Carried? = switch carried {
-        case .held(let words)?: .dismissed(words)
+        case .held?: .dismissed
         case .dismissed?, nil: nil
         }
         move(to: HoldState(held: nil, dismissed: held), carrying: carrying)
     }
 
     /// The person brought back the words they dismissed last, ahead of any held since, since
-    /// they were said first.
+    /// they were said first. In the loop's turn, so no insert is on its way to settle words
+    /// these join.
     func bringBack() {
         guard let dismissed else { return }
+        precondition(carried == nil, "dismissed words were brought back while an insert was on its way")
         standingGeneration += 1
-        let carrying: Carried? = switch carried {
-        case .held(let words)?, .dismissed(let words)?: .held(words)
-        case nil: nil
-        }
-        move(to: HoldState(held: held.map { $0.after(dismissed) } ?? dismissed, dismissed: nil), carrying: carrying)
+        move(to: HoldState(held: held.map { $0.after(dismissed) } ?? dismissed, dismissed: nil), carrying: nil)
     }
 
     /// What an insert made now carries: what is held, then `words`.
     func sending(_ words: Transcript) -> Transcript {
-        move(to: state, carrying: held?.offered.map(Carried.held))
+        move(to: state, carrying: held?.offered.map { _ in .held })
         return offering(words)
     }
 
@@ -326,8 +319,8 @@ public final class Hold {
     func landed() {
         let next = switch carried {
         case nil: state
-        case .held(let words)?: HoldState(held: held?.placing(words), dismissed: dismissed)
-        case .dismissed(let words)?: HoldState(held: held, dismissed: dismissed?.placing(words))
+        case .held?: HoldState(held: held?.placed, dismissed: dismissed)
+        case .dismissed?: HoldState(held: held, dismissed: dismissed?.placed)
         }
         move(to: next, carrying: nil)
     }
