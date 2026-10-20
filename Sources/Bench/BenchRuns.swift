@@ -7,6 +7,14 @@ public enum BenchEnding: Hashable, Sendable {
     case finished
     case stopped(BenchStop)
     case failed(String)
+
+    /// How a run ended whose work failed with `failure`, or did not, and which a press was
+    /// heard during, or the person cancelled. A failure is said first, since nothing else says
+    /// it; then a press, whose rows were measured beside it whether or not the stop reached
+    /// them; then the cancel.
+    public init(failure: String?, yielded: Bool, cancelled: Bool) {
+        self = if let failure { .failed(failure) } else if yielded { .stopped(.forPress) } else if cancelled { .stopped(.cancelled) } else { .finished }
+    }
 }
 
 /// Why a run was stopped before it finished.
@@ -69,7 +77,7 @@ public final class BenchRuns {
         rows = 0
         cancelled = false
         let task = Task { [log] in
-            let outcome: BenchEnding
+            let failure: String?
             do {
                 try await work { event in
                     await MainActor.run {
@@ -82,17 +90,16 @@ public final class BenchRuns {
                         events(event)
                     }
                 }
-                outcome = .finished
+                failure = nil
             } catch {
-                outcome = .failed("\(error)")
+                // A load or a decode cancelled midway throws its own error, not
+                // CancellationError, so one thrown once the run was told to stop is the stop's.
+                failure = Task.isCancelled ? nil : "\(error)"
             }
+            // The release, not the stop, says a press was heard, so a yield still on its way
+            // here is not missed.
             let displaced = hold.release()
-            // Why the run was stopped is what is said, ahead of what its work did: a load or a
-            // decode cancelled midway throws its own error, not CancellationError, and work
-            // told to stop during its last hold finishes anyway, its rows measured beside the
-            // press. The release, not the stop, says a press was heard, so a yield still on its
-            // way here is not missed.
-            let ending: BenchEnding = displaced.yielded ? .stopped(.forPress) : cancelled ? .stopped(.cancelled) : outcome
+            let ending = BenchEnding(failure: failure, yielded: displaced.yielded, cancelled: cancelled)
             log("bench: \(Self.describe(ending, rows: rows)); \(displaced)")
             current = nil
             ended(ending)

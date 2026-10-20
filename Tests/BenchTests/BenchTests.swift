@@ -215,6 +215,15 @@ private final class Picked: Sendable {
         #expect(await !runs.isRunning)
     }
 
+    /// A run's own failure is what its ending says, whatever stopped it; with none, a press
+    /// heard during it comes before the person's cancel.
+    @Test func aRunsFailureIsSaidAheadOfThePressOrTheCancel() {
+        #expect(BenchEnding(failure: "a weight file is truncated", yielded: true, cancelled: true) == .failed("a weight file is truncated"))
+        #expect(BenchEnding(failure: nil, yielded: true, cancelled: true) == .stopped(.forPress))
+        #expect(BenchEnding(failure: nil, yielded: false, cancelled: true) == .stopped(.cancelled))
+        #expect(BenchEnding(failure: nil, yielded: false, cancelled: false) == .finished)
+    }
+
     /// Work that finishes after a press was heard during it, before the stop reached it, still
     /// ends saying a dictation stopped it, since what it measured last was measured beside one.
     @Test func aRunWhoseWorkFinishesAfterAPressWasHeardSaysADictationStoppedIt() async throws {
