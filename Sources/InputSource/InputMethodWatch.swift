@@ -8,22 +8,50 @@ import Insertion
 /// the process that said it: a loop rebuilt makes a new supervisor, whose first word is the
 /// same running process again, and that process is still of the build it said.
 public struct InputMethodWatch: Sendable {
+    private let app: Build
     private var process: InputMethodSupervisor.Event?
     private var arrival: CursorArrival?
+    /// The standing last shown, so the log says each one once.
+    private var shown: InputMethodStanding?
 
-    public init() {}
+    /// A standing to show, and whether it is one the log has not said yet.
+    public struct Showing: Equatable, Sendable {
+        public let standing: InputMethodStanding
+        public let isNew: Bool
+    }
 
-    public mutating func told(_ event: InputMethodSupervisor.Event) { process = event }
+    /// Watching for an app of `app`.
+    public init(app: Build) { self.app = app }
+
+    /// Every word of the supervisor's is shown, since the line may stand on what a rebuild put
+    /// up while it set the input method up.
+    public mutating func told(_ event: InputMethodSupervisor.Event) -> Showing {
+        process = event
+        return show(Self.standing(of: event, said: arrival, by: app))
+    }
 
     /// Kept whichever process told it, so an arrival heard before the supervisor says that
-    /// process is running counts once it does.
-    public mutating func arrived(_ arrival: CursorArrival) { self.arrival = arrival }
+    /// process is running counts once it does. Shown only when it moved the standing, so an
+    /// arrival in each app the person moves to leaves whatever else the line says, a
+    /// microphone that would not start included.
+    public mutating func arrived(_ arrival: CursorArrival) -> Showing? {
+        self.arrival = arrival
+        guard let standing, standing != shown else { return nil }
+        return show(standing)
+    }
 
-    /// Where the input method stands for an app of `app`, or nil while the supervisor has said
-    /// nothing.
-    public func standing(for app: Build) -> InputMethodStanding? {
+    /// Where the input method stands, or nil while the supervisor has said nothing.
+    public var standing: InputMethodStanding? {
+        process.map { Self.standing(of: $0, said: arrival, by: app) }
+    }
+
+    private mutating func show(_ standing: InputMethodStanding) -> Showing {
+        defer { shown = standing }
+        return Showing(standing: standing, isNew: standing != shown)
+    }
+
+    private static func standing(of process: InputMethodSupervisor.Event, said arrival: CursorArrival?, by app: Build) -> InputMethodStanding {
         switch process {
-        case nil: return nil
         case .running(let pid, _):
             guard let arrival, arrival.pid == pid else { return .running(pid: pid, build: .notYetSaid) }
             return BuildMismatch(app: app, inputMethod: arrival.build).map { .otherBuild(pid: pid, $0) }

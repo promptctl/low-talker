@@ -107,10 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The input method's process and the build it last said, which together are the one
     /// source of what the status line says of it. [LAW:one-source-of-truth]
-    private var inputMethod = InputMethodWatch()
-    /// The standing last said, so the log says each one once and an arrival that leaves it as
-    /// it was leaves the line alone.
-    private var loggedStanding: InputMethodStanding?
+    private lazy var inputMethod = InputMethodWatch(app: build)
 
     private func showHotkeyStatus(_ status: HotkeyStatus) {
         hotkeyStatus = status
@@ -337,10 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Result { () throws(PortNotHosted) in
                 try InputMethodNotices(
                     cursorArrived: { [unowned self] arrival in
-                        inputMethod.arrived(arrival)
-                        // Only an arrival that moved the standing touches the line, so one in
-                        // each app the person moves to leaves whatever else it says.
-                        if inputMethod.standing(for: build) != loggedStanding { showInputMethod() }
+                        inputMethod.arrived(arrival).map(showInputMethod)
                         listening?.dictation.cursorArrived()
                     },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
@@ -369,21 +363,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The input method's process as the notices keep it.
     private func show(_ event: InputMethodSupervisor.Event) {
         log.notice("input method: \(event, privacy: .public)")
-        inputMethod.told(event)
-        showInputMethod()
+        showInputMethod(inputMethod.told(event))
     }
 
     /// The line says how to press only while an input method that can type the words is
     /// running: one of this app's build, or one that has not said its build yet, whose
-    /// greeting the inserter checks before any words go.
-    ///
-    /// The standing goes to the log once, when it changes. The line is written over whatever
-    /// stands there, the one a rebuild put up while it set the input method up included.
-    private func showInputMethod() {
-        guard let standing = inputMethod.standing(for: build) else { return }
-        if standing != loggedStanding { log.notice("input method: \(standing, privacy: .public)") }
-        loggedStanding = standing
-        let status: HotkeyStatus = switch standing {
+    /// greeting the inserter checks before any words go. `InputMethodWatch` decides when the
+    /// line is written and when the log hears it.
+    private func showInputMethod(_ showing: InputMethodWatch.Showing) {
+        if showing.isNew { log.notice("input method: \(showing.standing, privacy: .public)") }
+        let status: HotkeyStatus = switch showing.standing {
         case .running: .listening(listeningStatus)
         case .otherBuild(_, let mismatch): .off("\(mismatch.facts); \(BuildMismatch.fix)")
         case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
