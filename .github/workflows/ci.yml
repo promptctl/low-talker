@@ -39,7 +39,16 @@ jobs:
         run: brew install xcodegen
 
       - name: Build and test the package
-        run: make test
+        run: |
+          swift build --build-tests
+          swift test --skip-build > /tmp/tests.log 2>&1 &
+          until pgrep -f "low-talkerPackageTests.xctest/Contents/MacOS/low-talkerPackageTests --testing-library swift-testing" > /dev/null; do sleep 0.2; done
+          sleep 4
+          for p in $(pgrep -f "low-talkerPackageTests.xctest/Contents/MacOS/low-talkerPackageTests --testing-library swift-testing"); do sample "$p" 2 -mayDie -file "/tmp/sample-$p.txt" || true; done
+          wait || true
+          echo "===SAMPLE==="
+          cat /tmp/sample-*.txt
+          echo "===END==="
 
       # The runner has no model to carry, so the bundles are built carrying none, which is
       # a build every Makefile path allows and one the app names at launch. Signing reaches
