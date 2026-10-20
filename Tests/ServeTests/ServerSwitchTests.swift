@@ -33,7 +33,7 @@ import Testing
 
     @Test func offUntilChosenAndBindsNothing() async throws {
         let server = aSwitch()
-        server.resume(at: .success(.loopback))
+        server.resume(at: { .loopback })
         #expect(!server.chosen)
         #expect("\(server.state)" == "off")
         #expect(server.running == nil)
@@ -43,8 +43,8 @@ import Testing
     /// model itself.
     @Test func chosenItListensAndAnswersWithTheEngineItIsHanded() async throws {
         let server = aSwitch()
-        defer { server.choose(false, at: .success(.loopback)) }
-        server.choose(true, at: .success(.loopback))
+        defer { server.choose(false, at: { .loopback }) }
+        server.choose(true, at: { .loopback })
         let running = try await listening(server)
         let upload: [(name: String, filename: String?, value: Data)] = [
             ("model", nil, Data("m".utf8)), ("response_format", nil, Data("text".utf8)), ("file", "audio.mp3", try fixture("hello-16k-mono.mp3")),
@@ -60,9 +60,9 @@ import Testing
     /// Switched off, the port is let go and the choice is remembered as off.
     @Test func switchedOffItLetsThePortGo() async throws {
         let server = aSwitch()
-        server.choose(true, at: .success(.loopback))
+        server.choose(true, at: { .loopback })
         let port = try await listening(server).server.port
-        server.choose(false, at: .success(.loopback))
+        server.choose(false, at: { .loopback })
         await server.running?.value
         #expect("\(server.state)" == "off")
         #expect(!aSwitch().chosen)
@@ -73,10 +73,10 @@ import Testing
     /// The choice outlives the switch, as it outlives the app: another switch over the same
     /// defaults resumes listening.
     @Test func theChoiceIsKept() async throws {
-        aSwitch().choose(true, at: .failure(.noModes))
+        aSwitch().choose(true, at: { throw ConfigError.noModes })
         let resumed = aSwitch()
-        defer { resumed.choose(false, at: .success(.loopback)) }
-        resumed.resume(at: .success(.loopback))
+        defer { resumed.choose(false, at: { .loopback }) }
+        resumed.resume(at: { .loopback })
         _ = try await listening(resumed)
     }
 
@@ -87,16 +87,16 @@ import Testing
     /// `allowLocalEndpointReuse` false.
     @Test(.timeLimit(.minutes(1))) func aRestartListensAgainOnTheSamePort() async throws {
         let server = aSwitch()
-        defer { server.choose(false, at: .success(.loopback)) }
+        defer { server.choose(false, at: { .loopback }) }
         server.answer(with: .ready(Stub()))
-        server.choose(true, at: .success(.loopback))
+        server.choose(true, at: { .loopback })
         let running = try await listening(server)
         // Answered with `connection: close`, so the server's side closes first.
         _ = try await running.post(Data())
         var client = Client(running)
         defer { client.task.cancel(with: .normalClosure, reason: nil) }
         try await client.wait(for: "session.created")
-        server.resume(at: .success(.loopback))
+        server.resume(at: { .loopback })
         #expect(try await listening(server).server.port == running.server.port)
         try await client.send(["type": "session.update", "session": [:] as [String: Any]])
         try await client.wait(for: "session.updated")
@@ -106,8 +106,8 @@ import Testing
     /// rather than being left up behind a switch that reads off.
     @Test func switchedOffWhileStartingNothingIsLeftListening() async throws {
         let server = aSwitch()
-        server.choose(true, at: .success(.loopback))
-        server.choose(false, at: .success(.loopback))
+        server.choose(true, at: { .loopback })
+        server.choose(false, at: { .loopback })
         await server.running?.value
         #expect("\(server.state)" == "off")
         let again = try await TranscriptionServer.listen(at: ListenAddress(port: held.port.withLock { $0 }), engine: { .ready(Stub()) }, record: { _ in })
@@ -120,14 +120,14 @@ import Testing
         // TEST-NET-1, which no interface of any Mac holds.
         let unheld = ServeBinding.interface(try InterfaceAddress("192.0.2.1"), token: try BearerToken("sk-test-token"))
         let server = aSwitch()
-        defer { server.choose(false, at: .success(.loopback)) }
-        server.choose(true, at: .success(unheld))
+        defer { server.choose(false, at: { .loopback }) }
+        server.choose(true, at: { unheld })
         try await Task.sleep(for: .milliseconds(200))
         #expect("\(server.state)" == "starting")
-        server.choose(false, at: .success(unheld))
+        server.choose(false, at: { unheld })
         await server.running?.value
         #expect("\(server.state)" == "off")
-        server.choose(true, at: .success(.loopback))
+        server.choose(true, at: { .loopback })
         _ = try await listening(server)
     }
 
@@ -138,15 +138,36 @@ import Testing
         defer { holder.stop() }
         held.port.withLock { $0 = holder.port }
         let taken = aSwitch()
-        taken.choose(true, at: .success(.loopback))
+        taken.choose(true, at: { .loopback })
         await taken.running?.value
         #expect("\(taken.state)".hasPrefix("stopped — LowTalker cannot serve on 127.0.0.1:\(holder.port): "))
         #expect(taken.chosen)
 
         let unread = aSwitch()
-        unread.choose(true, at: .failure(.noModes))
+        unread.choose(true, at: { throw ConfigError.noModes })
         await unread.running?.value
         #expect("\(unread.state)" == "stopped — the config cannot be read: \(ConfigError.noModes)")
+
+        let untold = aSwitch()
+        untold.choose(true, at: { throw PromptsUnavailable(why: "no tokenizer.json") })
+        await untold.running?.value
+        #expect("\(untold.state)" == "stopped — \(PromptsUnavailable(why: "no tokenizer.json"))")
+    }
+
+    /// A binding the app has yet to read leaves the switch starting, not off, and it listens
+    /// once the binding is read.
+    @Test func aBindingStillBeingReadReadsStarting() async throws {
+        let (read, reading) = AsyncStream<ServeBinding>.makeStream()
+        let server = aSwitch()
+        defer { server.choose(false, at: { .loopback }) }
+        server.choose(true, at: {
+            for await binding in read { return binding }
+            throw CancellationError()
+        })
+        try await Task.sleep(for: .milliseconds(200))
+        #expect("\(server.state)" == "starting")
+        reading.yield(.loopback)
+        _ = try await listening(server)
     }
 
     /// Waits until the switch reads listening, and returns its server.

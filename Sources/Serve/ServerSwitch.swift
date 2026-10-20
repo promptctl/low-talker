@@ -18,8 +18,8 @@ public final class ServerSwitch {
         /// Asked to listen, and not listening yet.
         case starting
         case listening(TranscriptionServer)
-        /// Asked to listen and not listening, and why: the address refused, the config could
-        /// not be read, or the listener failed after it was up.
+        /// Asked to listen and not listening, and why: the address refused, no binding could
+        /// be read, or the listener failed after it was up.
         case stopped(String)
 
         public var description: String {
@@ -84,7 +84,7 @@ public final class ServerSwitch {
     }
 
     /// Records the person's choice and brings the server into line with it.
-    public func choose(_ on: Bool, at binding: Result<ServeBinding, ConfigError>) {
+    public func choose(_ on: Bool, at binding: @escaping @MainActor () async throws -> ServeBinding) {
         defaults.set(on, forKey: Self.choiceKey)
         resume(at: binding)
     }
@@ -92,9 +92,12 @@ public final class ServerSwitch {
     /// Brings the server into line with the choice already made: at launch, what the person
     /// last chose.
     ///
+    /// `binding` is awaited once the attempt is `starting`, so a binding the app has yet to
+    /// read reads as starting, and one it could not read as stopped with why.
+    ///
     /// [LAW:dataflow-not-control-flow] Every call takes down what is there and then listens
     /// if the choice says to, so a second call is a restart and never a second listener.
-    public func resume(at binding: Result<ServeBinding, ConfigError>) {
+    public func resume(at binding: @escaping @MainActor () async throws -> ServeBinding) {
         stop()
         guard chosen else { return }
         attempts += 1
@@ -106,9 +109,9 @@ public final class ServerSwitch {
             await before?.value
             let server: TranscriptionServer
             do {
-                server = try await listen(try binding.get(), { resident.engine.withLock { $0 } })
+                server = try await listen(try await binding(), { resident.engine.withLock { $0 } })
             } catch {
-                // A config that cannot be read names no address, so the server says why it
+                // A binding that cannot be read names no address, so the server says why it
                 // has none rather than guessing loopback. [LAW:no-silent-failure]
                 settle(attempt, as: .stopped(error is ConfigError ? "the config cannot be read: \(error)" : "\(error)"))
                 return

@@ -150,8 +150,9 @@ private struct ModeEntry: Decodable {
     /// [LAW:one-source-of-truth] A mode the file gives no chord listens for the default
     /// one, which is the chord `Config.default` names.
     ///
-    /// [LAW:parse-dont-validate] An entry becomes a Mode only once the engine can be told
-    /// its vocabulary, so no press ever begins in a mode whose every press would fail.
+    /// An entry becomes a Mode only once the engine can be told its vocabulary, so no press
+    /// ever begins in a mode whose every press would fail. [LAW:single-enforcer] The check is
+    /// `PromptEncoder`'s, the one the engine makes again at each press.
     func mode(prompting: PromptEncoder) throws(ConfigError) -> Mode {
         let mode = Mode(name: name, chord: chord ?? Hotkey.defaultChord, vocabulary: Vocabulary(vocabulary ?? []))
         do throws(VocabularyError) { _ = try prompting.prompt(for: mode.vocabulary) } catch { throw .vocabulary(mode: mode.name, error) }

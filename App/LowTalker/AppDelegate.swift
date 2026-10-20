@@ -169,8 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - the loop
 
-    /// The config this app runs on, read the first time it is asked for and again at every
-    /// save: what the microphone does at rest, the modes the hotkey listens for and where
+    /// The config this app runs on, read once at launch and again at every save: what the microphone does at rest, the modes the hotkey listens for and where
     /// the server listens, from one reading, so none of them comes from a different version
     /// of the file. The menu's names for the chords read it too, so what the menu says to
     /// hold is what is heard. Only `follow` changes it once it is read. [LAW:one-source-of-truth]
@@ -222,6 +221,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     private let configLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "config")
 
+    /// The config as it stands once the launch reading has ended. Awaited, never assumed: a
+    /// come-up the menu or the setup starts at launch, and a server switched on then, wait
+    /// here for the reading. [LAW:no-ambient-temporal-coupling] What they then run on is the
+    /// config as it stands, which a save may have moved past the launch reading.
+    private func readConfig() async throws -> Config {
+        _ = try await reading.value.get()
+        guard let config else { preconditionFailure("the launch reading sets the running config before it ends") }
+        return try config.get()
+    }
+
+    /// Where the server listens, from `readConfig`, so a tokenizer that did not load stops a
+    /// chosen server with that reason rather than leaving it off. [LAW:no-silent-failure]
+    private func serveBinding() async throws -> ServeBinding {
+        try await readConfig().serve
+    }
+
     /// Takes up a save of the config file: each setting whose value changed is moved to the
     /// new value, and the rest are left alone. A save the file refused leaves every one where
     /// it was, and the menu says why. [LAW:no-silent-failure]
@@ -238,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // that config, `.kept`, so it arrives below and moves nothing.
         guard let was, case .success(let now) = next.config else {
             configLog.notice("config: \(next, privacy: .public)")
-            serving?.resume(at: next.config.map(\.serve))
+            serving?.resume(at: serveBinding)
             lifecycle.comeUp()
             return
         }
@@ -256,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 capture.rest(as: now.microphone)
                 return "microphone \(capture.doing)"
             case .serve:
-                serving?.resume(at: next.config.map(\.serve))
+                serving?.resume(at: serveBinding)
                 return "server binding"
             }
         }
@@ -534,8 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Only in the menu of a build that has a server to switch.
     @objc private func toggleServing() {
-        guard let config else { preconditionFailure("the switch is in the menu only once the config is read") }
-        serving.map { $0.choose(!$0.chosen, at: config.map(\.serve)) }
+        serving.map { $0.choose(!$0.chosen, at: serveBinding) }
     }
 
     /// Opens the app at login, or stops it. An item switched off in System Settings can be
@@ -684,16 +698,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // What the last run held is shown from launch, not from the first loop, which waits on
         // the microphone grant. [LAW:nothing-unseen] So is a store that could not be read.
         hold.unrestored.map { sessions.fault("held words: \($0, privacy: .public)") }
+        // Listening from launch when the person last chose to, answering 503 until the model
+        // is resident, so a client started beside the app is told to wait rather than refused.
+        // Its binding, like the come-up's first step, awaits the config's reading, so both
+        // start now.
+        serving?.resume(at: serveBinding)
         showHotkeyStatus(.starting(step: nil))
-        // The come-up's first step awaits the config's reading, so the loop starts now.
         Task { await listen() }
-        // Once the config is read: listening when the person last chose to, answering 503
-        // until the model is resident, so a client started beside the app is told to wait
-        // rather than refused; and then following saves, each a reload of the config the
-        // server and the loop started on. One task, so a quit's cancel stops all of it.
+        // Once the config is read, each save is a reload of the config the server and the
+        // loop started on.
         reloading = Task {
             guard case .success(let prompts) = await prompting.value, case .success(let read) = await reading.value, !Task.isCancelled else { return }
-            serving?.resume(at: read.config.map(\.serve))
             for await next in RunningConfig.reloads(after: read, prompting: prompts) { follow(next) }
         }
     }
@@ -733,13 +748,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // what came up short was the hotkey or the input method, which the rebuild redoes.
             // Restarting it would close and reopen an engine the resting mode holds open.
             guard capture.atRest == nil else { return .running }
+            // Read before the grant, so a tokenizer that did not load is the status line's
+            // reason even while the microphone waits on setup, whose list says that too.
+            let atRest = try await readConfig().microphone
             let grant = try readMicrophone().grant()
-            // Awaited, never assumed: a come-up the menu or the setup started at launch waits
-            // here for the reading. [LAW:no-ambient-temporal-coupling] What it then runs on is
-            // the config as it stands, which a save may have moved past the launch reading.
-            _ = try await reading.value.get()
-            guard let config else { preconditionFailure("the launch reading sets the running config before it ends") }
-            let atRest = try config.get().microphone
             // Awaited, so the menu and the readings queued behind the come-up run while
             // a slow input is reached.
             try await capture.start(grant, atRest: atRest)
@@ -998,8 +1010,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Anything but plainly on or off is said under the item, since a checkmark cannot say it.
         if openAtLogin != .on, openAtLogin != .off { menu.addItem(readout("    \(openAtLogin)")) }
-        // Only once the config is read, since the binding the switch serves at is the config's.
-        if let serving, running != nil {
+        if let serving {
             let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
             item.state = serving.chosen ? .on : .off
         }
