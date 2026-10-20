@@ -51,8 +51,8 @@ public final class DictationInputController: IMKInputController {
     override public func activateServer(_ sender: Any!) {
         // The controller is a main-thread object arriving through a signature written
         // before the language could say so, and `assumeIsolated` is where that is asserted
-        // and checked. The client is read here and nowhere else on this thread; its commits
-        // are made off it, by `Committer`, which is why `Client` is Sendable.
+        // and checked. The client is read here, and every later call on it, the commits
+        // included, is made on this same actor (IMK rule 4).
         nonisolated(unsafe) let client = sender as? IMKTextInput
         nonisolated(unsafe) let controller = self
         MainActor.assumeIsolated {

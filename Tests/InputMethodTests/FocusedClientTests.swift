@@ -22,24 +22,19 @@ import Testing
     /// which cursor is chosen.
     private final class Cursor: TextCursor {
         let application: String
-        /// What the client answers when asked about its field. Isolated to the main actor,
-        /// where it is asked, so a case can change it between inserts and the cursor stays
-        /// Sendable.
-        @MainActor final class Answer {
-            var field: FieldAnswer
-            var asked = 0
-            nonisolated init(_ field: FieldAnswer) { self.field = field }
-        }
-        let answer: Answer
+        /// What the client answers when asked about its field, which a case can change
+        /// between inserts, and how many times it was asked.
+        var answer: FieldAnswer
+        var asked = 0
 
         init(in application: String = "com.example.editor", answering field: FieldAnswer = FocusedClientTests.textEdit) {
             self.application = application
-            answer = Answer(field)
+            answer = field
         }
 
-        @MainActor var field: FieldAnswer {
-            answer.asked += 1
-            return answer.field
+        var field: FieldAnswer {
+            asked += 1
+            return answer
         }
 
         func commit(_ text: String) { Issue.record("the decision committed \(text.debugDescription)") }
@@ -158,7 +153,7 @@ import Testing
         client.took(cursor)
         #expect(try self.cursor(client, whileInFrontIs: "com.google.Chrome").get() === cursor)
 
-        cursor.answer.field = .noDocumentAccess
+        cursor.answer = .noDocumentAccess
         #expect(throws: Refusal.noTextFieldHasFocus) { try self.cursor(client, whileInFrontIs: "com.google.Chrome").get() }
     }
 
@@ -173,11 +168,11 @@ import Testing
         _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.finder", secureInputHeldBy: nil, selected: true, screens: [Self.display])
         _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: "iTerm2", selected: true, screens: [Self.display])
         _ = client.inFront(for: .app("com.apple.finder"), whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: nil, selected: true, screens: [Self.display])
-        #expect(cursor.answer.asked == 0)
+        #expect(cursor.asked == 0)
 
         let seen = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: nil, selected: true, screens: [Self.display])
         _ = seen.description
-        #expect(cursor.answer.asked == 1)
+        #expect(cursor.asked == 1)
     }
 
     /// The insert's log line tells the three ways into `noTextFieldHasFocus` apart - no
