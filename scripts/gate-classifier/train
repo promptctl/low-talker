@@ -43,7 +43,7 @@ SILENT = 1e-4  # -80 dBFS: under it a source's excerpt is silence, whatever filt
 HIGHPASS = butter(4, 100, "highpass", fs=RATE, output="sos")
 RUMBLE = butter(4, 80, "lowpass", fs=RATE, output="sos")
 # A frame is voiced when its normalised autocorrelation peaks at 0.3 or more at a lag of 2.5 to
-# 12.5 ms (80-400 Hz pitch). Breathy and whispered onsets, fricative nuclei and coughs fall under.
+# 12.5 ms (80-400 Hz pitch). Breathy and whispered onsets and fricative nuclei fall under.
 VOICED = 0.3
 PITCH_LAGS = slice(40, 200)
 
