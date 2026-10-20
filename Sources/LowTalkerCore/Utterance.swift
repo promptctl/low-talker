@@ -200,8 +200,9 @@ actor Utterance {
         // The room: the quietest of this frame and the readings of the last `roomSpan` before it.
         let room = recent.reduce(peak, min)
         recent = Array((recent + [reading].compactMap { $0 }).suffix(Self.roomFrames))
-        // A speaker is heard once a clip reaches a speaker's level or a syllable the
-        // discriminator called speech has sounded (low-reliability-z2z.3vd).
+        // A speaker is heard while a clip, or the run it carries on, is at a speaker's level, and
+        // for good once a syllable the discriminator called speech has sounded
+        // (low-reliability-z2z.3vd): a clap opens no gate to the breathing after it.
         let speaker = loudest >= Self.audible || loudestSpeech > 0
         // The softest a sample under `audible` may be and still be speech, for the room.
         let roomGate = min(Self.audible, room * Self.aboveRoom)
