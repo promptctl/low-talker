@@ -52,8 +52,8 @@ let package = Package(
             dependencies: [
                 "Identity",
                 "Grants",
-                // The app's end of the hotkey port, which the input method tells the modifier
-                // keys to.
+                // The app's end of the hotkey port, which the input method tells each cursor
+                // arrival to.
                 "Insertion",
                 "CoreAudioCalls",
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),

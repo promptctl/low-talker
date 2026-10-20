@@ -185,7 +185,7 @@ public struct InstalledInputMethod: Sendable {
     }
 
     /// Whether the input source is the one in use now: the only state in which the input
-    /// method is handed keys, and so the only one in which the hotkey is heard.
+    /// method is handed a client to type into.
     public static func isSelected() -> Bool {
         source(named: AppIdentity.inputSourceIdentifier).map(isSelected) ?? false
     }

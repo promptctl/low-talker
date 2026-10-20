@@ -1,6 +1,5 @@
 import AppKit
 import InputMethod
-import Insertion
 import Testing
 
 /// The controller hands back every key it is offered.
@@ -15,8 +14,8 @@ import Testing
 /// unpromised thing does is fail on some runs and not others.
 /// [LAW:no-ambient-temporal-coupling]
 ///
-/// Serialized because the changes told are one stream with one reader at a time: two cases
-/// waiting on it at once each take changes the other is waiting for.
+/// Serialized because the arrivals told are one stream with one reader at a time: two cases
+/// waiting on it at once each take arrivals the other is waiting for.
 @Suite(.serialized) @MainActor struct DictationInputControllerTests {
     /// A key as something that can be carried into a test case. `NSEvent` itself cannot -
     /// it is explicitly not `Sendable` - so what travels is the description of the press and
@@ -52,44 +51,27 @@ import Testing
         .init(description: "Return", characters: "\r", keyCode: 36, modifiers: 0),
     ]
 
-    /// Asked for changes of the modifier keys and nothing typed: the dictation chord is
-    /// modifiers alone, and a key typed is none of this process's business.
-    @Test func onlyChangesOfTheModifierKeysAreAskedFor() throws {
+    /// Asked for nothing: the app hears the modifier keys itself, and a key typed is none of
+    /// this process's business.
+    @Test func noEventIsAskedFor() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        #expect(controller.recognizedEvents(nil) == Int(NSEvent.EventTypeMask.flagsChanged.rawValue))
+        #expect(controller.recognizedEvents(nil) == 0)
     }
 
-    /// A change of the modifier keys is handed back like every key, and told as the session
-    /// holds it.
-    @Test(.timeLimit(.minutes(1))) func aChangeOfTheModifierKeysIsHandedBackAndTold() async throws {
+    /// A change of the modifier keys, offered anyway, is handed back like every key.
+    @Test func aChangeOfTheModifierKeysIsHandedBack() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
         let moved = try #require(CGEvent(keyboardEventSource: nil, virtualKey: 61, keyDown: true))
         moved.type = .flagsChanged
         moved.flags = .maskAlternate
         let event = try #require(NSEvent(cgEvent: moved))
-        let held = SessionModifiers.read().flags
         #expect(controller.handle(event, client: nil) == false, "Right Option was claimed by the input method")
-        let handled = UInt64((ProcessInfo.processInfo.systemUptime * 1_000_000_000).rounded())
-        let told = await Notices.shared.notices.compactMap(\.held).first { @Sendable in $0.flags == held }
-        #expect(try #require(told).uptimeNanoseconds <= handled, "told as changed after it was read")
-    }
-
-    /// Right Option down at 0, Shift down at 100 ms, Right Option up at 400 ms, and the Shift
-    /// event handled at 500 ms: the reading already shows Right Option up, and the release is
-    /// told at 400 ms. Dated by the event, it would be told at 100 ms, and a 400 ms hold would
-    /// be heard as a tap. The key the session last saw typed crosses with it.
-    @Test(.timeLimit(.minutes(1))) func aReadingAheadOfItsEventIsDatedByTheChangeItShows() async {
-        let shiftAloneSinceTheRelease = SessionModifiers(session: 0x20102, fnKeyDown: false, changedAt: 7_000.4, typedAt: 7_000.2)
-        Notices.shared.moved(at: 7_000.1, reading: shiftAloneSinceTheRelease)
-        let told = await Notices.shared.notices.compactMap(\.held).first { @Sendable in $0.flags == 0x20102 }
-        #expect(told?.uptimeNanoseconds == 7_000_400_000_000)
-        #expect(told?.typedUptimeNanoseconds == 7_000_200_000_000)
     }
 
     /// A cursor given focus is told to the app, which offers it words no cursor took.
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsTold() async {
         Notices.shared.cursorArrived(in: "com.apple.TextEdit")
-        #expect(await Notices.shared.notices.first { @Sendable in $0 == .cursorArrived } != nil)
+        #expect(await Notices.shared.arrivals.first { @Sendable _ in true } != nil)
     }
 
     /// A call carrying no event, which IMK makes, is handed back rather than trapping and
@@ -115,13 +97,5 @@ import Testing
     /// after any build succeeded. [LAW:one-source-of-truth]
     @Test func theControllerAnswersToTheNameThePlistNames() {
         #expect(NSStringFromClass(DictationInputController.self) == "DictationInputController")
-    }
-}
-
-private extension Notice {
-    /// The modifier keys a notice carries, when it is a change of them.
-    var held: HeldModifiers? {
-        guard case .modifiersMoved(let held) = self else { return nil }
-        return held
     }
 }

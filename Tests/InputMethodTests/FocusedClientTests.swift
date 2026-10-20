@@ -57,8 +57,9 @@ import Testing
 
     /// The decision, on a desk with only the display and no secure input unless said.
     private func cursor(_ client: FocusedClient, for destination: Destination = .cursorInFront, whileInFrontIs frontmost: String? = inFront,
-                        secureInputHeldBy holder: String? = nil, screens: [CGRect] = [display]) -> Result<any TextCursor, Refusal> {
-        client.inFront(for: destination, whileInFrontIs: frontmost, secureInputHeldBy: holder, screens: screens).cursor
+                        secureInputHeldBy holder: String? = nil, selected: Bool = true,
+                        screens: [CGRect] = [display]) -> Result<any TextCursor, Refusal> {
+        client.inFront(for: destination, whileInFrontIs: frontmost, secureInputHeldBy: holder, selected: selected, screens: screens).cursor
     }
 
     @Test func theCursorInFrontIsTheOneChosen() throws {
@@ -90,6 +91,16 @@ import Testing
         let typeSelecting = FocusedClient()
         typeSelecting.took(Cursor(answering: Self.typeSelect))
         #expect(throws: Refusal.secureInputIsOn) { try cursor(typeSelecting, secureInputHeldBy: "iTerm2").get() }
+    }
+
+    /// With another input source selected the cursor last held is one the text input system
+    /// has deactivated, and the refusal names the Input menu over any refusal about the
+    /// cursor, since no field the person clicks into can take the words until it is fixed.
+    @Test func anotherSourceSelectedIsRefusedByName() {
+        let client = FocusedClient()
+        client.took(Cursor())
+        #expect(throws: Refusal.inputSourceIsNotSelected) { try cursor(client, selected: false).get() }
+        #expect(throws: Refusal.inputSourceIsNotSelected) { try cursor(FocusedClient(), selected: false).get() }
     }
 
     /// Nothing in front is an answer, not a failure, and it is said by name.
@@ -159,12 +170,12 @@ import Testing
         let cursor = Cursor(in: "com.apple.TextEdit")
         client.took(cursor)
 
-        _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.finder", secureInputHeldBy: nil, screens: [Self.display])
-        _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: "iTerm2", screens: [Self.display])
-        _ = client.inFront(for: .app("com.apple.finder"), whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: nil, screens: [Self.display])
+        _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.finder", secureInputHeldBy: nil, selected: true, screens: [Self.display])
+        _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: "iTerm2", selected: true, screens: [Self.display])
+        _ = client.inFront(for: .app("com.apple.finder"), whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: nil, selected: true, screens: [Self.display])
         #expect(cursor.answer.asked == 0)
 
-        let seen = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: nil, screens: [Self.display])
+        let seen = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: nil, selected: true, screens: [Self.display])
         _ = seen.description
         #expect(cursor.answer.asked == 1)
     }
@@ -174,10 +185,11 @@ import Testing
     /// the caret of a taken insert was.
     @Test func whatTheInsertSawNamesTheCursorAndWhatItsClientAnswered() {
         func seen(_ field: FieldAnswer?, inFront frontmost: String? = "com.apple.finder", secureInputHeldBy holder: String? = nil,
-                  screens: [CGRect] = [Self.display]) -> InFront {
+                  selected: Bool = true, screens: [CGRect] = [Self.display]) -> InFront {
             let client = FocusedClient()
             field.map { client.took(Cursor(in: "com.apple.finder", answering: $0)) }
-            return client.inFront(for: .cursorInFront, whileInFrontIs: frontmost, secureInputHeldBy: holder, screens: screens)
+            return client.inFront(for: .cursorInFront, whileInFrontIs: frontmost, secureInputHeldBy: holder, selected: selected,
+                                  screens: screens)
         }
 
         let none = seen(nil)
@@ -207,6 +219,10 @@ import Testing
         let securing = seen(.noDocumentAccess, inFront: nil, secureInputHeldBy: "iTerm2")
         #expect(throws: Refusal.secureInputIsOn) { try securing.cursor.get() }
         #expect(securing.description == "with nothing in front and the cursor in com.apple.finder, secure input held by iTerm2")
+
+        let elsewhere = seen(Self.textEdit, selected: false)
+        #expect(throws: Refusal.inputSourceIsNotSelected) { try elsewhere.cursor.get() }
+        #expect(elsewhere.description == "with com.apple.finder in front and the cursor in com.apple.finder, another input source selected")
     }
 
     /// A cursor does not outlive the app it belongs to. Without this the person could

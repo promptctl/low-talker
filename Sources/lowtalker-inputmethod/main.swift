@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Identity
 import InputMethod
 import InputMethodKit
@@ -54,6 +55,16 @@ func secureInputHolder() -> String? {
     return NSRunningApplication(processIdentifier: pid)?.localizedName ?? "process \(pid)"
 }
 
+/// Whether this input method's source is the one in use, read from the text input system.
+/// No current source, or one that names no identifier, is not this one.
+@MainActor
+func isTheSelectedSource() -> Bool {
+    let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+    let identifier = current.flatMap { TISGetInputSourceProperty($0, kTISPropertyInputSourceID) }
+        .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String }
+    return identifier == AppIdentity.inputSourceIdentifier
+}
+
 /// Where the insert port's commits run, one serial queue per app, off the main thread. Held
 /// for the life of the process like everything else opened here.
 let committer = Committer(label: "\(AppIdentity.inputMethodPortName).commits")
@@ -92,6 +103,7 @@ let insertions: InsertionPort? = {
                     FocusedClient.shared.inFront(for: request.destination,
                                                  whileInFrontIs: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
                                                  secureInputHeldBy: secureInputHolder(),
+                                                 selected: isTheSelectedSource(),
                                                  screens: NSScreen.screens.map(\.frame))
                 }
             }
@@ -114,20 +126,16 @@ let insertions: InsertionPort? = {
     }
 }()
 
-/// Every notice, told to this installation's app: the changes of the modifier keys it hears
-/// its hotkey from, and the cursors that arrive. Off the main thread, which is where the keys
-/// are handled, and waiting on nothing: a change the app did not take is corrected by the
-/// next, since each carries the whole state.
+/// Every cursor that arrives, told to this installation's app. Off the main thread, and
+/// waiting on nothing: an arrival the app did not take costs only the wait for the next.
 ///
-/// Said in the log when how the telling fares changes, and not on every notice: the app not
-/// listening is the ordinary state of an app that is not running, and a line per modifier key
-/// pressed would bury everything else here. Every key still passes through whatever this
-/// says. [LAW:no-silent-failure]
+/// Said in the log when how the telling fares changes, and not on every arrival: the app not
+/// listening is the ordinary state of an app that is not running. [LAW:no-silent-failure]
 let tellingTheApp = Task.detached {
     let sender = NoticeSender()
     var fared: NoticeSender.Told?
-    for await notice in Notices.shared.notices {
-        let told = sender.tell(notice)
+    for await _ in Notices.shared.arrivals {
+        let told = sender.tellCursorArrived()
         if told != fared { logger.log(level: told.isFault ? .error : .default, "\(told.description, privacy: .public)") }
         fared = told
     }

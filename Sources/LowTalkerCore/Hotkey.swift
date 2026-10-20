@@ -1,7 +1,7 @@
 import Dispatch
 
-/// The hotkey for the life of the app: the modifier keys as the input method tells them, a
-/// detector reading them, and the presses it finds handed on by the main queue.
+/// The hotkey for the life of the app: the modifier keys as the window server's events tell
+/// them, a detector reading them, and the presses it finds handed on by the main queue.
 @MainActor
 public final class Hotkey {
     nonisolated public static let defaultTapThreshold: Duration = .milliseconds(250)
@@ -37,16 +37,10 @@ public final class Hotkey {
         detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
 
-    /// The app's hotkey: the modes `config` names, heard by their chords through the input
-    /// method, which also tells each cursor it is given focus in to `cursorArrived` while this
-    /// is watching, and whose process `superviseInputMethod` supervises meanwhile.
-    public convenience init(
-        listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold,
-        cursorArrived: @escaping @MainActor () -> Void,
-        superviseInputMethod: @escaping @MainActor () -> Disposal
-    ) {
-        self.init(modes: config.modes, tapThreshold: tapThreshold,
-                  feed: InputMethodModifiers(cursorArrived: cursorArrived, superviseInputMethod: superviseInputMethod))
+    /// The app's hotkey: the modes `config` names, heard by their chords from the window
+    /// server's own events.
+    public convenience init(listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold) {
+        self.init(modes: config.modes, tapThreshold: tapThreshold, feed: ModifierMonitor())
     }
 
     public var phase: HotkeyDetector.Phase { detector.phase }

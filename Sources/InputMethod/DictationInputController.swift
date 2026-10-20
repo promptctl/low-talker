@@ -1,9 +1,8 @@
 import AppKit
 import InputMethodKit
-import Insertion
 
-/// The controller macOS offers the modifier keys to while this input method is the selected
-/// source, which declines every one of them.
+/// The controller macOS gives each client to while this input method is the selected source,
+/// which declines every key it could be offered.
 ///
 /// An input method sits between the keyboard and whatever the person is typing into, so the
 /// keys it does not hand back are keys that never arrive anywhere. Declining all of them is
@@ -23,33 +22,19 @@ import Insertion
 /// it; `InputMethodPlistTests` holds that string to this name.
 @objc(DictationInputController)
 public final class DictationInputController: IMKInputController {
-    /// The events this controller is handed: changes of the modifier keys, and nothing
-    /// typed. What the text input system offers when nobody says is key-downs alone (0x400,
-    /// read off `super` on studious, 2026-09-27), which is every key typed and no modifier
-    /// ever moving. Asking for these instead is what lets the app hear a chord of modifiers
-    /// alone with no grant, and it means the keys a person types never reach this process.
-    override public func recognizedEvents(_: Any!) -> Int {
-        Int(NSEvent.EventTypeMask.flagsChanged.rawValue)
-    }
+    /// The events this controller is handed: none. What the text input system offers when
+    /// nobody says is key-downs alone (0x400, read off `super` on studious, 2026-09-27), which
+    /// is every key typed; the app hears the modifier keys itself, so this asks for nothing,
+    /// and no key a person types or holds reaches this process.
+    override public func recognizedEvents(_: Any!) -> Int { 0 }
 
-    /// Every event, declined, and each one told to `Notices` as a change of the
-    /// modifier keys: `recognizedEvents` asks for nothing else. The signature is
-    /// `IMKInputController`'s; returning false is how it says "not mine", which is the whole
-    /// behaviour this controller has toward keys - low-input-method-s71.31s added insertion
-    /// through a door of the app's, and low-hotkey-aws.yvl the telling, and neither changed
-    /// the answer.
+    /// Every event declined: returning false is how the signature says "not mine", which is
+    /// the whole behaviour this controller has toward keys.
     ///
-    /// Told whatever the event, rather than after asking which kind it is: what is told is
-    /// the state of the modifier keys read off the session, so an event that changed none of
-    /// them tells the app nothing it does not already hold. [LAW:dataflow-not-control-flow]
-    ///
-    /// IMK also calls this with no event at all (low-input-method-8vv: the call after an
-    /// activate trapped on the implicitly unwrapped event the inherited signature has). Such a
-    /// call changed no key, so it tells nothing: the next change carries the whole state.
-    override public func handle(_ event: NSEvent?, client sender: Any!) -> Bool {
-        event.map { Notices.shared.moved(at: $0.timestamp, reading: .read(after: $0.timestamp)) }
-        return false
-    }
+    /// Overridden, though no event is asked for, because IMK also calls this with no event at
+    /// all (low-input-method-8vv: the call after an activate trapped on the implicitly
+    /// unwrapped event the inherited signature has).
+    override public func handle(_: NSEvent?, client _: Any!) -> Bool { false }
 
     /// The text input system gave this controller's client focus, which is the only way
     /// this process learns where words can go.
