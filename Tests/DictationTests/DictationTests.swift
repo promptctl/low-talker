@@ -1281,6 +1281,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.dismissed == held)
         #expect(rig.store.state == HoldState(dismissed: held))
         rig.dictation.bringBackDismissed()
+        try await rig.dictation.finish()
         #expect(rig.hold.state == HoldState(held: held))
         #expect(rig.store.state == HoldState(held: held))
         rig.inputMethod.refusing(nil)
@@ -1300,6 +1301,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold(speaking: [4])
         _ = await rig.report()
         rig.dictation.bringBackDismissed()
+        try await rig.dictation.finish()
         #expect(rig.hold.state == HoldState(held: .unplaced(part("a b", "\(Refusal.noTextFieldHasFocus)"))))
     }
 
@@ -1316,6 +1318,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold(speaking: [4])
         _ = await rig.report()
         rig.dictation.bringBackDismissed()
+        try await rig.dictation.finish()
         #expect(rig.hold.state == HoldState(held: .unaccounted(part("a b", "\(notYetTaken)"))))
     }
 
@@ -1355,9 +1358,9 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.store.state == HoldState())
     }
 
-    /// Words brought back while an insert is on its way stay held once it lands, and only the
-    /// words it carried are placed.
-    @Test func wordsBroughtBackDuringAnInsertStayHeld() async throws {
+    /// Words brought back while an insert is on its way come back once it is answered, so it
+    /// places only the words it carried.
+    @Test func wordsBroughtBackDuringAnInsertComeBackOnceItIsAnswered() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         rig.hold()
@@ -1370,15 +1373,15 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.cursorArrived()
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
         rig.dictation.bringBackDismissed()
-        #expect(rig.store.state == HoldState(held: .unaccounted(part("a b", "LowTalker ended while inserting held words, so they may have been typed"))))
+        #expect(rig.store.state == HoldState(held: .unaccounted(part(" b", "LowTalker ended while inserting held words, so they may have been typed")), dismissed: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)"))))
         rig.inputMethod.letGo()
         try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted == [" b"])
         #expect(rig.hold.state == HoldState(held: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)"))))
     }
 
-    /// Words dismissed and brought back while an insert carrying them is on its way are placed
-    /// by it, and nothing is left.
+    /// Words dismissed while an insert carrying them is on its way, and asked back, are placed
+    /// by it: the bring-back waits for its answer, and finds nothing left to bring back.
     @Test func wordsDismissedAndBroughtBackDuringAnInsertArePlaced() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
@@ -1390,15 +1393,15 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
         rig.hold.dismiss()
         rig.dictation.bringBackDismissed()
-        #expect(rig.store.state == HoldState(held: .unaccounted(part("a", "LowTalker ended while inserting held words, so they may have been typed"))))
+        #expect(rig.store.state == HoldState(dismissed: .unaccounted(part("a", "LowTalker ended while inserting held words, so they may have been typed"))))
         rig.inputMethod.letGo()
         try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted == ["a"])
         #expect(rig.hold.state == HoldState())
     }
 
-    /// Words brought back while an insert whose words may have landed is on its way end as
-    /// they would brought back after its answer: what is held cannot hang on which came first.
+    /// Words asked back while an insert whose words may have landed is on its way come back
+    /// after its answer, joining its words as words said before them.
     @Test func wordsBroughtBackDuringAnInsertThatMayHaveLandedJoinItsWords() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
@@ -1413,6 +1416,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.bringBackDismissed()
         rig.inputMethod.letGo()
         _ = await rig.report()
+        try await rig.dictation.finish()
         #expect(rig.hold.state == HoldState(held: .unaccounted(part("a b", "\(notYetTaken)"))))
     }
 
@@ -1432,6 +1436,25 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         _ = try await rig.session()
         #expect(rig.inputMethod.inserted == [" b"])
         #expect(rig.hold.state == HoldState(dismissed: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)"))))
+    }
+
+    /// Words asked back once a press's key is up come back after its key-up insert, which
+    /// carries none of them.
+    @Test func bringingBackAsAPressIsInsertedWaitsForIt() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { clip in Transcript(typed: clip.samples == [1, 2, 3] ? "a" : " b") })
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.hold()
+        _ = await rig.report()
+        rig.hold.dismiss()
+        rig.inputMethod.refusing(nil)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([4])
+        rig.keyUp()
+        rig.dictation.bringBackDismissed()
+        _ = try await rig.session()
+        try await rig.dictation.finish()
+        #expect(rig.inputMethod.inserted == [" b"])
+        #expect(rig.hold.state == HoldState(held: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)"))))
     }
 
     /// The hold's log line counts words and never says them.
@@ -1458,6 +1481,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         // The dismissed words were placed nowhere, so they come back to be offered.
         #expect(rig.hold.dismissed == .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)")))
         rig.dictation.bringBackDismissed()
+        try await rig.dictation.finish()
         #expect(rig.hold.held == .unplaced(part("a b", "\(Refusal.noTextFieldHasFocus)")))
     }
 
