@@ -80,21 +80,20 @@ func isTheSelectedSource() -> Bool {
     return identifier == AppIdentity.inputSourceIdentifier
 }
 
-/// Where the insert port's commits run, one serial queue per app, off the main thread. Held
-/// for the life of the process like everything else opened here.
-let committer = Committer(label: "\(AppIdentity.inputMethodPortName).commits")
+/// Where the insert port's words are committed: on the main actor, each insert waited on for
+/// a bounded time. Each insert's turn there is said in the log once it has run, so a commit
+/// that outlasted its answer is still accounted for. Held for the life of the process like
+/// everything else opened here.
+let committer = Committer { ended in logger.notice("\(ended.description, privacy: .public)") }
 
 /// The app's door, beside the text input system's. Held for the life of the process for
 /// the same reason the server is: released, the app's next request finds nothing listening.
 ///
-/// Answered on a queue of its own and never on the main one, which is where every key this
-/// source passes through is handled. An insert asks the main actor only which cursor is in
-/// front and whether its client is a text field on a screen - where `FocusedClient` and every
-/// `IMKInputController` callback already run, so the two never race - and then hands the
-/// words to the `Committer`, off the main thread.
-/// Both waits are bounded by the committer, so a hung app costs the person an insert
-/// answered by name and not a dead keyboard. [LAW:no-ambient-temporal-coupling]
-/// `assumeIsolated` inside the ask is that sentence made checkable.
+/// Answered on a queue of its own and never on the main one, which is where `FocusedClient`
+/// and every `IMKInputController` callback run. Each insert is one turn on the main actor,
+/// where the cursor is decided and the words committed, and the port waits for it within the
+/// committer's bound, so a hung app costs the person an insert answered by name and not a
+/// port that never answers. [LAW:no-ambient-temporal-coupling]
 ///
 /// Only this installation's app gets through; every other sender is refused by the port
 /// before its words are read, and the refusal is logged here with what was required.
@@ -111,26 +110,16 @@ let insertions: InsertionPort? = {
             logger.error("\(String(describing: event), privacy: .public)")
         }) { request in
             // Read on the main actor, where the effects are, and handed to the decision as
-            // values. [LAW:effects-at-boundaries] Asked within the committer's bound, like
-            // the commit, so the whole answer is one this process keeps.
-            let seen = committer.ask(on: .main) {
-                MainActor.assumeIsolated {
-                    FocusedClient.shared.inFront(for: request.destination,
-                                                 whileInFrontIs: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-                                                 secureInputHeldBy: secureInputHolder(),
-                                                 selected: isTheSelectedSource(),
-                                                 screens: NSScreen.screens.map(\.frame))
-                }
+            // values. [LAW:effects-at-boundaries]
+            let placed = committer.insert(request) {
+                FocusedClient.shared.inFront(for: request.destination,
+                                             whileInFrontIs: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                                             secureInputHeldBy: secureInputHolder(),
+                                             selected: isTheSelectedSource(),
+                                             screens: NSScreen.screens.map(\.frame))
             }
-            let answer = committer.answer(request.text, at: seen?.cursor)
-            // A main thread that did not look is said as not knowing, never as nothing in
-            // front. [LAW:no-silent-failure]
-            let context = seen?.description ?? "without knowing what is in front, since the main thread did not look in time"
-            logger.notice("""
-                insert of \(request.text.count, privacy: .public) characters into \(request.destination, privacy: .public): \
-                \(String(describing: answer), privacy: .public), \(context, privacy: .public)
-                """)
-            return answer
+            logger.notice("\(placed.description, privacy: .public)")
+            return placed.answer
         }
     } catch {
         logger.fault("""

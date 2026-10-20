@@ -10,9 +10,11 @@ import Insertion
 /// real one - by macOS, in a process macOS launched, with a person's cursor at the far end.
 /// Everything below this line is then reachable without any of that.
 ///
-/// Sendable, because the commit is made off the main thread, where a hung app cannot hold
-/// the keys this source passes through. `Committer` owns where it runs and says why.
-public protocol TextCursor: AnyObject, Sendable {
+/// On the main actor, every member: each is a call into the client, or a fact read off it
+/// there, and IMK rules 3 and 4 put every client call on the main actor. `Committer` owns
+/// how an insert reaches it.
+@MainActor
+public protocol TextCursor: AnyObject {
     /// The app this cursor belongs to, which is how a cursor left over from an app the
     /// person has since switched away from is told from the one in front of them.
     ///
@@ -28,8 +30,7 @@ public protocol TextCursor: AnyObject, Sendable {
     ///
     /// Read from the client each time it is asked and never kept, because focus moves
     /// between fields and page bodies in ways the text input system does not always report.
-    /// On the main actor, since it is a call on the client (IMK rule 4).
-    @MainActor var field: FieldAnswer { get }
+    var field: FieldAnswer { get }
     /// Commits `text` at the insertion point, taking nothing away.
     func commit(_ text: String)
 }
@@ -124,8 +125,8 @@ public final class FocusedClient {
     /// app that is actually in front and its client is a text field, or the refusal that says
     /// why there is none, with the facts that decided it.
     ///
-    /// Only the decision: the commit is `Committer`'s, off this actor, and what the answer
-    /// claims once it is made is said there.
+    /// Only the decision: the commit is `Committer`'s, made in the same main-actor turn, and
+    /// what the answer claims once it is made is said there.
     ///
     /// Absence is not a mistake to guard against but the answer itself: nowhere to put
     /// words is a refusal the app reports by name, and the words go nowhere else.
@@ -189,7 +190,7 @@ public final class FocusedClient {
 /// because they tell the three ways into a no-text-field refusal apart: no client, a client
 /// giving no document access, and a caret on no screen. A taken insert names where its
 /// caret was too. [LAW:no-silent-failure] [LAW:nothing-unseen]
-public struct InFront: Sendable, CustomStringConvertible {
+public struct InFront: CustomStringConvertible {
     let frontmost: String?
     let secureInputHolder: String?
     let selected: Bool
@@ -227,30 +228,13 @@ public struct InFront: Sendable, CustomStringConvertible {
 /// input method performs when the user accepts a candidate, which is why this reaches
 /// terminals, browsers and Electron apps that no synthesised keystroke would.
 ///
-/// [LAW:no-ambient-temporal-coupling] exception: `@unchecked`, because `IMKTextInput` is a
-/// proxy the language cannot see into. This type calls it three ways: the name once, on the
-/// main thread, as the cursor is made; its field on the main actor, at each insert; and
-/// every commit on its app's serial queue in `Committer`.
-/// Measured on low-input-method-s71.c7d: committed from there, the words reach the app, in
-/// order, and the main thread stays free. Measured on low-input-method-s71.03j: the main
-/// thread making a new cursor over the same client, by a reactivation, at the instant a
-/// commit is in flight does not crash or hang IMK. Against 15,991 reactivations landing
-/// inside an accepted commit's round trip, one of 3,471 accepted words never reached the
-/// app - a loss neither this process nor IMK can see, since an off-main commit returns
-/// before the app has taken the words. No word arrived doubled or out of order. The field
-/// read can land inside the previous insert's round trip the same way, and
-/// whether a read loses words as a reactivation did is not measured; the overlap ends when
-/// commits move onto the main actor (low-imk-rules-w3g.3ky).
-///
-/// That one loss in 3,471 is left unmitigated, for the reason `Committer` already gives
-/// for the hung-app case: there is no moment at which this process can ask whether the
-/// words landed. A read of the client after the reactivation would be exactly the "did it
-/// take" check `Committer` rejected as unanswerable across apps - Finder's desktop grows a
-/// buffer nobody can see while iTerm2 answers `length()` of 0 whether or not the words
-/// landed - so it would tell this one loss from nothing at a rate no person dictating can
-/// reach in the first place. [LAW:no-silent-failure]'s bar is a refusal by name where one
-/// is knowable, not an invented signal where it is not.
-final class Client: TextCursor, @unchecked Sendable {
+/// Measured on low-input-method-s71.03j, while commits ran off the main thread: against 15,991
+/// reactivations landing inside an accepted commit's round trip, one of 3,471 accepted words
+/// never reached the app, a loss neither this process nor IMK could see. Every call on the
+/// client now runs on the main actor, so a reactivation and a commit never overlap: the same
+/// stress rerun on studious (low-imk-rules-w3g.3ky), with 11,162 reactivations landing inside
+/// an accepted insert's round trip, lost, doubled and reordered no word.
+final class Client: TextCursor {
     private let client: IMKTextInput
     let application: String
 
@@ -274,7 +258,7 @@ final class Client: TextCursor, @unchecked Sendable {
     /// (IMKInputSession.h), so it is the insertion point's: Finder's buffer holding 19
     /// characters answered x 108. A client that reports no line leaves the rectangle
     /// untouched. [LAW:parse-dont-validate]
-    @MainActor var field: FieldAnswer {
+    var field: FieldAnswer {
         guard client.supportsProperty(TSMDocumentPropertyTag(kTSMDocumentSupportDocumentAccessPropertyTag)) else { return .noDocumentAccess }
         var line = NSRect.zero
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &line)

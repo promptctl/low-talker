@@ -19,8 +19,9 @@ import DarwinCalls
 ///
 /// Both closures run on `queue`, one request at a time, and the answer is sent when the
 /// closure returns. Whatever the closure touches that lives elsewhere, it reaches itself:
-/// the input method hosts this on a queue of its own and asks the main actor only which
-/// cursor is in front, so a slow answer never holds the keys the main thread handles.
+/// the input method hosts this on a queue of its own and waits on the main actor, where each
+/// insert is decided and committed, only within `Committer`'s bound, so a held main actor
+/// costs an answer by name and never a port that does not answer.
 /// [LAW:no-ambient-temporal-coupling]
 ///
 /// Held for the life of the process by whoever makes it. Released, the port closes and the
