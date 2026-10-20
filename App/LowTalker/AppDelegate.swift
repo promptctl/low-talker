@@ -108,7 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The input method's process and the build it last said, which together are the one
     /// source of what the status line says of it. [LAW:one-source-of-truth]
     private var inputMethod = InputMethodWatch()
-    /// The standing the log last said, so it says each one once.
+    /// The standing last said, so the log says each one once and an arrival that leaves it as
+    /// it was leaves the line alone.
     private var loggedStanding: InputMethodStanding?
 
     private func showHotkeyStatus(_ status: HotkeyStatus) {
@@ -337,7 +338,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try InputMethodNotices(
                     cursorArrived: { [unowned self] arrival in
                         inputMethod.arrived(arrival)
-                        showInputMethod()
+                        // Only an arrival that moved the standing touches the line, so one in
+                        // each app the person moves to leaves whatever else it says.
+                        if inputMethod.standing(for: build) != loggedStanding { showInputMethod() }
                         listening?.dictation.cursorArrived()
                     },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
@@ -374,9 +377,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// running: one of this app's build, or one that has not said its build yet, whose
     /// greeting the inserter checks before any words go.
     ///
-    /// Each said once, when it changes, so a cursor arriving in each app the person moves to
-    /// logs nothing: the standing to the log, and the line over whatever stands there, the one
-    /// a rebuild put up while it set the input method up included.
+    /// The standing goes to the log once, when it changes. The line is written over whatever
+    /// stands there, the one a rebuild put up while it set the input method up included.
     private func showInputMethod() {
         guard let standing = inputMethod.standing(for: build) else { return }
         if standing != loggedStanding { log.notice("input method: \(standing, privacy: .public)") }
@@ -388,7 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .notOpened(let reason):
             .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
         }
-        if status != hotkeyStatus { showHotkeyStatus(status) }
+        showHotkeyStatus(status)
     }
 
     /// This installation's input method, as its package installed it, registered and - once
@@ -426,7 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// What the menu says after "Hotkey: ".
-    private enum HotkeyStatus: Equatable, CustomStringConvertible {
+    private enum HotkeyStatus: CustomStringConvertible {
         case starting(step: String?)
         /// Listening, and how to press it.
         case listening(String)

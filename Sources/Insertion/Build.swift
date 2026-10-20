@@ -12,6 +12,9 @@ import Identity
 /// The app and its input method come from one `xcodebuild` call, which hands both bundles
 /// the same two values, so two processes of one build carry equal `Build`s and a process of
 /// any other build does not. [FRAMING:representation]
+///
+/// Its JSON is what an input method says and every later app reads, so its fields keep their
+/// names; `WireTests` pins the bytes.
 public struct Build: Codable, Hashable, Sendable, CustomStringConvertible {
     public let number: String
     public let revision: String

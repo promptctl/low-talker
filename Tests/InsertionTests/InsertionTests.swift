@@ -81,6 +81,15 @@ import Testing
         #expect(Wire.greeting(of: Data("nonsense".utf8)) == nil)
     }
 
+    /// Every later app reads the build an input method of this one says, and one it cannot
+    /// read is an answer nobody could read rather than a mismatch. Pinned to the bytes for
+    /// the same reason as the refusals above.
+    @Test func aBuildIsSaidInBytesEveryLaterBuildReads() throws {
+        let build = Build(number: "9", revision: "0123456789ab")
+        #expect(Wire.greeting(of: Data(#"{"number":"9","revision":"0123456789ab"}"#.utf8)) == .admitted(by: build))
+        #expect(try JSONSerialization.jsonObject(with: Wire.said(build)) as? [String: String] == ["number": "9", "revision": "0123456789ab"])
+    }
+
     /// An insert that reports no characters is a real answer - a zero-length request arrives
     /// as an empty request and is answered honestly - so nothing here may turn it away.
     @Test func anInsertOfNothingIntoARealAppStillCrosses() {
