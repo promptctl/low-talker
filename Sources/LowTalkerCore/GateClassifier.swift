@@ -38,9 +38,10 @@ final class GateClassifier: Discriminator, Sendable {
     /// Core ML holds the window to the model's input shape, so a window of any other length
     /// is refused rather than read.
     func verdict(_ window: ArraySlice<Float>) throws -> Verdict {
-        let samples = MLMultiArray(MLShapedArray(scalars: window, shape: [1, window.count]))
+        // Made inside the lock: a Core ML value carried in would tie the model to this task.
         let score = try model.withLock { model in
-            try model.prediction(from: MLDictionaryFeatureProvider(dictionary: ["samples": samples])).featureValue(for: "speech")?.multiArrayValue?[0].floatValue
+            let samples = MLMultiArray(MLShapedArray(scalars: window, shape: [1, window.count]))
+            return try model.prediction(from: MLDictionaryFeatureProvider(dictionary: ["samples": samples])).featureValue(for: "speech")?.multiArrayValue?[0].floatValue
         }
         guard let score else { throw GateClassifierError.noScore }
         return score >= Self.threshold ? .speech : .other
