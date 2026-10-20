@@ -502,7 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .success(let config)?: Hotkey.named(in: config)
         // The status line already says why nothing is heard.
         case .failure?: "no chord: the config cannot be read"
-        case nil: "no chord: the config is not read yet"
+        case nil: preconditionFailure("only a loop `adopt` built says how to press, and it adopts only a config that was read")
         }
     }
 
