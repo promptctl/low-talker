@@ -52,8 +52,10 @@ import Testing
         try #require(AudioHardwareDestroyAggregateDevice(aggregate) == noErr)
         Thread.sleep(forTimeInterval: 0.5)
 
+        // On a thread of its own: with the main thread held, a global queue's block waited 8.3 s
+        // to start on the 3-core CI runner under the full suite (the removal took 1.3 ms).
         let removed = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
+        Thread.detachNewThread {
             _ = remove()
             removed.signal()
         }
