@@ -59,9 +59,10 @@ let package = Package(
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "TOMLKit", package: "TOMLKit"),
             ],
-            // Copied, not processed: SwiftPM outside Xcode compiles no Core ML model, so
-            // GateClassifier compiles it at load, in the app and the CLI alike.
-            resources: [.copy("GateClassifier.mlpackage")]
+            // Copied, not processed: Xcode compiles a .copy'd .mlpackage and generates a class
+            // for it, which SwiftPM outside Xcode never does. Inside a copied folder both copy it
+            // as is, so GateClassifier compiles it at load, in the app and the CLI alike.
+            resources: [.copy("Models")]
         ),
         // OpenAI's speech-to-text API over any Transcriber, for callers other than
         // dictation (epic low-serve-axq). Above the core, so the core never links Network

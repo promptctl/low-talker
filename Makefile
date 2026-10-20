@@ -164,7 +164,7 @@ gate-replay-measure:
 
 # The gate classifier trained again: its audio fetched into $(GATE_CLASSIFIER), never committed,
 # and a candidate written beside it. Training runs differ, so this never writes the bundled
-# Sources/LowTalkerCore/GateClassifier.mlpackage: shipping a candidate is copying it there,
+# Sources/LowTalkerCore/Models/GateClassifier.mlpackage: shipping a candidate is copying it there,
 # with its threshold in GateClassifier.swift and its digest and manifest's licenses in
 # sbom/rules.json, which `make sbom` holds the bundled model to.
 GATE_CLASSIFIER := .build/gate-classifier

@@ -78,7 +78,7 @@
   },
   "classifiers": {
     "GateClassifier": {
-      "path": "Sources/LowTalkerCore/GateClassifier.mlpackage",
+      "path": "Sources/LowTalkerCore/Models/GateClassifier.mlpackage",
       "sha256": "01b43fc4c916bdac1647059c6624da2666dd359ea2a88b331b705b228d6d2666",
       "trainedOn": "scripts/gate-classifier/manifest.tsv",
       "licenses": {

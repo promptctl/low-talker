@@ -24,7 +24,7 @@ struct GateClassifier: Discriminator, @unchecked Sendable {
 
     /// Loads the bundled model onto the CPU: the Neural Engine is Whisper's.
     init() async throws {
-        guard let package = Bundle.module.url(forResource: "GateClassifier", withExtension: "mlpackage") else {
+        guard let package = Bundle.module.url(forResource: "GateClassifier", withExtension: "mlpackage", subdirectory: "Models") else {
             throw GateClassifierError.notBundled
         }
         let configuration = MLModelConfiguration()
@@ -55,7 +55,7 @@ enum GateClassifierError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .notBundled: "GateClassifier.mlpackage is not in LowTalkerCore's resources"
+        case .notBundled: "Models/GateClassifier.mlpackage is not in LowTalkerCore's resources"
         case .shape(let shape): "the gate classifier takes samples shaped \(shape.map { "\($0)" } ?? "unnamed"), not one frame and its context"
         case .noScore: "the gate classifier answered without a `speech` score"
         }
