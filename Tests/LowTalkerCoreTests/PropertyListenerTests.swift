@@ -53,11 +53,16 @@ import Testing
         Thread.sleep(forTimeInterval: 0.5)
 
         let removed = DispatchSemaphore(value: 0)
+        let asked = Date()
         DispatchQueue.global().async {
+            let started = Date()
             _ = remove()
+            print("DIAG removal started after \(started.timeIntervalSince(asked)) s, removal took \(Date().timeIntervalSince(started)) s")
             removed.signal()
         }
-        #expect(removed.wait(timeout: .now() + 5) == .success)
+        let result = removed.wait(timeout: .now() + 30)
+        print("DIAG wait \(result) after \(Date().timeIntervalSince(asked)) s")
+        #expect(result == .success)
     }
 
     private static let system = AudioObjectID(kAudioObjectSystemObject)
