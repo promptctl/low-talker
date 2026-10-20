@@ -215,11 +215,14 @@ private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @e
 
     /// Fn is what the Fn key's own event says, and every other key's event leaves it as it
     /// was: an arrow held under Right Option sets the secondary-Fn bit on Right Option's event
-    /// with Fn up, and Right Option let go while Fn is held carries no bit for it.
+    /// with Fn up, and Right Option let go while Fn is held carries no bit for it. The Fn
+    /// key's own event with Fn already held is its release, though an arrow still down sets
+    /// the bit on it.
     @Test func fnIsWhatTheFnKeysOwnEventSays() {
         let fnDown = change(fnBit | 0x100, key: kVK_Function, at: 0)
         #expect(fnDown.held(after: []) == [.function])
         #expect(change(0x100, key: kVK_Function, at: 0).held(after: [.function]) == [])
+        #expect(fnDown.held(after: [.function]) == [])
         let rightOptionUnderAnArrow = change(Modifier.rightOption.mask | 0x80100 | fnBit, key: kVK_RightOption, at: 0)
         #expect(rightOptionUnderAnArrow.held(after: []) == [.rightOption])
         #expect(change(0x100, key: kVK_RightOption, at: 0).held(after: [.function, .rightOption]) == [.function])

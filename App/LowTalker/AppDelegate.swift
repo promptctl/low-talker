@@ -360,9 +360,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// This installation's input method, as its package installed it, registered and - once
-    /// a person has switched it on in setup - selected: what the words are committed through
-    /// and the hotkey is told the keys by. Run at every rebuild, which is what keeps the input
-    /// method selected.
+    /// a person has switched it on in setup - selected: what the words are committed through.
+    /// Run at every rebuild, which is what keeps the input method selected.
     ///
     /// Nothing here puts a system dialog on screen, because a rebuild runs at launch. The
     /// input method is switched on from its own step in setup; see `ask(_:)`.

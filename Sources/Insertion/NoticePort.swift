@@ -12,8 +12,8 @@ import Foundation
 /// focus. So every message is checked against `senders` before its bytes are read, and one
 /// that fails is told as `turnedAway` and never reaches `cursorArrived`. [LAW:single-enforcer]
 ///
-/// Nothing is answered: the input method sends from its main thread and waits for nothing
-/// there. A message that asked for an answer anyway has its reply right released unanswered.
+/// Nothing is answered: the input method sends from a task of its own and waits for
+/// nothing. A message that asked for an answer anyway has its reply right released unanswered.
 ///
 /// Held for as long as the app listens. Released, the name is free before the release
 /// returns, because the app hosts it again straight away each time it rebuilds its loop;

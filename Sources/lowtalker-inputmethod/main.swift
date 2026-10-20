@@ -56,11 +56,11 @@ func secureInputHolder() -> String? {
 }
 
 /// Whether this input method's source is the one in use, read from the text input system.
-/// A source that names no identifier is not this one.
+/// No current source, or one that names no identifier, is not this one.
 @MainActor
 func isTheSelectedSource() -> Bool {
-    let current = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-    let identifier = TISGetInputSourceProperty(current, kTISPropertyInputSourceID)
+    let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+    let identifier = current.flatMap { TISGetInputSourceProperty($0, kTISPropertyInputSourceID) }
         .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String }
     return identifier == AppIdentity.inputSourceIdentifier
 }

@@ -17,7 +17,8 @@ public struct SessionModifiers: Equatable, Sendable, CustomStringConvertible {
     /// key, no later than the reading, in seconds since the machine came up - `NSEvent.timestamp`'s
     /// clock. Measured on studious, 2026-10-03: for keys pressed through vhid it lands 1.5-9 ms
     /// after each one was sent. Measured on u2 (macOS 26.5.2), 2026-10-20: while an app holds
-    /// Secure Event Input it is stale, so it only ever holds a release back, never times a press.
+    /// Secure Event Input this time is stale, though the flags are not, so it only ever holds a
+    /// release back, never times a press.
     public let changedAt: TimeInterval
 
     public init(session: UInt64, fnKeyDown: Bool, changedAt: TimeInterval) {

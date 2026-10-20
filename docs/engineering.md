@@ -239,7 +239,7 @@ The app logs every reading it takes, so an agent can read back what the menu is 
 
     /usr/bin/log show --predicate 'subsystem == "ai.promptctl.low-talker"' --last 5m --style compact
 
-The category is `engine`. Each open writes `onboarding: ready` or `onboarding: not ready`, then one `onboarding: <Name>: <what was read>` per requirement, then `hotkey: unheard because [...]` with whatever the Hotkey line names. `log` is spelled with its absolute path because zsh has a builtin by that name.
+The category is `engine`. Each open writes `onboarding: ready` or `onboarding: not ready`, then one `onboarding: <Name>: <what was read>` per requirement, then `hotkey: words held, not typed, because [...]` with whatever the menu's "Not typed now" lines name. `log` is spelled with its absolute path because zsh has a builtin by that name.
 
 ## What a release ships, and under what license
 

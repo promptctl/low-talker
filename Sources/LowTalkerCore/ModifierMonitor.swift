@@ -192,10 +192,14 @@ public struct FlagsChanged: Equatable, Sendable, CustomStringConvertible {
     /// Fn by which key moved: the session sets the secondary-Fn bit for the arrow and
     /// navigation keys too, so another key's event can carry it with Fn up. Those keys arrive
     /// as key-downs and never as `.flagsChanged`, so only the Fn key's own event says what
-    /// Fn did, and every other event leaves it as it was.
+    /// Fn did, and every other event leaves it as it was. That event can carry the bit as Fn
+    /// goes up, too, while an arrow is still down (not measured: vhid has no Fn key), so it
+    /// presses Fn only when Fn was up; with Fn held it is the release.
     func held(after before: Set<Modifier>) -> Set<Modifier> {
         let others = Modifier.held(in: flags).subtracting([.function])
-        let fn = keyCode == UInt16(kVK_Function) ? flags & Modifier.function.mask != 0 : before.contains(.function)
+        let fn = keyCode == UInt16(kVK_Function)
+            ? flags & Modifier.function.mask != 0 && !before.contains(.function)
+            : before.contains(.function)
         return fn ? others.union([.function]) : others
     }
 
