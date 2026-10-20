@@ -1,6 +1,7 @@
 import Foundation
 import LowTalkerCore
 import Synchronization
+import TestProbes
 import Testing
 
 /// A bench directory built on the fly: a clip the pipeline wrote beside the text
@@ -56,12 +57,6 @@ private enum CaseSensitiveVolume {
         return try result.get()
     }
 
-    /// `onAThreadOfItsOwn` in InsertionTests, which this target cannot import.
-    private static func onAThreadOfItsOwn(_ body: @escaping @Sendable () throws -> Void) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            Thread { continuation.resume(with: Result { try body() }) }.start()
-        }
-    }
 
     private static func hdiutil(_ arguments: String...) throws {
         let process = Process()

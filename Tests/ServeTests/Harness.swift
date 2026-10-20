@@ -3,6 +3,7 @@ import Foundation
 import Network
 @testable import Serve
 import Synchronization
+import TestProbes
 import Testing
 
 /// An engine that hears the conformance fixture's words in whatever it is given, and keeps
@@ -128,12 +129,10 @@ struct Running {
         try suite.run()
         // Read and waited on off the cooperative pool, which the server answering the
         // suite runs on.
-        let printed = await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                let data = output.fileHandleForReading.readDataToEndOfFile()
-                suite.waitUntilExit()
-                continuation.resume(returning: String(decoding: data, as: UTF8.self))
-            }
+        let printed = await onAThreadOfItsOwn {
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            suite.waitUntilExit()
+            return String(decoding: data, as: UTF8.self)
         }
         let summary = try #require(printed.split(separator: "\n").last.map { Data($0.utf8) })
         return try #require((JSONSerialization.jsonObject(with: summary) as? [String: Any])?["results"] as? [[String: Any]], "\(printed)")

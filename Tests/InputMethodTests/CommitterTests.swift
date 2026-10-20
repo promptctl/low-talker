@@ -2,6 +2,7 @@ import Foundation
 @testable import InputMethod
 import Insertion
 import os
+import TestProbes
 import Testing
 
 /// Committing on the main actor, and how long an answer waits for it.
@@ -40,15 +41,6 @@ import Testing
     }
 
     private static let seenLine = "with com.example.editor in front and the cursor in com.example.editor"
-
-    /// Runs the blocking `body` on a thread of its own and awaits what it returned: a test body
-    /// runs on the cooperative pool, and a wait there holds one of a three-core runner's three
-    /// threads. `onAThreadOfItsOwn` in InsertionTests, which this target cannot import.
-    private static func onAThreadOfItsOwn<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
-        await withCheckedContinuation { continuation in
-            Thread { continuation.resume(returning: body()) }.start()
-        }
-    }
 
     /// The words go in, and the answer counts them as a person would: an emoji is one
     /// character to whoever dictated it.
@@ -149,7 +141,7 @@ import Testing
         let ends = OSAllocatedUnfairLock(initialState: [Ended]())
         let committer = Committer(bound: .seconds(20)) { ended in ends.withLock { $0.append(ended) } }
 
-        let answers = await Self.onAThreadOfItsOwn {
+        let answers = await onAThreadOfItsOwn {
             ["one", "two", "three"].map { word in
                 committer.insert(InsertRequest(word, into: .cursorInFront)) { Self.seen(.success(cursor)) }.answer
             }
@@ -177,7 +169,7 @@ import Testing
             released.wait()
         }
 
-        let placed = await Self.onAThreadOfItsOwn {
+        let placed = await onAThreadOfItsOwn {
             held.wait()
             defer { released.signal() }
             return committer.insert(Self.request) {

@@ -118,7 +118,7 @@ let package = Package(
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
         .target(name: "InputMethod", dependencies: ["Insertion", "Identity"], swiftSettings: inputMethodIsolation),
-        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "Insertion", "Identity"]),
+        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "Insertion", "Identity", "TestProbes"]),
         // The two calls that cross between the app and the input method - words one way, the
         // modifier keys the other - and both ends of each port. It links Identity for the
         // ports' names and the Darwin calls beneath them, and nothing else - in particular no
@@ -141,7 +141,7 @@ let package = Package(
         // A sender that is not the test process, so the insert port's refusal is held by a
         // request that really crossed from another process. In no product: nothing ships it.
         .executableTarget(name: "insertion-probe", dependencies: ["Insertion", "Identity"], path: "Tests/InsertionProbe"),
-        .testTarget(name: "InsertionTests", dependencies: ["Insertion", "Identity", "DarwinCalls", "insertion-probe"]),
+        .testTarget(name: "InsertionTests", dependencies: ["Insertion", "Identity", "DarwinCalls", "insertion-probe", "TestProbes"]),
         // The process macOS launches out of the input method bundle. It holds the effects -
         // reading the bundle, opening the port, running the loop - and nothing else.
         .executableTarget(name: "lowtalker-inputmethod", dependencies: ["InputMethod", "Insertion", "Identity"], swiftSettings: inputMethodIsolation),
