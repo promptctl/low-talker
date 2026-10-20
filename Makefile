@@ -63,6 +63,10 @@ XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swift
 # `swift build`'s and the SBOM's. The project xcodegen writes has no resolved file, so
 # xcodebuild would pick versions of its own in a fresh derived-data folder; the root one is
 # copied in and xcodebuild resolves nothing else, stopping on a package it does not pin.
+#
+# Package targets, such as the bundle carrying LowTalkerCore's resources, never read
+# project.yml's settings and sign automatically, which refuses a named Developer ID identity.
+# Manual signing set here reaches them too.
 define build_app
 	xcodegen generate
 	mkdir -p $(XCODE_RESOLVED_DIR)
@@ -70,7 +74,7 @@ define build_app
 	xcodebuild -project LowTalker.xcodeproj -scheme $(SCHEME) -configuration $(CONFIGURATION) \
 		-onlyUsePackageVersionsFromResolvedFile \
 		-derivedDataPath $(DERIVED_DATA) BUNDLED_MODEL_STORE="$(BUNDLED_MODEL_STORE)" \
-		ACCEPTS_CONNECTIONS=$(ACCEPTS_CONNECTIONS) \
+		ACCEPTS_CONNECTIONS=$(ACCEPTS_CONNECTIONS) CODE_SIGN_STYLE=Manual \
 		$(if $(SIGNING_IDENTITY),CODE_SIGN_IDENTITY="$(SIGNING_IDENTITY)") build
 endef
 
