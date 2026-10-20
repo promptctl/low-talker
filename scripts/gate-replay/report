@@ -6,7 +6,7 @@
 Both files are rows the gate replay (Tests/GateReplayTests) wrote: a case's `key=value`
 id, the count and hash of the samples its last pass is handed, and the 10 ms windows of
 its signal they came from. The baseline is master's; the measured rows are the tree's.
-Five reports, each against the baseline:
+Six reports, each against the baseline:
 
 - speech lost after inserted transients, beyond what as much digital silence loses: the
   windows master hands without the transient that the tree's silence control keeps and its
@@ -15,7 +15,10 @@ Five reports, each against the baseline:
   changed: what the tree's gate loses there, the loss above cannot see;
 - background talk let in under a speaker, and speech lost there;
 - bench variants whose handed samples changed;
-- a tap left open in a room, where what it keeps changed.
+- a tap left open in a room, where what it keeps changed;
+- a sound before a tap left open, handing a window of the room the room alone does not:
+  the case against its own `source=none` control, the tree's beside master's, and the
+  cases whose handed samples changed.
 
 Two files that do not hold the same cases, or hold one twice, are no comparison, and the
 report stops naming them. Differences are the report, not a failure: it exits 0 whatever it finds.
@@ -128,6 +131,31 @@ def listed(changed):
         f"    {label(fields)}: let in {seconds(added)}, lost {seconds(lost)}" for fields, added, lost in changed]
 
 
+def tap_after(baseline, measured):
+    """Per room: the cases where a sound before a tap left open hands a window its room alone
+    does not, in the tree and on master."""
+    def beyond(rows, fields):
+        alone = rows[case_id({**fields, "source": "none"})]["windows"]
+        return len(rows[case_id(fields)]["windows"] - alone)
+
+    groups = defaultdict(list)
+    for row in family(measured, "tap-after").values():
+        fields = row["fields"]
+        if fields["source"] != "none":
+            groups[fields["room"]].append((fields, beyond(measured, fields), beyond(baseline, fields)))
+    lines = ["a sound before a tap left open, handing what its room alone does not",
+             f"  {'room':>4} {'cases':>6} {'handing':>8} {'worst':>8}   {'master handing':>14} {'worst':>8}"]
+    worse = []
+    for room, cases in sorted(groups.items(), key=lambda item: -int(item[0])):
+        lines.append(f"  {room:>4} {len(cases):>6} {sum(1 for c in cases if c[1]):>8} {seconds(max(c[1] for c in cases)):>8}"
+                     f"   {sum(1 for c in cases if c[2]):>14} {seconds(max(c[2] for c in cases)):>8}")
+        worse += [f"    {label(fields)}: {seconds(was)} on master, {seconds(now)}" for fields, now, was in cases if now > was]
+    # Master hands a sound's hangover of room past it, and a loud room alone whole, so the bar is
+    # master's; what the tree hands differently from master in either room is listed beside it.
+    lines.append(f"  cases handing more of it than on master: {len(worse) or 'none'}")
+    return lines + sorted(worse) + listed(changes(baseline, family(measured, "tap-after")))
+
+
 def main(baseline_path, measured_path):
     baseline, measured = load(baseline_path), load(measured_path)
     missing, extra = sorted(baseline.keys() - measured.keys()), sorted(measured.keys() - baseline.keys())
@@ -142,7 +170,8 @@ def main(baseline_path, measured_path):
     report += [f"soft readers alone and beside as much silence whose handed samples changed, of {len(controls)}"] + listed(changes(baseline, controls)) + [""]
     report += talk(baseline, measured) + [""]
     report += [f"bench variants whose handed samples changed, of {len(family(measured, 'bench'))}"] + listed(changes(baseline, family(measured, "bench"))) + [""]
-    report += [f"a tap left open in a room, of {len(family(measured, 'tap'))}"] + listed(changes(baseline, family(measured, "tap")))
+    report += [f"a tap left open in a room, of {len(family(measured, 'tap'))}"] + listed(changes(baseline, family(measured, "tap"))) + [""]
+    report += tap_after(baseline, measured)
     print("\n".join(report))
 
 

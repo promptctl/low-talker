@@ -1,0 +1,357 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = "==3.12.*"
+# dependencies = ["torch==2.7.1", "coremltools==9.0", "numpy==2.5.4", "scipy==1.18.1", "soundfile==0.14.0"]
+# ///
+"""The gate classifier, trained on what fetch-data fetched and exported for Core ML:
+
+    scripts/gate-classifier/train <data folder> <out.mlpackage> [--context <seconds>]
+
+The gate's question, per 0.1 s frame: is the loudest sound in it speech? The model reads the
+frame with `context` seconds either side, scales it so the frame's peak is 1, and answers with
+a probability. Every example is mixed from known sources, so its label is exact: a frame is
+speech when the speech's peak in it is the loudest source's and within 4x of the speech's own
+peak (a syllable's nucleus); not speech when a non-speech clip's is, within 16x of that clip's peak. A frame where
+the two are within 3 dB of each other is not trained on.
+
+Model selection reads only held-out readers and uploaders, never ESC-50 or the bench.
+"""
+import argparse
+import multiprocessing
+import os
+import sys
+import time
+import zlib
+from fractions import Fraction
+
+import numpy as np
+import soundfile
+from scipy.signal import butter, fftconvolve, lfilter, resample_poly, sosfilt
+
+RATE = 16_000
+FRAME = 1_600
+RANGE = 16.0  # The gate's dynamicRange: a frame within 16x of a sound's peak can set the range.
+# Speech is trained on its syllable nuclei, frames within 4x of its peak, which is what sets the
+# range. Within 16x it also holds breaths and clicks, the very sounds the Breathing and Gasp
+# clips teach as not speech.
+NUCLEUS = 4.0
+MARGIN = 10 ** (3 / 20)  # Two sources within 3 dB in a frame: neither is the loudest.
+PRE = 6_400  # Audio before an excerpt that reverb reads, cut off after.
+SILENT = 1e-4  # -80 dBFS: under it a source's excerpt is silence, whatever filtering left.
+HIGHPASS = butter(4, 100, "highpass", fs=RATE, output="sos")
+RUMBLE = butter(4, 80, "lowpass", fs=RATE, output="sos")
+
+
+def held_out(group):
+    """One reader or uploader in ten is held out, the same ones every run."""
+    return zlib.crc32(group.encode()) % 10 == 0
+
+
+class Source:
+    def __init__(self, samples, within):
+        self.samples = samples
+        frames = len(samples) // FRAME
+        self.frame_peaks = np.abs(samples[: frames * FRAME].reshape(frames, FRAME)).max(axis=1) if frames else np.zeros(0)
+        self.peak = float(self.frame_peaks.max()) if frames else 0.0
+        self.loud = np.flatnonzero(self.frame_peaks >= self.peak / within) if self.peak > 0 else np.zeros(0, int)
+
+
+def load(folder):
+    # Speech is a list of sources; non-speech is a list per class, so each class is drawn as
+    # often as any other however few clips it has.
+    groups = {"speech": {True: [], False: []}, "nonspeech": {True: {}, False: {}}}
+    counts = {}
+    with open(os.path.join(folder, "manifest.tsv")) as manifest:
+        next(manifest)
+        for line in manifest:
+            kind, path, _, _, group, classes = line.rstrip("\n").split("\t")
+            samples, rate = soundfile.read(os.path.join(folder, path), dtype="float32", always_2d=True)
+            if rate != RATE:
+                sys.exit(f"{path}: {rate} Hz, expected {RATE}")
+            # Rumble under 100 Hz is no one's voice: some readers' recordings peak on it, which
+            # would label a thump as a syllable. Labels are read with it gone; the mix adds
+            # rumble back, so the model learns to look past it.
+            source = Source(sosfilt(HIGHPASS, samples.mean(axis=1)).astype(np.float32), NUCLEUS if kind == "speech" else RANGE)
+            if len(source.loud) == 0:
+                continue
+            held = held_out(group)
+            if kind == "speech":
+                groups[kind][held].append(source)
+            for c in (classes.split(",") if kind == "nonspeech" else ["speech"]):
+                if kind == "nonspeech":
+                    groups[kind][held].setdefault(c, []).append(source)
+                counts.setdefault(c, {True: [0, set()], False: [0, set()]})
+                counts[c][held][0] += 1
+                counts[c][held][1].add(group)
+    print("class\ttrain clips\ttrain groups\theld-out clips\theld-out groups")
+    for c, n in counts.items():
+        print(f"{c}\t{n[False][0]}\t{len(n[False][1])}\t{n[True][0]}\t{len(n[True][1])}")
+    return groups
+
+
+class Mixer:
+    """Mixes one labelled example: a window of `size` samples centred on the frame judged."""
+
+    def __init__(self, speech, nonspeech, context, rng):
+        self.speech, self.rng = speech, rng
+        self.nonspeech = [nonspeech[c] for c in sorted(nonspeech)]
+        self.side = int(context * RATE)
+        self.size = FRAME + 2 * self.side
+
+    def excerpt(self, source, at):
+        """The source's samples placed so its sample `at` lands at the window's frame start,
+        with PRE samples before the window; zero where the source has none. Half the time
+        played 15% slower to 15% faster, pitch with it, so a class of few clips (47 sneezes)
+        is heard in more voices than it has."""
+        need = PRE + self.size
+        speed = Fraction(1)
+        if self.rng.random() < 0.5:
+            speed = Fraction(int(self.rng.integers(17, 24)), 20)
+        span = int(np.ceil(need * speed)) + 1
+        start = at - int(round((self.side + PRE) * speed))
+        raw = np.zeros(span, np.float32)
+        lo, hi = max(0, start), min(len(source.samples), start + span)
+        if hi > lo:
+            raw[lo - start : hi - start] = source.samples[lo:hi]
+        if speed != 1:
+            raw = resample_poly(raw, speed.denominator, speed.numerator).astype(np.float32)
+        out = np.zeros(need, np.float32)
+        out[: min(need, len(raw))] = raw[:need]
+        return out
+
+    def colour(self, x):
+        rng = self.rng
+        if rng.random() < 0.5:
+            a = rng.uniform(0.0, 0.95)
+            x = lfilter([1 - a], [1, -a], x) if rng.random() < 0.5 else lfilter([1, -a], [1], x)
+        if rng.random() < 0.3:
+            rt60 = rng.uniform(0.1, 0.6)
+            n = int(min(rt60, 0.4) * RATE)
+            # The direct sound, then a decaying tail carrying 5% to 50% of its energy.
+            ir = rng.standard_normal(n) * np.exp(-6.9 * np.arange(n) / (rt60 * RATE))
+            ir *= np.sqrt(rng.uniform(0.05, 0.5) / np.sum(ir**2))
+            ir[0] += 1
+            x = fftconvolve(x, ir)[: len(x)]
+        return x.astype(np.float32)
+
+    def placed(self, source, frame=None):
+        """An excerpt with one of the source's loud frames (or `frame`) at the window's frame."""
+        f = int(self.rng.choice(source.loud)) if frame is None else frame
+        jitter = int(self.rng.integers(-FRAME // 4, FRAME // 4 + 1))
+        return self.colour(self.excerpt(source, f * FRAME + jitter))
+
+    def anywhere(self, source):
+        at = int(self.rng.integers(-self.size, len(source.samples)))
+        return self.colour(self.excerpt(source, at))
+
+    def example(self):
+        """(window, label, kind of mix) or None when the mix leaves no source the loudest by 3 dB."""
+        rng = self.rng
+        s = self.speech[int(rng.integers(len(self.speech)))]
+        cls = self.nonspeech[int(rng.integers(len(self.nonspeech)))]
+        n = cls[int(rng.integers(len(cls)))]
+        centre = slice(PRE + self.side, PRE + self.side + FRAME)
+        kind = rng.choice(6, p=[0.25, 0.10, 0.20, 0.20, 0.15, 0.10])
+        if kind == 0:  # Speech in its own context.
+            sp, ns, label = self.placed(s), None, 1
+        elif kind == 1:  # A loud stretch of speech cut out alone.
+            sp, ns, label = self.placed(s), None, 1
+            keep = int(rng.integers(FRAME, 5 * FRAME + 1))
+            lo = centre.start - int(rng.integers(0, keep - FRAME + 1))
+            sp[:max(0, lo)] = 0
+            sp[lo + keep:] = 0
+        elif kind == 2:  # A non-speech sound alone.
+            sp, ns, label = None, self.placed(n), 0
+        elif kind == 3:  # A non-speech sound spliced into speech, as the replay inserts one.
+            ns, sp, label = self.placed(n), self.anywhere(s), 0
+            span = int(rng.integers(2 * FRAME, 5 * FRAME + 1))
+            lo = centre.start - int(rng.integers(0, span - FRAME + 1))
+            cut = np.zeros_like(ns)
+            cut[max(0, lo) : lo + span] = 1
+            sp, ns = sp * (1 - cut), ns * cut
+            sp *= self.relative(ns, sp, rng.uniform(6, 40))
+        elif kind == 4:  # A non-speech sound over speech.
+            ns, sp, label = self.placed(n), self.anywhere(s), 0
+            sp *= self.relative(ns, sp, rng.uniform(6, 30))
+        else:  # Speech over a quieter non-speech sound.
+            sp, ns, label = self.placed(s), self.anywhere(n), 1
+            ns *= self.relative(sp, ns, rng.uniform(6, 30))
+        sp_peak = float(np.abs(sp[centre]).max()) if sp is not None else 0.0
+        ns_peak = float(np.abs(ns[centre]).max()) if ns is not None else 0.0
+        mine, other = (sp_peak, ns_peak) if label else (ns_peak, sp_peak)
+        if mine < SILENT or mine < other * MARGIN:
+            return None
+        mix = sum(x for x in (sp, ns) if x is not None)[PRE:]
+        if rng.random() < 0.9:
+            noise = rng.uniform(-1, 1, len(mix)).astype(np.float32)
+            if rng.random() < 0.5:
+                noise = lfilter([1 - 0.9], [1, -0.9], noise).astype(np.float32)
+            # A soft speaker in a loud room peaks only a few dB over it.
+            mix += noise / np.abs(noise).max() * mine * 10 ** (-rng.uniform(3, 60) / 20)
+        if rng.random() < 0.2:
+            rumble = sosfilt(RUMBLE, rng.standard_normal(len(mix) + RATE))[RATE:].astype(np.float32)
+            mix += rumble / np.abs(rumble).max() * mine * 10 ** (-rng.uniform(0, 20) / 20)
+        mix *= 10 ** (-rng.uniform(0, 40) / 20)
+        if not np.isfinite(mix).all():
+            raise ValueError(f"mix of kind {kind} is not finite")
+        return mix, label, int(kind)
+
+    @staticmethod
+    def relative(louder, softer, db):
+        """The gain that puts `softer`'s peak `db` below `louder`'s; none for a silent one."""
+        top = float(np.abs(softer).max())
+        return np.float32(float(np.abs(louder).max()) * 10 ** (-db / 20) / top) if top >= SILENT else np.float32(0)
+
+
+GROUPS = None
+CONTEXT = None
+
+
+def batch(args):
+    held, seed, count = args
+    mixer = Mixer(GROUPS["speech"][held], GROUPS["nonspeech"][held], CONTEXT, np.random.default_rng(seed))
+    xs, ys = [], []
+    while len(xs) < count:
+        made = mixer.example()
+        if made is not None:
+            xs.append(made[0])
+            ys.append(made[1])
+    return np.stack(xs), np.array(ys, np.float32)
+
+
+def model_for(size):
+    import torch
+    from torch import nn
+
+    n_fft, hop, mels = 400, 160, 64
+    bins = n_fft // 2 + 1
+    window = np.hanning(n_fft + 1)[:-1]
+    k = np.arange(bins)[:, None] * np.arange(n_fft)[None, :] * 2 * np.pi / n_fft
+    dft = np.concatenate([np.cos(k) * window, -np.sin(k) * window])[:, None, :].astype(np.float32)
+
+    def mel(f):
+        return 2595 * np.log10(1 + f / 700)
+
+    edges = 700 * (10 ** (np.linspace(mel(50), mel(RATE / 2), mels + 2) / 2595) - 1)
+    freqs = np.arange(bins) * RATE / n_fft
+    bank = np.zeros((mels, bins), np.float32)
+    for m in range(mels):
+        lo, mid, hi = edges[m : m + 3]
+        bank[m] = np.clip(np.minimum((freqs - lo) / (mid - lo), (hi - freqs) / (hi - mid)), 0, None)
+
+    side = (size - FRAME) // 2
+    steps = (size - n_fft) // hop + 1
+
+    class Gate(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.register_buffer("dft", torch.from_numpy(dft))
+            self.register_buffer("bank", torch.from_numpy(bank))
+            def block(i, o):
+                return nn.Sequential(nn.Conv2d(i, o, 3, padding=1), nn.BatchNorm2d(o), nn.ReLU(), nn.MaxPool2d(2))
+            self.convs = nn.Sequential(block(1, 16), block(16, 32), block(32, 64), nn.Conv2d(64, 64, 3, padding=1), nn.ReLU())
+            self.head = nn.Sequential(nn.Flatten(), nn.Linear(64 * (steps // 8), 32), nn.ReLU(), nn.Linear(32, 1))
+
+        def forward(self, x):
+            # x: (batch, size) raw samples. Scaled so the judged frame's peak is 1.
+            peak = x[:, side : side + FRAME].abs().amax(dim=1, keepdim=True).clamp(min=1e-6)
+            x = (x / peak).unsqueeze(1)
+            spec = nn.functional.conv1d(x, self.dft, stride=hop)
+            power = spec[:, :bins] ** 2 + spec[:, bins:] ** 2
+            logmel = torch.log(torch.matmul(self.bank, power) + 1e-6)
+            h = self.convs(((logmel + 5) / 5).unsqueeze(1))
+            return self.head(h.mean(dim=2))
+
+    return Gate()
+
+
+def selection(scores, labels):
+    """Share of held-out non-speech frames at or above the score that keeps 99.9% of
+    held-out speech frames, and that score."""
+    threshold = float(np.quantile(scores[labels == 1], 0.001))
+    return float((scores[labels == 0] >= threshold).mean()), threshold
+
+
+def main():
+    global GROUPS, CONTEXT
+    parser = argparse.ArgumentParser()
+    parser.add_argument("data")
+    parser.add_argument("out")
+    parser.add_argument("--context", type=float, default=0.2)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--steps", type=int, default=1_000)
+    parser.add_argument("--checkpoint", help="also save the chosen weights here, for inspection")
+    args = parser.parse_args()
+    CONTEXT = args.context
+    started = time.time()
+    GROUPS = load(args.data)
+    size = FRAME + 2 * int(CONTEXT * RATE)
+    # The pool forks before torch touches the GPU, and its workers share the loaded audio.
+    pool = multiprocessing.get_context("fork").Pool(10)
+    vx, vy = zip(*pool.map(batch, [(True, 10_000_000 + i, 500) for i in range(40)]))
+    vx, vy = np.concatenate(vx), np.concatenate(vy)
+    print(f"held-out mixes: {int(vy.sum())} speech frames, {int((1 - vy).sum())} non-speech frames; loaded in {time.time() - started:.0f} s", flush=True)
+
+    import torch
+
+    torch.manual_seed(0)
+    device = torch.device("mps")
+    model = model_for(size).to(device)
+    print(f"parameters: {sum(p.numel() for p in model.parameters())}")
+    optimiser = torch.optim.AdamW(model.parameters(), lr=2e-3, weight_decay=1e-4)
+    schedule = torch.optim.lr_scheduler.OneCycleLR(optimiser, max_lr=2e-3, total_steps=args.epochs * args.steps)
+    loss_fn = torch.nn.BCEWithLogitsLoss()
+    best = (2.0, None, None)
+    for epoch in range(args.epochs):
+        model.train()
+        jobs = ((False, epoch * args.steps + i, 256) for i in range(args.steps))
+        total = 0.0
+        for x, y in pool.imap(batch, jobs, chunksize=4):
+            logits = model(torch.from_numpy(x).to(device)).squeeze(1)
+            loss = loss_fn(logits, torch.from_numpy(y).to(device))
+            optimiser.zero_grad()
+            loss.backward()
+            optimiser.step()
+            schedule.step()
+            total += loss.item()
+        model.eval()
+        with torch.no_grad():
+            scores = torch.cat([torch.sigmoid(model(torch.from_numpy(vx[i : i + 1024]).to(device))).squeeze(1).cpu() for i in range(0, len(vx), 1024)]).numpy()
+        let_in, threshold = selection(scores, vy)
+        print(f"epoch {epoch + 1}: loss {total / args.steps:.4f}; held-out non-speech at or above {threshold:.4f} (keeps 99.9% speech): {let_in:.2%}; {time.time() - started:.0f} s", flush=True)
+        if let_in < best[0]:
+            best = (let_in, epoch + 1, {k: v.detach().cpu().clone() for k, v in model.state_dict().items()})
+    pool.close()
+    print(f"chosen: epoch {best[1]}, held-out non-speech let in {best[0]:.2%}")
+    if args.checkpoint:
+        torch.save(best[2], args.checkpoint)
+
+    import coremltools as ct
+
+    model = model_for(size)
+    model.load_state_dict(best[2])
+    model.eval()
+
+    class Probability(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, x):
+            return torch.sigmoid(self.inner(x))
+
+    traced = torch.jit.trace(Probability(model).eval(), torch.zeros(1, size))
+    mlmodel = ct.convert(
+        traced,
+        inputs=[ct.TensorType(name="samples", shape=(1, size), dtype=np.float32)],
+        outputs=[ct.TensorType(name="speech", dtype=np.float32)],
+        minimum_deployment_target=ct.target.macOS15,
+        compute_precision=ct.precision.FLOAT32,
+    )
+    mlmodel.short_description = f"Is the loudest sound in the middle 0.1 s of {size / RATE:.1f} s of 16 kHz audio speech."
+    mlmodel.save(args.out)
+    print(f"saved {args.out}")
+
+
+if __name__ == "__main__":
+    main()

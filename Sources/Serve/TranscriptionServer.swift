@@ -448,6 +448,9 @@ private struct Answering: Sendable {
         event.refusedAsRoomSeconds = heard.transcription.quiet.refusedAsRoom
         event.transients = heard.transcription.quiet.transients.count
         event.longestTransientSeconds = heard.transcription.quiet.transients.longest
+        event.rangePeak = heard.transcription.quiet.range.map(Double.init)
+        event.keptOutPeak = heard.transcription.quiet.keptOut.map(Double.init)
+        event.keptOutFrames = heard.transcription.quiet.keptOutFrames
         event.nothingSpokenPeak = heard.nothingSpokenPeak.map(Double.init)
         let segment = try Segment(heard.transcription.transcript)
         (event.avgLogprob, event.compressionRatio) = (segment?.avgLogprob, segment?.compressionRatio)
@@ -588,6 +591,12 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     /// Bursts of sound in the upload refused as too brief to be speech, and seconds the longest sounded.
     public internal(set) var transients: Int?
     public internal(set) var longestTransientSeconds: Double?
+    /// The peak of the upload's loudest syllable in frames called speech, the range it was
+    /// judged against; and the loudest sound above the range kept out of it as not speech, and
+    /// in how many frames.
+    public internal(set) var rangePeak: Double?
+    public internal(set) var keptOutPeak: Double?
+    public internal(set) var keptOutFrames: Int?
     /// The loudest sample of an upload refused as nothing spoken, which was answered as
     /// nothing said.
     public internal(set) var nothingSpokenPeak: Double?

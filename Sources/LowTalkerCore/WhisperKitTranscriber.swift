@@ -15,15 +15,18 @@ import WhisperKit
 public struct WhisperKitTranscriber: Transcriber {
     public let model: ModelName
     private let pipeline: Pipeline
+    private let gate: GateClassifier
     private let turns: EngineTurns
     private var caller: EngineTurns.Caller
 
-    /// Loads an installed model onto the compute units, its weights from disk alone.
-    /// Returns only once the model is resident, so the first `transcribe` pays no
-    /// load cost. It hears for dictation; `served` is the same engine for the server.
+    /// Loads an installed model onto the compute units, its weights from disk alone, and
+    /// the gate classifier beside it. Returns only once both are resident, so the first
+    /// `transcribe` pays no load cost. It hears for dictation; `served` is the same engine
+    /// for the server.
     public init(_ installed: InstalledModel, turns: EngineTurns) async throws {
         model = installed.model
         pipeline = try await Pipeline(installed: installed)
+        gate = try await GateClassifier()
         self.turns = turns
         caller = .dictation
     }
@@ -91,7 +94,7 @@ public struct WhisperKitTranscriber: Transcriber {
         // [LAW:composability] The passes are Hearing's to run; this engine is one
         // decode of what a pass asks for, and its floor and prefix length are the
         // facts it hands over.
-        return try await Hearing.transcribe(audio, margin: Pipeline.margin, context: Pipeline.contextWords, pass: { pass async throws(TranscriptionFailure) in
+        return try await Hearing.transcribe(audio, margin: Pipeline.margin, context: Pipeline.contextWords, judging: gate, pass: { pass async throws(TranscriptionFailure) in
             try await turns.decode(as: caller) { () async throws(TranscriptionFailure) in try await pipeline.hear(pass.samples, arrived: pass.arrived, from: pass.cut, saying: pass.saying, told: prompt) }
         }, partial: partial)
     }

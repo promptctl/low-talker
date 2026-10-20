@@ -30,7 +30,7 @@ import TestProbes
 
     /// A failure that states only facts is logged whole, with nothing held apart.
     @Test(arguments: [
-        TranscriptionFailure.nothingSpoken(peak: 0.004, quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0, transients: .none)),
+        TranscriptionFailure.nothingSpoken(peak: 0.004, quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0)),
         .vocabulary(.tooLong(tokens: 300, limit: 224)),
         .cancelled,
     ])

@@ -15,10 +15,12 @@ it and nothing else. [LAW:single-enforcer]
 import json
 import sys
 
-# The permissive set the tree sits in, and the public-domain equivalents. GPL, LGPL, AGPL,
-# MPL, SSPL and source-available licenses stay out: they ask for source, or restrict use,
-# on distribution, and every release distributes. SPDX ids match without regard to case.
-ACCEPTED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "CC0-1.0", "0BSD"}
+# The permissive set the tree sits in, and the public-domain equivalents. CC BY asks only
+# for attribution, as MIT does; it is what the gate classifier's training audio is under.
+# GPL, LGPL, AGPL, MPL, SSPL, the ShareAlike and NonCommercial Creative Commons licenses and
+# source-available licenses stay out: they ask for source or the same license, or restrict
+# use, on distribution, and every release distributes. SPDX ids match without regard to case.
+ACCEPTED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "CC0-1.0", "0BSD", "CC-BY-3.0", "CC-BY-4.0"}
 ACCEPTED_IDS = {spdx.casefold() for spdx in ACCEPTED}
 
 REMEDY = ("Drop the component, replace it with one under an accepted license, or reimplement "

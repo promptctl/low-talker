@@ -17,6 +17,9 @@ MASTER = {
     "family=talk press=short fixture=say/yes under=librispeech/a db=-30": "0-40",
     "family=bench fixture=say/yes level=0 trim=whole room=clean": "0-48",
     "family=tap fixture=say/yes room=-35": "0-48",
+    # A loud room alone hands 0-999; a cough before it hands the same room.
+    "family=tap-after source=none room=-35": "0-999",
+    "family=tap-after source=coughing/1-19111-A-24 room=-35": "0-999",
 }
 
 
@@ -36,7 +39,8 @@ class ReportTests(unittest.TestCase):
         result = self.report(rows(MASTER), rows(MASTER))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cases losing more than on master: none", result.stdout)
-        self.assertEqual(result.stdout.count("changed: none"), 4)
+        self.assertEqual(result.stdout.count("changed: none"), 5)
+        self.assertIn("cases handing more of it than on master: none", result.stdout)
 
     def test_loss_after_a_transient_is_counted_beyond_the_silence_control(self):
         fixed = {**MASTER, f"family=transient {INSERT} source=coughing/1-19111-A-24": "0-99"}
@@ -68,6 +72,23 @@ class ReportTests(unittest.TestCase):
         result = self.report(rows(MASTER), rows({**MASTER, case: "0-38"}, {case: "beef"}))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("fixture=say/yes level=0 trim=whole room=clean: let in 0.00 s, lost 0.10 s", result.stdout)
+
+    def test_a_sound_before_a_tap_handing_more_beyond_its_room_alone_than_master_is_listed(self):
+        # The room alone hands nothing in the tree; the cough before it still hands 0-999.
+        alone = "family=tap-after source=none room=-35"
+        result = self.report(rows(MASTER), rows({**MASTER, alone: "-"}, {alone: "beef"}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"-35\s+1\s+1\s+10.00 s\s+0\s+0.00 s")
+        self.assertIn("cases handing more of it than on master: 1", result.stdout)
+        self.assertIn("source=coughing/1-19111-A-24 room=-35: 0.00 s on master, 10.00 s", result.stdout)
+
+    def test_room_a_sound_before_a_tap_lets_in_beside_master_is_listed(self):
+        # Master's cough refused the room after it; the tree hands the room, as the room alone does.
+        case = "family=tap-after source=coughing/1-19111-A-24 room=-35"
+        result = self.report(rows({**MASTER, case: "0-29"}), rows(MASTER, {case: "beef"}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cases handing more of it than on master: none", result.stdout)
+        self.assertIn("source=coughing/1-19111-A-24 room=-35: let in 9.70 s, lost 0.00 s", result.stdout)
 
     def test_files_holding_different_cases_are_no_comparison(self):
         case = "family=tap fixture=say/yes room=-35"

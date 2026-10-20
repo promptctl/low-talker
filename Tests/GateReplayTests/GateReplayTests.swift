@@ -20,23 +20,23 @@ private let repository = URL(fileURLWithPath: #filePath)
         let esc50 = try #require(environment["GATE_REPLAY_ESC50"], "GATE_REPLAY_ESC50 names the folder scripts/gate-replay/fetch-esc50 fills")
         let fixtures = try Fixtures(bench: repository.appendingPathComponent("bench"), esc50: URL(fileURLWithPath: esc50))
         try #require(!fixtures.transients.isEmpty, "no ESC-50 clips under \(esc50)")
-        let rows = await Self.measure(fixtures.cases)
+        let rows = try await Self.measure(fixtures.cases, judging: try await GateClassifier())
         try (rows.sorted().joined(separator: "\n") + "\n").write(toFile: out, atomically: true, encoding: .utf8)
     }
 
     /// Every case's row, measured as many at a time as there are cores: each utterance is
-    /// its own actor, and nothing passes between cases.
-    static func measure(_ cases: [Case]) async -> [String] {
-        await withTaskGroup(of: String.self) { group in
+    /// its own actor, and nothing passes between cases but the one classifier judging them all.
+    static func measure(_ cases: [Case], judging discriminator: any Discriminator) async throws -> [String] {
+        try await withThrowingTaskGroup(of: String.self) { group in
             var rows: [String] = []
             var pending = cases[...]
             for _ in 0..<ProcessInfo.processInfo.activeProcessorCount {
                 guard let next = pending.popFirst() else { break }
-                group.addTask { await next.row() }
+                group.addTask { try await next.row(judging: discriminator) }
             }
-            for await row in group {
+            for try await row in group {
                 rows.append(row)
-                if let next = pending.popFirst() { group.addTask { await next.row() } }
+                if let next = pending.popFirst() { group.addTask { try await next.row(judging: discriminator) } }
             }
             return rows
         }
@@ -74,12 +74,12 @@ struct Case: Sendable {
 
     /// The id, the count and FNV-1a hash of the samples the last pass is handed, and the
     /// windows of the signal they came from, as runs `first-last` (inclusive), or `-`.
-    func row() async -> String {
-        let utterance = Utterance()
+    func row(judging discriminator: any Discriminator) async throws -> String {
+        let utterance = Utterance(judging: discriminator)
         for clip in AudioClip(samples: signal()).chunks(of: Self.hundredth) {
-            await utterance.append(clip)
+            try await utterance.append(clip)
         }
-        await utterance.end()
+        try await utterance.end()
         let (handed, arrived, _, timeline) = await utterance.audio(beyond: 0)
         var hash: UInt64 = 0xCBF2_9CE4_8422_2325
         for sample in handed {
@@ -192,7 +192,7 @@ struct Fixtures {
     var readers: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("librispeech/") } }
     var shortPresses: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("say/") } }
 
-    var cases: [Case] { bench + transientCases + talk + tap }
+    var cases: [Case] { bench + transientCases + talk + tap + tapAfter }
 
     /// Every fixture at 0 and -20 dB, whole and from its first sound, clean and in a quiet
     /// and a loud room.
@@ -294,6 +294,21 @@ struct Fixtures {
                     return zip(audio, Noise.samples(audio.count, at: Float(pow(10, Double(db) / 20)))).map(+)
                 }
             }
+        }
+    }
+
+    /// A tap left open after a sound and nothing said: each ESC-50 clip, then 10 s of room at
+    /// -51 and -35 dBFS, beside the same room alone (`source=none`). The clip is the inserted
+    /// stretch, so the windows of a case and of its room alone line up.
+    var tapAfter: [Case] {
+        let room = 10 * Self.rate
+        return [("-51", Self.quietRoom), ("-35", Self.loudRoom)].flatMap { name, level in
+            [Case(id: "family=tap-after source=none room=\(name)", inserted: nil) { Noise.samples(room, at: level) }]
+                + transients.map { clip, segment in
+                    Case(id: "family=tap-after source=\(clip) room=\(name)", inserted: 0..<segment.count) {
+                        segment + Noise.samples(room, at: level)
+                    }
+                }
         }
     }
 }

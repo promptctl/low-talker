@@ -36,7 +36,7 @@ import Testing
         let feeding = Task { await feed(clipFeed, seen) }
         var passes: [Hearing.Pass] = []
         var partials: [Partial] = []
-        let transcription = try await Hearing.transcribe(clips, margin: margin, context: 3, pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { pass in
             passes.append(pass)
             record.yield(pass)
             return reading
@@ -58,7 +58,7 @@ import Testing
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
-        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, transients: .none))
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
         #expect(passes.isEmpty)
     }
 
@@ -67,15 +67,15 @@ import Testing
     @Test func theTranscriptionCarriesTheQuietTheGateKept() async throws {
         let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
         let clips = [room, AudioClip(samples: Array(repeating: 0.03, count: 1_600))] + Array(repeating: room, count: 60)
-        let utterance = Utterance()
-        for clip in clips { await utterance.append(clip) }
-        await utterance.end()
+        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        for clip in clips { try await utterance.append(clip) }
+        try await utterance.end()
         let gate = await utterance.audio(beyond: 0).timeline.quiet
         #expect(gate.room == 0.002 && gate.refusedAsRoom == 60)
         let transcription = try await Hearing.transcribe(AsyncStream { feed in
             for clip in clips { feed.yield(clip) }
             feed.finish()
-        }, margin: Self.margin, context: 3, pass: { _ in Self.reading }, partial: { _ in })
+        }, margin: Self.margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { _ in Self.reading }, partial: { _ in })
         #expect(transcription.quiet == gate)
     }
 
@@ -103,7 +103,7 @@ import Testing
         }
         feed.finish()
         var passes: [Hearing.Pass] = []
-        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { pass in
             passes.append(pass)
             return Self.hallucinating(pass)
         }, partial: { _ in })

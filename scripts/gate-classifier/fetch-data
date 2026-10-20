@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""The audio the gate classifier is trained on, fetched into <folder>:
+
+    scripts/gate-classifier/fetch-data <folder>
+
+Speech is LibriSpeech dev-clean and test-clean (CC BY 4.0) without the bench's six readers.
+Non-speech is every FSD50K clip (CC BY 4.0 as a whole) that carries one of CLASSES, no
+voice or music label, and its own license CC0 or CC BY. ESC-50 is the test set and is drawn
+from Freesound too: every clip of it is dropped, and so is every clip by an uploader of the
+sounds the gate replay inserts. Each source is pinned, so every training run reads the same
+audio. <folder>/manifest.tsv names every clip kept, its license and its uploader, which is the
+attribution CC BY asks for. A file already fetched is not fetched again; a failed fetch stops
+the run.
+"""
+import csv
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tarfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+
+FSD50K = "https://huggingface.co/datasets/Fhrozen/FSD50k/resolve/ccf1acaff12f3f4a4c10052dddafbb6d22152c9b/"
+ESC50 = "https://raw.githubusercontent.com/karolpiczak/ESC-50/33c8ce9eb2cf0b1c2f8bcf322eb349b6be34dbb6/"
+LIBRISPEECH = "https://openslr.elda.org/resources/12/"  # A mirror of openslr.org, many times faster from here
+# The sets and their MD5s as openslr.org/resources/12/md5sum.txt lists them.
+SPEECH_SETS = {"dev-clean": "42e2234ba48799c1f50f24a7926300a1", "test-clean": "32fa31d27d2e1cad72775fee3f4849a9"}
+COUGHVID = "https://zenodo.org/records/4498364/files/public_dataset.zip?download=1"
+COUGHVID_MD5 = "110d638a292cfa5c3a71a95d60b5b466"  # As the Zenodo record lists it.
+COUGH_DETECTED = 0.95
+COUGHS = 3_000
+BENCH_READERS ={"251", "777", "2277", "2803", "3536", "6313"}
+# The ESC-50 categories scripts/gate-replay/fetch-esc50 inserts.
+REPLAYED = {"coughing", "sneezing", "door_wood_knock", "clapping"}
+CLASSES = """Cough Sneeze Knock Clapping Hands Finger_snapping Slam Door Tap Thump_and_thud Crack
+Chink_and_clink Coin_(dropping) Keys_jangling Cutlery_and_silverware Dishes_and_pots_and_pans Glass
+Drawer_open_or_close Cupboard_open_or_close Computer_keyboard Typing Writing Crumpling_and_crinkling
+Zipper_(clothing) Scissors Walk_and_footsteps Breathing Gasp Burping_and_eructation
+Chewing_and_mastication Wood Hammer""".split()
+EXCLUDED = {"Human_voice", "Music"}
+LICENSES = {
+    "http://creativecommons.org/publicdomain/zero/1.0/": "CC0 1.0",
+    "http://creativecommons.org/licenses/by/3.0/": "CC BY 3.0",
+}
+
+
+def fetch(url, path):
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return path
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Thousands of fetches meet the odd failed DNS lookup or dropped connection; a fetch
+    # that fails three times stops the run.
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as response, open(path + ".part", "wb") as out:
+                while chunk := response.read(1 << 20):
+                    out.write(chunk)
+            break
+        except (urllib.error.URLError, OSError) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code < 500 or attempt == 2:
+                raise
+            print(f"retrying {url}: {error}", flush=True)
+            time.sleep(5 * (attempt + 1))
+    os.replace(path + ".part", path)
+    return path
+
+
+def check(path, md5):
+    digest = hashlib.md5()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    if digest.hexdigest() != md5:
+        sys.exit(f"{path}: md5 {digest.hexdigest()}, expected {md5}")
+
+
+def main(folder):
+    folder = os.path.abspath(folder)
+    meta = os.path.join(folder, "fsd50k")
+    for name in ["metadata/dev_clips_info_FSD50K.json", "metadata/eval_clips_info_FSD50K.json", "labels/dev.csv", "labels/eval.csv"]:
+        fetch(FSD50K + name, os.path.join(meta, os.path.basename(name)))
+    esc50 = list(csv.DictReader(open(fetch(ESC50 + "meta/esc50.csv", os.path.join(folder, "esc50.csv")))))
+    held = {row["filename"].split("-")[1] for row in esc50}
+    replayed = {row["filename"].split("-")[1] for row in esc50 if row["category"] in REPLAYED}
+    # ESC-50's LICENSE attributes every clip to its Freesound page,
+    # "(http://www.freesound.org/people/<uploader>/sounds/<id>/)", gone from Freesound or not.
+    owners = {}
+    for line in open(fetch(ESC50 + "LICENSE", os.path.join(folder, "esc50-LICENSE"))):
+        if "freesound.org/people/" in line:
+            uploader, _, source = line.split("freesound.org/people/")[1].split("/")[:3]
+            owners[source] = urllib.parse.unquote(uploader)
+    unattributed = sorted(replayed - owners.keys())
+    if unattributed:
+        sys.exit(f"ESC-50's LICENSE names no uploader for replayed sources {unattributed}")
+    held_uploaders = {owners[s] for s in replayed}
+    print(f"ESC-50: {len(held)} source ids held out; {len(replayed)} replayed sources, {len(held_uploaders)} uploaders held out")
+
+    # Per class, what became of every clip carrying it: the first rule that drops a clip
+    # names its fate, so each clip is counted once per class it carries.
+    fates = ["kept", "license", "voice/music", "ESC-50 id", "ESC-50 uploader"]
+    counts = {c: dict.fromkeys(fates, 0) for c in CLASSES}
+    clips = []
+    for split in ["dev", "eval"]:
+        info = json.load(open(os.path.join(meta, f"{split}_clips_info_FSD50K.json")))
+        for row in csv.DictReader(open(os.path.join(meta, f"{split}.csv"))):
+            labels, clip = row["labels"].split(","), info[row["fname"]]
+            classes = [c for c in CLASSES if c in labels]
+            fate = ("license" if clip["license"] not in LICENSES
+                    else "voice/music" if EXCLUDED & set(labels)
+                    else "ESC-50 id" if row["fname"] in held
+                    else "ESC-50 uploader" if clip["uploader"] in held_uploaders
+                    else "kept")
+            for c in classes:
+                counts[c][fate] += 1
+            if classes and fate == "kept":
+                clips.append((split, row["fname"], LICENSES[clip["license"]], clip["uploader"], classes))
+    print("class\t" + "\t".join(fates))
+    for c in CLASSES:
+        print(c + "\t" + "\t".join(str(counts[c][f]) for f in fates))
+
+    def get(clip):
+        split, name = clip[0], clip[1]
+        path = os.path.join(folder, "nonspeech", f"{name}.wav")
+        if not os.path.exists(path):
+            raw = fetch(f"{FSD50K}clips/{split}/{name}.wav", path + ".source.wav")
+            subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", raw, path + ".part.wav"], check=True)
+            os.replace(path + ".part.wav", path)
+            os.remove(raw)
+        return path
+    with ThreadPoolExecutor(8) as pool:
+        paths = list(pool.map(get, clips))
+
+    speech = []
+    for name, md5 in SPEECH_SETS.items():
+        archive = fetch(f"{LIBRISPEECH}{name}.tar.gz", os.path.join(folder, f"{name}.tar.gz"))
+        root = os.path.join(folder, "speech", name)
+        if not os.path.isdir(root):
+            check(archive, md5)
+            with tarfile.open(archive) as tar:
+                tar.extractall(root + ".part", filter="data")
+            os.replace(root + ".part", root)
+        for base, _, files in os.walk(root):
+            for f in sorted(files):
+                if f.endswith(".flac") and f.split("-")[0] not in BENCH_READERS:
+                    speech.append((os.path.join(base, f), f.split("-")[0]))
+
+    # FSD50K has few coughs once ESC-50's uploaders are out; COUGHVID adds recordings its own
+    # detector scores as a cough, each from one participant.
+    archive = fetch(COUGHVID, os.path.join(folder, "coughvid.zip"))
+    check(archive, COUGHVID_MD5)
+    coughs = []
+    with zipfile.ZipFile(archive) as bundle:
+        names = set(bundle.namelist())
+        for member in sorted(n for n in names if n.endswith(".json")):
+            if float(json.loads(bundle.read(member)).get("cough_detected") or 0) < COUGH_DETECTED:
+                continue
+            stem = member[: -len(".json")]
+            audio = next((stem + ext for ext in (".webm", ".ogg") if stem + ext in names), None)
+            if audio:
+                coughs.append((os.path.basename(stem), audio))
+            if len(coughs) == COUGHS:
+                break
+        os.makedirs(os.path.join(folder, "coughvid"), exist_ok=True)
+
+        def convert(cough):
+            name, audio = cough
+            path = os.path.join(folder, "coughvid", f"{name}.wav")
+            if not os.path.exists(path):
+                subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", str(16_000), "-sample_fmt", "s16", path + ".part.wav"],
+                               input=bundle.read(audio), check=True)
+                os.replace(path + ".part.wav", path)
+            return path
+        with ThreadPoolExecutor(8) as pool:
+            cough_paths = list(pool.map(convert, coughs))
+    print(f"COUGHVID: {len(coughs)} recordings scored {COUGH_DETECTED} or more as a cough")
+
+    with open(os.path.join(folder, "manifest.tsv"), "w") as out:
+        out.write("kind\tpath\tsource\tlicense\tgroup\tclasses\n")
+        for path, reader in sorted(speech):
+            out.write(f"speech\t{os.path.relpath(path, folder)}\tLibriSpeech {path.split('/speech/')[1].split('/')[0]}\tCC BY 4.0\treader {reader}\t-\n")
+        for path, (split, name, license, owner, classes) in zip(paths, clips):
+            out.write(f"nonspeech\t{os.path.relpath(path, folder)}\tFSD50K {split} {name} (freesound.org/s/{name})\t{license}\tuploader {owner}\t{','.join(classes)}\n")
+        for path, (name, _) in zip(cough_paths, coughs):
+            out.write(f"nonspeech\t{os.path.relpath(path, folder)}\tCOUGHVID {name}\tCC BY 4.0\tparticipant {name}\tCough\n")
+    print(f"{len(speech)} speech files from {len({r for _, r in speech})} readers; {len(clips)} non-speech clips from {len({c[3] for c in clips})} uploaders")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit("usage: fetch-data <folder>")
+    main(sys.argv[1])

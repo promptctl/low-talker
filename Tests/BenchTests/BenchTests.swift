@@ -25,7 +25,7 @@ private final class ScriptedEar: Transcriber {
         for await _ in audio {}
         await gate.wait()
         guard !Task.isCancelled else { throw .cancelled }
-        return Transcription(transcript: Transcript(typed: "hello world"), quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none))
+        return Transcription(transcript: Transcript(typed: "hello world"), quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
     }
 }
 
