@@ -41,6 +41,7 @@ jobs:
       - name: Build and test the package
         run: |
           swift build --build-tests
+          defaults write NSGlobalDomain NSAppSleepDisabled -bool YES
           swift test --skip-build > /tmp/tests.log 2>&1 &
           until grep -q "Test run started" /tmp/tests.log 2>/dev/null; do sleep 0.1; done
           pgrep -fl "low-talkerPackageTests" || true
@@ -49,7 +50,7 @@ jobs:
           sample "$p" 15 5 -mayDie -file /tmp/sample.txt || true
           wait || true
           grep -E "Test run with|Fatal" /tmp/tests.log | head -5 || true
-          grep -E "Suite \S+ passed after" /tmp/tests.log | awk '{print $NF, $(NF-1)}' | sort | uniq -c | sort -rn | head -5 || true
+          grep -E "Suite (ConfigTests|WordErrorRateTests|SampleCountTests|ChordNameTests|BuildTests) passed|Test authorizedIsAGrant" /tmp/tests.log || true
           echo "===SAMPLE==="
           cat /tmp/sample.txt
           echo "===END==="
