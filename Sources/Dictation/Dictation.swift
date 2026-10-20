@@ -64,7 +64,7 @@ public final class Dictation {
             let level = { (peak: Float?, none: String) in peak.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? none }
             let room = level(quiet.room, "none heard")
             let range = "range \(level(quiet.range, "none")), \(level(quiet.keptOut, "nothing")) kept out of it in \(quiet.keptOutFrames) frame\(quiet.keptOutFrames == 1 ? "" : "s")"
-            return "heard \(transcription.transcript.words.count) words in a \(press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room, \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") refused, the longest sounding \(String(format: "%.2f", quiet.transients.longest)) s; \(range)) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
+            return "heard \(transcription.transcript.words.count) words in a \(press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room, \(String(format: "%.1f", quiet.refusedAsNotSpeech)) s as no speech, \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") refused, the longest sounding \(String(format: "%.2f", quiet.transients.longest)) s; \(range)) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
         }
     }
 

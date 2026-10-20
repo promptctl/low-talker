@@ -91,7 +91,7 @@ import Testing
     /// in clips of a second, is handed to a pass as the lead-in and then the speech, and
     /// the timeline says how much went.
     @Test(arguments: [1.0, 61.1]) func quietBeforeSpeechIsLetGoButTheLeadIn(clipSeconds: Double) async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         let audio = AudioClip(samples: Self.quiet(60 * 16_000).samples + Self.speech(1_600).samples)
         for clip in audio.chunks(of: clipSeconds) {
             try await utterance.append(clip)
@@ -133,7 +133,7 @@ import Testing
     /// A hold with nothing said in it has no speech to hand a pass: the hangover
     /// rides on speech, so with none there is not even that.
     @Test func nothingSaidIsNoAudioAtAll() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(Self.quiet(32_000))
         try await utterance.end()
         let (samples, _, ended, _) = await utterance.audio(beyond: 0)
@@ -190,20 +190,101 @@ import Testing
         feed.finish()
     }
 
-    /// An utterance no clip of which reached the audible floor is refused with its
-    /// loudest peak, not heard as nothing said.
-    @Test func nothingReachingTheFloorIsRefused() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+    /// A room with no speaker in it is nothing spoken, however soft the room and however it
+    /// swells: before a speaker is heard only a frame the discriminator calls speech sounds, and
+    /// all of it is refused as no speech.
+    @Test func aRoomAloneIsNothingSpoken() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.005))
         let clips = AsyncStream<AudioClip> { continuation in
-            continuation.yield(Self.quiet(1_600))
-            continuation.yield(AudioClip(samples: [0.005, -0.008]))
+            for frame in 0..<20 {
+                continuation.yield(AudioClip(samples: Array(repeating: frame.isMultiple(of: 4) ? 0.004 : 0.002, count: 1_600)))
+            }
             continuation.finish()
         }
         let refusal = await #expect(throws: TranscriptionFailure.self) {
             try await utterance.fill(from: clips)
         }
-        guard case .nothingSpoken(let peak, _)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
-        #expect(peak == 0.008)
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.004)
+        #expect(quiet.room == 0.002 && quiet.refusedAsRoom == 0 && quiet.refusedAsNotSpeech == 2)
+    }
+
+    /// Digital silence is no sound at all: a microphone delivering zeros is nothing spoken,
+    /// though with no room heard and nothing louder, every peak it is judged against is zero.
+    @Test func digitalSilenceIsNothingSpoken() async throws {
+        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let clips = AsyncStream<AudioClip> { continuation in
+            continuation.yield(AudioClip(samples: Array(repeating: 0, count: 16_000)))
+            continuation.finish()
+        }
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            try await utterance.fill(from: clips)
+        }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0)
+        #expect(quiet.room == nil && quiet.refusedAsRoom == 0)
+    }
+
+    /// Speech under the -40 dBFS floor is speech when it stands clear of the room: 0.008 over a
+    /// room of 0.001 is heard, and so is a tenth of both, so a low input volume, a distant
+    /// microphone or a whisper is cut into speech and quiet as a loud speaker is
+    /// (low-reliability-z2z.3vd).
+    @Test(arguments: [Float(1), 0.1]) func softSpeechStandingClearOfTheRoomIsHeard(scale: Float) async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004 * scale))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.001 * scale, count: 16_000)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.008 * scale, count: 3_200)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.001 * scale, count: 8_000)))
+        try await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 3_200 + Utterance.hangover)
+        #expect(timeline.quiet.range == 0.008 * scale)
+    }
+
+    /// Breathing under a speaker's level is no speech, though it stands clear of a quiet room as
+    /// a whisper does: before a speaker is heard only a frame the discriminator calls speech
+    /// sounds, so a press with nothing said in it is refused, not read as " Thank you."
+    @Test func breathingWithNoSpeakerIsNoSpeech() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.005))
+        let clips = AsyncStream<AudioClip> { continuation in
+            continuation.yield(AudioClip(samples: Array(repeating: 0.0005, count: 16_000)))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.004, count: 16_000)))
+            continuation.finish()
+        }
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            try await utterance.fill(from: clips)
+        }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.004)
+        #expect(quiet.refusedAsRoom == 0 && quiet.refusedAsNotSpeech == 2)
+    }
+
+    /// A soft speaker who opens the press is their own room until they pause, so speech before
+    /// any quiet is heard is judged by the discriminator, not the room, and kept from its first
+    /// sample, however long it runs before the first pause.
+    @Test func softSpeechOpeningThePressBeforeAnyQuietIsKept() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.001))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.006, count: 6_400)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.0015, count: 1_600)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
+        try await utterance.end()
+        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        #expect(samples.count == 9_600 + Utterance.hangover)
+        #expect(samples.prefix(6_400).allSatisfy { $0 == 0.006 })
+    }
+
+    /// Soft speech that opens the press, before any of the room has been heard, is kept from its
+    /// first sample once a pause in it shows the room: what came before the first frame to stand
+    /// clear of the room rides with it as its lead-in.
+    @Test func softSpeechOpeningThePressIsKept() async throws {
+        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let word = AudioClip(samples: Array(repeating: 0.008, count: 3_200))
+        try await utterance.append(word)
+        try await utterance.append(Self.quiet(1_600))
+        try await utterance.append(word)
+        try await utterance.end()
+        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        #expect(samples.count == 3_200 + 1_600 + 3_200 + Utterance.hangover)
+        #expect(samples.prefix(3_200).allSatisfy { $0 == 0.008 })
     }
 
     /// Speech is judged against the utterance's own loudest clip, not a level: a
@@ -211,7 +292,7 @@ import Testing
     /// full level and at a tenth of it alike, so a soft speaker in a quiet room is cut
     /// into speech and quiet where a loud one is.
     @Test(arguments: [Float(1), 0.1]) func speechStandsWithinRangeOfTheLoudest(scale: Float) async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.001 * scale))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.0005 * scale, count: 16_000)))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.5 * scale, count: 1_600)))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.04 * scale, count: 1_600)))
@@ -220,16 +301,15 @@ import Testing
         #expect(samples.count == Utterance.leadIn + 3_200 + Utterance.hangover)
     }
 
-    /// A click past the floor does not make the room a speaker: noise under the floor that
-    /// stands no higher than the room is quiet, though it lies within range of the click,
-    /// so a tap left open after a keystroke hands no pass a minute of it to read words
-    /// into (low-dictation-f15). Speech under the floor that does stand above the room is
-    /// still speech, and the room and what it refused are on the record. A microphone that
-    /// opens on digital silence has not heard the room yet, so the click's room is the one
-    /// after it.
+    /// A click does not make the room a speaker: noise that stands no higher than the room
+    /// is quiet, though it lies within range of the click, so a tap left open after a
+    /// keystroke hands no pass a minute of it to read words into (low-dictation-f15).
+    /// Speech that does stand above the room is speech, and the room and what it refused
+    /// are on the record. A microphone that opens on digital silence has not heard the room
+    /// yet, so the click's room is the one after it.
     @Test(arguments: [Float(0.002), 0]) func theRoomAfterAClickIsQuiet(opening: Float) async throws {
         let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? opening : -opening }))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.03, count: 1_600)))
         for _ in 0..<60 { try await utterance.append(room) }
@@ -237,8 +317,8 @@ import Testing
         #expect(samples.count == Utterance.leadIn + 1_600 + Utterance.hangover)
         // Let go: all of the room but the click's lead-in and hangover, and the lead-in of
         // speech that may yet follow.
-        // The room before the click is under the floor, so only the minute after it was refused as room.
-        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, transients: .none, range: 0.03, keptOut: nil, keptOutFrames: 0))
+        // The room before the click is no speech, the minute after it the room; digital silence is neither.
+        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, refusedAsNotSpeech: opening > 0 ? 1 : 0, transients: .none, range: 0.03, keptOut: nil, keptOutFrames: 0))
 
         try await utterance.append(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
         // The few samples the end cuts a frame short to are no tenth of a second, so no room reading.
@@ -288,7 +368,7 @@ import Testing
     /// there are, none sounds long enough without a break to be a syllable, so the utterance is
     /// refused with the run of them as one transient.
     @Test func typingIsNoSpeech() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         let clips = AsyncStream<AudioClip> { continuation in
             for _ in 0..<20 {
                 continuation.yield(Self.click)
@@ -308,7 +388,7 @@ import Testing
     /// speaker to judge what follows against, so speech 24 dB under it is speech once the
     /// click has gone with the quiet.
     @Test func aSoftSpeakerAfterALoudClickIsHeard() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(Self.click)
         try await utterance.append(Self.quiet(16_000))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.02, count: 16_000)))
@@ -319,11 +399,11 @@ import Testing
         #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
     }
 
-    /// A soft speaker near the floor is heard though a syllable runs from a frame over the floor
+    /// A soft speaker near `audible` is heard though a syllable runs from a frame over it
     /// into one under it: the run carries the range across the frames, so the second frame is
     /// judged against the first, not against itself alone.
     @Test func aRunAtTheFloorCarriesItsRangeAcrossFrames() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         let clips = AsyncStream<AudioClip> { continuation in
             continuation.yield(Self.quiet(16_000))
             continuation.yield(AudioClip(samples: Self.quiet(960).samples + Array(repeating: 0.012, count: 640)))

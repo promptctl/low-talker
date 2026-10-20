@@ -44,7 +44,7 @@ import WhisperKit
         var partials: [Partial] = []
         // Kept rather than thrown, so the feed is let go and waited for however the loop ends.
         let transcription = await Result { () async throws(TranscriptionFailure) in
-            try await Hearing.transcribe(clips, margin: margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { pass throws(TranscriptionFailure) in
+            try await Hearing.transcribe(clips, margin: margin, context: 3, judging: Verdicts.speech(atOrAbove: 0.004), pass: { pass throws(TranscriptionFailure) in
                 passes.append(pass)
                 record.yield(pass)
                 if failing(passes.count) { throw unreadable }
@@ -57,7 +57,7 @@ import WhisperKit
     }
 
     /// Nothing reaching the gate is no pass at all and a refusal, not a decode of
-    /// silence that comes back empty. All of it is quiet, judged against the room it heard.
+    /// silence that comes back empty. All of it is quiet, refused as no speech with no speaker in it.
     @Test func aSilentHoldMakesNoPassAndIsRefused() async {
         var passes: [Hearing.Pass] = []
         let refusal = await #expect(throws: TranscriptionFailure.self) {
@@ -68,7 +68,7 @@ import WhisperKit
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
-        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, refusedAsNotSpeech: 2, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
         #expect(passes.isEmpty)
     }
 
@@ -77,15 +77,15 @@ import WhisperKit
     @Test func theTranscriptionCarriesTheQuietTheGateKept() async throws {
         let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
         let clips = [room, AudioClip(samples: Array(repeating: 0.03, count: 1_600))] + Array(repeating: room, count: 60)
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         for clip in clips { try await utterance.append(clip) }
         try await utterance.end()
         let gate = await utterance.audio(beyond: 0).timeline.quiet
-        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60)
+        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60 && gate.refusedAsNotSpeech == 1)
         let transcription = try await Hearing.transcribe(AsyncStream { feed in
             for clip in clips { feed.yield(clip) }
             feed.finish()
-        }, margin: Self.margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { _ in Self.reading }, partial: { _ in })
+        }, margin: Self.margin, context: 3, judging: Verdicts.speech(atOrAbove: 0.004), pass: { _ in Self.reading }, partial: { _ in })
         #expect(transcription.quiet == gate)
     }
 
@@ -113,7 +113,7 @@ import WhisperKit
         }
         feed.finish()
         var passes: [Hearing.Pass] = []
-        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, judging: Verdicts.speech(atOrAbove: 0.004), pass: { pass in
             passes.append(pass)
             return Self.hallucinating(pass)
         }, partial: { _ in })
@@ -142,7 +142,7 @@ import WhisperKit
         #expect(quiet.letGo == AudioClip.duration(for: audio.count))
         #expect(quiet.transients == Transients(count: 1, longest: 0.03))
         #expect(passes.isEmpty)
-        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 against the audible floor 0.01, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
+        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 over a room of 0.002, 11.93 s were called no speech, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
     }
 
     /// Speech under a second, well under what a pass waits for during the hold,

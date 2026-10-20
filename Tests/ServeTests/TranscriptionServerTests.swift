@@ -98,7 +98,7 @@ import TestProbes
     /// range with what was kept out of it, and the passes the engine failed to read with the
     /// latest failure's facts, none of its words (low-reliability-z2z.5s1).
     @Test func hearsAnMP3() async throws {
-        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3), unread: Partial.Unread(passes: 2, latest: .unreadable(.speechWithoutWords(text: " secret"))))
+        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, refusedAsNotSpeech: 0.25, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3), unread: Partial.Unread(passes: 2, latest: .unreadable(.speechWithoutWords(text: " secret"))))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -111,7 +111,7 @@ import TestProbes
         let event = try await running.nextEvent()
         #expect(event.status == 200 && event.words == 5 && event.model == "gpt-transcribe" && event.error == nil)
         #expect(event.quietSeconds == 1.5 && event.nothingSpokenPeak == nil)
-        #expect(event.roomPeak == 0.25 && event.refusedAsRoomSeconds == 0.5)
+        #expect(event.roomPeak == 0.25 && event.refusedAsRoomSeconds == 0.5 && event.refusedAsNotSpeechSeconds == 0.25)
         #expect(event.transients == 2 && event.longestTransientSeconds == 0.03)
         #expect(event.rangePeak == 0.5 && event.keptOutPeak == 0.75 && event.keptOutFrames == 3)
         #expect(event.unreadPasses == 2 && event.latestUnreadPass == "WhisperKit returned a segment of 7 characters without word timings")
@@ -126,7 +126,7 @@ import TestProbes
         ("verbose_json", Data(#"{"duration":2.5,"language":"english","segments":[],"task":"transcribe","text":"","usage":{"seconds":3,"type":"duration"}}"#.utf8)),
     ])
     func anUploadWithNothingSpokenIsEmptyText(format: String, answer: Data) async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))))
         defer { running.server.stop() }
         // 0.0025, about -52 dBFS: a quiet room's hold, under the -40 dBFS floor.
         let (response, body) = try await running.post([

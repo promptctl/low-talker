@@ -8,8 +8,9 @@ import Testing
 /// An engine that hears the conformance fixture's words in whatever it is given, and keeps
 /// what it was given. While audio streams in it confirms a word per half second heard, up
 /// to half the words, so a streamed utterance has words confirmed before it ends and
-/// words left for the final transcript. Audio that never reaches the engine's audible floor
-/// it refuses as nothing spoken, as the engine does, with `quiet`, and noise it hears its words in doubtfully.
+/// words left for the final transcript. Audio that never reaches `Utterance.audible` it
+/// refuses as nothing spoken, as the engine refuses a room with nothing clear of it, with
+/// `quiet`, and noise it hears its words in doubtfully.
 /// Its partials say it failed to read the passes `unread` counts.
 final class Stub: Transcriber {
     let heard = Mutex<[(seconds: TimeInterval, vocabulary: Vocabulary, cancelled: Bool)]>([])
@@ -17,7 +18,7 @@ final class Stub: Transcriber {
     let quiet: Quiet
     let unread: Partial.Unread?
 
-    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0), unread: Partial.Unread? = nil) {
+    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0), unread: Partial.Unread? = nil) {
         self.answer = answer
         self.quiet = quiet
         self.unread = unread
