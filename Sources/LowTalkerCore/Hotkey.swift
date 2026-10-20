@@ -1,4 +1,6 @@
 import Dispatch
+import Identity
+import os
 
 /// The hotkey for the life of the app: the modifier keys as the window server's events tell
 /// them, a detector reading them, and the presses it finds handed on by the main queue.
@@ -7,6 +9,9 @@ public final class Hotkey {
     nonisolated public static let defaultTapThreshold: Duration = .milliseconds(250)
     /// The chord listened for where the config names no other: Right Option.
     nonisolated public static let defaultChord = KeyChord(modifiers: .rightOption)
+    /// [LAW:one-source-of-truth] The `hotkey` category of the unified log, for everything
+    /// the hotkey hears and decides.
+    nonisolated static let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
 
     /// The chord in the words a person presses it by, in `Modifier.allCases` order, so one
     /// chord always spells one name: `rightOption` as "Right Option", the case's own name
@@ -83,7 +88,7 @@ public final class Hotkey {
         was?.dispose()
         detector = HotkeyDetector(modes: detector.modes, tapThreshold: detector.tapThreshold)
         unfinished.map { transition in
-            was.map { installation in after { installation.onTransition(transition) } }
+            was.map { installation in deliver(transition, to: installation.onTransition) }
         }
     }
 
@@ -112,17 +117,21 @@ public final class Hotkey {
     // Only the feed stops: nothing is left to hear an ending told from here.
     deinit { MainActor.assumeIsolated { installed?.dispose() } }
 
-    /// Runs `work` on the main queue, after the event that caused it has been read.
+    /// Logs `transition`, then hands it to `onTransition` on the main queue, after the event
+    /// that caused it has been read.
     ///
-    /// [LAW:single-enforcer] The one way anything leaves this class. The main queue is
+    /// [LAW:single-enforcer] The one way anything leaves this class, so every transition
+    /// is logged, a lapse at `stop` among them. The main queue is
     /// first-in-first-out, which is what keeps a `began` ahead of the `ended` that
     /// follows it: `Dictation.press` traps on a pair out of order rather than repairing
     /// one, so the order is a correctness property and not a preference.
-    private func after(_ work: @escaping @MainActor () -> Void) {
-        DispatchQueue.main.async { MainActor.assumeIsolated(work) }
+    private func deliver(_ transition: HotkeyDetector.Transition,
+                         to onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) {
+        Self.log.notice("\(transition, privacy: .public)")
+        DispatchQueue.main.async { MainActor.assumeIsolated { onTransition(transition) } }
     }
 
     private func handle(_ event: KeyEvent, _ onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) {
-        for transition in detector.handle(event) { after { onTransition(transition) } }
+        for transition in detector.handle(event) { deliver(transition, to: onTransition) }
     }
 }

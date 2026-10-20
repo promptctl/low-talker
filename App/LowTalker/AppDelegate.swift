@@ -397,7 +397,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hearing = notices.flatMap { notices in
             Result {
                 try hotkey.start { [unowned self] transition in
-                    log.notice("hotkey: \(transition, privacy: .public)")
                     // A blocked chord is no press, so the last press's failure stands.
                     if case .began = transition { lastFailure = nil }
                     dictation.press(transition)

@@ -296,6 +296,17 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         #expect(keyboard.detector.phase == .held(next, since: at(1010)))
     }
 
+    /// The superset chord in the other order switches too, in two key-downs: Right Option
+    /// alone ends the tap, and Shift under it completes the command chord from rest.
+    @Test func theSupersetChordSwitchesWithItsSharedKeyDownFirst() {
+        var keyboard = Keyboard(modes: modes(rightOption, command))
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+        #expect(keyboard.press(.rightOption, at: 1000) == ended(.tap, at: 1000))
+        #expect(keyboard.press(.leftShift, at: 1010) == began(command, at: 1010))
+        #expect(keyboard.detector.phase == .held(command, since: at(1010)))
+    }
+
     /// A switch's two transitions name one moment in the hotkey's log, which is how the line
     /// tells a switch from a press made after the tap ended.
     @Test func aSwitchIsLoggedAsOneMoment() {
