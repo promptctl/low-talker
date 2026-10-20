@@ -117,7 +117,7 @@ let package = Package(
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
-        .target(name: "InputMethod", dependencies: ["Insertion"], swiftSettings: inputMethodIsolation),
+        .target(name: "InputMethod", dependencies: ["Insertion", "Identity"], swiftSettings: inputMethodIsolation),
         .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "Insertion", "Identity"]),
         // The two calls that cross between the app and the input method - words one way, the
         // modifier keys the other - and both ends of each port. It links Identity for the

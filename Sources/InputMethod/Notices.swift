@@ -1,4 +1,5 @@
 import Foundation
+import Identity
 import os
 
 /// What this process tells the app, in the order it happened: every cursor a controller is
@@ -15,7 +16,7 @@ public nonisolated final class Notices: Sendable {
     /// one arrival is as good as another to the app. [LAW:no-ambient-temporal-coupling]
     public let arrivals: AsyncStream<Void>
     private let continuation: AsyncStream<Void>.Continuation
-    private let log = Logger(subsystem: subsystem, category: "notices")
+    private let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "notices")
 
     private init() {
         (arrivals, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))

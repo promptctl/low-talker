@@ -23,7 +23,7 @@ import InputMethodKit
 @objc(DictationInputController)
 public final class DictationInputController: IMKInputController {
     /// How `IMKServer` builds the controller. Nonisolated, as the initializers they override
-    /// are, which a main-actor class does not inherit; they set nothing the main actor owns.
+    /// are, which a main-actor class does not inherit.
     nonisolated override public init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
     }
@@ -81,8 +81,8 @@ public final class DictationInputController: IMKInputController {
     /// The cursor made on the way in is the one handed back, so `FocusedClient` can tell
     /// this client leaving from a different one arriving - a fresh wrapper around the same
     /// client would be a different object and the comparison would always miss.
-    nonisolated override public func deactivateServer(_ sender: Any!) {
-        onMainActor("deactivateServer", sender) { _ in
+    nonisolated override public func deactivateServer(_: Any!) {
+        onMainActor("deactivateServer", ()) {
             self.cursor.map(FocusedClient.shared.left)
             self.cursor = nil
         }
