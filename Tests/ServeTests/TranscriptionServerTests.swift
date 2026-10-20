@@ -94,10 +94,11 @@ import TestProbes
     }
 
     /// An mp3 is decoded as a wav is, and the engine hears all of it. The event carries
-    /// the quiet the engine let go, the room it was judged against, the transients refused, and
-    /// the range with what was kept out of it.
+    /// the quiet the engine let go, the room it was judged against, the transients refused, the
+    /// range with what was kept out of it, and the passes the engine failed to read with the
+    /// latest failure's facts, none of its words (low-reliability-z2z.5s1).
     @Test func hearsAnMP3() async throws {
-        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3))
+        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3), unread: Partial.Unread(passes: 2, latest: .unreadable(.speechWithoutWords(text: " secret"))))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -113,6 +114,7 @@ import TestProbes
         #expect(event.roomPeak == 0.25 && event.refusedAsRoomSeconds == 0.5)
         #expect(event.transients == 2 && event.longestTransientSeconds == 0.03)
         #expect(event.rangePeak == 0.5 && event.keptOutPeak == 0.75 && event.keptOutFrames == 3)
+        #expect(event.unreadPasses == 2 && event.latestUnreadPass == "WhisperKit returned a segment of 7 characters without word timings")
     }
 
     /// An upload no sample of which reached the audible floor, a push-to-talk hold where
@@ -134,6 +136,7 @@ import TestProbes
         #expect(body == answer, "\(String(decoding: body, as: UTF8.self))")
         let event = try await running.nextEvent()
         #expect(event.status == 200 && event.error == nil && event.words == 0)
+        #expect(event.unreadPasses == 0 && event.latestUnreadPass == nil)
         // The quiet the engine refused it with, the room it heard included.
         #expect(event.quietSeconds == 2.5 && event.roomPeak == Double(Float(0.002)))
         #expect(event.rangePeak == nil && event.keptOutPeak == nil && event.keptOutFrames == 0)

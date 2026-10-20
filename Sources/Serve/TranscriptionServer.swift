@@ -443,6 +443,8 @@ private struct Answering: Sendable {
             throw APIError.engineFailed("\(error)")
         }
         event.words = heard.transcription.transcript.words.count
+        event.unreadPasses = heard.transcription.unread?.passes ?? 0
+        event.latestUnreadPass = heard.transcription.unread?.latest.account.facts
         event.quietSeconds = heard.transcription.quiet.letGo
         event.roomPeak = heard.transcription.quiet.room.map(Double.init)
         event.refusedAsRoomSeconds = heard.transcription.quiet.refusedAsRoom
@@ -582,6 +584,10 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     public internal(set) var vocabularyTerms: Int?
     public internal(set) var audioSeconds: Double?
     public internal(set) var words: Int?
+    /// Passes the engine failed to read before the transcript's, each leaving its reading to
+    /// the next, and the latest failure's facts, which leave off any words it read.
+    public internal(set) var unreadPasses: Int?
+    public internal(set) var latestUnreadPass: String?
     /// Seconds of the upload's quiet the engine was not handed.
     public internal(set) var quietSeconds: Double?
     /// The peak of the upload's quietest tenth of a second, the room its quiet was judged

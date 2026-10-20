@@ -27,18 +27,21 @@ public protocol Transcriber: Sendable {
     ) async throws(TranscriptionFailure) -> Transcription
 }
 
-/// An utterance as the engine heard it: the words it read, and the account of the quiet
-/// around them that no pass was handed.
+/// An utterance as the engine heard it: the words it read, the account of the quiet
+/// around them that no pass was handed, and the passes before the last it failed to read.
 ///
 /// [LAW:types-are-the-program] The quiet is the utterance's, not its words': a slice of the
 /// words, a partial, or a run handed to the cursor is a Transcript, and has no quiet to lose.
-public struct Transcription: Hashable, Sendable {
+public struct Transcription: Sendable {
     public let transcript: Transcript
     public let quiet: Quiet
+    /// None when the engine read every pass.
+    public let unread: Partial.Unread?
 
-    public init(transcript: Transcript, quiet: Quiet) {
+    public init(transcript: Transcript, quiet: Quiet, unread: Partial.Unread?) {
         self.transcript = transcript
         self.quiet = quiet
+        self.unread = unread
     }
 }
 
@@ -171,9 +174,14 @@ public struct Partial: Sendable {
         self.unread = unread
     }
 
-    /// Everything heard so far, confirmed then tentative, as one line of text.
+    /// Everything heard so far, confirmed then tentative.
+    public var reading: Transcript {
+        Transcript(words: confirmed.words + tentative.words)
+    }
+
+    /// The reading as one line of text.
     public var text: String {
-        confirmed.text + tentative.text
+        reading.text
     }
 }
 

@@ -187,7 +187,7 @@ final class FakeTranscriber: Transcriber {
         }
         let clip = AudioClip(samples: samples)
         heard.withLock { $0.append(clip) }
-        return Transcription(transcript: try await answer(clip), quiet: quiet)
+        return Transcription(transcript: try await answer(clip), quiet: quiet, unread: nil)
     }
 }
 

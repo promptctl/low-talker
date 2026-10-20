@@ -118,9 +118,10 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         client.task.cancel(with: .normalClosure, reason: nil)
     }
 
-    /// The socket's one event says what happened on it.
+    /// The socket's one event says what happened on it, the passes the engine failed to read
+    /// during its items included (low-reliability-z2z.5s1).
     @Test func theSocketsEventCountsWhatHappenedOnIt() async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 1)
@@ -140,6 +141,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         #expect(realtime.sent.roomPeak == 0.25 && realtime.sent.refusedAsRoomSeconds == 0.5)
         #expect(realtime.sent.transients == 2 && realtime.sent.longestTransientSeconds == 0.03)
         #expect(realtime.sent.rangePeak == 0.5 && realtime.sent.keptOutPeak == 0.75 && realtime.sent.keptOutFrames == 3)
+        #expect(realtime.sent.unreadPasses == 1 && realtime.sent.latestUnreadPass == "WhisperKit returned a segment of 7 characters without word timings")
     }
 
     /// A client that appends for longer than the limit without a commit, as Pipecat does

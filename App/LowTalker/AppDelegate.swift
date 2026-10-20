@@ -751,15 +751,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// The press's own line, with what its microphone delivered; each insert's
-    /// key-up-to-acknowledged time is the executor's line beside it, under its own category.
+    /// The press's own line, with what it showed while the key was down and what its
+    /// microphone delivered; each insert's key-up-to-acknowledged time is the executor's line
+    /// beside it, under its own category.
     /// The words are private: they are what the user dictated.
     private func report(_ press: Dictation.Report) {
         switch press.outcome {
         case .session(let session):
-            sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); microphone: \(press.microphone, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
+            sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); \(press.record, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
         case .usedAsModifier(let landed, let held):
-            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so nothing more of the press was inserted; \(landed, privacy: .public) words inserted before, \(held, privacy: .public) heard after them held; microphone: \(press.microphone, privacy: .public)")
+            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so nothing more of the press was inserted; \(landed, privacy: .public) words inserted before, \(held, privacy: .public) heard after them held; \(press.record, privacy: .public)")
         case .failed(let failed):
             reportFailure(failed, of: press)
         }
@@ -776,12 +777,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // declares them.
         let account = failed.failure.account
         let mode = press.map { " in \($0.mode)" } ?? ""
-        let microphone = press.map { "; microphone: \($0.microphone)" } ?? ""
+        let record = press.map { "; \($0.record)" } ?? ""
         switch account.dictated {
         case nil:
-            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public)")
+            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(record, privacy: .public)")
         case let dictated?:
-            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(microphone, privacy: .public); dictated: \(dictated, privacy: .private)")
+            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(record, privacy: .public); dictated: \(dictated, privacy: .private)")
         }
     }
 
@@ -806,7 +807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The app's microphone authorization as it stands now.
     private func readMicrophone() -> MicrophoneAuthorization {
         let microphone = MicrophonePermission().current
-        log.notice("privacy: \(microphone, privacy: .public)")
+        log.notice("privacy: \(record, privacy: .public)")
         return microphone
     }
 
@@ -857,7 +858,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // microphone on an idle Mac is either explained here or is a bug - and a dark one
         // the config asked to hold open says so here too. [LAW:no-silent-failure]
         let microphone = capture.doing
-        log.notice("microphone at rest: \(microphone, privacy: .public)")
+        log.notice("microphone at rest: \(record, privacy: .public)")
         let untyped = untypedBecause()
         let globeKey = globeKeyClash()
         let openAtLogin = loginItem.current

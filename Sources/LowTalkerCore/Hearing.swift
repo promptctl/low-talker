@@ -35,10 +35,15 @@ struct Hearing {
     private(set) var heard = 0
     /// Passes that changed the last confirmed word's punctuation.
     private(set) var repunctuated = 0
-    /// Samples the latest pass the engine failed to read had been handed.
-    private(set) var missed = 0
-    /// The passes the engine failed to read, whose reading was left to the next pass.
-    private(set) var unread: Partial.Unread?
+    /// The passes the engine failed to read, none before the first.
+    private(set) var missed: Missed?
+
+    /// [LAW:types-are-the-program] The samples the latest pass the engine failed to read had
+    /// been handed, and the passes it failed to read so far, which one miss sets together.
+    struct Missed {
+        let through: Int
+        let unread: Partial.Unread
+    }
 
     init(margin: Int, context: Int) {
         precondition(margin >= 0, "a margin reaches back from a pass's end, not forward")
@@ -85,11 +90,11 @@ struct Hearing {
     /// than `margin` past the cut, so the first pass reads a second of speech rather
     /// than a fragment padded out with silence. A pass the engine failed to read
     /// leaves its audio to the next pass, which waits for more than that one was
-    /// handed, so the same failure is not read again over the same audio. Once the
-    /// utterance has ended, any speech past `heard` is worth the last pass, however
-    /// short.
+    /// handed, so the hold does not read the same failure again over the same audio.
+    /// Once the utterance has ended, any speech past `heard` is worth the last pass,
+    /// however short.
     var passable: Int {
-        max(heard, missed, cut + margin)
+        max(heard, missed?.through ?? 0, cut + margin)
     }
 
     /// Takes in a pass that read `words`, from the cut through `end` samples. The
@@ -114,15 +119,14 @@ struct Hearing {
     /// The engine failed to read a pass handed `end` samples, for `failure`. What the passes
     /// before it read stands, and the next pass reads this one's audio again with more after it.
     mutating func miss(through end: Int, for failure: TranscriptionFailure) {
-        missed = end
-        unread = Partial.Unread(passes: (unread?.passes ?? 0) + 1, latest: failure)
+        missed = Missed(through: end, unread: Partial.Unread(passes: (missed?.unread.passes ?? 0) + 1, latest: failure))
     }
 
     /// [LAW:types-are-the-program] The partial's confirmed words are the ones whose text
     /// is final, so a reader can take them as they come: every confirmed word but the
     /// last, whose punctuation the next pass may still revise.
     var partial: Partial {
-        Partial(confirmed: Transcript(words: confirmed.dropLast()), tentative: Transcript(words: confirmed.suffix(1) + tentative), repunctuated: repunctuated, unread: unread)
+        Partial(confirmed: Transcript(words: confirmed.dropLast()), tentative: Transcript(words: confirmed.suffix(1) + tentative), repunctuated: repunctuated, unread: missed?.unread)
     }
 
     /// The utterance as heard so far, which is the transcript once no more audio
@@ -191,6 +195,6 @@ extension Hearing {
         }
         try await fed.get()
         // Timed from the audio's first sample, not from the quiet the utterance let go.
-        return Transcription(transcript: heard.timeline.place(hearing.transcript), quiet: heard.timeline.quiet)
+        return Transcription(transcript: heard.timeline.place(hearing.transcript), quiet: heard.timeline.quiet, unread: hearing.missed?.unread)
     }
 }

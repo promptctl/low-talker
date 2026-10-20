@@ -660,6 +660,10 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
         /// sample any of them held: how near the floor a quiet microphone came.
         public internal(set) var nothingSpoken = 0
         public internal(set) var nothingSpokenPeak: Double?
+        /// Passes the engine failed to read during the completed items, each leaving its reading
+        /// to the next, and the latest failure's facts, which leave off any words it read.
+        public internal(set) var unreadPasses = 0
+        public internal(set) var latestUnreadPass: String?
 
         mutating func count(_ frame: Outgoing) {
             guard case .event(let event) = frame else { return }
@@ -675,6 +679,8 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
                 rangePeak = [rangePeak, heard.transcription.quiet.range.map(Double.init)].compactMap { $0 }.max()
                 keptOutPeak = [keptOutPeak, heard.transcription.quiet.keptOut.map(Double.init)].compactMap { $0 }.max()
                 keptOutFrames += heard.transcription.quiet.keptOutFrames
+                unreadPasses += heard.transcription.unread?.passes ?? 0
+                latestUnreadPass = heard.transcription.unread?.latest.account.facts ?? latestUnreadPass
                 if let peak = heard.nothingSpokenPeak {
                     nothingSpoken += 1
                     nothingSpokenPeak = max(nothingSpokenPeak ?? 0, Double(peak))

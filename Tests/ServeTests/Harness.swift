@@ -10,14 +10,17 @@ import Testing
 /// to half the words, so a streamed utterance has words confirmed before it ends and
 /// words left for the final transcript. Audio that never reaches the engine's audible floor
 /// it refuses as nothing spoken, as the engine does, with `quiet`, and noise it hears its words in doubtfully.
+/// What it hears says it failed to read the passes `unread` counts.
 final class Stub: Transcriber {
     let heard = Mutex<[(seconds: TimeInterval, vocabulary: Vocabulary, cancelled: Bool)]>([])
     let answer: Result<Transcript, TranscriptionFailure>
     let quiet: Quiet
+    let unread: Partial.Unread?
 
-    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0)) {
+    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0), unread: Partial.Unread? = nil) {
         self.answer = answer
         self.quiet = quiet
+        self.unread = unread
     }
 
     func transcribe(
@@ -46,7 +49,7 @@ final class Stub: Transcriber {
         // White noise changes sign on about half its samples, speech and a tone on far fewer.
         // Noise is read as the engine reads a primed hallucination over it: words, barely believed.
         let noise = Double(crossings) / Double(samples) > 0.3
-        return Transcription(transcript: noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: Self.doubted) }) : transcript, quiet: quiet)
+        return Transcription(transcript: noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: Self.doubted) }) : transcript, quiet: quiet, unread: unread)
     }
 
     /// The probability the stub gives every word it reads into noise.

@@ -36,22 +36,24 @@ import WhisperKit
     static func transcribe(
         failing: @escaping @Sendable (Int) -> Bool = { _ in false },
         feed: @escaping @Sendable (AsyncStream<AudioClip>.Continuation, AsyncStream<Hearing.Pass>) async -> Void
-    ) async throws -> (passes: [Hearing.Pass], partials: [Partial], transcript: Transcript) {
+    ) async throws -> (passes: [Hearing.Pass], partials: [Partial], transcription: Transcription) {
         let (clips, clipFeed) = AsyncStream<AudioClip>.makeStream()
         let (seen, record) = AsyncStream<Hearing.Pass>.makeStream()
         let feeding = Task { await feed(clipFeed, seen) }
         var passes: [Hearing.Pass] = []
         var partials: [Partial] = []
-        defer { record.finish() }
-        let transcription = try await Hearing.transcribe(clips, margin: margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { pass throws(TranscriptionFailure) in
-            passes.append(pass)
-            record.yield(pass)
-            if failing(passes.count) { throw unreadable }
-            return reading
-        }, partial: { partials.append($0) })
+        // Kept rather than thrown, so the feed is let go and waited for however the loop ends.
+        let transcription = await Result { () async throws(TranscriptionFailure) in
+            try await Hearing.transcribe(clips, margin: margin, context: 3, judging: Verdicts.everyFrameSpeech, pass: { pass throws(TranscriptionFailure) in
+                passes.append(pass)
+                record.yield(pass)
+                if failing(passes.count) { throw unreadable }
+                return reading
+            }, partial: { partials.append($0) })
+        }
         record.finish()
         await feeding.value
-        return (passes, partials, transcription.transcript)
+        return (passes, partials, try transcription.get())
     }
 
     /// Nothing reaching the gate is no pass at all and a refusal, not a decode of
@@ -147,7 +149,7 @@ import WhisperKit
     /// gets exactly one pass once the utterance ends, over the speech and its
     /// hangover from the start, and the words it reads are the transcript.
     @Test func aSubSecondUtteranceGetsOnePassAtItsEnd() async throws {
-        let (passes, partials, transcript) = try await Self.transcribe { feed, _ in
+        let (passes, partials, transcription) = try await Self.transcribe { feed, _ in
             feed.yield(Self.speech(0.4))
             feed.finish()
         }
@@ -157,7 +159,7 @@ import WhisperKit
         #expect(passes[0].cut == 0)
         #expect(passes[0].saying == "")
         #expect(partials.isEmpty)
-        #expect(transcript.text == " see you")
+        #expect(transcription.transcript.text == " see you")
     }
 
     /// During the hold a pass needs more than the margin of speech: speech that
@@ -178,7 +180,7 @@ import WhisperKit
     /// settled words as its prefix, and trailing quiet before key-up earns none: the
     /// pass in flight at key-up is the last.
     @Test func passesFollowTheSpeechDuringTheHoldAndStopWhenItIsHeard() async throws {
-        let (passes, partials, transcript) = try await Self.transcribe { feed, seen in
+        let (passes, partials, transcription) = try await Self.transcribe { feed, seen in
             var passes = seen.makeAsyncIterator()
             feed.yield(Self.speech(0.7))
             feed.yield(Self.speech(0.1))
@@ -195,18 +197,20 @@ import WhisperKit
         #expect(partials.map(\.text) == [" see you", " see you"])
         #expect(partials[0].confirmed.words.isEmpty)
         #expect(partials[1].confirmed.text == " see")
-        #expect(transcript.text == " see you")
+        #expect(transcription.transcript.text == " see you")
+        #expect(partials.allSatisfy { $0.unread == nil } && transcription.unread == nil)
     }
 
     /// A pass the engine fails to read during the hold leaves the reading to the next one
-    /// (low-reliability-z2z.5s1): pass 2 of 5 throws, and pass 3 starts from the same cut
-    /// over its audio and more. The partials say how many passes went unread and why the
-    /// latest did, and the press is heard to its transcript.
+    /// (low-reliability-z2z.5s1): pass 3 of 6 throws once two passes have settled words, and
+    /// pass 4 starts from the same cut and the same words over its audio and more. The
+    /// partials say how many passes went unread and why the latest did, and the press is
+    /// heard to its transcript, which counts them too.
     @Test func aPassThatFailsDuringTheHoldLeavesTheReadingToTheNext() async throws {
-        let (passes, partials, transcript) = try await Self.transcribe(failing: { $0 == 2 }) { feed, seen in
+        let (passes, partials, transcription) = try await Self.transcribe(failing: { $0 == 3 }) { feed, seen in
             var passes = seen.makeAsyncIterator()
             feed.yield(Self.speech(1.2))
-            for _ in 0..<3 {
+            for _ in 0..<4 {
                 _ = await passes.next()
                 feed.yield(Self.speech(0.5))
             }
@@ -214,15 +218,17 @@ import WhisperKit
             feed.yield(Self.speech(0.5))
             feed.finish()
         }
-        #expect(passes.count >= 5)
-        #expect(passes[2].cut == passes[1].cut)
-        #expect(passes[2].saying == passes[1].saying)
-        #expect(passes[2].samples.count > passes[1].samples.count)
-        #expect(partials[0].unread == nil)
-        #expect(partials[1].text == partials[0].text)
-        #expect(partials.dropFirst().allSatisfy { $0.unread?.passes == 1 })
+        #expect(passes.count >= 6)
+        #expect(passes[2].cut > 0 && !passes[2].saying.isEmpty)
+        #expect(passes[3].cut == passes[2].cut)
+        #expect(passes[3].saying == passes[2].saying)
+        #expect(passes[3].samples.count > passes[2].samples.count)
+        #expect(partials.prefix(2).allSatisfy { $0.unread == nil })
+        #expect(partials[2].text == partials[1].text)
+        #expect(partials.dropFirst(2).allSatisfy { $0.unread?.passes == 1 })
         guard case .unreadable(.wordEndsBeforeStart)? = partials.last?.unread?.latest else { Issue.record("latest unread \(String(describing: partials.last?.unread?.latest))"); return }
-        #expect(transcript.text == " see you")
+        #expect(transcription.transcript.text == " see you")
+        #expect(transcription.unread?.passes == 1)
     }
 
     /// The last pass is the transcript's own reading, so one the engine fails to read fails
