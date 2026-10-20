@@ -430,7 +430,7 @@ struct Timeline: Sendable {
     }
 
     func place(_ partial: Partial) -> Partial {
-        Partial(confirmed: place(partial.confirmed), tentative: place(partial.tentative), repunctuated: partial.repunctuated)
+        Partial(confirmed: place(partial.confirmed), tentative: place(partial.tentative), repunctuated: partial.repunctuated, unread: partial.unread)
     }
 
     private typealias Word = Transcript.Word

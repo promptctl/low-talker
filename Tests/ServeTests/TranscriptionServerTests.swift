@@ -94,10 +94,11 @@ import TestProbes
     }
 
     /// An mp3 is decoded as a wav is, and the engine hears all of it. The event carries
-    /// the quiet the engine let go, the room it was judged against, the transients refused, and
-    /// the range with what was kept out of it.
+    /// the quiet the engine let go, the room it was judged against, the transients refused, the
+    /// range with what was kept out of it, and the passes the engine failed to read with the
+    /// latest failure's facts, none of its words (low-reliability-z2z.5s1).
     @Test func hearsAnMP3() async throws {
-        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3))
+        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3), unread: Partial.Unread(passes: 2, latest: .unreadable(.speechWithoutWords(text: " secret"))))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -113,6 +114,7 @@ import TestProbes
         #expect(event.roomPeak == 0.25 && event.refusedAsRoomSeconds == 0.5)
         #expect(event.transients == 2 && event.longestTransientSeconds == 0.03)
         #expect(event.rangePeak == 0.5 && event.keptOutPeak == 0.75 && event.keptOutFrames == 3)
+        #expect(event.unreadPasses == 2 && event.latestUnreadPass == "WhisperKit returned a segment of 7 characters without word timings")
     }
 
     /// An upload no sample of which reached the audible floor, a push-to-talk hold where
@@ -134,6 +136,7 @@ import TestProbes
         #expect(body == answer, "\(String(decoding: body, as: UTF8.self))")
         let event = try await running.nextEvent()
         #expect(event.status == 200 && event.error == nil && event.words == 0)
+        #expect(event.unreadPasses == 0 && event.latestUnreadPass == nil)
         // The quiet the engine refused it with, the room it heard included.
         #expect(event.quietSeconds == 2.5 && event.roomPeak == Double(Float(0.002)))
         #expect(event.rangePeak == nil && event.keptOutPeak == nil && event.keptOutFrames == 0)
@@ -362,12 +365,16 @@ import TestProbes
         try await running.server.finished()
     }
 
+    /// Its event counts the passes the engine failed to read before the failure
+    /// (low-reliability-z2z.5s1).
     @Test func anEngineFailureIs500WithTheReason() async throws {
-        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())))))
+        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
         #expect(response.statusCode == 500)
         #expect(try (error(body)["message"] as? String)?.contains("the stub engine was told to fail") == true)
+        let event = try await running.nextEvent()
+        #expect(event.unreadPasses == 1 && event.latestUnreadPass == "WhisperKit returned a segment of 7 characters without word timings")
     }
 
     /// Refusals the conformance suite does not send, each in OpenAI's error shape and each

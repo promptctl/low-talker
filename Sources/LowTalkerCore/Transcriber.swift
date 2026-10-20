@@ -32,7 +32,7 @@ public protocol Transcriber: Sendable {
 ///
 /// [LAW:types-are-the-program] The quiet is the utterance's, not its words': a slice of the
 /// words, a partial, or a run handed to the cursor is a Transcript, and has no quiet to lose.
-public struct Transcription: Hashable, Sendable {
+public struct Transcription: Sendable {
     public let transcript: Transcript
     public let quiet: Quiet
 
@@ -126,15 +126,16 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
 
 extension Transcriber {
     /// A clip heard all at once: an utterance whose whole audio arrives with the
-    /// key-up, so there is nothing to hear early and no partial to show.
+    /// key-up, so there is nothing to hear early and no partial to show, unless the
+    /// caller asks to be told what the passes before the last failed to read.
     ///
     /// [LAW:one-type-per-behavior] Batch decoding is the one-clip utterance, not a
     /// second path through the engine.
-    public func transcribe(_ clip: AudioClip, expecting vocabulary: Vocabulary) async throws(TranscriptionFailure) -> Transcription {
+    public func transcribe(_ clip: AudioClip, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void = { _ in }) async throws(TranscriptionFailure) -> Transcription {
         try await transcribe(AsyncStream { continuation in
             continuation.yield(clip)
             continuation.finish()
-        }, expecting: vocabulary) { _ in }
+        }, expecting: vocabulary, partial: partial)
     }
 }
 
@@ -144,21 +145,41 @@ extension Transcriber {
 /// confirmed words are final and will appear verbatim in the transcript the
 /// utterance ends with, while the tentative words are the engine's latest reading
 /// of everything after them and the next partial may replace them entirely.
-public struct Partial: Hashable, Sendable {
+public struct Partial: Sendable {
     public let confirmed: Transcript
     public let tentative: Transcript
     /// Passes so far that changed the punctuation of a word two passes had agreed on.
     public let repunctuated: Int
+    /// The passes so far the engine failed to read, none when it read every one.
+    public let unread: Unread?
 
-    public init(confirmed: Transcript, tentative: Transcript, repunctuated: Int) {
+    /// Passes the engine failed to read, each leaving its reading to the next pass, and why
+    /// the latest of them failed.
+    public struct Unread: Sendable {
+        public let passes: Int
+        public let latest: TranscriptionFailure
+
+        public init(passes: Int, latest: TranscriptionFailure) {
+            self.passes = passes
+            self.latest = latest
+        }
+    }
+
+    public init(confirmed: Transcript, tentative: Transcript, repunctuated: Int, unread: Unread?) {
         self.confirmed = confirmed
         self.tentative = tentative
         self.repunctuated = repunctuated
+        self.unread = unread
     }
 
-    /// Everything heard so far, confirmed then tentative, as one line of text.
+    /// Everything heard so far, confirmed then tentative.
+    public var reading: Transcript {
+        Transcript(words: confirmed.words + tentative.words)
+    }
+
+    /// The reading as one line of text.
     public var text: String {
-        confirmed.text + tentative.text
+        reading.text
     }
 }
 
