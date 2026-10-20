@@ -14,7 +14,7 @@ extension Dictation {
         /// far, confirmed then tentative. Wins over `transcribing`: the press being spoken
         /// is the one the person is watching for.
         case listening(heard: Transcript)
-        /// A press's chord is down and nothing is hearing it, for the reason `why` says, so the
+        /// A press is open and nothing is hearing it, for the reason `why` says, so the
         /// person learns it before speaking into it. Wins over `transcribing` as `listening` does.
         case refused(why: String)
         /// A press has ended and its outcome is not yet reported.

@@ -4,7 +4,7 @@ import Identity
 import LowTalkerCore
 
 /// The small panel near the bottom of the screen while a press is on its way, or while words
-/// no cursor took are held: not listening, and why, while a refused press's chord is down;
+/// no cursor took are held: not listening, and why, while a refused press is open;
 /// listening, with what the engine has read of the press so far, then
 /// transcribing, then gone once the press's outcome is reported - unless an insert failed, and
 /// then it says why and holds the words until a cursor takes them, the person places them with

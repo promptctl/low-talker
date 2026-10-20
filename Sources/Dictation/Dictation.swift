@@ -463,7 +463,7 @@ public final class Dictation {
     }
 
     /// [LAW:one-source-of-truth] Read off the open press, so a refused one is shown for as long
-    /// as its chord is down, and the person learns it before speaking into it.
+    /// as it is open, a tapped one until its chord is pressed again, and the person learns it before speaking into it.
     private var activity: Activity {
         switch press {
         case .down(_, let open): .listening(heard: open.streaming.heard)
