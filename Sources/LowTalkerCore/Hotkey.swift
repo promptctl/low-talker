@@ -123,6 +123,6 @@ public final class Hotkey {
     }
 
     private func handle(_ event: KeyEvent, _ onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) {
-        detector.handle(event).map { transition in after { onTransition(transition) } }
+        for transition in detector.handle(event) { after { onTransition(transition) } }
     }
 }

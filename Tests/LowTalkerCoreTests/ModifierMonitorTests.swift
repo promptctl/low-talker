@@ -42,7 +42,7 @@ private struct Told {
     }
 
     private mutating func heard(_ moves: [KeyEvent]) -> [HotkeyDetector.Transition] {
-        moves.compactMap { detector.handle($0) }
+        moves.flatMap { detector.handle($0) }
     }
 }
 
@@ -211,7 +211,7 @@ private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @e
         #expect(pressAndRelease[1].time - pressAndRelease[0].time >= .milliseconds(200))
         // A threshold under the interval, so the release read from the session is a hold.
         var detector = HotkeyDetector(modes: Config.default.modes, tapThreshold: .milliseconds(100))
-        #expect(pressAndRelease.compactMap { detector.handle($0) }
+        #expect(pressAndRelease.flatMap { detector.handle($0) }
             == [.began(.dictation, at: HostTime(seconds: pressedAt)), .ended(.released(.hold, at: pressAndRelease[1].time))])
     }
 
@@ -235,7 +235,7 @@ private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @e
     @MainActor @Test func aFnTapHandledLateIsStillATap() {
         var detector = HotkeyDetector(modes: try! Modes([fnKey]), tapThreshold: .milliseconds(250))
         var transitions: [HotkeyDetector.Transition] = []
-        let feed = installed(heard: { detector.handle($0).map { transitions.append($0) } })
+        let feed = installed(heard: { transitions += detector.handle($0) })
         feed.heard(change(fnBit | 0x100, key: kVK_Function, at: 0))
         feed.heard(change(0x100, key: kVK_Function, at: 120))
         feed.open = nil
@@ -247,7 +247,7 @@ private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @e
     @MainActor @Test func theSecondaryFnBitOnAnotherKeysEventPressesNoFn() {
         var detector = HotkeyDetector(modes: try! Modes([oneKey]), tapThreshold: .milliseconds(250))
         var transitions: [HotkeyDetector.Transition] = []
-        let feed = installed(heard: { detector.handle($0).map { transitions.append($0) } })
+        let feed = installed(heard: { transitions += detector.handle($0) })
         feed.heard(change(Modifier.rightOption.mask | 0x80100 | fnBit, key: kVK_RightOption, at: 0))
         feed.heard(change(0x100, key: kVK_RightOption, at: 600))
         feed.open = nil
@@ -261,7 +261,7 @@ private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @e
     @MainActor @Test func aSecondKeyQueuedBehindASessionReadStillCompletesTheChord() {
         var detector = HotkeyDetector(modes: try! Modes([twoKeys]), tapThreshold: .milliseconds(250))
         var transitions: [HotkeyDetector.Transition] = []
-        let feed = installed(heard: { detector.handle($0).map { transitions.append($0) } })
+        let feed = installed(heard: { transitions += detector.handle($0) })
         feed.heard(change(Modifier.rightCommand.mask | 0x100100, key: kVK_RightCommand, at: 0))
         feed.confirmed(SessionModifiers(session: Modifier.rightCommand.mask | 0x100100, fnKeyDown: false, changedAt: seconds(0)),
                        at: at(1002))

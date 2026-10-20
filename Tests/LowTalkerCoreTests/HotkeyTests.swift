@@ -64,7 +64,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
         try hotkey.start { transitions.append($0) }
         let installation = try #require(feed.installations.first)
         installation.handle(rightOption(.down, at: 0))
-        #expect(hotkey.phase == .held(rightOption.chord, since: at(0)))
+        #expect(hotkey.phase == .held(rightOption, since: at(0)))
         await settle()
         #expect(transitions == [.began(rightOption, at: at(0))])
         installation.handle(rightOption(.up, at: 400))
@@ -85,6 +85,22 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
         await settle()
         #expect(transitions == [.began(rightOption, at: at(0)), .ended(.usedAsModifier)])
         #expect(hotkey.phase == .idle)
+    }
+
+    /// A latched tap ended by another mode's chord reaches the handler as its end and then the
+    /// other mode's beginning, in that order, as `Dictation.press` requires.
+    @Test func aSwitchReachesTheHandlerEndedThenBegan() async throws {
+        let notes = Mode(name: "notes", chord: KeyChord(modifiers: .rightCommand))
+        let feed = FakeFeed()
+        let hotkey = Hotkey(modes: try Modes([rightOption, notes]), feed: feed)
+        var transitions: [HotkeyDetector.Transition] = []
+        try hotkey.start { transitions.append($0) }
+        let installation = try #require(feed.installations.first)
+        installation.handle(rightOption(.down, at: 0))
+        installation.handle(rightOption(.up, at: 100))
+        installation.handle(KeyEvent(key: .rightCommand, direction: .down, modifiers: [.rightCommand], time: at(1000), lastTyped: at(-60_000)))
+        await settle()
+        #expect(transitions == [.began(rightOption, at: at(0)), .ended(.released(.tap, at: at(1000))), .began(notes, at: at(1000))])
     }
 
     /// Every transition leaves by the main queue, never from inside the feed's call, so a
