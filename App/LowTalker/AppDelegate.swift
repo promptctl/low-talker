@@ -108,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The input method's process and the build it last said, which together are the one
     /// source of what the status line says of it. [LAW:one-source-of-truth]
     private var inputMethod = InputMethodWatch()
+    /// The standing the log last said, so it says each one once.
+    private var loggedStanding: InputMethodStanding?
 
     private func showHotkeyStatus(_ status: HotkeyStatus) {
         hotkeyStatus = status
@@ -372,10 +374,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// running: one of this app's build, or one that has not said its build yet, whose
     /// greeting the inserter checks before any words go.
     ///
-    /// Written only when it changes, so a cursor arriving in each app the person moves to logs
-    /// nothing, and always over the line a rebuild put up while it set the input method up.
+    /// Each said once, when it changes, so a cursor arriving in each app the person moves to
+    /// logs nothing: the standing to the log, and the line over whatever stands there, the one
+    /// a rebuild put up while it set the input method up included.
     private func showInputMethod() {
         guard let standing = inputMethod.standing(for: build) else { return }
+        if standing != loggedStanding { log.notice("input method: \(standing, privacy: .public)") }
+        loggedStanding = standing
         let status: HotkeyStatus = switch standing {
         case .running: .listening(listeningStatus)
         case .otherBuild(_, let mismatch): .off("\(mismatch.facts); \(BuildMismatch.fix)")
@@ -383,9 +388,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .notOpened(let reason):
             .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
         }
-        guard status != hotkeyStatus else { return }
-        log.notice("input method: \(standing, privacy: .public)")
-        showHotkeyStatus(status)
+        if status != hotkeyStatus { showHotkeyStatus(status) }
     }
 
     /// This installation's input method, as its package installed it, registered and - once
