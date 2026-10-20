@@ -144,16 +144,31 @@ extension Transcriber {
 /// confirmed words are final and will appear verbatim in the transcript the
 /// utterance ends with, while the tentative words are the engine's latest reading
 /// of everything after them and the next partial may replace them entirely.
-public struct Partial: Hashable, Sendable {
+public struct Partial: Sendable {
     public let confirmed: Transcript
     public let tentative: Transcript
     /// Passes so far that changed the punctuation of a word two passes had agreed on.
     public let repunctuated: Int
+    /// The passes so far the engine failed to read, none when it read every one.
+    public let unread: Unread?
 
-    public init(confirmed: Transcript, tentative: Transcript, repunctuated: Int) {
+    /// Passes the engine failed to read, each leaving its reading to the next pass, and why
+    /// the latest of them failed.
+    public struct Unread: Sendable {
+        public let passes: Int
+        public let latest: TranscriptionFailure
+
+        public init(passes: Int, latest: TranscriptionFailure) {
+            self.passes = passes
+            self.latest = latest
+        }
+    }
+
+    public init(confirmed: Transcript, tentative: Transcript, repunctuated: Int, unread: Unread?) {
         self.confirmed = confirmed
         self.tentative = tentative
         self.repunctuated = repunctuated
+        self.unread = unread
     }
 
     /// Everything heard so far, confirmed then tentative, as one line of text.

@@ -176,7 +176,7 @@ private final class FixedEar: Transcriber {
         var clips = 0
         for await _ in audio {
             clips += 1
-            partial(Partial(confirmed: Transcript(words: []), tentative: Transcript(typed: clips == 1 ? "" : heard), repunctuated: 0))
+            partial(Partial(confirmed: Transcript(words: []), tentative: Transcript(typed: clips == 1 ? "" : heard), repunctuated: 0, unread: nil))
             clipHeard.yield()
         }
         holds.withLock { $0.append(clips) }

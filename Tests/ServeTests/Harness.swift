@@ -38,7 +38,7 @@ final class Stub: Transcriber {
             }
             samples += clip.samples.count
             let confirmed = loudest < Utterance.audible ? 0 : min(words.count / 2, Int(seconds / 0.5))
-            partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0))
+            partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0, unread: nil))
         }
         heard.withLock { $0.append((seconds, vocabulary, Task.isCancelled)) }
         guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest, quiet: quiet) }

@@ -529,12 +529,45 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.held == nil)
     }
 
+    /// A cut press whose last reading fails holds what the passes before it read past the
+    /// commits, under the cut's warning, and is reported as the failure (low-reliability-z2z.5s1).
+    @Test func aCutPressWhoseLastReadingFailsHoldsWhatThePassesRead() async throws {
+        let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ throws(TranscriptionFailure) in throw .unreadable(.speechWithoutWords(text: " friend")) }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        rig.dictation.press(.ended(.lapsed))
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(stopped.landed == 1)
+        guard case .unreadable(.speechWithoutWords)? = stopped.cause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.cause)"); return }
+        #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The hotkey stopped listening during your dictation.")))
+    }
+
+    /// A released press whose last reading fails holds every word the passes before it read
+    /// past the commits, saying the words after them are missing, and is reported as the
+    /// failure: the words read during the hold are not thrown away with the last reading
+    /// (low-reliability-z2z.5s1).
+    @Test func aReleasedPressWhoseLastReadingFailsHoldsWhatThePassesRead() async throws {
+        let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ throws(TranscriptionFailure) in throw .unreadable(.speechWithoutWords(text: " friend")) }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        rig.keyUp()
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(stopped.landed == 1)
+        guard case .unreadable(.speechWithoutWords)? = stopped.cause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.cause)"); return }
+        #expect(rig.inputMethod.inserted == ["hello"])
+        #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The engine failed on its last reading of your dictation, so words said after its earlier readings are missing.")))
+    }
+
     /// The engine hears a press while it is still going on: the audio reaches it as it is
     /// captured, and what it reads comes back before the key does. The press's line carries
-    /// the passes run by key-up, how many re-punctuated a settled word, and how long after
-    /// key-down the first words came.
+    /// the passes run by key-up, how many re-punctuated a settled word, how many the engine
+    /// failed to read, and how long after key-down the first words came.
     @Test func aPressIsHeardWhileTheKeyIsStillDown() async throws {
-        let engine = FakeTranscriber(reading: { Transcript(typed: $0.isEmpty ? "" : "hello") }, repunctuating: { $0.isEmpty ? 0 : 2 }) { _ in Transcript(typed: "hello") }
+        let engine = FakeTranscriber(reading: { Transcript(typed: $0.isEmpty ? "" : "hello") }, repunctuating: { $0.isEmpty ? 0 : 2 }, unreading: { $0.isEmpty ? nil : Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " hello"))) }) { _ in Transcript(typed: "hello") }
         let rig = try await Rig(hearing: engine)
         let keyDown = HostTime.now
         rig.dictation.press(.began(Rig.dictation, at: keyDown))
@@ -547,9 +580,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(engine.clips.map(\.samples) == [[1, 2]])
         #expect(session.duringPress.passes >= 1)
         #expect(session.duringPress.repunctuated == 2)
+        #expect(session.duringPress.unread?.passes == 1)
+        #expect(!"\(session.duringPress)".contains("hello"))
         let firstWords = try #require(session.duringPress.firstWords)
         #expect(firstWords > .zero && firstWords <= read - keyDown)
-        #expect("\(session)".contains("passes during the press, 2 repunctuating a settled word, first words \(Int(firstWords / .milliseconds(1))) ms after key-down"))
+        #expect("\(session)".contains("passes during the press, 2 repunctuating a settled word, 1 the engine failed to read, the latest as WhisperKit returned a segment of 6 characters without word timings, first words \(Int(firstWords / .milliseconds(1))) ms after key-down"))
         #expect(rig.inputMethod.inserted == ["hello"])
     }
 

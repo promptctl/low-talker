@@ -110,6 +110,8 @@ public final class Dictation {
         public let passes: Int
         /// Passes that changed the punctuation of a word two passes had agreed on.
         public let repunctuated: Int
+        /// The passes the engine failed to read, none when it read every one.
+        public let unread: Partial.Unread?
         /// [LAW:types-are-the-program] Absent when no pass before key-up read a word,
         /// which a short tap or a slow engine leaves - not a zero, which would say the
         /// words were there at once.
@@ -123,7 +125,9 @@ public final class Dictation {
         public var description: String {
             let words = firstWords.map { "first words \(Int($0 / .milliseconds(1))) ms after key-down" } ?? "no words before key-up"
             let committed = firstCommit.map { "\(commits) commits of \(wordsCommitted) words, the first \(Int($0 / .milliseconds(1))) ms after key-down" } ?? "nothing committed before key-up"
-            return "\(passes) passes during the press, \(repunctuated) repunctuating a settled word, \(words), \(committed)"
+            // The failure's facts only: a reading's failure can carry the words.
+            let unread = unread.map { "\($0.passes) the engine failed to read, the latest as \($0.latest.account.facts)" } ?? "0 the engine failed to read"
+            return "\(passes) passes during the press, \(repunctuated) repunctuating a settled word, \(unread), \(words), \(committed)"
         }
     }
 
@@ -150,14 +154,11 @@ public final class Dictation {
 
         private struct State {
             var passes = 0
-            var repunctuated = 0
+            /// What the latest pass read, nothing before the first.
+            var partial = Partial(confirmed: Transcript(words: []), tentative: Transcript(words: []), repunctuated: 0, unread: nil)
             var firstWords: Duration?
             /// Nil while the key is down.
             var ended: Ended?
-            var confirmed: [Transcript.Word] = []
-            /// The text the latest pass read, confirmed then tentative, without its timings:
-            /// a pass that rereads the same words has read nothing new.
-            var heard = Transcript(words: [])
             var cursor = ConfirmedCursor()
             /// False once the press stops committing.
             var committing = true
@@ -189,9 +190,15 @@ public final class Dictation {
             (reads, read) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
         }
 
-        /// Everything the latest pass read.
+        /// Everything the latest pass read, confirmed then tentative.
+        var reading: Transcript {
+            state.withLock { Transcript(words: $0.partial.confirmed.words + $0.partial.tentative.words) }
+        }
+
+        /// The text the latest pass read, without its timings: a pass that rereads the same
+        /// words has read nothing new.
         var heard: Transcript {
-            state.withLock { $0.heard }
+            Transcript(typed: state.withLock { $0.partial.text })
         }
 
         /// The microphone is open, and `missing` reads what its audio already lacks.
@@ -203,10 +210,8 @@ public final class Dictation {
             let now = ContinuousClock.now
             state.withLock { state in
                 state.passes += 1
-                state.repunctuated = partial.repunctuated
                 state.firstWords = state.firstWords ?? (partial.text.isEmpty ? nil : now - keyDown)
-                state.confirmed = partial.confirmed.words
-                state.heard = Transcript(typed: partial.text)
+                state.partial = partial
             }
             wake.yield()
             read.yield()
@@ -244,7 +249,7 @@ public final class Dictation {
                 case nil, .stopped: .keyDown(keyDown)
                 }
                 // A stopped press takes no words, so it has no run.
-                let run = state.cursor.advance(through: state.committing ? state.confirmed : [])
+                let run = state.cursor.advance(through: state.committing ? state.partial.confirmed.words : [])
                 // [LAW:one-source-of-truth] Nothing said is the transcript's test, the one the
                 // executor refuses an insert by.
                 return run.isBlank ? nil : Run(words: run, since: since)
@@ -281,7 +286,7 @@ public final class Dictation {
         func ended(_ ended: Ended) -> DuringPress {
             state.withLock { state in
                 state.ended = ended
-                return DuringPress(passes: state.passes, repunctuated: state.repunctuated, firstWords: state.firstWords, commits: state.performed.count, wordsCommitted: state.words, firstCommit: state.performed.first?.acknowledged)
+                return DuringPress(passes: state.passes, repunctuated: state.partial.repunctuated, unread: state.partial.unread, firstWords: state.firstWords, commits: state.performed.count, wordsCommitted: state.words, firstCommit: state.performed.first?.acknowledged)
             }
         }
     }
@@ -717,7 +722,12 @@ public final class Dictation {
             let transcription: Transcription
             switch decoded.transcription {
             case .success(let decodedTranscription): transcription = decodedTranscription
-            case .failure(let failed): throw stopped(failed.failure)
+            case .failure(let failed):
+                // [LAW:no-silent-failure] The last reading failed, and what the passes before it
+                // read past the commits is held, the words said after them missing.
+                let rest = heard.streaming.rest(of: heard.streaming.reading)
+                if !rest.isBlank { hold.heldBack(rest, warning: PressStopped.lastReadingFailed) }
+                throw stopped(failed.failure)
             }
             let placed: Placed
             do throws(InsertFailure) {
@@ -727,15 +737,16 @@ public final class Dictation {
             if placed.performed == nil, let unplaced { throw stopped(unplaced) }
             return .session(Session(context: context, transcription: transcription, duringPress: heard.duringPress, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 }))
         case .cut(let cut):
-            // What the decode heard past the commits, and what kept it from reading them. Nothing
-            // spoken is nothing more to hold rather than a failure: a chord used as a modifier
-            // with nothing said is a typed key and nothing else.
+            // What the decode heard past the commits, and what kept it from reading them: a failed
+            // last reading leaves what the passes before it read. Nothing spoken is nothing more
+            // to hold rather than a failure: a chord used as a modifier with nothing said is a
+            // typed key and nothing else.
             let rest: Transcript
             let unread: (any Accounted)?
             switch decoded.transcription {
             case .success(let transcription): (rest, unread) = (heard.streaming.rest(of: transcription.transcript), nil)
             case .failure(let failed):
-                rest = Transcript(words: [])
+                rest = heard.streaming.rest(of: heard.streaming.reading)
                 if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = failed.failure }
             }
             let held = rest.isBlank ? 0 : rest.words.count
@@ -813,6 +824,9 @@ public struct PressStopped: Accounted {
     /// The words committed before it stopped.
     public let landed: Int
     public let cause: any Accounted
+
+    /// What the hold shows beside the words the passes read before a last reading that failed.
+    static let lastReadingFailed = "WARNING: The engine failed on its last reading of your dictation, so words said after its earlier readings are missing."
 
     public var description: String { "\(cause)" + insertedBefore(landed) }
     /// What it left at the cursor, which is a count, and then the cause's account.

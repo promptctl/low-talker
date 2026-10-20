@@ -21,7 +21,7 @@
 /// [LAW:effects-at-boundaries] A value with no engine and no clock: words come in
 /// with the sample count they were read through, and the engine reads out where
 /// to start next and what to say first. The pass itself is the engine's.
-struct Hearing: Equatable {
+struct Hearing {
     /// Samples a settled word must end before a pass's end.
     let margin: Int
     /// How many confirmed words a pass starts from.
@@ -35,6 +35,10 @@ struct Hearing: Equatable {
     private(set) var heard = 0
     /// Passes that changed the last confirmed word's punctuation.
     private(set) var repunctuated = 0
+    /// Samples the latest pass the engine failed to read had been handed.
+    private(set) var missed = 0
+    /// The passes the engine failed to read, whose reading was left to the next pass.
+    private(set) var unread: Partial.Unread?
 
     init(margin: Int, context: Int) {
         precondition(margin >= 0, "a margin reaches back from a pass's end, not forward")
@@ -79,10 +83,13 @@ struct Hearing: Equatable {
     /// The sample count the speech must exceed before a pass is worth starting while
     /// the utterance is still being spoken: new audio since the last pass, and more
     /// than `margin` past the cut, so the first pass reads a second of speech rather
-    /// than a fragment padded out with silence. Once the utterance has ended, any
-    /// speech past `heard` is worth the last pass, however short.
+    /// than a fragment padded out with silence. A pass the engine failed to read
+    /// leaves its audio to the next pass, which waits for more than that one was
+    /// handed, so the same failure is not read again over the same audio. Once the
+    /// utterance has ended, any speech past `heard` is worth the last pass, however
+    /// short.
     var passable: Int {
-        max(heard, cut + margin)
+        max(heard, missed, cut + margin)
     }
 
     /// Takes in a pass that read `words`, from the cut through `end` samples. The
@@ -104,11 +111,18 @@ struct Hearing: Equatable {
         heard = end
     }
 
+    /// The engine failed to read a pass handed `end` samples, for `failure`. What the passes
+    /// before it read stands, and the next pass reads this one's audio again with more after it.
+    mutating func miss(through end: Int, for failure: TranscriptionFailure) {
+        missed = end
+        unread = Partial.Unread(passes: (unread?.passes ?? 0) + 1, latest: failure)
+    }
+
     /// [LAW:types-are-the-program] The partial's confirmed words are the ones whose text
     /// is final, so a reader can take them as they come: every confirmed word but the
     /// last, whose punctuation the next pass may still revise.
     var partial: Partial {
-        Partial(confirmed: Transcript(words: confirmed.dropLast()), tentative: Transcript(words: confirmed.suffix(1) + tentative), repunctuated: repunctuated)
+        Partial(confirmed: Transcript(words: confirmed.dropLast()), tentative: Transcript(words: confirmed.suffix(1) + tentative), repunctuated: repunctuated, unread: unread)
     }
 
     /// The utterance as heard so far, which is the transcript once no more audio
@@ -145,6 +159,11 @@ extension Hearing {
     /// heard gets the last pass, however short, and the engine pads it out to its
     /// floor. So a tap-to-toggle "yes" is heard, not decoded as nothing, and a hold
     /// with nothing said in it is still no pass at all.
+    ///
+    /// A pass during the hold is speculative: the next one rereads its audio. So one the
+    /// engine fails to read leaves the reading to the next, and the partial counts it.
+    /// Only the last pass's failure, the transcript's own reading, fails the utterance,
+    /// as does any pass once the decode is cancelled. [LAW:no-silent-failure]
     static func transcribe(
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         margin: Int,
@@ -159,8 +178,13 @@ extension Hearing {
         var hearing = Hearing(margin: margin, context: context)
         var heard = await utterance.audio(beyond: hearing.passable)
         while heard.samples.count > hearing.heard {
-            let words = try await pass(Pass(samples: heard.samples, arrived: heard.arrived, cut: hearing.cut, saying: hearing.saying))
-            hearing.hear(words, through: heard.samples.count)
+            do throws(TranscriptionFailure) {
+                let words = try await pass(Pass(samples: heard.samples, arrived: heard.arrived, cut: hearing.cut, saying: hearing.saying))
+                hearing.hear(words, through: heard.samples.count)
+            } catch {
+                if heard.ended || Task.isCancelled { throw error }
+                hearing.miss(through: heard.samples.count, for: error)
+            }
             if heard.ended { break }
             partial(heard.timeline.place(hearing.partial))
             heard = await utterance.audio(beyond: hearing.passable)

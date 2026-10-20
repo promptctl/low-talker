@@ -144,24 +144,28 @@ final class FakeTranscriber: Transcriber {
     private let reading: @Sendable ([Float]) -> Transcript
     private let confirming: @Sendable ([Float]) -> Transcript
     private let repunctuating: @Sendable ([Float]) -> Int
+    private let unreading: @Sendable ([Float]) -> Partial.Unread?
     private let quiet: Quiet
     private let answer: @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
 
     /// `reading` is what a pass makes of the audio so far and `confirming` the words two
     /// passes have agreed on, which the answer has to begin with, and `repunctuating` how
-    /// many passes so far changed a settled word's punctuation; one pass runs per clip as
+    /// many passes so far changed a settled word's punctuation, and `unreading` how many
+    /// the engine failed to read and why the latest did; one pass runs per clip as
     /// it arrives, and reads and confirms nothing unless a test says otherwise. Every answer
     /// is told with `quiet`, none unless a test says otherwise.
     init(
         reading: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
         confirming: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
         repunctuating: @escaping @Sendable ([Float]) -> Int = { _ in 0 },
+        unreading: @escaping @Sendable ([Float]) -> Partial.Unread? = { _ in nil },
         quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0),
         _ answer: @escaping @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
     ) {
         self.reading = reading
         self.confirming = confirming
         self.repunctuating = repunctuating
+        self.unreading = unreading
         self.quiet = quiet
         self.answer = answer
     }
@@ -178,7 +182,7 @@ final class FakeTranscriber: Transcriber {
         var samples: [Float] = []
         for await clip in audio {
             samples += clip.samples
-            partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples)))
+            partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: unreading(samples)))
             arrived.withLock { $0 = samples }
         }
         let clip = AudioClip(samples: samples)
