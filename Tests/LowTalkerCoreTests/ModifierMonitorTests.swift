@@ -99,10 +99,12 @@ private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @e
         #expect(twice.told(states.flatMap { [$0, ($0.0, $0.1 + 3)] }) == once.told(states))
     }
 
-    /// Right Option pressed with Shift already down is another chord, and passes by.
-    @Test func anotherModifierHeldFirstMakesItAnotherChord() {
+    /// Right Option pressed with Shift already down begins no press, and is told as blocked
+    /// until it comes up.
+    @Test func anotherModifierHeldFirstBlocksTheChord() {
         var told = Told(listeningFor: oneKey)
-        #expect(told.told([([.leftShift], 0), ([.leftShift, .rightOption], 50), ([.rightOption], 100), ([], 700)]).isEmpty)
+        #expect(told.told([([.leftShift], 0), ([.leftShift, .rightOption], 50), ([.rightOption], 100), ([], 700)])
+            == [.blocked(oneKey, by: [.leftShift]), .ended(.released(.hold, at: at(700)))])
     }
 
     /// Shift added and let go during a hold changes nothing: the press is the chord's.
@@ -113,12 +115,12 @@ private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @e
     }
 
     /// Right Command then Right Option is the chord of both, and a listener for Right
-    /// Option alone hears nothing of it.
+    /// Option alone hears it as that chord blocked.
     @Test func aChordHeldOnTopOfAnotherKeyIsNotTheChordOfOneKey() {
         var hearingOneKey = Told(listeningFor: oneKey)
         var hearingTwoKeys = Told(listeningFor: twoKeys)
         let states: [(Set<Modifier>, Int64)] = [([.rightCommand], 0), ([.rightCommand, .rightOption], 50), ([], 700)]
-        #expect(hearingOneKey.told(states).isEmpty)
+        #expect(hearingOneKey.told(states) == [.blocked(oneKey, by: [.rightCommand]), .ended(.released(.hold, at: at(700)))])
         #expect(hearingTwoKeys.told(states) == [.began(twoKeys, at: at(50)), .ended(.released(.hold, at: at(700)))])
     }
 

@@ -28,3 +28,24 @@ public struct EngineUnavailable: WordFree {
 
     public var description: String { "\(cause)" }
 }
+
+/// A chord pressed with other modifiers already held with it, which begins no press.
+///
+/// Word-free: it is told at the chord, before anything is said.
+public struct ChordBlocked: WordFree {
+    public let chord: KeyChord
+    public let others: Set<Modifier>
+
+    public init(chord: KeyChord, others: Set<Modifier>) {
+        self.chord = chord
+        self.others = others
+    }
+
+    public var description: String {
+        let pressed = Hotkey.named(chord)
+        // The session reads a held arrow or navigation key as Function, so a person who held
+        // one is told so by name.
+        let function = others.contains(.function) ? " An arrow or navigation key held counts as Function." : ""
+        return "WARNING: \(Hotkey.named(others)) was held with \(pressed), so nothing is listening.\(function) Let go and press \(pressed) alone."
+    }
+}

@@ -46,7 +46,6 @@ final class Rig {
         engine: @escaping @MainActor () throws(EngineUnavailable) -> Dictation.Engine,
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
-        frontmost: @escaping @Sendable @MainActor () throws(FrontmostUnknown) -> BundleID = { textEdit },
         keeping store: FakeHeldStore = FakeHeldStore()
     ) async throws {
         capture = AudioCapture(retaining: retaining, hardware: hardware, startingAt: Self.origin, reporting: { _ in })
@@ -65,7 +64,6 @@ final class Rig {
             turns: turns,
             executor: Executor(insertingThrough: inputMethod),
             hold: hold,
-            frontmost: frontmost,
             report: { press in
                 reported.raise()
                 feed.yield(press)
@@ -79,10 +77,9 @@ final class Rig {
         transcriber: @escaping Dictation.Engine,
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
-        frontmost: @escaping @Sendable @MainActor () throws(FrontmostUnknown) -> BundleID = { textEdit },
         keeping store: FakeHeldStore = FakeHeldStore()
     ) async throws {
-        try await self.init(engine: { transcriber }, retaining: retaining, atRest: atRest, frontmost: frontmost, keeping: store)
+        try await self.init(engine: { transcriber }, retaining: retaining, atRest: atRest, keeping: store)
     }
 
     convenience init(
@@ -131,7 +128,7 @@ final class Rig {
     }
 
     /// A hold that opens no microphone, because something refused the press before one
-    /// could open - no app to insert into, or no device to record with. Nothing is spoken
+    /// could open - no engine to hear it, or no device to record with. Nothing is spoken
     /// into it, which is not the test being coy: there is nothing listening, and that is
     /// the state being described.
     func refusedHold() {
@@ -153,6 +150,12 @@ final class Rig {
         dictation.press(.began(Self.dictation, at: now))
         speak(samples)
         dictation.press(.ended(.usedAsModifier))
+    }
+
+    /// The chord pressed with `others` held with it, which begins no press, and let go.
+    func blockedHold(by others: Set<Modifier> = [.function]) {
+        dictation.press(.blocked(Self.dictation, by: others))
+        keyUp()
     }
 
     /// The next session's outcome, in press order.
@@ -254,15 +257,14 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
 @MainActor
 @Suite struct DictationTests {
-    @Test func aHoldInsertsWhatWasSaidIntoTheAppThatWasInFront() async throws {
+    @Test func aHoldInsertsWhatWasSaidAtTheCursorInFront() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "hi") }
         let rig = try await Rig(hearing: engine)
         rig.hold(speaking: [1, 2, 3])
         let session = try await rig.session()
         #expect(engine.clips.map(\.samples) == [[1, 2, 3]])
         #expect(session.transcription.transcript.text == "hi")
-        #expect(session.context.frontmostApp == Rig.textEdit)
-        #expect(session.context.press == .hold)
+        #expect(session.press == .hold)
         #expect(session.performed.count == 1)
         #expect(session.performed[0].into == Rig.textEdit)
         #expect(session.keyUpToTranscript >= .zero)
@@ -879,45 +881,26 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted == [sentence, "b"])
     }
 
-    @Test func aPressWithNothingToInsertIntoIsReportedAndTheNextPressInserts() async throws {
-        let refused = Mutex(true)
-        let rig = try await Rig(transcriber: { FakeTranscriber { _ in Transcript(typed: "a") } }) { () throws(FrontmostUnknown) in
-            if refused.withLock({ $0 }) { throw .noFrontmostApp }
-            return Rig.textEdit
-        }
-        rig.refusedHold()
-        #expect(await rig.report().failure is FrontmostUnknown)
-        refused.withLock { $0 = false }
-        rig.hold()
-        _ = try await rig.session()
-        #expect(rig.inputMethod.inserted == ["a"])
-    }
-
-    /// A press with nothing to insert into is refused at key-down, before anything is
-    /// heard, so it is the one outcome that could be ready before an earlier press's.
+    /// A press refused at its chord has nothing to hear, so it is the one outcome that could
+    /// be ready before an earlier press's.
     /// It waits its turn all the same: outcomes are reported in the order the presses
     /// came, whatever each one costs.
     @Test func aRefusedPressIsReportedAfterAnEarlierPressStillBeingHeard() async throws {
         let gate = Gate()
-        let refusing = Mutex(false)
         let rig = try await Rig(transcriber: {
             FakeTranscriber { _ in
                 await gate.wait()
                 return Transcript(typed: "a")
             }
-        }) { () throws(FrontmostUnknown) in
-            if refusing.withLock({ $0 }) { throw .noFrontmostApp }
-            return Rig.textEdit
-        }
+        })
         rig.hold()
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
-        refusing.withLock { $0 = true }
-        rig.refusedHold()
+        rig.blockedHold()
         gate.open()
         let first = await rig.report()
         let second = await rig.report()
         #expect(try first.get().transcription.transcript.text == "a")
-        #expect(second.failure is FrontmostUnknown)
+        #expect(second.failure is ChordBlocked)
     }
 
     /// What the app awaits before it quits. A surface that went while a session was still in
@@ -1697,7 +1680,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         try await rig.dictation.finish()
         let rebuilt = Dictation(
             capture: rig.capture, engine: { { FakeTranscriber { _ in Transcript(typed: "") } } }, turns: rig.turns,
-            executor: Executor(insertingThrough: rig.inputMethod), hold: rig.hold, frontmost: { Rig.textEdit },
+            executor: Executor(insertingThrough: rig.inputMethod), hold: rig.hold,
             report: { _ in }, showing: { _ in })
         rig.inputMethod.refusing(nil)
         rebuilt.cursorArrived()
@@ -1930,7 +1913,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(report.opened == nil)
         #expect(rig.hardware.engines.isEmpty)
         #expect(rig.inputMethod.inserted.isEmpty)
-        #expect(rig.shown.activities == [.transcribing, .idle])
+        #expect(rig.shown.activities == [.refused(why: "LoadFailed()"), .transcribing, .idle])
     }
 
     /// [LAW:no-silent-failure] The engine failed under an open press - a driver going down
@@ -2001,13 +1984,58 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.shown.activities == [.listening(heard: Transcript(words: [])), .listening(heard: Transcript(typed: " hello")), .transcribing, .idle])
     }
 
-    /// A press refused its microphone is never shown as listening, and its failure, once
-    /// reported, leaves the loop idle.
-    @Test func aRefusedPressIsNeverShownListening() async throws {
-        let rig = try await Rig(transcriber: { FakeTranscriber { _ in Transcript(typed: "a") } }) { () throws(FrontmostUnknown) in throw .noFrontmostApp }
-        rig.refusedHold()
-        #expect(await rig.report().failure is FrontmostUnknown)
-        #expect(rig.shown.activities == [.transcribing, .idle])
+    /// A press refused its microphone is shown refused from its key-down, before anything is
+    /// said into it, never as listening, and its failure, once reported, leaves the loop idle.
+    @Test func aPressRefusedItsMicrophoneIsShownRefusedWhileItsKeyIsDown() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.hardware.failingToLaunch = BadBuffer()
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        let refused = Dictation.Activity.refused(why: NoMicrophone.failed(BadBuffer()).account.facts)
+        #expect(rig.shown.activities == [refused])
+        rig.keyUp()
+        #expect(await rig.report().failure is NoMicrophone)
+        #expect(rig.shown.activities == [refused, .transcribing, .idle])
+    }
+
+    /// The chord pressed with an arrow key held, which reads as Function, begins no press: it
+    /// is shown refused while it is down, saying which key to let go of, opens no microphone,
+    /// takes no turn of the engine, and is reported refused once it comes up.
+    @Test func aChordBlockedByAnotherKeyIsShownRefusedAtTheChord() async throws {
+        let engine = FakeTranscriber { _ in Transcript(typed: "a") }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.blocked(Rig.dictation, by: [.function]))
+        let blocked = ChordBlocked(chord: Rig.dictation.chord, others: [.function])
+        #expect(rig.shown.activities == [.refused(why: blocked.description)])
+        #expect(rig.turns.reading.holds == 0)
+        rig.keyUp()
+        let report = await rig.pressReport()
+        #expect(report.outcome.failure is ChordBlocked)
+        #expect(report.opened == nil)
+        #expect(rig.hardware.engines.isEmpty)
+        #expect(engine.clips.isEmpty)
+        #expect(rig.shown.activities == [.refused(why: blocked.description), .transcribing, .idle])
+
+        // Let go and pressed alone, the chord is heard.
+        rig.hold()
+        #expect(try await rig.session().transcription.transcript.text == "a")
+    }
+
+    /// A refused chord that turns out to be a typed key's modifier - Shift and Right Option
+    /// held for a special character - was never dictation, so its refusal turned nothing away
+    /// and nothing is reported as failed.
+    @Test func aRefusedChordUsedAsAModifierIsNoFailure() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.dictation.press(.blocked(Rig.dictation, by: [.leftShift]))
+        rig.dictation.press(.ended(.usedAsModifier))
+        guard case .usedAsModifier(landed: 0, held: 0) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        #expect(rig.hold.held == nil)
+    }
+
+    /// The refusal names the chord and the keys held with it, and says an arrow key reads as
+    /// Function, since that is the key the person actually held.
+    @Test func aBlockedChordSaysWhichKeysToLetGoOf() {
+        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.leftShift]))" == "WARNING: Left Shift was held with Right Option, so nothing is listening. Let go and press Right Option alone.")
+        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.function, .leftCommand]))" == "WARNING: Left Command+Function was held with Right Option, so nothing is listening. An arrow or navigation key held counts as Function. Let go and press Right Option alone.")
     }
 
     /// A press made while an earlier one is still on its way is shown listening, and the
@@ -2030,6 +2058,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func anActivityDescribesItselfWithoutTheWords() {
         #expect("\(Dictation.Activity.listening(heard: Transcript(typed: "hello there")))" == "listening, 2 words heard")
         #expect("\(Dictation.Activity.transcribing)" == "transcribing")
+        #expect("\(Dictation.Activity.refused(why: "no microphone"))" == "refused: no microphone")
     }
 
     /// The icon is the press's while there is one and the engine's otherwise, except that a
@@ -2043,6 +2072,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(Dictation.Activity.idle.iconDescription(for: "L", over: failed) == failed.iconDescription(for: "L"))
         #expect(Dictation.Activity.listening(heard: Transcript(typed: "hi")).glyph(over: failed) == .symbol("waveform"))
         #expect(Dictation.Activity.listening(heard: Transcript(typed: "hi")).iconDescription(for: "L", over: preparing) == "L: listening")
+        #expect(Dictation.Activity.refused(why: "no microphone").glyph(over: preparing) == .symbol("exclamationmark.triangle"))
+        #expect(Dictation.Activity.refused(why: "no microphone").iconDescription(for: "L", over: ready) == "L: not listening")
         #expect(Dictation.Activity.transcribing.glyph(over: ready) == .symbol("text.cursor"))
         #expect(Dictation.Activity.transcribing.iconDescription(for: "L", over: ready) == "L: transcribing")
         #expect(Dictation.Activity.transcribing.glyph(over: preparing) == .symbol("hourglass"))

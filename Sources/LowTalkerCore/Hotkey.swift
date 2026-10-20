@@ -13,7 +13,12 @@ public final class Hotkey {
     /// split at its capitals, so no table of names stands beside the cases to fall out of
     /// step with them.
     nonisolated public static func named(_ chord: KeyChord) -> String {
-        Modifier.allCases.filter(chord.modifiers.contains).map { modifier in
+        named(chord.modifiers)
+    }
+
+    /// Modifiers held together, named as a chord is.
+    nonisolated public static func named(_ modifiers: Set<Modifier>) -> String {
+        Modifier.allCases.filter(modifiers.contains).map { modifier in
             modifier.rawValue.reduce(into: "") { name, letter in
                 name += name.isEmpty ? letter.uppercased() : letter.isUppercase ? " \(letter)" : String(letter)
             }

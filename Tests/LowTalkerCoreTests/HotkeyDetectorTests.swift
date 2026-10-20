@@ -92,15 +92,74 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         #expect(keyboard.detector.phase == .latched(rightOption.chord))
     }
 
-    /// Right Option with Command already held is a different chord, and one that is
-    /// not configured.
-    @Test func theChordWithAnotherModifierHeldIsNotThePress() {
+    /// Right Option with Command already held is not the chord, so no press begins, but it is
+    /// told as blocked at the chord and ended as the chord comes up, so the person learns it
+    /// before speaking.
+    @Test func theChordWithAnotherModifierHeldIsBlocked() {
         var keyboard = Keyboard()
         #expect(keyboard.press(.leftCommand, at: 0) == nil)
-        #expect(keyboard.press(.rightOption, at: 10) == nil)
+        #expect(keyboard.press(.rightOption, at: 10) == .blocked(rightOption, by: [.leftCommand]))
+        #expect(keyboard.detector.phase == .blocked(rightOption.chord, since: at(10)))
+        #expect(keyboard.release(.leftCommand, at: 300) == nil)
+        #expect(keyboard.release(.rightOption, at: 400) == ended(.hold, at: 400))
         #expect(keyboard.detector.phase == .idle)
-        #expect(keyboard.release(.rightOption, at: 400) == nil)
-        #expect(keyboard.release(.leftCommand, at: 410) == nil)
+        #expect(keyboard.press(.rightOption, at: 1000) == began(rightOption, at: 1000))
+    }
+
+    /// An arrow or navigation key held reads as Function, and blocks the chord like any other.
+    @Test func anArrowKeyHeldBlocksTheChord() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.function, at: 0)
+        #expect(keyboard.press(.rightOption, at: 10) == .blocked(rightOption, by: [.function]))
+    }
+
+    /// Nothing is listening, so a blocked chord let go quickly latches nothing: it ends, and
+    /// the next press of the chord alone begins one.
+    @Test func aBlockedChordTappedEndsAndLatchesNothing() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.leftShift, at: 0)
+        _ = keyboard.press(.rightOption, at: 10)
+        #expect(keyboard.release(.rightOption, at: 60) == ended(.tap, at: 60))
+        #expect(keyboard.detector.phase == .idle)
+        _ = keyboard.release(.leftShift, at: 70)
+        #expect(keyboard.press(.rightOption, at: 100) == began(rightOption, at: 100))
+    }
+
+    /// Shift and Right Option held to type a special character: the blocked chord was the
+    /// typed key's modifier, and ends as one.
+    @Test func aBlockedChordWithAKeyTypedUnderItEndsAsAModifier() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.leftShift, at: 0)
+        _ = keyboard.press(.rightOption, at: 10)
+        keyboard.type(at: 40)
+        #expect(keyboard.release(.rightOption, at: 90) == .ended(.usedAsModifier))
+    }
+
+    /// Of the chords the extra keys block, the one with the most keys is the one named.
+    @Test func theMostSpecificBlockedChordIsNamed() {
+        var keyboard = Keyboard(modes: modes(rightOption, command))
+        _ = keyboard.press(.leftShift, at: 0)
+        _ = keyboard.press(.function, at: 5)
+        #expect(keyboard.press(.rightOption, at: 10) == .blocked(command, by: [.function]))
+    }
+
+    /// A blocked chord ends with the hotkey's lapse like any press.
+    @Test func aLapseEndsABlockedChord() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.leftCommand, at: 0)
+        _ = keyboard.press(.rightOption, at: 10)
+        #expect(keyboard.detector.lapse() == .ended(.lapsed))
+        #expect(keyboard.detector.phase == .idle)
+    }
+
+    /// While a blocked chord is down, another chord completing changes nothing.
+    @Test func aChordCompletedWhileBlockedIsIgnored() {
+        var keyboard = Keyboard(modes: modes(rightOption, rightCommand))
+        _ = keyboard.press(.leftShift, at: 0)
+        _ = keyboard.press(.rightOption, at: 10)
+        _ = keyboard.release(.leftShift, at: 20)
+        #expect(keyboard.press(.rightCommand, at: 30) == nil)
+        #expect(keyboard.detector.phase == .blocked(rightOption.chord, since: at(10)))
     }
 
     /// The chord that began the press owns it: adding Shift to a held Right Option

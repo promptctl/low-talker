@@ -38,6 +38,13 @@ extension KeyChord {
     func isCompleted(by key: Modifier, holding held: Set<Modifier>) -> Bool {
         held == modifiers && modifiers.contains(key)
     }
+
+    /// Whether `key` going down would have completed this chord, but for other modifiers
+    /// already held with it: what an arrow or navigation key held does too, since it reads
+    /// as Function.
+    func isBlocked(by key: Modifier, holding held: Set<Modifier>) -> Bool {
+        held.isStrictSuperset(of: modifiers) && modifiers.contains(key)
+    }
 }
 
 /// Finds presses of the configured modes' chords in the keyboard's events, and tells a
@@ -52,7 +59,9 @@ extension KeyChord {
 /// as the key comes up. The chord that began a press owns it: modifiers added during a
 /// hold change nothing, and the press ends when any key of its chord comes up. A key typed
 /// while the chord was down makes it neither: the chord was that key's modifier, and the
-/// press ends as the chord comes up, however long it was down.
+/// press ends as the chord comes up, however long it was down. A chord pressed with other
+/// modifiers already held begins no press, and is told as blocked, so the person learns it at
+/// the chord rather than after speaking into it; it never latches, since nothing listens.
 ///
 /// [LAW:effects-at-boundaries] A value with no clock and no feed. Time comes in on
 /// each event, so a test drives it with timestamps of its choosing.
@@ -62,6 +71,10 @@ public struct HotkeyDetector: Sendable {
         /// wherever the handler happens to run, which is later by however late the
         /// event was delivered.
         case began(Mode, at: HostTime)
+        /// The chord went down with these other modifiers already held, so no listening
+        /// begins. [LAW:no-silent-failure] It is told rather than ignored, and ended like a
+        /// press, so whatever shows it is shown while the chord is down and no longer.
+        case blocked(Mode, by: Set<Modifier>)
         /// Listening ends, and why. Only one press is ever open, so this ends that one.
         case ended(Ending)
     }
@@ -103,6 +116,8 @@ public struct HotkeyDetector: Sendable {
         case idle
         /// The chord is down and the press is not yet known to be a hold or a tap.
         case held(KeyChord, since: HostTime)
+        /// The chord is down with other modifiers held with it, so nothing is listening.
+        case blocked(KeyChord, since: HostTime)
         /// A tap left listening on; the next press of its chord, or of any chord listened
         /// for, ends it.
         case latched(KeyChord)
@@ -133,28 +148,35 @@ public struct HotkeyDetector: Sendable {
         // At most one mode's chord completes on one event, since two chords with the same
         // modifiers are one chord and no two modes share one.
         let completed = modes.first { $0.chord.isCompleted(by: event.key, holding: event.modifiers) }
-        switch (phase, completed) {
-        case (.idle, let mode?):
+        // Of the chords the extra modifiers block, the one with the most keys is the one
+        // the person was reaching for.
+        let blocked = modes.filter { $0.chord.isBlocked(by: event.key, holding: event.modifiers) }
+            .max { $0.chord.modifiers.count < $1.chord.modifiers.count }
+        switch (phase, completed, blocked) {
+        case (.idle, let mode?, _):
             phase = .held(mode.chord, since: event.time)
             return .began(mode, at: event.time)
+        case (.idle, nil, let mode?):
+            phase = .blocked(mode.chord, since: event.time)
+            return .blocked(mode, by: event.modifiers.subtracting(mode.chord.modifiers))
         // Its own chord ends it too, listened for or not: the press belongs to the chord that
         // began it, so a chord moved by `listen(for:)` mid-latch still ends what it started.
-        case (.latched(let chord), _) where completed != nil || chord.isCompleted(by: event.key, holding: event.modifiers):
+        case (.latched(let chord), _, _) where completed != nil || chord.isCompleted(by: event.key, holding: event.modifiers):
             phase = .idle
             return .ended(.released(.tap, at: event.time))
-        case (.held, _), (.latched, _), (.idle, nil):
+        case (.held, _, _), (.blocked, _, _), (.latched, _, _), (.idle, nil, nil):
             return nil
         }
     }
 
     private mutating func up(of event: KeyEvent) -> Transition? {
+        // A typed key the session's record hides leaves the press told by its length, as
+        // every press was before the record was read.
+        func typedUnder(since: HostTime) -> Bool { event.lastTyped.map { since < $0 } ?? false }
+        func kind(since: HostTime) -> PressKind { event.time - since < tapThreshold ? .tap : .hold }
         switch phase {
         case .held(let chord, let since) where chord.modifiers.contains(event.key):
-            // A typed key the session's record hides leaves the press told by its length, as
-            // every press was before the record was read.
-            let typedUnderChord = event.lastTyped.map { since < $0 } ?? false
-            let press: PressKind = event.time - since < tapThreshold ? .tap : .hold
-            switch (typedUnderChord, press) {
+            switch (typedUnder(since: since), kind(since: since)) {
             case (true, _):
                 phase = .idle
                 return .ended(.usedAsModifier)
@@ -165,7 +187,10 @@ public struct HotkeyDetector: Sendable {
                 phase = .idle
                 return .ended(.released(.hold, at: event.time))
             }
-        case .held, .latched, .idle:
+        case .blocked(let chord, let since) where chord.modifiers.contains(event.key):
+            phase = .idle
+            return .ended(typedUnder(since: since) ? .usedAsModifier : .released(kind(since: since), at: event.time))
+        case .held, .blocked, .latched, .idle:
             return nil
         }
     }
@@ -186,7 +211,7 @@ public struct HotkeyDetector: Sendable {
     public mutating func lapse() -> Transition? {
         let transition: Transition? = switch phase {
         case .idle: nil
-        case .held, .latched: .ended(.lapsed)
+        case .held, .blocked, .latched: .ended(.lapsed)
         }
         phase = .idle
         return transition

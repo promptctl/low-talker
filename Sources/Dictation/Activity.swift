@@ -2,7 +2,8 @@ import LowTalkerCore
 
 extension Dictation {
     /// What the loop is doing with presses now, as the status item and the HUD show it: a microphone
-    /// open for a press, presses ended and still on their way to the cursor, or neither.
+    /// open for a press, a press's chord down with nothing hearing it, presses ended and still
+    /// on their way to the cursor, or none of these.
     ///
     /// [LAW:one-source-of-truth] Read off the loop's own press and queue, so the icon cannot
     /// say listening over a press that was refused its microphone, or ready over words still
@@ -13,6 +14,9 @@ extension Dictation {
         /// far, confirmed then tentative. Wins over `transcribing`: the press being spoken
         /// is the one the person is watching for.
         case listening(heard: Transcript)
+        /// A press's chord is down and nothing is hearing it, for the reason `why` says, so the
+        /// person learns it before speaking into it. Wins over `transcribing` as `listening` does.
+        case refused(why: String)
         /// A press has ended and its outcome is not yet reported.
         case transcribing
 
@@ -33,6 +37,7 @@ extension Dictation {
             switch shown(over: readiness) {
             case .idle: readiness.statusGlyph()
             case .listening: .symbol("waveform")
+            case .refused: .symbol("exclamationmark.triangle")
             case .transcribing: .symbol("text.cursor")
             }
         }
@@ -43,6 +48,7 @@ extension Dictation {
             switch shown(over: readiness) {
             case .idle: readiness.iconDescription(for: name)
             case .listening: "\(name): listening"
+            case .refused: "\(name): not listening"
             case .transcribing: "\(name): transcribing"
             }
         }
@@ -53,6 +59,7 @@ extension Dictation {
             switch self {
             case .idle: "idle"
             case .listening(let heard): "listening, \(heard.words.count) words heard"
+            case .refused(let why): "refused: \(why)"
             case .transcribing: "transcribing"
             }
         }

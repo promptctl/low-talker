@@ -397,7 +397,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hearing = notices.flatMap { notices in
             Result {
                 try hotkey.start { [unowned self] transition in
-                    if case .began = transition { lastFailure = nil }
+                    switch transition {
+                    case .began, .blocked: lastFailure = nil
+                    case .ended: break
+                    }
                     dictation.press(transition)
                 }
                 return notices

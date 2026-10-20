@@ -16,10 +16,7 @@ Each mode seeds the model with its own vocabulary, your own words and names, so 
 
 ## The pipeline
 
-Every invocation flows through the same two types:
-
-- **Context** is everything known before you speak: which chord was held, whether it was a tap or a hold, and the frontmost app's bundle id.
-- **Transcript** is what the engine produced, with word timings and confidence attached. It is never a bare string.
+Every invocation flows through one type: a **Transcript** is what the engine produced, with word timings and confidence attached. It is never a bare string.
 
 What becomes of a transcript is one thing: its text is inserted at the cursor of the app in front.
 
