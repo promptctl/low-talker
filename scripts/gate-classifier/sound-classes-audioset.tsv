@@ -1,0 +1,111 @@
+sound analysis label	audioset name
+giggling	Giggle
+baby_crying	Baby cry, infant cry
+choir_singing	Choir
+nose_blowing	Respiratory sounds
+person_running	Run
+person_shuffling	Shuffle
+person_walking	Walk, footsteps
+chewing	Chewing, mastication
+burp	Burping, eructation
+slurp	Digestive
+babble	Hubbub, speech noise, speech babble
+dog_bark	Bark
+dog_howl	Howl
+dog_bow_wow	Bow-wow
+dog_growl	Growling
+dog_whimper	Whimper (dog)
+cat_purr	Purr
+cat_meow	Meow
+horse_clip_clop	Clip-clop
+horse_neigh	Neigh, whinny
+cow_moo	Moo
+pig_oink	Oink
+sheep_bleat	Bleat
+chicken	Chicken, rooster
+chicken_cluck	Cluck
+rooster_crow	Crowing, cock-a-doodle-doo
+turkey_gobble	Gobble
+duck_quack	Quack
+goose_honk	Honk
+lion_roar	Roar
+bird_vocalization	Bird vocalization, bird call, bird song
+bird_chirp_tweet	Chirp, tweet
+bird_squawk	Squawk
+pigeon_dove_coo	Coo
+crow_caw	Caw
+owl_hoot	Hoot
+bird_flapping	Bird flight, flapping wings
+cricket_chirp	Cricket
+mosquito_buzz	Mosquito
+fly_buzz	Fly, housefly
+bee_buzz	Bee, wasp, etc.
+frog_croak	Croak
+snake_hiss	Hiss
+snake_rattle	Rattle
+coyote_howl	Howl
+elk_bugle	Wild animals
+guitar_tapping	Tapping (guitar technique)
+guitar_strum	Strum
+wind_instrument	Wind instrument, woodwind instrument
+disc_scratching	Scratching (performance technique)
+wind_rustling_leaves	Rustling leaves
+stream_burbling	Stream
+sea_waves	Waves, surf
+fire_crackle	Crackle
+sailing	Sailboat, sailing ship
+car_horn	Vehicle horn, car horn, honking
+power_windows	Power windows, electric windows
+vehicle_skidding	Skidding
+race_car	Race car, auto racing
+air_horn	Air horn, truck horn
+reverse_beeps	Reversing beeps
+police_siren	Police car (siren)
+fire_engine_siren	Fire engine, fire truck (siren)
+traffic_noise	Traffic noise, roadway noise
+railroad_car	Railroad car, train wagon
+subway_metro	Subway, metro, underground
+airplane	Fixed-wing aircraft, airplane
+engine_idling	Idling
+engine_accelerating_revving	Accelerating, revving, vroom
+door_bell	Doorbell
+door_sliding	Sliding door
+door_slam	Slam
+drawer_open_close	Drawer open or close
+dishes_pots_pans	Dishes, pots, and pans
+sink_filling_washing	Sink (filling or washing)
+bathtub_filling_washing	Bathtub (filling or washing)
+zipper	Zipper (clothing)
+electric_shaver	Electric shaver, electric razor
+typing_computer_keyboard	Computer keyboard
+smoke_detector	Smoke detector, smoke alarm
+ratchet_and_pawl	Ratchet, pawl
+air_conditioner	Air conditioning
+saw	Sawing
+hedge_trimmer	Power tool
+chopping_wood	Chop
+wood_cracking	Crack
+glass_clink	Chink, clink
+glass_breaking	Shatter
+liquid_splashing	Splash, splatter
+liquid_sloshing	Slosh
+liquid_squishing	Squish
+liquid_dripping	Drip
+liquid_pouring	Pour
+liquid_trickle_dribble	Trickle, dribble
+liquid_filling_container	Fill (with liquid)
+liquid_spraying	Spray
+water_pump	Pump (liquid)
+underwater_bubbling	Gurgling
+beep	Beep, bleep
+click	Clicking
+bowling_impact	Generic impact sounds
+playing_badminton	Generic impact sounds
+playing_hockey	Generic impact sounds
+playing_squash	Generic impact sounds
+playing_table_tennis	Generic impact sounds
+playing_tennis	Generic impact sounds
+playing_volleyball	Generic impact sounds
+rope_skipping	Generic impact sounds
+scuba_diving	Breathing
+skiing	Scrape

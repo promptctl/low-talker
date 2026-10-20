@@ -102,7 +102,7 @@ class Mixer:
     def excerpt(self, source, at):
         """The source's samples placed so its sample `at` lands at the window's frame start,
         with PRE samples before the window; zero where the source has none. Half the time
-        played 15% slower to 15% faster, pitch with it, so a class of few clips (47 sneezes)
+        played 15% slower to 15% faster, pitch with it, so a class of few clips
         is heard in more voices than it has."""
         need = PRE + self.size
         speed = Fraction(1)

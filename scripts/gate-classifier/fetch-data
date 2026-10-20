@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = "==3.12.*"
+# dependencies = ["openai-whisper==20250625", "numpy==2.2.6", "soundfile==0.13.1"]
+# ///
 """The audio the gate classifier is trained on, fetched into <folder>:
 
     scripts/gate-classifier/fetch-data <folder>
@@ -7,15 +11,20 @@ Speech is LibriSpeech dev-clean and test-clean (CC BY 4.0) without the bench's s
 Non-speech is every FSD50K clip (CC BY 4.0 as a whole) that carries one of CLASSES, no
 voice or music label, and its own license CC0 or CC BY. ESC-50 is the test set and is drawn
 from Freesound too: every clip of it is dropped, and so is every clip by an uploader of the
-sounds the gate replay inserts. Each source is pinned, so every training run reads the same
-audio. <folder>/manifest.tsv names every clip kept, its license and its uploader, which is the
+sounds the gate replay inserts. FSDKaggle2019's Flickr soundtracks labelled Sneeze add the
+sneezes Freesound runs out of, under CC BY 2.0, with any whose labels or Whisper transcript
+show talk dropped. Each source is pinned, so every training run reads the same audio.
+<folder>/manifest.tsv names every clip kept, its license and its uploader, which is the
 attribution CC BY asks for. A file already fetched is not fetched again; a failed fetch stops
 the run.
 """
 import csv
 import hashlib
+import http.client
 import json
 import os
+import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -24,6 +33,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 
 FSD50K = "https://huggingface.co/datasets/Fhrozen/FSD50k/resolve/ccf1acaff12f3f4a4c10052dddafbb6d22152c9b/"
@@ -48,6 +58,24 @@ LICENSES = {
     "http://creativecommons.org/publicdomain/zero/1.0/": "CC0 1.0",
     "http://creativecommons.org/licenses/by/3.0/": "CC BY 3.0",
 }
+# AudioSet's ontology, which places each FSD50K label (by its AudioSet id) under its ancestors.
+ONTOLOGY = "https://raw.githubusercontent.com/audioset/ontology/d417d32bf59c711abb5910fd2f76a0eb44697991/ontology.json"
+FSDKAGGLE = "https://zenodo.org/records/3612637/files/"
+FSDKAGGLE_META_MD5 = "11fea49a1f8a096ee594da9fcb4fd630"  # As the Zenodo record lists it.
+# The noisy train set is one zip split in seven parts, 21.5 GB, of which the sneezes are
+# about 210 MB: they are read out of it by byte range. Sizes as the Zenodo record lists them.
+NOISY_PARTS = [(f"FSDKaggle2019.audio_train_noisy.z{n:02d}", 3_221_225_472) for n in range(1, 7)]
+NOISY_PARTS.append(("FSDKaggle2019.audio_train_noisy.zip", 2_191_775_999))
+FLICKR_LICENSE = "CC BY 2.0"
+RATE = 16_000
+# Apple's sound classifier hears a sneeze in a 1 s window scoring Sneeze at SNEEZE or more; the
+# window is kept when it and the windows overlapping it score every label under EXCLUDED below
+# HEARD.
+SNEEZE = 0.5
+HEARD = 0.2
+WORD_REACH = 0.3  # A word Whisper places this near the kept window is talk in it.
+# Its labels that AudioSet names otherwise, each with the AudioSet name it stands for.
+SOUND_CLASSES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound-classes-audioset.tsv")
 
 
 def fetch(url, path):
@@ -62,7 +90,7 @@ def fetch(url, path):
                 while chunk := response.read(1 << 20):
                     out.write(chunk)
             break
-        except (urllib.error.URLError, OSError) as error:
+        except (urllib.error.URLError, OSError, http.client.IncompleteRead) as error:
             if isinstance(error, urllib.error.HTTPError) and error.code < 500 or attempt == 2:
                 raise
             print(f"retrying {url}: {error}", flush=True)
@@ -80,11 +108,219 @@ def check(path, md5):
         sys.exit(f"{path}: md5 {digest.hexdigest()}, expected {md5}")
 
 
+def ranged(disk, offset, length):
+    """`length` bytes of the split noisy zip from `offset` in part `disk`, carried on into the
+    parts after it as a split zip's spans are. Each range is start-end: Zenodo answers a suffix
+    range with the whole part. Zenodo often drops a connection a few KB short of a range's end,
+    so a dropped range resumes from the last byte that came; three drops in a row with nothing
+    new stop the run."""
+    out = bytearray()
+    while length:
+        name, size = NOISY_PARTS[disk]
+        take = min(length, size - offset)
+        data, idle = bytearray(), 0
+        while len(data) < take:
+            start = offset + len(data)
+            request = urllib.request.Request(f"{FSDKAGGLE}{name}?download=1", headers={"Range": f"bytes={start}-{offset + take - 1}"})
+            failure = "the connection closed early"
+            try:
+                with urllib.request.urlopen(request, timeout=300) as response:
+                    if response.status != 206:
+                        sys.exit(f"{name} bytes {start}-{offset + take - 1}: HTTP {response.status}, not 206")
+                    while chunk := response.read(1 << 16):
+                        data += chunk
+            except (urllib.error.URLError, OSError, http.client.IncompleteRead) as error:
+                if isinstance(error, urllib.error.HTTPError) and error.code < 500:
+                    raise
+                failure = error
+            if len(data) < take:
+                idle = 0 if offset + len(data) > start else idle + 1
+                if idle == 3:
+                    sys.exit(f"{name} bytes {offset}+{take}: stuck at byte {offset + len(data)} after three tries: {failure}")
+                print(f"resuming {name} at byte {offset + len(data)} of {offset}+{take}: {failure}", flush=True)
+                time.sleep(5 * idle)
+        if len(data) != take:
+            sys.exit(f"{name} bytes {offset}+{take}: {len(data)} bytes came back")
+        out += data
+        length -= take
+        disk, offset = disk + 1, 0
+    return bytes(out)
+
+
+def noisy_entries(path):
+    """Each noisy clip's name -> (method, crc, compressed size, size, disk, local header offset),
+    read from the central directory at the end of the last part, kept at `path` once fetched."""
+    if not os.path.exists(path):
+        last = len(NOISY_PARTS) - 1
+        tail = ranged(last, NOISY_PARTS[last][1] - 65_536, 65_536)
+        end = tail.rfind(b"PK\x05\x06")
+        _, disk, _, _, size, offset = struct.unpack("<HHHHII", tail[end + 4 : end + 20])
+        with open(path + ".part", "wb") as out:
+            out.write(ranged(disk, offset, size))
+        os.replace(path + ".part", path)
+    directory, entries, p = open(path, "rb").read(), {}, 0
+    while p < len(directory):
+        (signature, _, _, _, method, _, _, crc, packed, unpacked, name_len, extra_len, comment_len,
+         start, _, _, header) = struct.unpack("<IHHHHHHIIIHHHHHII", directory[p : p + 46])
+        if signature != 0x02014B50:
+            sys.exit(f"noisy zip: no central directory entry at {p}")
+        name = os.path.basename(directory[p + 46 : p + 46 + name_len].decode())
+        entries[name] = (method, crc, packed, unpacked, start, header)
+        p += 46 + name_len + extra_len + comment_len
+    return entries
+
+
+def unzipped(entry, path):
+    """One noisy clip, its local header and data read by range, inflated and checked."""
+    method, crc, packed, unpacked, disk, offset = entry
+    name_len, extra_len = struct.unpack("<HH", ranged(disk, offset, 30)[26:30])
+    offset += 30 + name_len + extra_len
+    while offset >= NOISY_PARTS[disk][1]:
+        offset -= NOISY_PARTS[disk][1]
+        disk += 1
+    data = ranged(disk, offset, packed)
+    data = zlib.decompress(data, -15) if method == 8 else data
+    if len(data) != unpacked or zlib.crc32(data) != crc:
+        sys.exit(f"{path}: {len(data)} bytes, crc {zlib.crc32(data):08x}; expected {unpacked}, {crc:08x}")
+    with open(path + ".part", "wb") as out:
+        out.write(data)
+    os.replace(path + ".part", path)
+
+
+def talk(transcript):
+    """Whether a Whisper transcript holds a word: any letter outside its [] or () annotations,
+    which is how it marks a sneeze or a cough it heard."""
+    return re.search(r"[A-Za-z]", re.sub(r"\[[^\]]*\]|\([^)]*\)", "", transcript)) is not None
+
+
+def flickr_sneezes(folder, ids, excluded_ids, ontology):
+    """FSDKaggle2019's noisy Flickr soundtracks labelled Sneeze, each with its fate: kept, or the
+    first rule that drops it. A kept soundtrack's 1 s sneeze window is written, 16 kHz mono, to
+    <folder>/flickr."""
+    meta = os.path.join(folder, "fsdkaggle2019")
+    archive = fetch(FSDKAGGLE + "FSDKaggle2019.meta.zip?download=1", os.path.join(meta, "meta.zip"))
+    check(archive, FSDKAGGLE_META_MD5)
+    with zipfile.ZipFile(archive) as bundle:
+        rows = [r for r in csv.DictReader(bundle.read("FSDKaggle2019.meta/train_noisy_post_competition.csv").decode().splitlines())
+                if "Sneeze" in r["labels"].split(",")]
+    parents = {}
+    for node in ontology:
+        for child in node["child_ids"]:
+            parents.setdefault(child, set()).add(node["id"])
+
+    def excluded(node):
+        """Whether an AudioSet node is under EXCLUDED, the one definition of voice and music
+        that FSD50K's labels and these soundtracks are both held to."""
+        found, stack = {node}, [node]
+        while stack:
+            for parent in parents.get(stack.pop(), ()):
+                if parent not in found:
+                    found.add(parent)
+                    stack.append(parent)
+        return bool(excluded_ids & found)
+    known = {node["id"] for node in ontology}
+
+    def voice_or_music(labels):
+        # A label nobody can place is not one nobody need fear: it stops the run.
+        for label in labels:
+            if label not in ids or ids[label] not in known:
+                sys.exit(f"FSDKaggle2019 label {label!r} is not in FSD50K's vocabulary or AudioSet's ontology")
+        return any(excluded(ids[label]) for label in labels)
+
+    fates = {}
+    for r in rows:
+        labels = r["labels"].split(",")
+        fates[r["fname"]] = ("license" if r["license"] != FLICKR_LICENSE
+                             else "voice/music" if voice_or_music(labels)
+                             else None)
+    candidates = [r for r in rows if fates[r["fname"]] is None]
+    entries = noisy_entries(os.path.join(meta, "noisy-central-directory"))
+    os.makedirs(os.path.join(meta, "soundtracks"), exist_ok=True)
+
+    def get(row):
+        path = os.path.join(meta, "soundtracks", row["fname"])
+        if not os.path.exists(path):
+            unzipped(entries[row["fname"]], path + ".source.wav")
+            subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", path + ".source.wav", path], check=True)
+            os.remove(path + ".source.wav")
+        return path
+    with ThreadPoolExecutor(8) as pool:
+        soundtracks = dict(zip((r["fname"] for r in candidates), pool.map(get, candidates)))
+
+    # A noisy Sneeze label marks a home video with a sneeze somewhere among its talk, so only
+    # the sneeze is trained on: Apple's sound classifier finds a 1 s window it hears as a sneeze,
+    # with nothing under EXCLUDED in it or the windows overlapping it, and Whisper places no word
+    # near it. Each of the classifier's labels is placed in AudioSet's ontology by name, or by
+    # SOUND_CLASSES where AudioSet names it otherwise.
+    classifier = os.path.join(folder, "sound-classes")
+    subprocess.run(["swiftc", "-O", os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound-classes.swift"), "-o", classifier], check=True)
+    lines = subprocess.run([classifier, *soundtracks.values()], check=True, capture_output=True, text=True).stdout.splitlines()
+    header = lines[0].split("\t")[2:]
+    by_name = {re.sub(r"[^a-z0-9]+", "_", node["name"].lower()).strip("_"): node["id"] for node in ontology}
+    names = {node["name"]: node["id"] for node in ontology}
+    renamed = dict(csv.reader(open(SOUND_CLASSES).readlines()[1:], delimiter="\t"))
+    placed = {}
+    for label in header:
+        node = names.get(renamed[label]) if label in renamed else by_name.get(label)
+        if node is None:
+            sys.exit(f"sound classifier label {label!r} has no AudioSet node by name or in {SOUND_CLASSES}")
+        placed[label] = node
+    sneeze_at = header.index("sneeze")
+    held_to = [i for i, label in enumerate(header) if excluded(placed[label])]
+    windows = {}
+    for line in lines[1:]:
+        name, start, *scores = line.split("\t")
+        scores = [float(v) for v in scores]
+        windows.setdefault(name, []).append((float(start), scores[sneeze_at], max(scores[i] for i in held_to)))
+    chosen = {}
+    for name in soundtracks:
+        clear = [w for w in windows[name]
+                 if w[1] >= SNEEZE and all(o[2] < HEARD for o in windows[name] if abs(o[0] - w[0]) < 1)]
+        if clear:
+            chosen[name] = max(clear, key=lambda w: w[1])
+        else:
+            fates[name] = "no sneeze"
+
+    import numpy
+    import soundfile
+    import whisper
+    model = whisper.load_model("small.en")
+    transcripts = {}
+    os.makedirs(os.path.join(folder, "flickr"), exist_ok=True)
+    for name, (start, _, _) in chosen.items():
+        samples, _ = soundfile.read(soundtracks[name], dtype="float32")
+        heard = model.transcribe(numpy.asarray(samples), language="en", fp16=False, condition_on_previous_text=False, word_timestamps=True)
+        transcripts[name] = heard["text"].strip()
+        near = [w for s in heard["segments"] for w in s["words"]
+                if talk(w["word"]) and w["end"] > start - WORD_REACH and w["start"] < start + 1 + WORD_REACH]
+        fates[name] = "talk" if near else "kept"
+        if not near:
+            soundfile.write(os.path.join(folder, "flickr", name), samples[int(start * RATE) : int((start + 1) * RATE)], RATE, subtype="PCM_16")
+    with open(os.path.join(folder, "fsdkaggle2019-excerpts.tsv"), "w") as out:
+        out.write("fname\tfate\twindow start s\tsneeze\tvoice or music\ttranscript\n")
+        for name in soundtracks:
+            start, sneeze, voice = chosen.get(name, ("-", "-", "-"))
+            out.write(f"{name}\t{fates[name]}\t{start}\t{sneeze}\t{voice}\t{transcripts.get(name, '-')}\n")
+
+    order = ["kept", "license", "voice/music", "no sneeze", "talk"]
+    counts = dict.fromkeys(order, 0)
+    for fate in fates.values():
+        counts[fate] += 1
+    print("FSDKaggle2019 Flickr sneezes\t" + "\t".join(f"{f} {counts[f]}" for f in order))
+    print(f"sound classifier labels held to EXCLUDED: {', '.join(header[i] for i in held_to)}")
+    return [(os.path.join(folder, "flickr", r["fname"]), chosen[r["fname"]][0], r)
+            for r in candidates if fates[r["fname"]] == "kept"]
+
+
 def main(folder):
     folder = os.path.abspath(folder)
     meta = os.path.join(folder, "fsd50k")
-    for name in ["metadata/dev_clips_info_FSD50K.json", "metadata/eval_clips_info_FSD50K.json", "labels/dev.csv", "labels/eval.csv"]:
+    for name in ["metadata/dev_clips_info_FSD50K.json", "metadata/eval_clips_info_FSD50K.json", "labels/dev.csv", "labels/eval.csv", "labels/vocabulary.csv"]:
         fetch(FSD50K + name, os.path.join(meta, os.path.basename(name)))
+    # FSD50K's vocabulary gives each label, spelled as FSD50K and FSDKaggle2019 both spell it,
+    # its AudioSet id.
+    ids = {label: mid for _, label, mid in csv.reader(open(os.path.join(meta, "vocabulary.csv")))}
+    ontology = json.load(open(fetch(ONTOLOGY, os.path.join(folder, "ontology.json"))))
     esc50 = list(csv.DictReader(open(fetch(ESC50 + "meta/esc50.csv", os.path.join(folder, "esc50.csv")))))
     held = {row["filename"].split("-")[1] for row in esc50}
     replayed = {row["filename"].split("-")[1] for row in esc50 if row["category"] in REPLAYED}
@@ -179,6 +415,9 @@ def main(folder):
             cough_paths = list(pool.map(convert, coughs))
     print(f"COUGHVID: {len(coughs)} recordings scored {COUGH_DETECTED} or more as a cough")
 
+    # FSD50K runs short of sneezes once ESC-50's uploaders are out; Flickr soundtracks add more.
+    sneezes = flickr_sneezes(folder, ids, {ids[label] for label in EXCLUDED}, ontology)
+
     with open(os.path.join(folder, "manifest.tsv"), "w") as out:
         out.write("kind\tpath\tsource\tlicense\tgroup\tclasses\n")
         for path, reader in sorted(speech):
@@ -187,6 +426,11 @@ def main(folder):
             out.write(f"nonspeech\t{os.path.relpath(path, folder)}\tFSD50K {split} {name} (freesound.org/s/{name})\t{license}\tuploader {owner}\t{','.join(classes)}\n")
         for path, (name, _) in zip(cough_paths, coughs):
             out.write(f"nonspeech\t{os.path.relpath(path, folder)}\tCOUGHVID {name}\tCC BY 4.0\tparticipant {name}\tCough\n")
+        # The window is the second the classifier heard as a sneeze; the soundtrack's other
+        # labels describe moments outside it, so it is drawn as a Sneeze only.
+        for path, start, row in sneezes:
+            owner = row["flickr_video_URL"].split("/videos/")[1].split("/")[0]
+            out.write(f"nonspeech\t{os.path.relpath(path, folder)}\tFSDKaggle2019 noisy {row['fname']} at {start:.2f} s ({row['flickr_video_URL']})\t{FLICKR_LICENSE}\tflickr owner {owner}\tSneeze\n")
     print(f"{len(speech)} speech files from {len({r for _, r in speech})} readers; {len(clips)} non-speech clips from {len({c[3] for c in clips})} uploaders")
 
 
