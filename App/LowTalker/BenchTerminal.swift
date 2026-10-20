@@ -39,7 +39,7 @@ enum BenchTerminal {
             }, ended: { ending in
                 switch ending {
                 case .finished: exit(0)
-                case .cancelled: exit(1)
+                case .stopped: exit(1)
                 case .failed(let reason):
                     printToStandardError("LowTalker --bench: \(reason)")
                     exit(1)

@@ -4,7 +4,8 @@ import Synchronization
 /// the engine the moment it begins, cancelling any served decode in flight, and served
 /// decodes wait until every hold has had its final transcript. A cancelled decode runs
 /// again, whole, once they have, so a served caller sees only the wait and never an error
-/// dictation caused.
+/// dictation caused. Work that holds the engine and gives way to dictation, a bench run, is
+/// told to stop by the first dictation decode it meets.
 ///
 /// [LAW:single-enforcer] The rule lives here and nowhere else. Dictation takes holds and
 /// both it and the server decode through this, as `Caller.dictation` and `Caller.served`;
@@ -88,6 +89,8 @@ public final class EngineTurns: Sendable {
         var reading = Reading()
         var decoding: Decoding?
         var waiting: [Waiter] = []
+        /// What each open hold that gives way to dictation does to give way, by its id.
+        var yielders: [Int: @Sendable () -> Void] = [:]
         var ids = 0
 
         /// The next waiter to decode, taken off the queue and made the one decoding, when
@@ -121,26 +124,47 @@ public final class EngineTurns: Sendable {
     /// Takes the engine for a hold, from key-down until the hold's final transcript is out.
     /// A served decode in flight is told to stop before this returns.
     public func hold() -> EngineHold {
-        let (cancel, preempted) = state.withLock { state -> ((@Sendable () -> Void)?, Bool) in
-            state.reading.holds += 1
-            guard var decoding = state.decoding, decoding.caller == .served, !decoding.preempted else { return (nil, false) }
-            decoding.preempted = true
-            state.decoding = decoding
-            return (decoding.cancel, true)
-        }
-        cancel?()
-        return EngineHold(turns: self, preempted: preempted)
+        take(yielding: nil)
     }
 
-    /// Closes one hold and hands the engine on; returns how many served decodes were waiting.
-    fileprivate func release() -> Int {
-        let (next, waiting) = state.withLock { state in
+    /// Takes the engine for work that gives way to dictation, a bench run: served decodes wait
+    /// for it as for a hold, and the first dictation decode admitted while it is open calls
+    /// `yield`, once. A press that is refused, or still waits on its engine, decodes nothing,
+    /// so it stops nothing.
+    public func hold(yieldingToDictation yield: @escaping @Sendable () -> Void) -> EngineHold {
+        take(yielding: yield)
+    }
+
+    private func take(yielding yield: (@Sendable () -> Void)?) -> EngineHold {
+        let (cancel, preempted, yielder) = state.withLock { state -> ((@Sendable () -> Void)?, Bool, Int?) in
+            state.reading.holds += 1
+            let yielder = yield.map { yield in
+                state.ids += 1
+                state.yielders[state.ids] = yield
+                return state.ids
+            }
+            guard var decoding = state.decoding, decoding.caller == .served, !decoding.preempted else { return (nil, false, yielder) }
+            decoding.preempted = true
+            state.decoding = decoding
+            return (decoding.cancel, true, yielder)
+        }
+        cancel?()
+        return EngineHold(turns: self, preempted: preempted, yielder: yielder)
+    }
+
+    /// Closes one hold and hands the engine on; returns how many served decodes were waiting,
+    /// and whether a dictation decode was admitted while it was open, for one that gives way.
+    fileprivate func release(yielder: Int?) -> (waiting: Int, yielded: Bool) {
+        let (next, waiting, yielded) = state.withLock { state in
             state.reading.holds -= 1
+            // A yield no longer kept was taken by a dictation decode, under this same lock, so
+            // the answer holds even while that yield is still on its way to its owner.
+            let yielded = yielder.map { state.yielders.removeValue(forKey: $0) == nil } ?? false
             let waiting = state.waiting.count { $0.caller == .served }
-            return (state.admit(), waiting)
+            return (state.admit(), waiting, yielded)
         }
         next?.resume(returning: true)
-        return waiting
+        return (waiting, yielded)
     }
 
     /// Runs `decode` on the engine when `caller`'s turn comes, and again from the start if a
@@ -211,6 +235,14 @@ public final class EngineTurns: Sendable {
             }?.resume(returning: false)
         }
         guard admitted else { throw .cancelled }
+        // [LAW:single-enforcer] Dictation first, for work that gives way to it as for served
+        // decodes: called outside the lock, since what a yield does is its owner's.
+        if caller == .dictation {
+            state.withLock { state in
+                defer { state.yielders = [:] }
+                return Array(state.yielders.values)
+            }.forEach { $0() }
+        }
         return id
     }
 }
@@ -220,10 +252,12 @@ public final class EngineTurns: Sendable {
 public final class EngineHold: Sendable {
     /// What a hold put off: whether it told a served decode in flight to stop as it began
     /// (one that finished anyway kept its result), and how many served decodes were waiting
-    /// on it when it let go.
+    /// on it when it let go. And what put it off: whether a hold that gives way to dictation
+    /// had a dictation decode admitted while it was open.
     public struct Displaced: Equatable, Sendable, CustomStringConvertible {
         public let preempted: Bool
         public let waiting: Int
+        public let yielded: Bool
 
         public var description: String {
             "\(preempted ? 1 : 0) served preempted, \(waiting) served waiting"
@@ -232,11 +266,14 @@ public final class EngineHold: Sendable {
 
     private let turns: EngineTurns
     private let preempted: Bool
+    /// The id its yield is kept under, for a hold that gives way to dictation.
+    private let yielder: Int?
     private let released = Atomic(false)
 
-    fileprivate init(turns: EngineTurns, preempted: Bool) {
+    fileprivate init(turns: EngineTurns, preempted: Bool, yielder: Int?) {
         self.turns = turns
         self.preempted = preempted
+        self.yielder = yielder
     }
 
     /// Lets the engine go. [LAW:no-silent-failure] A second release would count another
@@ -244,6 +281,7 @@ public final class EngineHold: Sendable {
     @discardableResult
     public func release() -> Displaced {
         precondition(!released.exchange(true, ordering: .relaxed), "a hold was released twice")
-        return Displaced(preempted: preempted, waiting: turns.release())
+        let (waiting, yielded) = turns.release(yielder: yielder)
+        return Displaced(preempted: preempted, waiting: waiting, yielded: yielded)
     }
 }

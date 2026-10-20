@@ -17,7 +17,7 @@ public enum EngineReadiness: Sendable, Equatable {
     /// Loaded, the wait having lasted `after`. Kept rather than measured when read, so the
     /// menu opened an hour later says how long the load took, not how long ago launch was.
     case ready(ModelName, after: Duration)
-    /// The load stopped with this reason, and nothing will retry it until the next launch.
+    /// The load stopped with this reason; the next press is refused and starts it again.
     case failed(String)
 
     /// This state once the load has reported `phase`. Only a wait advances: a report

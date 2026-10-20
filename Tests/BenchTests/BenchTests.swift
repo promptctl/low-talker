@@ -160,9 +160,9 @@ private final class Picked: Sendable {
         #expect(ending.withLock { $0 } == .finished)
     }
 
-    /// A cancelled run stops where it is held, says so, and lets dictation back in; while it
-    /// runs, a press is refused with the reason, and so is a second run.
-    @Test func cancellingEndsTheRunAndPressesAreRefusedUntilThen() async throws {
+    /// A cancelled run stops where it is held and says so; while it runs, a second run is
+    /// refused.
+    @Test func cancellingEndsTheRunAndASecondRunIsRefusedUntilThen() async throws {
         let picked = try Picked(fixtures: ["a"]).remembered()
         let ear = ScriptedEar(gate: Gate())
         let plan = try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 3, vocabulary: .empty)
@@ -177,18 +177,68 @@ private final class Picked: Sendable {
         }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
         while ear.gate.waiting == 0 { await Task.yield() }
 
-        await #expect(throws: BenchmarkRunning()) { try await runs.admitPress() }
-        #expect("\(BenchmarkRunning())".hasPrefix("a benchmark is running"))
         await #expect(throws: RunRefused.benchmarkRunning) {
             try await runs.start("again", work: { _ in }, events: { _ in }, ended: { _ in })
         }
 
         await runs.cancel()
         await run.value
-        #expect(ending.withLock { $0 } == .cancelled)
+        #expect(ending.withLock { $0 } == .stopped(.cancelled))
         #expect(lines.withLock { $0 }.last == "bench: cancelled after 0 rows; 0 served preempted, 0 served waiting")
-        try await runs.admitPress()
         #expect(await !runs.isRunning)
+    }
+
+    /// The first press heard during a run stops it, and the run's last line says a dictation
+    /// stopped it.
+    @Test func aPressHeardDuringARunStopsItAndItsLineSaysSo() async throws {
+        let picked = try Picked(fixtures: ["a"]).remembered()
+        let ear = ScriptedEar(gate: Gate())
+        let plan = try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 3, vocabulary: .empty)
+        let lines = Mutex<[String]>([])
+        let turns = EngineTurns()
+        let runs = await BenchRuns(turns: turns) { line in lines.withLock { $0.append(line) } }
+        let ending = Mutex<BenchEnding?>(nil)
+        let options = BenchOptions(fixtures: picked.fixtures, store: .folder(picked.store), plan: plan)
+        let run = try await runs.start("over a", work: { emit in
+            try await Bench.run(options, folders: picked.folders, carried: nil, load: { _, _ in
+                LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+            }, emit: emit)
+        }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
+        while ear.gate.waiting == 0 { await Task.yield() }
+
+        let press = turns.hold()
+        _ = try await turns.decode(as: .dictation) { () throws(TranscriptionFailure) in "heard" }
+        press.release()
+        await run.value
+        #expect(ending.withLock { $0 } == .stopped(.forPress))
+        #expect(lines.withLock { $0 }.last == "bench: stopped for a dictation after 0 rows; 0 served preempted, 0 served waiting")
+        #expect(await !runs.isRunning)
+    }
+
+    /// A run's own failure is what its ending says, whatever stopped it; with none, a press
+    /// heard during it comes before the person's cancel.
+    @Test func aRunsFailureIsSaidAheadOfThePressOrTheCancel() {
+        #expect(BenchEnding(failure: "a weight file is truncated", yielded: true, cancelled: true) == .failed("a weight file is truncated"))
+        #expect(BenchEnding(failure: nil, yielded: true, cancelled: true) == .stopped(.forPress))
+        #expect(BenchEnding(failure: nil, yielded: false, cancelled: true) == .stopped(.cancelled))
+        #expect(BenchEnding(failure: nil, yielded: false, cancelled: false) == .finished)
+    }
+
+    /// Work that finishes after a press was heard during it, before the stop reached it, still
+    /// ends saying a dictation stopped it, since what it measured last was measured beside one.
+    @Test func aRunWhoseWorkFinishesAfterAPressWasHeardSaysADictationStoppedIt() async throws {
+        let lines = Mutex<[String]>([])
+        let turns = EngineTurns()
+        let runs = await BenchRuns(turns: turns) { line in lines.withLock { $0.append(line) } }
+        let ending = Mutex<BenchEnding?>(nil)
+        let run = try await runs.start("beside a press", work: { _ in
+            let press = turns.hold()
+            _ = try await turns.decode(as: .dictation) { () throws(TranscriptionFailure) in "heard" }
+            press.release()
+        }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
+        await run.value
+        #expect(ending.withLock { $0 } == .stopped(.forPress))
+        #expect(lines.withLock { $0 }.last == "bench: stopped for a dictation after 0 rows; 0 served preempted, 0 served waiting")
     }
 
     /// A run takes the process's turns as a press does, so a served request waits it out, and

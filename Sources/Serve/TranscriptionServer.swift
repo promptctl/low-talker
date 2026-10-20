@@ -11,8 +11,12 @@ import Synchronization
 public enum ServedEngine: Sendable {
     case ready(any Transcriber)
     case notResident(String)
-    /// Will not be resident: the model could not be loaded, so waiting will not help.
+    /// Not resident: the model's last load failed, and nothing loads it again until a
+    /// dictation press does, so waiting alone will not help.
     case failed(String)
+
+    /// Not resident yet: a load is under way.
+    public static let loading = ServedEngine.notResident("the model is still loading")
 }
 
 /// OpenAI's `POST /v1/audio/transcriptions` and its Realtime transcription socket,

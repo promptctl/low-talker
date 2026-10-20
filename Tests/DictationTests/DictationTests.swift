@@ -43,7 +43,7 @@ final class Rig {
     let store: FakeHeldStore
 
     init(
-        transcriber: @escaping @Sendable @MainActor () async throws(EngineUnavailable) -> any Transcriber,
+        engine: @escaping @MainActor () throws(EngineUnavailable) -> Dictation.Engine,
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
         frontmost: @escaping @Sendable @MainActor () throws(FrontmostUnknown) -> BundleID = { textEdit },
@@ -61,7 +61,7 @@ final class Rig {
         hold = Hold(store: store, failedToKeep: { shown.unkept.append($0) }, showing: { shown.states.append($0) })
         dictation = Dictation(
             capture: capture,
-            transcriber: transcriber,
+            engine: engine,
             turns: turns,
             executor: Executor(insertingThrough: inputMethod),
             hold: hold,
@@ -72,6 +72,17 @@ final class Rig {
             },
             showing: { shown.activities.append($0) }
         )
+    }
+
+    /// A loop whose every press is let in at key-down and waits on `transcriber` for its engine.
+    convenience init(
+        transcriber: @escaping Dictation.Engine,
+        retaining: TimeInterval = AudioCapture.defaultRetention,
+        atRest: MicrophoneAtRest = .shut,
+        frontmost: @escaping @Sendable @MainActor () throws(FrontmostUnknown) -> BundleID = { textEdit },
+        keeping store: FakeHeldStore = FakeHeldStore()
+    ) async throws {
+        try await self.init(engine: { transcriber }, retaining: retaining, atRest: atRest, frontmost: frontmost, keeping: store)
     }
 
     convenience init(
@@ -1685,7 +1696,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         _ = await rig.report()
         try await rig.dictation.finish()
         let rebuilt = Dictation(
-            capture: rig.capture, transcriber: { FakeTranscriber { _ in Transcript(typed: "") } }, turns: rig.turns,
+            capture: rig.capture, engine: { { FakeTranscriber { _ in Transcript(typed: "") } } }, turns: rig.turns,
             executor: Executor(insertingThrough: rig.inputMethod), hold: rig.hold, frontmost: { Rig.textEdit },
             report: { _ in }, showing: { _ in })
         rig.inputMethod.refusing(nil)
@@ -1906,6 +1917,20 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(report.opened == nil)
         #expect(report.microphone == "no microphone opened for it")
         #expect(report.record == "microphone: no microphone opened for it")
+    }
+
+    /// A press made after the model failed to load is refused at its key-down, before its
+    /// microphone opens, so nothing the person goes on to say is heard and then dropped.
+    @Test func aPressNoEngineCanHearIsRefusedBeforeItsMicrophoneOpens() async throws {
+        struct LoadFailed: Error {}
+        let rig = try await Rig(engine: { () throws(EngineUnavailable) -> Dictation.Engine in throw EngineUnavailable(LoadFailed()) })
+        rig.refusedHold()
+        let report = await rig.pressReport()
+        #expect((report.outcome.failure as? EngineUnavailable)?.cause is LoadFailed)
+        #expect(report.opened == nil)
+        #expect(rig.hardware.engines.isEmpty)
+        #expect(rig.inputMethod.inserted.isEmpty)
+        #expect(rig.shown.activities == [.transcribing, .idle])
     }
 
     /// [LAW:no-silent-failure] The engine failed under an open press - a driver going down
