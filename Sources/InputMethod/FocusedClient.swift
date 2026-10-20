@@ -231,7 +231,9 @@ public struct InFront: CustomStringConvertible {
 /// Measured on low-input-method-s71.03j, while commits ran off the main thread: against 15,991
 /// reactivations landing inside an accepted commit's round trip, one of 3,471 accepted words
 /// never reached the app, a loss neither this process nor IMK could see. Every call on the
-/// client now runs on the main actor, so a reactivation and a commit never overlap.
+/// client now runs on the main actor, so a reactivation and a commit never overlap: the same
+/// stress rerun on studious (low-imk-rules-w3g.3ky), with 11,162 reactivations landing inside
+/// an accepted insert's round trip, lost, doubled and reordered no word.
 final class Client: TextCursor {
     private let client: IMKTextInput
     let application: String

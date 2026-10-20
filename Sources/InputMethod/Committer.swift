@@ -7,10 +7,12 @@ import os
 /// On the main actor, in the same turn that chose the cursor (IMK rule 4): the field is read
 /// and `insertText` is made there, synchronously, and nowhere else. The insert port's queue
 /// reaches it through one hop and waits at most `bound`, because the call into the app is
-/// macOS's and not this process's to trust. Measured on low-input-method-s71.c7d, a main-thread
-/// `insertText` into an app whose main thread is asleep waits up to 3 s, and then returns as if
-/// nothing were wrong. So a commit still running when `bound` passes is answered `notYetTaken`,
-/// and the bound sits beneath both that 3 s and one phase of the app's own wait.
+/// macOS's and not this process's to trust. Measured on studious (low-imk-rules-w3g.3ky), an
+/// `insertText` into an app stalled while taking it holds the main actor 3.0 s and then returns
+/// as if nothing were wrong; the words land when the app wakes. Keys typed into another app
+/// meanwhile arrive as fast as when nothing is stalled (median 3.4 ms), because this source asks
+/// for no keys. So a commit still running when `bound` passes is answered `notYetTaken`, and the
+/// bound sits beneath both that 3 s and one phase of the app's own wait.
 ///
 /// [LAW:no-ambient-temporal-coupling] The main queue is serial, so words asked for in order
 /// land in order. A commit holding the main actor holds every insert behind it, whichever app
