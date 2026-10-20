@@ -25,7 +25,7 @@ jobs:
     name: Build and test
     # macos-15 ships Xcode 16.4 as its default, which carries the Swift 6 toolchain
     # Package.swift asks for; jq is preinstalled, xcodegen is not.
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       # SHA-pinned, same pin and same reasoning as code-review.yml: third-party code
