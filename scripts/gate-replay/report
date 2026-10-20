@@ -6,7 +6,7 @@
 Both files are rows the gate replay (Tests/GateReplayTests) wrote: a case's `key=value`
 id, the count and hash of the samples its last pass is handed, and the 10 ms windows of
 its signal they came from. The baseline is master's; the measured rows are the tree's.
-Six reports, each against the baseline:
+Seven reports, each against the baseline:
 
 - speech lost after inserted transients, beyond what as much digital silence loses: the
   windows master hands without the transient that the tree's silence control keeps and its
@@ -18,7 +18,10 @@ Six reports, each against the baseline:
 - a tap left open in a room, where what it keeps changed;
 - a sound before a tap left open, handing a window of the room the room alone does not:
   the case against its own `source=none` control, the tree's beside master's, and the
-  cases whose handed samples changed.
+  cases whose handed samples changed;
+- soft sound with no speaker in front of it, talk across the room or breathing under the
+  floor: the presses of it alone that hand a pass anything, and the windows of its 2 s
+  before a reader 20 and 40 dB down that are handed, the tree's beside master's.
 
 Two files that do not hold the same cases, or hold one twice, are no comparison, and the
 report stops naming them. Differences are the report, not a failure: it exits 0 whatever it finds.
@@ -126,8 +129,8 @@ def talk(baseline, measured):
     return lines + listed(changed)
 
 
-def listed(changed):
-    return [f"  changed: {len(changed) or 'none'}"] + [
+def listed(changed, what="changed"):
+    return [f"  {what}: {len(changed) or 'none'}"] + [
         f"    {label(fields)}: let in {seconds(added)}, lost {seconds(lost)}" for fields, added, lost in changed]
 
 
@@ -156,6 +159,39 @@ def tap_after(baseline, measured):
     return lines + sorted(worse) + listed(changes(baseline, family(measured, "tap-after")))
 
 
+def soft(baseline, measured):
+    """Per source kind, level and room: soft-room presses handing a pass anything, and the
+    windows of the 2 s before the reader that soft-before hands at each reader level, in the
+    tree and on master."""
+    before = int(2 / WINDOW)
+    levels = (-20, -40)
+
+    def kept(rows, case):
+        return sum(1 for window in rows[case]["windows"] if window < before)
+
+    groups = defaultdict(lambda: [0] * (3 + 2 * len(levels)))
+    for name in ("soft-room", "soft-before"):
+        for case, row in family(measured, name).items():
+            fields = row["fields"]
+            group = groups[(fields["source"].split("/")[0], int(fields["db"]), int(fields["room"]))]
+            if name == "soft-room":
+                group[0] += 1
+                group[1] += bool(row["windows"])
+                group[2] += bool(baseline[case]["windows"])
+            else:
+                at = 3 + 2 * levels.index(int(fields["level"]))
+                group[at] += kept(measured, case)
+                group[at + 1] += kept(baseline, case)
+    lines = ["soft sound with no speaker in front of it, and what of its 2 s is kept before a reader at each level",
+             f"  {'source':<10} {'dB':>4} {'room':>5} {'presses':>8} {'handing':>8} {'master':>7}"
+             + "".join(f"   {f'kept, {level} dB':>14} {'master':>8}" for level in levels)]
+    for (source, db, room), (count, handing, was, *kept_by_level) in sorted(groups.items(), key=lambda item: (item[0][0], -item[0][1], -item[0][2])):
+        lines.append(f"  {source:<10} {db:>4} {room:>5} {count:>8} {handing:>8} {was:>7}"
+                     + "".join(f"   {seconds(now):>14} {seconds(was):>8}" for now, was in zip(kept_by_level[::2], kept_by_level[1::2])))
+    return (lines + listed(changes(baseline, family(measured, "soft-room")), "alone, changed")
+            + listed(changes(baseline, family(measured, "soft-before")), "before a reader, changed"))
+
+
 def main(baseline_path, measured_path):
     baseline, measured = load(baseline_path), load(measured_path)
     missing, extra = sorted(baseline.keys() - measured.keys()), sorted(measured.keys() - baseline.keys())
@@ -171,7 +207,8 @@ def main(baseline_path, measured_path):
     report += talk(baseline, measured) + [""]
     report += [f"bench variants whose handed samples changed, of {len(family(measured, 'bench'))}"] + listed(changes(baseline, family(measured, "bench"))) + [""]
     report += [f"a tap left open in a room, of {len(family(measured, 'tap'))}"] + listed(changes(baseline, family(measured, "tap"))) + [""]
-    report += tap_after(baseline, measured)
+    report += tap_after(baseline, measured) + [""]
+    report += soft(baseline, measured)
     print("\n".join(report))
 
 

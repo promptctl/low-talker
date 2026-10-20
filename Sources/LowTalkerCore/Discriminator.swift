@@ -1,7 +1,8 @@
 import Foundation
 
 /// What tells the speech gate whether the loudest sound in a frame is speech, so a cough, a
-/// knock or a clap louder than the speaker sets no range for the speech after it.
+/// knock or a clap louder than the speaker sets no range for the speech after it, and breathing
+/// or a fan under a speaker's level begins no speech before a speaker is heard.
 ///
 /// [LAW:no-ambient-temporal-coupling] A verdict reads audio past the frame it judges, so the
 /// gate holds each frame until `lookahead` samples past it have arrived, or the utterance has

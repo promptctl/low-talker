@@ -6,8 +6,9 @@ private let repository = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
 /// The speech gate replayed over the bench fixtures and what is done to them: transients
-/// inserted, background talk mixed under them, rooms of every level, a tap left open. Each
-/// case is one row of what the real `Utterance` hands its last pass, written to
+/// inserted, background talk mixed under them, rooms of every level, a tap left open, soft
+/// sound with no speaker in front of it. Each case is one row of what the real `Utterance`
+/// hands its last pass, written to
 /// $GATE_REPLAY_OUT; scripts/gate-replay/report reads those rows against master's
 /// (scripts/gate-replay/baseline.tsv). `make gate-replay` runs the two. The gate under test
 /// is the one in the tree, through the API every caller uses, so the same rows come from
@@ -19,7 +20,7 @@ private let repository = URL(fileURLWithPath: #filePath)
         let out = try #require(environment["GATE_REPLAY_OUT"])
         let esc50 = try #require(environment["GATE_REPLAY_ESC50"], "GATE_REPLAY_ESC50 names the folder scripts/gate-replay/fetch-esc50 fills")
         let fixtures = try Fixtures(bench: repository.appendingPathComponent("bench"), esc50: URL(fileURLWithPath: esc50))
-        try #require(!fixtures.transients.isEmpty, "no ESC-50 clips under \(esc50)")
+        try #require(!fixtures.transients.isEmpty && !fixtures.breaths.isEmpty, "no ESC-50 clips under \(esc50)")
         let rows = try await Self.measure(fixtures.cases, judging: try await GateClassifier())
         try (rows.sorted().joined(separator: "\n") + "\n").write(toFile: out, atomically: true, encoding: .utf8)
     }
@@ -142,6 +143,9 @@ struct Fixtures {
     let speech: [(name: String, samples: [Float])]
     /// ESC-50 clips by `category/name`, each its loudest half second scaled to peak at 0.9.
     let transients: [(name: String, samples: [Float])]
+    /// ESC-50 `breathing` clips by `category/name`, whole: a sound under the speaker that
+    /// lasts as long as a syllable does and is not speech.
+    let breaths: [(name: String, samples: [Float])]
 
     static let rate = AudioClip.sampleCount(for: 1)
     static let tenth = AudioClip.sampleCount(for: 0.1)
@@ -173,7 +177,11 @@ struct Fixtures {
                 .filter(\.hasDirectoryPath).sorted { $0.lastPathComponent < $1.lastPathComponent }
         }
         speech = try folders(bench).flatMap(wavs).map { (name: named($0), samples: try AudioClip(contentsOf: $0).samples) }
-        transients = try folders(esc50).flatMap(wavs).map { url in
+        let (breathing, sounds) = try folders(esc50).reduce(into: ([URL](), [URL]())) { split, folder in
+            folder.lastPathComponent == "breathing" ? split.0.append(folder) : split.1.append(folder)
+        }
+        breaths = try breathing.flatMap(wavs).map { (name: named($0), samples: try AudioClip(contentsOf: $0).samples) }
+        transients = try sounds.flatMap(wavs).map { url in
             let clip = try AudioClip(contentsOf: url).samples
             let loudest = clip.indices.max { abs(clip[$0]) < abs(clip[$1]) } ?? 0
             let from = max(0, min(loudest - Self.tenth, clip.count - Self.clip))
@@ -192,13 +200,13 @@ struct Fixtures {
     var readers: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("librispeech/") } }
     var shortPresses: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("say/") } }
 
-    var cases: [Case] { bench + transientCases + talk + tap + tapAfter }
+    var cases: [Case] { bench + transientCases + talk + tap + tapAfter + softRoom }
 
-    /// Every fixture at 0 and -20 dB, whole and from its first sound, clean and in a quiet
-    /// and a loud room.
+    /// Every fixture at 0, -20 and -40 dB, whole and from its first sound, clean and in a quiet
+    /// and a loud room. At -40 dB every fixture peaks under the -40 dBFS floor.
     var bench: [Case] {
         speech.flatMap { name, samples in
-            [("0", Float(1)), ("-20", Self.soft)].flatMap { level, gain in
+            [("0", Float(1)), ("-20", Self.soft), ("-40", Self.soft * Self.soft)].flatMap { level, gain in
                 [("whole", samples), ("trimmed", Self.fromFirstSound(samples))].flatMap { trim, base in
                     [("clean", Float(0)), ("-51", Self.quietRoom), ("-35", Self.loudRoom)].map { room, noise in
                         Case(id: "family=bench fixture=\(name) level=\(level) trim=\(trim) room=\(room)", inserted: nil) {
@@ -292,6 +300,38 @@ struct Fixtures {
                 Case(id: "family=tap fixture=\(name) room=\(db)", inserted: nil) {
                     let audio = samples + Array(repeating: 0, count: 10 * Self.rate)
                     return zip(audio, Noise.samples(audio.count, at: Float(pow(10, Double(db) / 20)))).map(+)
+                }
+            }
+        }
+    }
+
+    /// Sound under the -40 dBFS floor with no speaker in front of it: each reader as talk across
+    /// the room, and each ESC-50 breathing clip, peaking at -45 and -55 dBFS over a room at -60
+    /// and -70 dBFS, the built-in microphone with its input volume turned down. Alone, a press
+    /// with nothing said (`family=soft-room`); and its first 2 s before a reader other than the
+    /// talk, 20 dB down and, under a speaker's level, 40 dB down (`family=soft-before`), what is
+    /// kept of it before the first word.
+    var softRoom: [Case] {
+        let readers = readers
+        let sources = readers.map { (name: "talk/" + $0.name, samples: $0.samples) } + breaths
+        let before = 2 * Self.rate
+        return sources.enumerated().flatMap { index, source in
+            let reader = readers[(index + 1) % readers.count]
+            let peak = AudioClip(samples: source.samples).peak
+            return [-45, -55].flatMap { db in
+                [-60, -70].flatMap { room in
+                    let (gain, noise) = (Float(pow(10, Double(db) / 20)) / peak, Float(pow(10, Double(room) / 20)))
+                    let fields = "source=\(source.name) db=\(db) room=\(room)"
+                    let alone = Case(id: "family=soft-room \(fields)", inserted: nil) {
+                        zip(source.samples, Noise.samples(source.samples.count, at: noise)).map { $0 * gain + $1 }
+                    }
+                    return [alone] + [-20, -40].map { level in
+                        Case(id: "family=soft-before \(fields) fixture=\(reader.name) level=\(level)", inserted: nil) {
+                            let scale = Float(pow(10, Double(level) / 20))
+                            let audio = (0..<before).map { $0 < source.samples.count ? source.samples[$0] * gain : 0 } + reader.samples.map { $0 * scale }
+                            return zip(audio, Noise.samples(audio.count, at: noise)).map(+)
+                        }
+                    }
                 }
             }
         }

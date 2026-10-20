@@ -164,7 +164,7 @@ final class FakeTranscriber: Transcriber {
         repunctuating: @escaping @Sendable ([Float]) -> Int = { _ in 0 },
         unreading: @escaping @Sendable ([Float]) -> Partial.Unread? = { _ in nil },
         missedAtKeyUp: Partial.Unread? = nil,
-        quiet: Quiet = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0),
+        quiet: Quiet = .none,
         _ answer: @escaping @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
     ) {
         self.reading = reading
