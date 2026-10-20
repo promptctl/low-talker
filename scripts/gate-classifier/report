@@ -1,0 +1,88 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = "==3.12.*"
+# dependencies = ["torch==2.7.1", "numpy==2.5.4", "scipy==1.18.1", "soundfile==0.14.0"]
+# ///
+"""A trained checkpoint on the held-out split, by the kinds of frame the gate's range turns on:
+
+    scripts/gate-classifier/report <data folder> <checkpoint.pt> [--context <seconds>]
+
+Every held-out reader's nuclei and every held-out Cough, Knock and Clapping loud frame are
+scored as recorded, clean and under a room of uniform white noise peaking 40 to 7 dB under the
+frame's own peak (a soft speaker in a loud room sits about 10 dB over it). Nuclei are split by
+periodicity and by how far the recording's peak stands over its high-passed peak (a mic pop or
+rumble). Read only held-out data: never ESC-50 or the bench.
+"""
+import argparse
+import importlib.machinery
+import importlib.util
+import os
+
+import numpy as np
+import soundfile
+import torch
+
+path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "train")
+spec = importlib.util.spec_from_loader("train", importlib.machinery.SourceFileLoader("train", path))
+train = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(train)
+
+ROOMS = [None, 40, 20, 13, 10, 7]
+CLASSES = ["Cough", "Knock", "Clapping"]
+
+
+def frames(folder, side):
+    """Held-out (window as recorded, frame peak, kind) for every nucleus and listed-class loud frame."""
+    out = []
+    with open(os.path.join(folder, "manifest.tsv")) as manifest:
+        next(manifest)
+        for line in manifest:
+            kind, rel, _, _, group, classes = line.rstrip("\n").split("\t")
+            listed = [c for c in classes.split(",") if c in CLASSES]
+            if not train.held_out(group) or (kind != "speech" and not listed):
+                continue
+            samples, _ = soundfile.read(os.path.join(folder, rel), dtype="float32", always_2d=True)
+            recorded = samples.mean(axis=1)
+            source = train.Source(recorded, train.NUCLEUS if kind == "speech" else train.RANGE)
+            # Scored as recorded, as the gate hands it audio; labelled by the high-passed copy.
+            padded = np.concatenate([np.zeros(side, np.float32), recorded, np.zeros(2 * side, np.float32)])
+            for f, voiced in zip(source.loud, source.voiced):
+                window = padded[f * train.FRAME : f * train.FRAME + train.FRAME + 2 * side]
+                top = float(np.abs(window[side : side + train.FRAME]).max())
+                pop = 20 * np.log10(top / source.frame_peaks[f])
+                tags = ["nuclei", "voiced" if voiced else "unvoiced", "pop < 1 dB" if pop < 1 else "pop 1-6 dB" if pop < 6 else "pop >= 6 dB"] if kind == "speech" else listed
+                out.append((window, top, tags))
+    return out
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("data")
+    parser.add_argument("checkpoint")
+    parser.add_argument("--context", type=float, default=0.2)
+    args = parser.parse_args()
+    side = int(args.context * train.RATE)
+    model = train.model_for(train.FRAME + 2 * side)
+    model.load_state_dict(torch.load(args.checkpoint))
+    model.eval()
+    rows = frames(args.data, side)
+    tags = ["nuclei", "voiced", "unvoiced", "pop < 1 dB", "pop 1-6 dB", "pop >= 6 dB"] + CLASSES
+    members = {t: np.array([t in r[2] for r in rows]) for t in tags}
+    noise = np.random.default_rng(0).uniform(-1, 1, (len(rows), len(rows[0][0]))).astype(np.float32)
+    noise /= np.abs(noise).max(axis=1, keepdims=True)
+    print(f"{args.checkpoint}: held-out frames " + ", ".join(f"{t} {members[t].sum()}" for t in tags))
+    print("speech: 1st percentile / share under 0.5; non-speech: share at or above 0.5 / 99th percentile")
+    print("room\t" + "\t".join(tags))
+    for room in ROOMS:
+        windows = np.stack([w if room is None else w + noise[i] * top * 10 ** (-room / 20) for i, (w, top, _) in enumerate(rows)])
+        with torch.no_grad():
+            scores = np.concatenate([torch.sigmoid(model(torch.from_numpy(windows[i : i + 1024]))).squeeze(1).numpy() for i in range(0, len(windows), 1024)])
+        cells = []
+        for t in tags:
+            s = scores[members[t]]
+            cells.append("-" if len(s) == 0 else f"{np.mean(s >= 0.5):.1%} / {np.quantile(s, 0.99):.3f}" if t in CLASSES else f"{np.quantile(s, 0.01):.3f} / {np.mean(s < 0.5):.1%}")
+        print(("clean" if room is None else f"{room} dB") + "\t" + "\t".join(cells), flush=True)
+
+
+if __name__ == "__main__":
+    main()

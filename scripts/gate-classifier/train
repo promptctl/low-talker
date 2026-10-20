@@ -12,7 +12,8 @@ frame with `context` seconds either side, scales it so the frame's peak is 1, an
 a probability. Every example is mixed from known sources, so its label is exact: a frame is
 speech when the speech's peak in it is the loudest source's and within 4x of the speech's own
 peak (a syllable's nucleus); not speech when a non-speech clip's is, within 16x of that clip's peak. A frame where
-the two are within 3 dB of each other is not trained on.
+the two are within 3 dB of each other is not trained on. Voiced and unvoiced nuclei are drawn
+equally often, as non-speech classes are.
 
 Model selection reads only held-out readers and uploaders, never ESC-50 or the bench.
 """
@@ -41,6 +42,10 @@ PRE = 6_400  # Audio before an excerpt that reverb reads, cut off after.
 SILENT = 1e-4  # -80 dBFS: under it a source's excerpt is silence, whatever filtering left.
 HIGHPASS = butter(4, 100, "highpass", fs=RATE, output="sos")
 RUMBLE = butter(4, 80, "lowpass", fs=RATE, output="sos")
+# A frame is voiced when its normalised autocorrelation peaks at 0.3 or more at a lag of 2.5 to
+# 12.5 ms (80-400 Hz pitch). Breathy and whispered onsets, fricative nuclei and coughs fall under.
+VOICED = 0.3
+PITCH_LAGS = slice(40, 200)
 
 
 def held_out(group):
@@ -48,13 +53,27 @@ def held_out(group):
     return zlib.crc32(group.encode()) % 10 == 0
 
 
+def periodicity(frames):
+    """Each frame's normalised autocorrelation peak over PITCH_LAGS: (n, FRAME) -> (n,)."""
+    z = frames - frames.mean(axis=1, keepdims=True)
+    ac = np.fft.irfft(np.abs(np.fft.rfft(z, 2 * FRAME, axis=1)) ** 2, axis=1)
+    return np.where(ac[:, 0] > 0, ac[:, PITCH_LAGS].max(axis=1) / np.maximum(ac[:, 0], 1e-30), 0.0)
+
+
 class Source:
-    def __init__(self, samples, within):
-        self.samples = samples
-        frames = len(samples) // FRAME
-        self.frame_peaks = np.abs(samples[: frames * FRAME].reshape(frames, FRAME)).max(axis=1) if frames else np.zeros(0)
+    """A recording high-passed at 100 Hz, its loud frames (within `within` of its peak) and
+    whether each is voiced. Rumble under 100 Hz is no one's voice: some readers' recordings peak
+    on it, which would label a thump as a syllable. The mix adds rumble back, so the model
+    learns to look past it."""
+
+    def __init__(self, recorded, within):
+        self.samples = sosfilt(HIGHPASS, recorded).astype(np.float32)
+        frames = len(recorded) // FRAME
+        blocks = self.samples[: frames * FRAME].reshape(frames, FRAME)
+        self.frame_peaks = np.abs(blocks).max(axis=1) if frames else np.zeros(0)
         self.peak = float(self.frame_peaks.max()) if frames else 0.0
         self.loud = np.flatnonzero(self.frame_peaks >= self.peak / within) if self.peak > 0 else np.zeros(0, int)
+        self.voiced = periodicity(blocks[self.loud]) >= VOICED
 
 
 def load(folder):
@@ -69,10 +88,7 @@ def load(folder):
             samples, rate = soundfile.read(os.path.join(folder, path), dtype="float32", always_2d=True)
             if rate != RATE:
                 sys.exit(f"{path}: {rate} Hz, expected {RATE}")
-            # Rumble under 100 Hz is no one's voice: some readers' recordings peak on it, which
-            # would label a thump as a syllable. Labels are read with it gone; the mix adds
-            # rumble back, so the model learns to look past it.
-            source = Source(sosfilt(HIGHPASS, samples.mean(axis=1)).astype(np.float32), NUCLEUS if kind == "speech" else RANGE)
+            source = Source(samples.mean(axis=1), NUCLEUS if kind == "speech" else RANGE)
             if len(source.loud) == 0:
                 continue
             held = held_out(group)
@@ -87,14 +103,26 @@ def load(folder):
     print("class\ttrain clips\ttrain groups\theld-out clips\theld-out groups")
     for c, n in counts.items():
         print(f"{c}\t{n[False][0]}\t{len(n[False][1])}\t{n[True][0]}\t{len(n[True][1])}")
+    # Speech is labelled at its nuclei, drawn as non-speech is: a pool (voiced or unvoiced) with
+    # even odds, then a clip holding nuclei of that kind, then one of them. The few breathy and
+    # unvoiced nuclei teach as much as the many voiced ones.
+    groups["nuclei"] = {held: nuclei(groups["speech"][held]) for held in (True, False)}
+    print("nuclei\ttrain voiced\ttrain unvoiced\theld-out voiced\theld-out unvoiced\t(frames in clips)")
+    print("speech\t" + "\t".join(f"{sum(len(f) for _, f in groups['nuclei'][held][v])} in {len(groups['nuclei'][held][v])}" for held in (False, True) for v in (True, False)))
     return groups
+
+
+def nuclei(sources):
+    """{voiced: [(source, its nuclei of that kind)]} over the sources holding any."""
+    return {v: [(s, s.loud[s.voiced == v]) for s in sources if (s.voiced == v).any()] for v in (True, False)}
 
 
 class Mixer:
     """Mixes one labelled example: a window of `size` samples centred on the frame judged."""
 
-    def __init__(self, speech, nonspeech, context, rng):
+    def __init__(self, speech, nuclei, nonspeech, context, rng):
         self.speech, self.rng = speech, rng
+        self.nuclei = [nuclei[v] for v in (True, False)]
         self.nonspeech = [nonspeech[c] for c in sorted(nonspeech)]
         self.side = int(context * RATE)
         self.size = FRAME + 2 * self.side
@@ -141,6 +169,12 @@ class Mixer:
         jitter = int(self.rng.integers(-FRAME // 4, FRAME // 4 + 1))
         return self.colour(self.excerpt(source, f * FRAME + jitter))
 
+    def nucleus(self):
+        """An excerpt with a speech nucleus at the window's frame, voiced or unvoiced with even odds."""
+        pool = self.nuclei[int(self.rng.integers(2))]
+        source, frames = pool[int(self.rng.integers(len(pool)))]
+        return self.placed(source, int(self.rng.choice(frames)))
+
     def anywhere(self, source):
         at = int(self.rng.integers(-self.size, len(source.samples)))
         return self.colour(self.excerpt(source, at))
@@ -154,9 +188,9 @@ class Mixer:
         centre = slice(PRE + self.side, PRE + self.side + FRAME)
         kind = rng.choice(6, p=[0.25, 0.10, 0.20, 0.20, 0.15, 0.10])
         if kind == 0:  # Speech in its own context.
-            sp, ns, label = self.placed(s), None, 1
+            sp, ns, label = self.nucleus(), None, 1
         elif kind == 1:  # A loud stretch of speech cut out alone.
-            sp, ns, label = self.placed(s), None, 1
+            sp, ns, label = self.nucleus(), None, 1
             keep = int(rng.integers(FRAME, 5 * FRAME + 1))
             lo = centre.start - int(rng.integers(0, keep - FRAME + 1))
             sp[:max(0, lo)] = 0
@@ -175,7 +209,7 @@ class Mixer:
             ns, sp, label = self.placed(n), self.anywhere(s), 0
             sp *= self.relative(ns, sp, rng.uniform(6, 30))
         else:  # Speech over a quieter non-speech sound.
-            sp, ns, label = self.placed(s), self.anywhere(n), 1
+            sp, ns, label = self.nucleus(), self.anywhere(n), 1
             ns *= self.relative(sp, ns, rng.uniform(6, 30))
         sp_peak = float(np.abs(sp[centre]).max()) if sp is not None else 0.0
         ns_peak = float(np.abs(ns[centre]).max()) if ns is not None else 0.0
@@ -210,7 +244,7 @@ CONTEXT = None
 
 def batch(args):
     held, seed, count = args
-    mixer = Mixer(GROUPS["speech"][held], GROUPS["nonspeech"][held], CONTEXT, np.random.default_rng(seed))
+    mixer = Mixer(GROUPS["speech"][held], GROUPS["nuclei"][held], GROUPS["nonspeech"][held], CONTEXT, np.random.default_rng(seed))
     xs, ys = [], []
     while len(xs) < count:
         made = mixer.example()
