@@ -206,10 +206,9 @@ actor Utterance {
         // loudest past the floor sounds.
         let withinRange = loudest >= Self.audible && peak >= loudest / Self.dynamicRange
         let sounds = withinRange && peak >= roomGate
-        // [LAW:nothing-unseen] What the room refused that the range alone would have kept, and a
-        // sound louder than the range that the discriminator kept out of it.
+        // [LAW:nothing-unseen] What the room refused that the range alone would have kept.
         timeline.heard(reading, refusedAsRoom: withinRange && !sounds ? clip.samples.count : 0)
-        timeline.keptOut(sounds && peak > loudestSpeech && verdict == .other ? peak : nil)
+        let louder = sounds && peak > loudestSpeech && verdict == .other ? peak : nil
         let softest = max(loudest / Self.dynamicRange, roomGate)
         // Where the audio kept must resume: the lead-in before the clip's first sample
         // that sounds when the clip sounds, the lead-in before its end when it does not,
@@ -232,6 +231,10 @@ actor Utterance {
         timeline.refused(transient: joined == nil ? burst?.transient : nil)
         burst = sounds ? (joined ?? .opening).sounding(clip, through: samples.count, gate: softest, verdict: verdict) : joined?.broken
         spoken = burst.flatMap { $0.holdsSyllable ? $0.through : nil } ?? spoken
+        // [LAW:nothing-unseen] A sound louder than the range that the discriminator kept out of
+        // it: one in a burst holding a syllable, which would have set the range had it been
+        // called speech. A click never could.
+        timeline.keptOut(burst.flatMap { $0.holdsSyllable ? louder : nil })
         loudestSpeech = max(loudestSpeech, burst?.speechPeak ?? 0)
         timeline.ranged(loudestSpeech)
     }
@@ -329,15 +332,19 @@ struct Lookahead {
     /// The samples a verdict reads: the lookbehind, a frame and the lookahead.
     private var window: Int { discriminator.lookbehind + Utterance.frameCount + discriminator.lookahead }
 
-    /// Every frame handed out while the audio holds at least `least` samples.
+    /// Every frame handed out while the audio from `taken` holds at least `least` samples. The
+    /// audio is let go once, after the last, so an upload sent as one clip is not moved once a frame.
     private mutating func frames(holding least: Int) throws -> [(AudioClip, Verdict)] {
         let window = window
         var frames: [(AudioClip, Verdict)] = []
-        while audio.count >= least {
-            let count = min(Utterance.frameCount, audio.count - discriminator.lookbehind)
-            let read = audio.prefix(window) + Array(repeating: 0, count: max(0, window - audio.count))
-            frames.append((AudioClip(samples: Array(audio[discriminator.lookbehind..<discriminator.lookbehind + count])), try discriminator.verdict(read[...])))
-            audio.removeFirst(count)
+        var taken = 0
+        defer { audio.removeFirst(taken) }
+        while audio.count - taken >= least {
+            let from = taken + discriminator.lookbehind
+            let count = min(Utterance.frameCount, audio.count - from)
+            let read = Array(audio[taken..<min(taken + window, audio.count)]) + Array(repeating: 0, count: max(0, taken + window - audio.count))
+            frames.append((AudioClip(samples: Array(audio[from..<from + count])), try discriminator.verdict(read[...])))
+            taken += count
         }
         return frames
     }

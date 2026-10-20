@@ -1,5 +1,6 @@
 import CoreML
 import Foundation
+import Synchronization
 
 /// The gate classifier: a small network trained for the gate's own question, whether the
 /// loudest sound in a tenth of a second is speech. scripts/gate-classifier/train trained the
@@ -9,7 +10,7 @@ import Foundation
 ///
 /// [LAW:effects-at-boundaries] Core ML is reached here and nowhere else in the gate; the
 /// gate is tested against verdicts of its own making.
-struct GateClassifier: Discriminator, @unchecked Sendable {
+final class GateClassifier: Discriminator, Sendable {
     let lookbehind = AudioClip.sampleCount(for: 0.2)
     let lookahead = AudioClip.sampleCount(for: 0.2)
     /// The score at or above which a frame is speech: above every ESC-50 clap, cough and knock
@@ -17,10 +18,9 @@ struct GateClassifier: Discriminator, @unchecked Sendable {
     /// bench's 56 loudest syllables. A model trained again brings its own.
     static let threshold: Float = 0.957
 
-    /// `@unchecked Sendable`: Core ML predicts on one model from many threads at once, and each
-    /// utterance asks from its own actor; nothing here mutates after the load.
-    private let model: MLModel
-    private let input: Int
+    /// Every utterance asks from its own actor, and a synchronous Core ML prediction is safe
+    /// on one thread at a time, so they take turns.
+    private let model: Mutex<MLModel>
 
     /// Loads the bundled model onto the CPU: the Neural Engine is Whisper's.
     init() async throws {
@@ -29,20 +29,20 @@ struct GateClassifier: Discriminator, @unchecked Sendable {
         }
         let configuration = MLModelConfiguration()
         configuration.computeUnits = .cpuOnly
-        model = try MLModel(contentsOf: try await MLModel.compileModel(at: package), configuration: configuration)
-        input = lookbehind + Utterance.frameCount + lookahead
-        let shape = model.modelDescription.inputDescriptionsByName["samples"]?.multiArrayConstraint?.shape
-        guard shape == [1, NSNumber(value: input)] else { throw GateClassifierError.shape(shape) }
+        let loaded = try MLModel(contentsOf: try await MLModel.compileModel(at: package), configuration: configuration)
+        let shape = loaded.modelDescription.inputDescriptionsByName["samples"]?.multiArrayConstraint?.shape
+        guard shape == [1, NSNumber(value: lookbehind + Utterance.frameCount + lookahead)] else { throw GateClassifierError.shape(shape) }
+        model = Mutex(loaded)
     }
 
+    /// Core ML holds the window to the model's input shape, so a window of any other length
+    /// is refused rather than read.
     func verdict(_ window: ArraySlice<Float>) throws -> Verdict {
-        let samples = try MLMultiArray(shape: [1, NSNumber(value: input)], dataType: .float32)
-        let pointer = samples.dataPointer.assumingMemoryBound(to: Float.self)
-        for (index, sample) in window.enumerated() {
-            pointer[index] = sample
+        let samples = MLMultiArray(MLShapedArray(scalars: window, shape: [1, window.count]))
+        let score = try model.withLock { model in
+            try model.prediction(from: MLDictionaryFeatureProvider(dictionary: ["samples": samples])).featureValue(for: "speech")?.multiArrayValue?[0].floatValue
         }
-        let output = try model.prediction(from: MLDictionaryFeatureProvider(dictionary: ["samples": samples]))
-        guard let score = output.featureValue(for: "speech")?.multiArrayValue?[0].floatValue else { throw GateClassifierError.noScore }
+        guard let score else { throw GateClassifierError.noScore }
         return score >= Self.threshold ? .speech : .other
     }
 }

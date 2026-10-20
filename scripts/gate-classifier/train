@@ -17,7 +17,6 @@ the two are within 3 dB of each other is not trained on.
 Model selection reads only held-out readers and uploaders, never ESC-50 or the bench.
 """
 import argparse
-import hashlib
 import multiprocessing
 import os
 import sys
@@ -351,11 +350,7 @@ def main():
     )
     mlmodel.short_description = f"Is the loudest sound in the middle 0.1 s of {size / RATE:.1f} s of 16 kHz audio speech."
     mlmodel.save(args.out)
-    digest = hashlib.sha256()
-    for base, _, files in sorted(os.walk(args.out)):
-        for f in sorted(files):
-            digest.update(open(os.path.join(base, f), "rb").read())
-    print(f"saved {args.out}: sha256 {digest.hexdigest()}")
+    print(f"saved {args.out}")
 
 
 if __name__ == "__main__":

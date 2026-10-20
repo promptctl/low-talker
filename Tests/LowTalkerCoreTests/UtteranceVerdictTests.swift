@@ -75,6 +75,25 @@ import Testing
         #expect(quiet.keptOut == 0.9 && quiet.keptOutFrames == 1)
     }
 
+    /// A click called other never holds a syllable, so it could set no range however it was
+    /// called, and nothing was kept out.
+    @Test func aClickCalledOtherIsNotKeptOut() async throws {
+        let click = Self.level(0.9, 0.03) + Self.level(0.001, 0.07)
+        let quiet = try await Self.handed(click + Self.pause + Self.soft, judging: Self.coughs).quiet
+        #expect(quiet.range == 0.05 && quiet.keptOut == nil && quiet.keptOutFrames == 0)
+    }
+
+    /// Audio appended as one clip is cut into the frames and verdicts its chunks are.
+    @Test func oneClipIsJudgedAsItsChunksAre() async throws {
+        let audio = Self.cough + Self.pause + Self.soft
+        let utterance = Utterance(judging: Verdicts.other(atOrAbove: 0.8, lookahead: AudioClip.sampleCount(for: 0.2)))
+        try await utterance.append(AudioClip(samples: audio))
+        try await utterance.end()
+        let (whole, arrived, _, timeline) = await utterance.audio(beyond: 0)
+        let chunked = try await Self.handed(audio, judging: Verdicts.other(atOrAbove: 0.8, lookahead: AudioClip.sampleCount(for: 0.2)))
+        #expect(Array(whole.prefix(arrived)) == chunked.samples && timeline.quiet == chunked.quiet)
+    }
+
     /// No pass is handed a frame before the audio its verdict reads has arrived, and the end
     /// judges the frames still waiting.
     @Test func aFrameWaitsForItsLookahead() async throws {
