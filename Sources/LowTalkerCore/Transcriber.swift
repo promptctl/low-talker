@@ -42,8 +42,9 @@ public struct Transcription: Hashable, Sendable {
     }
 }
 
-/// What the speech gate made of an utterance's quiet: how much it let go, the room it judged
-/// it against, and what the room and the transients refused.
+/// What the speech gate made of an utterance's quiet: how much it let go, the room and the
+/// range it judged it against, what the room and the transients refused, and what was kept
+/// out of the range.
 public struct Quiet: Hashable, Sendable {
     /// Seconds no pass was handed, before the speech and between it: heard as nothing,
     /// while the words are still timed in the audio as it was sent.
@@ -54,12 +55,27 @@ public struct Quiet: Hashable, Sendable {
     /// Seconds within range of the loudest that stood too near the room to be speech.
     public let refusedAsRoom: TimeInterval
     public let transients: Transients
+    /// The peak of the loudest syllable in frames the discriminator called speech: the range
+    /// the speech was judged against. None when no such syllable was heard.
+    public let range: Float?
+    /// The loudest sound that stood above the range when it was heard and was kept out of it,
+    /// the discriminator having called it something other than speech, and how many frames
+    /// were. A cough before a soft speaker, or a loudest syllable the discriminator missed: this
+    /// says what the gate did, not which. None, and zero frames, when nothing was.
+    public let keptOut: Float?
+    public let keptOutFrames: Int
 
-    public init(letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, transients: Transients) {
+    public init(
+        letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, transients: Transients,
+        range: Float?, keptOut: Float?, keptOutFrames: Int
+    ) {
         self.letGo = letGo
         self.room = room
         self.refusedAsRoom = refusedAsRoom
         self.transients = transients
+        self.range = range
+        self.keptOut = keptOut
+        self.keptOutFrames = keptOutFrames
     }
 }
 

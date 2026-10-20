@@ -134,7 +134,8 @@ extension Hearing {
     /// arrived, feeding the words back in and telling `partial` what is heard so far.
     /// The last pass's reading is the transcript, told with the quiet the utterance let
     /// go. Engine-agnostic: `pass` is the engine, `margin` the span it decodes no window
-    /// under, and `context` how many confirmed words it is told to say first.
+    /// under, `context` how many confirmed words it is told to say first, and `judging`
+    /// what tells the gate's speech from other sounds.
     ///
     /// [LAW:dataflow-not-control-flow] The one branch is the utterance's own state:
     /// speech to hear, or nothing more. A pass over what is there is the same pass
@@ -148,10 +149,11 @@ extension Hearing {
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         margin: Int,
         context: Int,
+        judging discriminator: any Discriminator,
         pass: (Pass) async throws(TranscriptionFailure) -> [Transcript.Word],
         partial: (Partial) -> Void
     ) async throws(TranscriptionFailure) -> Transcription {
-        let utterance = Utterance()
+        let utterance = Utterance(judging: discriminator)
         // A value, because an `async let` throws untyped.
         async let fed = Result { () async throws(TranscriptionFailure) in try await utterance.fill(from: audio) }
         var hearing = Hearing(margin: margin, context: context)

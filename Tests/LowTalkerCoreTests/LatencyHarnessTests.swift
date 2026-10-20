@@ -181,7 +181,7 @@ private final class FixedEar: Transcriber {
         }
         holds.withLock { $0.append(clips) }
         told.withLock { $0.append(vocabulary) }
-        return Transcription(transcript: Transcript(typed: heard), quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none))
+        return Transcription(transcript: Transcript(typed: heard), quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
     }
 }
 

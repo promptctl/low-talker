@@ -248,12 +248,21 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted == ["hi"])
     }
 
-    /// The press's line says the room its quiet was judged against, what that room refused, and the transients refused.
+    /// The press's line says the room its quiet was judged against, what that room refused, the
+    /// transients refused, and the range with the sound kept out of it.
     @Test func aPressLineSaysTheRoomItsQuietWasJudgedAgainst() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, transients: Transients(count: 2, longest: 0.03))) { _ in Transcript(typed: "hi") })
+        let rig = try await Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, transients: Transients(count: 2, longest: 0.03), range: 0.1, keptOut: 0.5, keptOutFrames: 3)) { _ in Transcript(typed: "hi") })
         rig.hold(speaking: [1, 2, 3])
         let line = try await rig.session().description
-        #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room, 2 transients refused, the longest sounding 0.03 s)"), "\(line)")
+        #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room, 2 transients refused, the longest sounding 0.03 s; range -20.0 dBFS, -6.0 dBFS kept out of it in 3 frames)"), "\(line)")
+    }
+
+    /// With no range and nothing kept out of it, the press's line says so.
+    @Test func aPressLineSaysWhenThereWasNoRange() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hi") })
+        rig.hold(speaking: [1, 2, 3])
+        let line = try await rig.session().description
+        #expect(line.contains("; range none, nothing kept out of it in 0 frames)"), "\(line)")
     }
 
     /// Confirmed words land while the key is still down, each run once and in order, and
@@ -1442,7 +1451,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// no failure, and nothing held.
     @Test func aChordUsedAsAModifierWithNothingSaidHoldsNothing() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in
-            throw .nothingSpoken(peak: 0, quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none))
+            throw .nothingSpoken(peak: 0, quiet: Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
         })
         rig.usedAsModifier(speaking: [0, 0, 0])
         guard case .usedAsModifier(let landed, let held) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
