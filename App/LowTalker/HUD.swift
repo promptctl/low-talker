@@ -144,6 +144,7 @@ final class HUD {
         close.isBordered = false
         close.imagePosition = .imageOnly
         close.setAccessibilityLabel("Dismiss the held words")
+        close.toolTip = "Dismiss the held words. Bring them back from the LowTalker menu."
         return close
     }()
 

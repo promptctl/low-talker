@@ -67,10 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// new config keeps offering them, and so does the next launch.
     private lazy var hold: Hold = Hold(store: HeldFile.app, failedToKeep: { [unowned self] unkept in
         sessions.fault("held words: \(unkept, privacy: .public)")
-    }) { [unowned self] held in
-        showHUD(held: held)
+    }) { [unowned self] state in
+        showHUD(held: state.held)
         // [LAW:nothing-unseen] Counted, never the words themselves: they are what the user dictated.
-        sessions.notice("held: \(held.map { "\($0.allWords.words.count) words, \($0.standing?.words.words.count ?? 0) of them may have been typed, \($0.warnings.joined(separator: " "))" } ?? "nothing", privacy: .public)")
+        sessions.notice("held: \(state, privacy: .public)")
     }
 
     /// When this process began, which every readout of the engine's wait counts from.
@@ -915,6 +915,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for trouble in [hold.unrestored?.description, hold.unkept?.description].compactMap({ $0 }) {
             menu.addItem(errorRow("Held words: \(trouble)", .heldWords))
         }
+        // The one step back from a click on the panel's circle.
+        hold.dismissed.map { dismissed in
+            menu.addItem(withTitle: "Bring Back Dismissed Words (\(dismissed.allWords.words.count))", action: #selector(bringBackDismissed), keyEquivalent: "")
+        }
         if running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
         if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: presses are refused until it ends")) }
         // Every requirement, met or not, and its step under it as the lines it was
@@ -947,6 +951,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Acknowledgements", action: #selector(openNotices), keyEquivalent: "")
         menu.addItem(withTitle: "Quit \(AppIdentity.displayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    }
+
+    @objc private func bringBackDismissed() {
+        sessions.notice("asked to bring back \(self.hold.dismissed?.allWords.words.count ?? 0, privacy: .public) dismissed words")
+        hold.bringBack()
     }
 
     /// A line the menu says and nothing a reader can press. An item with no action is

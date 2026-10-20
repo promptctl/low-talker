@@ -10,28 +10,30 @@ import Synchronization
 /// keeping the store's contract.
 @MainActor
 final class FakeHeldStore: HeldStore {
-    private(set) var kept: Held?
+    private(set) var state: HoldState
+    /// What is held, as kept.
+    var kept: Held? { state.held }
     /// Every write, in order.
-    private(set) var written: [Held?] = []
+    private(set) var written: [HoldState] = []
     /// What every read throws, when set.
     var unreadable: HeldUnreadable?
     /// What every write throws, when set; `.lost` keeps nothing, `.stale` leaves what was kept.
     var failing: HeldUnkept?
 
-    init(keeping kept: Held? = nil) {
-        self.kept = kept
+    init(keeping kept: Held? = nil, dismissed: Held? = nil) {
+        state = HoldState(held: kept, dismissed: dismissed)
     }
 
-    func read() throws(HeldUnreadable) -> Held? {
+    func read() throws(HeldUnreadable) -> HoldState {
         if let unreadable { throw unreadable }
-        return kept
+        return state
     }
 
-    func write(_ held: Held?) throws(HeldUnkept) {
-        written.append(held)
+    func write(_ state: HoldState) throws(HeldUnkept) {
+        written.append(state)
         switch failing {
-        case nil: kept = held
-        case .lost?: kept = nil
+        case nil: self.state = state
+        case .lost?: self.state = HoldState()
         case .stale?: break
         }
         if let failing { throw failing }
