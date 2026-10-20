@@ -807,7 +807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The app's microphone authorization as it stands now.
     private func readMicrophone() -> MicrophoneAuthorization {
         let microphone = MicrophonePermission().current
-        log.notice("privacy: \(record, privacy: .public)")
+        log.notice("privacy: \(microphone, privacy: .public)")
         return microphone
     }
 
@@ -858,7 +858,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // microphone on an idle Mac is either explained here or is a bug - and a dark one
         // the config asked to hold open says so here too. [LAW:no-silent-failure]
         let microphone = capture.doing
-        log.notice("microphone at rest: \(record, privacy: .public)")
+        log.notice("microphone at rest: \(microphone, privacy: .public)")
         let untyped = untypedBecause()
         let globeKey = globeKeyClash()
         let openAtLogin = loginItem.current
