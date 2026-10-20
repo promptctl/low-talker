@@ -65,6 +65,11 @@ public extension Inserter {
 /// words went.
 /// [LAW:single-enforcer] `PeerIdentity` is the check; this is its one caller here.
 ///
+/// And only to that input method of this app's own build, which its greeting's answer says
+/// before any words go. One of another build may read the words as something they are not,
+/// or answer in a shape this end cannot read, and then nobody knows whether they landed.
+/// `BuildMismatch` is that rule.
+///
 /// Nothing is retried. An input method that did not answer is one whose state nobody here
 /// knows - it may have inserted the words and died before replying - and sending again
 /// would be the one way to type the same sentence twice.
@@ -75,6 +80,8 @@ public struct InputMethodInserter: Inserter {
     /// insert, so a build that cannot say who its input method is says so on each press
     /// rather than inserting through whoever answers. [LAW:no-silent-failure]
     private let answerer: Result<PeerIdentity, PeerIdentity.Unreadable>
+    /// The build the words may go to: the app's own.
+    private let build: Build
 
     /// What the app gives each insert, split evenly across its four phases. The input
     /// method's own bound on a client is set beneath one phase, so its answer naming a hung
@@ -82,21 +89,22 @@ public struct InputMethodInserter: Inserter {
     public static let standardTimeout = Duration.seconds(5)
 
     /// Onto the input method's own insert port, answered only by a process signed like this
-    /// one under the input method's identifier.
-    public init(timeout: Duration = standardTimeout) {
+    /// one under the input method's identifier, and of `build`.
+    public init(build: Build, timeout: Duration = standardTimeout) {
         self.init(
             portName: AppIdentity.inputMethodPortName, timeout: timeout,
             answerer: Result { () throws(PeerIdentity.Unreadable) in
                 try .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier)
-            })
+            }, build: build)
     }
 
     /// Onto a port and an answerer someone else named, which is how a test puts its own port
     /// on the far end without installing an input method. [LAW:decomposition]
-    package init(portName: String, timeout: Duration, answerer: Result<PeerIdentity, PeerIdentity.Unreadable>) {
+    package init(portName: String, timeout: Duration, answerer: Result<PeerIdentity, PeerIdentity.Unreadable>, build: Build) {
         self.portName = portName
         self.timeout = timeout
         self.answerer = answerer
+        self.build = build
     }
 
     public func insert(_ text: String, into destination: Destination) throws(InsertFailure) -> Inserted {
@@ -125,13 +133,16 @@ public struct InputMethodInserter: Inserter {
                 // Dropped unanswered before any words went, which is a far end not answering.
                 abandoned: .nothingIsListening(port: portName))
         } catch { throw .unreachable(error) }
-        // An empty greeting is the input method saying it will listen; anything else is its
-        // refusal to, which is thrown by name like any other.
-        if let said = greeting.payload, !said.isEmpty {
-            guard case .refused(let refusal)? = Wire.answer(of: said) else {
-                throw .unreachable(.answerWasNotReadable(port: portName, bytes: said.count, words: .notSent))
-            }
+        // The greeting's answer is the input method's build, or its refusal to listen, which is
+        // thrown by name like any other.
+        let said = greeting.payload ?? Data()
+        switch Wire.greeting(of: said) {
+        case .admitted(let inputMethod)?:
+            if let mismatch = BuildMismatch(app: build, inputMethod: inputMethod) { throw .buildMismatch(mismatch) }
+        case .refused(let refusal)?:
             throw .refused(refusal)
+        case nil:
+            throw .unreachable(.answerWasNotReadable(port: portName, bytes: said.count, words: .notSent))
         }
         let received: Mach.Received
         do throws(Unreachable) {

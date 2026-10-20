@@ -70,6 +70,17 @@ import Testing
         #expect(Wire.answer(of: Data("nonsense".utf8)) == nil)
     }
 
+    /// A greeting is answered with the build, or with nothing by an input method from before
+    /// builds were compared, or with the refusal a port gives a sender it turns away.
+    @Test func aGreetingsAnswerIsABuildNoneOrARefusal() {
+        #expect(Wire.greeting(of: Wire.said(aBuild)) == .admitted(by: aBuild))
+        #expect(Wire.greeting(of: Wire.said(nil)) == .admitted(by: nil))
+        #expect(Wire.greeting(of: Data()) == .admitted(by: nil))
+        #expect(Wire.greeting(of: Wire.answer(.refused(.senderIsNotThisInstallationsApp))) == .refused(.senderIsNotThisInstallationsApp))
+        #expect(Wire.greeting(of: Wire.answer(.inserted(characters: 1, into: "com.example.editor"))) == nil)
+        #expect(Wire.greeting(of: Data("nonsense".utf8)) == nil)
+    }
+
     /// An insert that reports no characters is a real answer - a zero-length request arrives
     /// as an empty request and is answered honestly - so nothing here may turn it away.
     @Test func anInsertOfNothingIntoARealAppStillCrosses() {
@@ -136,7 +147,7 @@ private let anEditor = "com.example.editor"
     @MainActor @Test func aPortHostedOnTheMainActorAnswersOffIt() async throws {
         let name = aPortNobodyElseUses()
         let port = try InsertionPort(
-            portName: name, senders: try OwnProcess.identity(), queue: DispatchQueue(label: name),
+            portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: DispatchQueue(label: name),
             told: { Issue.record("the port was told \($0)") }
         ) { request in
             Optional(request.text).map { InsertionAnswer.inserted(characters: $0.count, into: anEditor) } ?? .refused(.noTextFieldHasFocus)
@@ -230,7 +241,7 @@ private let anEditor = "com.example.editor"
         let seen = Seen()
         let told = Told()
         let us = try OwnProcess.identity()
-        let port = try InsertionPort(portName: name, senders: us, queue: DispatchQueue(label: name), told: told.record) { request in
+        let port = try InsertionPort(portName: name, senders: us, build: aBuild, queue: DispatchQueue(label: name), told: told.record) { request in
             seen.record(request)
             return .inserted(characters: request.text.count, into: anEditor)
         }
@@ -253,7 +264,7 @@ private let anEditor = "com.example.editor"
         let probe = try await Probe.signed(as: "ai.promptctl.low-talker.test.probe")
         defer { try? FileManager.default.removeItem(at: probe.url) }
         let port = try InsertionPort(
-            portName: name, senders: probe.identity, queue: DispatchQueue(label: name), told: { Issue.record("told \($0)") }
+            portName: name, senders: probe.identity, build: aBuild, queue: DispatchQueue(label: name), told: { Issue.record("told \($0)") }
         ) { request in
             seen.record(request)
             return .inserted(characters: request.text.count, into: anEditor)
@@ -273,7 +284,7 @@ private let anEditor = "com.example.editor"
         let probe = try await Probe.signed(as: "ai.promptctl.low-talker.test.probe")
         defer { try? FileManager.default.removeItem(at: probe.url) }
         let required = PeerIdentity.signed(identifier: "ai.promptctl.low-talker.test.app", certificate: probe.certificate)
-        let port = try InsertionPort(portName: name, senders: required, queue: DispatchQueue(label: name), told: told.record) {
+        let port = try InsertionPort(portName: name, senders: required, build: aBuild, queue: DispatchQueue(label: name), told: told.record) {
             .inserted(characters: $0.text.count, into: anEditor)
         }
 
@@ -298,7 +309,7 @@ private let anEditor = "com.example.editor"
 
         let us = try OwnProcess.identity()
         let elsewhere = PeerIdentity.adHoc(cdhash: String(repeating: "0", count: 40))
-        let asking = InputMethodInserter(portName: name, timeout: aBudgetTheRunnerCannotSpend, answerer: .success(elsewhere))
+        let asking = InputMethodInserter(portName: name, timeout: aBudgetTheRunnerCannotSpend, answerer: .success(elsewhere), build: aBuild)
         await #expect(throws: InsertFailure.unreachable(.answeredByAStranger(port: name, pid: getpid(), because: .someoneElse(us), required: elsewhere, words: .notSent))) {
             try await asking.insert("hello", into: .cursorInFront)
         }
@@ -306,10 +317,28 @@ private let anEditor = "com.example.editor"
         withExtendedLifetime(port) {}
     }
 
+    /// An input method of another build is never sent the words, whether it is a build
+    /// between the same two releases, which only the revision tells apart, or one from before
+    /// builds were compared, which answers the greeting with nothing.
+    @Test(arguments: [Optional(Build(number: aBuild.number, revision: "ba9876543210")), nil])
+    func anInputMethodOfAnotherBuildNeverHearsTheWords(said: Build?) async throws {
+        let name = aPortNobodyElseUses()
+        let seen = Seen()
+        let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: said, queue: DispatchQueue(label: name), told: { _ in }) { request in
+            seen.record(request)
+            return .inserted(characters: request.text.count, into: anEditor)
+        }
+
+        let mismatch = try #require(BuildMismatch(app: aBuild, inputMethod: said))
+        await #expect(throws: InsertFailure.buildMismatch(mismatch)) { try await inserter(name).insert("hello", into: .cursorInFront) }
+        #expect(seen.text == nil)
+        withExtendedLifetime(port) {}
+    }
+
     /// A build that cannot say who its input method is says so on each insert, rather than
     /// sending to whoever answers.
     @Test func anInserterThatCannotNameItsInputMethodSaysSo() async {
-        let asking = InputMethodInserter(portName: aPortNobodyElseUses(), timeout: .seconds(1), answerer: .failure(.noCertificate))
+        let asking = InputMethodInserter(portName: aPortNobodyElseUses(), timeout: .seconds(1), answerer: .failure(.noCertificate), build: aBuild)
         await #expect(throws: InsertFailure.answererUnreadable(.noCertificate)) { try await asking.insert("hello", into: .cursorInFront) }
     }
 }
@@ -388,7 +417,7 @@ private let anEditor = "com.example.editor"
         // Resumed before the port goes, because a suspended queue released is a crash; the
         // port then drains and answers what was queued, to nobody.
         defer { held.resume() }
-        let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), queue: held, told: { _ in }) {
+        let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: held, told: { _ in }) {
             .inserted(characters: $0.text.count, into: anEditor)
         }
 
@@ -445,7 +474,7 @@ private let anEditor = "com.example.editor"
         let name = aPortNobodyElseUses()
         // Told nothing, because the answer this port finally sends goes to a sender that
         // stopped listening long before, and is reported after this case has ended.
-        let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), queue: DispatchQueue(label: name), told: { _ in }) { request in
+        let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: DispatchQueue(label: name), told: { _ in }) { request in
             Thread.sleep(forTimeInterval: 30)
             return .inserted(characters: request.text.count, into: anEditor)
         }
@@ -487,7 +516,7 @@ private let anEditor = "com.example.editor"
         try #require(lt_bootstrap_register(name, right.port) == KERN_SUCCESS)
         Thread {
             guard case .received(let greeting) = Mach.receive(on: right.port, timeout: aBudgetTheRunnerCannotSpend) else { return }
-            _ = greeting.answer(Data())
+            _ = greeting.answer(Wire.said(aBuild))
             guard case .received(let words) = Mach.receive(on: right.port, timeout: aBudgetTheRunnerCannotSpend) else { return }
             words.discardReply()
         }.start()
@@ -506,7 +535,7 @@ private let anEditor = "com.example.editor"
     func anAnswerNobodyCanReadIsSaidByName(garbled: mach_msg_id_t, words: Words) async throws {
         let name = aPortNobodyElseUses()
         let port = try InsertionPort(portName: name, queue: DispatchQueue(label: name), told: { _ in }) {
-            $0.id == garbled ? Data("nonsense".utf8) : Data()
+            $0.id == garbled ? Data("nonsense".utf8) : Wire.said(aBuild)
         }
 
         await #expect(throws: InsertFailure.unreachable(.answerWasNotReadable(port: name, bytes: 8, words: words))) {

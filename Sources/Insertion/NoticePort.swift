@@ -27,7 +27,8 @@ public final class NoticePort {
     public enum Event: CustomStringConvertible {
         /// A message from a process `senders` does not admit.
         case turnedAway(pid: pid_t, because: PeerIdentity.NotAdmitted, required: PeerIdentity)
-        /// A message from the input method that is not a cursor arrival.
+        /// A message from the input method that is not a cursor arrival, or an arrival whose
+        /// build is not one.
         case notUnderstood(id: mach_msg_id_t, bytes: Int?)
         /// Taking a message off the port failed for a reason of the kernel's.
         case receiveFailed(kern_return_t)
@@ -48,7 +49,7 @@ public final class NoticePort {
     /// `cursorArrived` and `told` run on `queue`, one message at a time, in the order they were sent.
     public convenience init(
         queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, cursorArrived: @escaping @Sendable () -> Void
+        told: @escaping @Sendable (Event) -> Void, cursorArrived: @escaping @Sendable (CursorArrival) -> Void
     ) throws(PortNotHosted) {
         let senders: PeerIdentity
         do throws(PeerIdentity.Unreadable) {
@@ -61,7 +62,7 @@ public final class NoticePort {
     /// without being the app. [LAW:decomposition]
     init(
         portName: String, senders: PeerIdentity, queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, cursorArrived: @escaping @Sendable () -> Void
+        told: @escaping @Sendable (Event) -> Void, cursorArrived: @escaping @Sendable (CursorArrival) -> Void
     ) throws(PortNotHosted) {
         port = try NamedPort(name: portName, queue: queue, received: { message in
             message.discardReply()
@@ -73,12 +74,26 @@ public final class NoticePort {
             }
             // [LAW:parse-dont-validate] The border: past it there is a cursor arrival, and
             // anything else is said by name rather than dropped. [LAW:no-silent-failure]
-            guard Wire.isCursorArrival(id: message.id, payload: message.payload) else {
+            guard let build = Wire.arrival(id: message.id, payload: message.payload) else {
                 told(.notUnderstood(id: message.id, bytes: message.payload?.count))
                 return
             }
-            cursorArrived()
+            cursorArrived(CursorArrival(pid: message.sender.pid, build: build))
         }, failed: { told(.receiveFailed($0)) })
+    }
+}
+
+/// A cursor the input method was given focus in, told by the input method process `pid`,
+/// which said it is `build`, or said none, as every input method from before builds were
+/// compared does. Who told it was checked off the audit token before this was made; the pid
+/// only says which of the input method's processes it was.
+public struct CursorArrival: Equatable, Sendable {
+    public let pid: pid_t
+    public let build: Build?
+
+    public init(pid: pid_t, build: Build?) {
+        self.pid = pid
+        self.build = build
     }
 }
 
@@ -91,6 +106,7 @@ public final class NoticePort {
 /// the side that checks. [LAW:single-enforcer]
 public struct NoticeSender: Sendable {
     private let portName: String
+    private let build: Build?
 
     /// How a message fared, said so the input method can log a change in it.
     public enum Told: Equatable, Sendable, CustomStringConvertible {
@@ -120,21 +136,24 @@ public struct NoticeSender: Sendable {
         }
     }
 
-    public init() {
-        self.init(portName: AppIdentity.hotkeyPortName)
+    /// Telling each arrival with `build`, this input method's own, or with none when its
+    /// bundle carries none.
+    public init(build: Build?) {
+        self.init(portName: AppIdentity.hotkeyPortName, build: build)
     }
 
-    init(portName: String) {
+    init(portName: String, build: Build?) {
         self.portName = portName
+        self.build = build
     }
 
-    /// Tells the app a cursor arrived.
+    /// Tells the app a cursor arrived, and which build says so.
     public func tellCursorArrived() -> Told {
         var remote = mach_port_t()
         guard lt_bootstrap_look_up(portName, &remote) == KERN_SUCCESS else { return .nobodyIsListening(port: portName) }
         defer { mach_port_deallocate(mach_task_self_, remote) }
         let sent = Mach.send(
-            Data(), id: Wire.cursorArrived, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
+            Wire.said(build), id: Wire.cursorArrived, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
             replyTo: Mach.noPort, timeout: .zero)
         return switch sent {
         case MACH_MSG_SUCCESS: .told

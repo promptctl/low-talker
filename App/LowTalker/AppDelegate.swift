@@ -99,6 +99,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sessions.info("activity: \(String(describing: activity), privacy: .public)")
     }
 
+    /// This app's build, read off its bundle at launch, so it is the build that is running and
+    /// not one an install has since put on disk. Words go only to an input method of the
+    /// same one. The build refuses to make a bundle without it, so its absence is a bundle
+    /// this project did not make.
+    private let build: Build = Build(of: .main) ?? { preconditionFailure("the app bundle carries no build number or source revision; it was not built by `make app`") }()
+
+    /// The input method's process and the build it last said, which together are the one
+    /// source of what the status line says of it. [LAW:one-source-of-truth]
+    private var inputMethod = InputMethodWatch()
+
     private func showHotkeyStatus(_ status: HotkeyStatus) {
         hotkeyStatus = status
         showHUD(held: hold.held)
@@ -308,7 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             turns: turns,
             // The words cross to the input method, which commits them at the
             // cursor through the text input system.
-            executor: Executor(insertingThrough: InputMethodInserter()),
+            executor: Executor(insertingThrough: InputMethodInserter(build: build)),
             hold: hold,
             report: { [unowned self] in report($0) },
             showing: { [unowned self] in show($0) }
@@ -323,7 +333,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let notices = installed.flatMap {
             Result { () throws(PortNotHosted) in
                 try InputMethodNotices(
-                    cursorArrived: { [unowned self] in listening?.dictation.cursorArrived() },
+                    cursorArrived: { [unowned self] arrival in
+                        inputMethod.arrived(arrival)
+                        showInputMethod()
+                        listening?.dictation.cursorArrived()
+                    },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
             }.mapError { LoopRefusal(stringLiteral: "\($0)") }
         }
@@ -347,16 +361,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if case .failure(let refusal) = hearing { showHotkeyStatus(.off(refusal.reason)) }
     }
 
-    /// The input method's process as the notices keep it: the line says how to press only
-    /// while one is running, since nothing else can type the words.
-    private func show(_ inputMethod: InputMethodSupervisor.Event) {
-        log.notice("input method: \(inputMethod, privacy: .public)")
-        switch inputMethod {
-        case .running: showHotkeyStatus(.listening(listeningStatus))
-        case .ended: showHotkeyStatus(.off("the input method ended; \(AppIdentity.displayName) is starting it again"))
-        case .notOpened(let reason, _):
-            showHotkeyStatus(.off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))"))
+    /// The input method's process as the notices keep it.
+    private func show(_ event: InputMethodSupervisor.Event) {
+        log.notice("input method: \(event, privacy: .public)")
+        inputMethod.told(event)
+        showInputMethod()
+    }
+
+    /// The line says how to press only while an input method that can type the words is
+    /// running: one of this app's build, or one that has not said its build yet, whose
+    /// greeting the inserter checks before any words go.
+    ///
+    /// Written only when it changes, so a cursor arriving in each app the person moves to logs
+    /// nothing, and always over the line a rebuild put up while it set the input method up.
+    private func showInputMethod() {
+        guard let standing = inputMethod.standing(for: build) else { return }
+        let status: HotkeyStatus = switch standing {
+        case .running: .listening(listeningStatus)
+        case .otherBuild(_, let mismatch): .off("\(mismatch.facts); \(BuildMismatch.fix)")
+        case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
+        case .notOpened(let reason):
+            .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
         }
+        guard status != hotkeyStatus else { return }
+        log.notice("input method: \(standing, privacy: .public)")
+        showHotkeyStatus(status)
     }
 
     /// This installation's input method, as its package installed it, registered and - once
@@ -394,7 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// What the menu says after "Hotkey: ".
-    private enum HotkeyStatus: CustomStringConvertible {
+    private enum HotkeyStatus: Equatable, CustomStringConvertible {
         case starting(step: String?)
         /// Listening, and how to press it.
         case listening(String)

@@ -21,6 +21,21 @@ import os
 
 private let logger = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "inputmethod")
 
+/// This process's build, read off its bundle before anything else here runs, so it is the
+/// build that was launched and not one an install has since put on disk. Said to the app in
+/// every greeting and every arrival, which is how the app sends words only to its own build.
+///
+/// A bundle that carries none says none, and the app holds every word and says why; keys still
+/// pass through. The build refuses to make such a bundle, so the fault says it was not built
+/// here. [LAW:no-silent-failure]
+let build: Build? = {
+    let build = Build(of: .main)
+    if build == nil {
+        logger.fault("this bundle carries no build number or source revision, so the app will send it no words; it was not built by `make app`")
+    }
+    return build
+}()
+
 /// The server owns the port macOS reaches this process on. Held for the life of the process
 /// by being a top-level binding: released, the connection goes with it and the text input
 /// system's calls land nowhere.
@@ -92,7 +107,7 @@ let committer = Committer(label: "\(AppIdentity.inputMethodPortName).commits")
 /// app. [LAW:no-silent-failure]
 let insertions: InsertionPort? = {
     do {
-        return try InsertionPort(queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
+        return try InsertionPort(build: build, queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
             logger.error("\(String(describing: event), privacy: .public)")
         }) { request in
             // Read on the main actor, where the effects are, and handed to the decision as
@@ -132,7 +147,7 @@ let insertions: InsertionPort? = {
 /// Said in the log when how the telling fares changes, and not on every arrival: the app not
 /// listening is the ordinary state of an app that is not running. [LAW:no-silent-failure]
 let tellingTheApp = Task.detached {
-    let sender = NoticeSender()
+    let sender = NoticeSender(build: build)
     var fared: NoticeSender.Told?
     for await _ in Notices.shared.arrivals {
         let told = sender.tellCursorArrived()
@@ -157,6 +172,6 @@ let quits = NSWorkspace.shared.notificationCenter.addObserver(
 let inserts = insertions.map { _ in "answering inserts on \(AppIdentity.inputMethodPortName)" } ?? "answering no inserts"
 logger.notice("""
     serving \(AppIdentity.inputMethodConnectionName, privacy: .public), \
-    \(inserts, privacy: .public)
+    \(inserts, privacy: .public), as \(build.map(\.description) ?? "no build", privacy: .public)
     """)
 NSApplication.shared.run()

@@ -51,20 +51,21 @@ public final class InsertionPort {
         }
     }
 
-    /// Hosts the insert port, admitting the app and nobody else.
+    /// Hosts the insert port, admitting the app and nobody else, and answering each greeting
+    /// with `build`, this input method's own, or with none when its bundle carries none.
     public convenience init(
-        queue: DispatchQueue,
+        build: Build?, queue: DispatchQueue,
         told: @escaping @Sendable (Event) -> Void, answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
     ) throws(PortNotHosted) {
         let senders: PeerIdentity
         do throws(PeerIdentity.Unreadable) { senders = try .signedLikeThisProcess(identifier: AppIdentity.bundleIdentifier) } catch { throw .noRequirement(error) }
-        try self.init(portName: AppIdentity.inputMethodPortName, senders: senders, queue: queue, told: told, answer: answer)
+        try self.init(portName: AppIdentity.inputMethodPortName, senders: senders, build: build, queue: queue, told: told, answer: answer)
     }
 
     /// Under a name and a requirement someone else chose, which is how a test hosts one
     /// without being an input method. [LAW:decomposition]
     convenience init(
-        portName: String, senders: PeerIdentity, queue: DispatchQueue,
+        portName: String, senders: PeerIdentity, build: Build?, queue: DispatchQueue,
         told: @escaping @Sendable (Event) -> Void, answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
     ) throws(PortNotHosted) {
         try self.init(portName: portName, queue: queue, told: told) { request in
@@ -74,10 +75,11 @@ public final class InsertionPort {
                 told(.turnedAway(pid: request.sender.pid, because: error, required: senders))
                 return Wire.answer(.refused(.senderIsNotThisInstallationsApp))
             }
-            // The greeting is answered empty: the sender has been admitted, and that is all
-            // it asked. [LAW:dataflow-not-control-flow] The id is the wire's own
-            // discriminator, and these are its two values.
-            guard request.id != Wire.greeting else { return Data() }
+            // The greeting is answered with the build: the sender has been admitted, and it
+            // decides whether this build is one to send its words to. [LAW:single-enforcer]
+            // [LAW:dataflow-not-control-flow] The id is the wire's own discriminator, and
+            // these are its two values.
+            guard request.id != Wire.greeting else { return Wire.said(build) }
             // Bytes that are not a request are answered, never dropped: a sender that hears
             // nothing waits out its timeout and learns nothing. [LAW:no-silent-failure]
             let asked = request.payload.flatMap(Wire.request(of:))
