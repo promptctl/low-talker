@@ -215,6 +215,23 @@ private final class Picked: Sendable {
         #expect(await !runs.isRunning)
     }
 
+    /// Work that finishes after a press was heard during it, before the stop reached it, still
+    /// ends saying a dictation stopped it, since what it measured last was measured beside one.
+    @Test func aRunWhoseWorkFinishesAfterAPressWasHeardSaysADictationStoppedIt() async throws {
+        let lines = Mutex<[String]>([])
+        let turns = EngineTurns()
+        let runs = await BenchRuns(turns: turns) { line in lines.withLock { $0.append(line) } }
+        let ending = Mutex<BenchEnding?>(nil)
+        let run = try await runs.start("beside a press", work: { _ in
+            let press = turns.hold()
+            _ = try await turns.decode(as: .dictation) { () throws(TranscriptionFailure) in "heard" }
+            press.release()
+        }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
+        await run.value
+        #expect(ending.withLock { $0 } == .stopped(.forPress))
+        #expect(lines.withLock { $0 }.last == "bench: stopped for a dictation after 0 rows; 0 served preempted, 0 served waiting")
+    }
+
     /// A run takes the process's turns as a press does, so a served request waits it out, and
     /// is refused while a press already holds them.
     @Test func aRunHoldsTheEngineAndWaitsForNoPress() async throws {

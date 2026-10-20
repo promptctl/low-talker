@@ -152,16 +152,19 @@ public final class EngineTurns: Sendable {
         return EngineHold(turns: self, preempted: preempted, yielder: yielder)
     }
 
-    /// Closes one hold and hands the engine on; returns how many served decodes were waiting.
-    fileprivate func release(yielder: Int?) -> Int {
-        let (next, waiting) = state.withLock { state in
+    /// Closes one hold and hands the engine on; returns how many served decodes were waiting,
+    /// and whether a dictation decode was admitted while it was open, for one that gives way.
+    fileprivate func release(yielder: Int?) -> (waiting: Int, yielded: Bool) {
+        let (next, waiting, yielded) = state.withLock { state in
             state.reading.holds -= 1
-            yielder.map { state.yielders[$0] = nil }
+            // A yield no longer kept was taken by a dictation decode, under this same lock, so
+            // the answer holds even while that yield is still on its way to its owner.
+            let yielded = yielder.map { state.yielders.removeValue(forKey: $0) == nil } ?? false
             let waiting = state.waiting.count { $0.caller == .served }
-            return (state.admit(), waiting)
+            return (state.admit(), waiting, yielded)
         }
         next?.resume(returning: true)
-        return waiting
+        return (waiting, yielded)
     }
 
     /// Runs `decode` on the engine when `caller`'s turn comes, and again from the start if a
@@ -249,10 +252,12 @@ public final class EngineTurns: Sendable {
 public final class EngineHold: Sendable {
     /// What a hold put off: whether it told a served decode in flight to stop as it began
     /// (one that finished anyway kept its result), and how many served decodes were waiting
-    /// on it when it let go.
+    /// on it when it let go. And what put it off: whether a hold that gives way to dictation
+    /// had a dictation decode admitted while it was open.
     public struct Displaced: Equatable, Sendable, CustomStringConvertible {
         public let preempted: Bool
         public let waiting: Int
+        public let yielded: Bool
 
         public var description: String {
             "\(preempted ? 1 : 0) served preempted, \(waiting) served waiting"
@@ -276,6 +281,7 @@ public final class EngineHold: Sendable {
     @discardableResult
     public func release() -> Displaced {
         precondition(!released.exchange(true, ordering: .relaxed), "a hold was released twice")
-        return Displaced(preempted: preempted, waiting: turns.release(yielder: yielder))
+        let (waiting, yielded) = turns.release(yielder: yielder)
+        return Displaced(preempted: preempted, waiting: waiting, yielded: yielded)
     }
 }

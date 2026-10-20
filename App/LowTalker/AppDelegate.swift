@@ -154,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// is resident: the only handle is the supply's task, which yields the value only
     /// when the initializer has returned. Lazy so that it can name `loadEngine`, which
     /// reports to this delegate's menu; touching it is what starts the load.
-    private lazy var engine = EngineSupply { [unowned self] in try await loadEngine() }
+    private lazy var engine = EngineSupply { [unowned self] attempt in try await loadEngine(attempt: attempt) }
 
     /// Whose decode the engine runs next: every press holds it from key-down, so a served
     /// caller waits for the speaker. Made with the delegate rather than with the engine, so
@@ -794,12 +794,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Off the main path from the first await: the Core ML load runs on WhisperKit's
     /// own threads, and only the status text comes back here.
-    private func loadEngine() async throws -> WhisperKitTranscriber {
-        // The first load's wait counts from launch, and one after a failure from the press
-        // that started it.
-        let since = if case .failed = engineReadiness { ContinuousClock.now } else { launched }
+    private func loadEngine(attempt: Int) async throws -> WhisperKitTranscriber {
+        // The first attempt's wait counts from launch, and a later one's from the press that
+        // started it.
+        let since = attempt == 1 ? launched : ContinuousClock.now
         show(.preparing(nil, since: since))
-        serving?.answer(with: .notResident("the model is still loading"))
+        serving?.answer(with: .loading)
         do {
             // The bundle carries a store, and `carriedModel` is its model, loaded here in
             // place — read-only, verified whole where the code signature sealed it, written
@@ -985,7 +985,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(withTitle: "Bring Back Dismissed Words (\(dismissed.allWords.words.count))", action: #selector(bringBackDismissed), keyEquivalent: "")
         }
         if let running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
-        if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: a press stops it")) }
+        if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: the next press heard stops it")) }
         // Every requirement, met or not, and its step under it as the lines it was
         // written in - one item per line, so nothing here wraps text the requirement
         // already broke. A list that showed only what was missing would leave a reader

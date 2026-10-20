@@ -28,15 +28,15 @@ import TestProbes
         #expect(try await Self.soon { turns.reading.decoding == nil && turns.reading.waiting == 1 })
         #expect(try await turns.decode(as: .dictation) { "spoken" } == "spoken")
         #expect(runs.now == 1)
-        #expect(hold.release() == EngineHold.Displaced(preempted: true, waiting: 1))
+        #expect(hold.release() == EngineHold.Displaced(preempted: true, waiting: 1, yielded: false))
         #expect(try await served.value == "heard")
         #expect(runs.now == 2)
         #expect(turns.reading == EngineTurns.Reading(tally: EngineTurns.Tally(cancelled: 1)))
     }
 
-    /// A hold that gives way to dictation is told to by the first dictation decode, once. A
-    /// press's hold alone, a served decode, and a dictation decode after the hold let go do
-    /// not tell it.
+    /// A hold that gives way to dictation is told to by the first dictation decode, once, and
+    /// its release says so. A press's hold alone, a served decode, and a dictation decode
+    /// after the hold let go do not tell it.
     @Test func aYieldingHoldIsToldByTheFirstDictationDecodeOnly() async throws {
         let turns = EngineTurns()
         let yields = Count()
@@ -49,10 +49,10 @@ import TestProbes
         #expect(try await turns.decode(as: .dictation) { "again" } == "again")
         press.release()
         #expect(yields.now == 1)
-        bench.release()
+        #expect(bench.release().yielded)
         #expect(try await served.value == "asked")
         let after = turns.hold(yieldingToDictation: { _ = yields.add() })
-        after.release()
+        #expect(!after.release().yielded)
         #expect(try await turns.decode(as: .dictation) { "later" } == "later")
         #expect(yields.now == 1)
     }
@@ -65,7 +65,7 @@ import TestProbes
         #expect(try await Self.soon { turns.reading.waiting == 1 })
         first.release()
         #expect(turns.reading.waiting == 1 && turns.reading.decoding == nil)
-        #expect(second.release() == EngineHold.Displaced(preempted: false, waiting: 1))
+        #expect(second.release() == EngineHold.Displaced(preempted: false, waiting: 1, yielded: false))
         #expect(try await served.value == "heard")
         #expect(turns.reading == EngineTurns.Reading(tally: EngineTurns.Tally(deferred: 1)))
     }
@@ -78,7 +78,7 @@ import TestProbes
         let hold = turns.hold()
         gate.open()
         #expect(try await spoken.value == "spoken")
-        #expect(hold.release() == EngineHold.Displaced(preempted: false, waiting: 0))
+        #expect(hold.release() == EngineHold.Displaced(preempted: false, waiting: 0, yielded: false))
         #expect(turns.reading.tally.cancelled == 0)
     }
 

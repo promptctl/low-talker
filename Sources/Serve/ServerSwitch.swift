@@ -148,5 +148,5 @@ public final class ServerSwitch {
 
 /// The engine the listener reads at every request, which the app sets as its model loads.
 private final class Resident: Sendable {
-    let engine = Mutex(ServedEngine.notResident("the model is still loading"))
+    let engine = Mutex(ServedEngine.loading)
 }

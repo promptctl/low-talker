@@ -16,7 +16,7 @@ import TestProbes
     @Test func aPressMadeWhileTheModelLoadsWaitsForIt() async throws {
         let loaded = Gate()
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let supply = EngineSupply {
+        let supply = EngineSupply { _ in
             await loaded.wait()
             return engine
         }
@@ -26,13 +26,14 @@ import TestProbes
     }
 
     /// A press made once the load has failed is refused with the load's reason, and the
-    /// refusal starts the load again, so the press after it is heard. A press already waiting
-    /// on the failed load is told the engine is unavailable.
+    /// refusal starts the next attempt at the load, so the press after it is heard. A press
+    /// already waiting on the failed load is told the engine is unavailable.
     @Test func aPressAfterAFailedLoadIsRefusedAndLoadsTheModelAgain() async throws {
-        let loads = Mutex(0)
+        let loads = Mutex<[Int]>([])
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
-        let supply = EngineSupply {
-            guard loads.withLock({ $0 += 1; return $0 }) > 1 else { throw LoadFailed() }
+        let supply = EngineSupply { attempt in
+            loads.withLock { $0.append(attempt) }
+            guard attempt > 1 else { throw LoadFailed() }
             return engine
         }
         let waiting = try supply.forPress()
@@ -40,9 +41,9 @@ import TestProbes
 
         let refusal = try #require(throws: EngineUnavailable.self) { try supply.forPress() }
         #expect((refusal.cause as? ModelNotLoaded)?.cause is LoadFailed)
-        #expect(refusal.description == "the model failed to load (a weight file is truncated), so nothing could hear it; it is loading again, and a press made once it is ready is heard")
+        #expect(refusal.description == "the model failed to load (a weight file is truncated), so nothing could hear it; this press started load attempt 2")
 
         #expect(try await supply.forPress()() as? FakeTranscriber === engine)
-        #expect(loads.withLock { $0 } == 2)
+        #expect(loads.withLock { $0 } == [1, 2])
     }
 }

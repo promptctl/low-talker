@@ -14,6 +14,9 @@ public enum ServedEngine: Sendable {
     /// Not resident: the model's last load failed, and nothing loads it again until a
     /// dictation press does, so waiting alone will not help.
     case failed(String)
+
+    /// Not resident yet: a load is under way.
+    public static let loading = ServedEngine.notResident("the model is still loading")
 }
 
 /// OpenAI's `POST /v1/audio/transcriptions` and its Realtime transcription socket,
