@@ -861,15 +861,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastFailure = failureLine(failed.failure)
         // [LAW:nothing-unseen] A dictation that did not happen is as readable here as one
         // that did: the facts in the clear and any words it carries private, as its type
-        // declares them.
+        // declares them. The microphone's record comes before the facts, which can be a
+        // whole Core ML error, so the 1 KB the unified log keeps of a line still holds it.
         let account = failed.failure.account
         let mode = press.map { " in \($0.mode)" } ?? ""
         let record = press.map { "; \($0.record)" } ?? ""
         switch account.dictated {
         case nil:
-            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(record, privacy: .public)")
+            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public)\(record, privacy: .public) — \(account.facts, privacy: .public)")
         case let dictated?:
-            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public) — \(account.facts, privacy: .public)\(record, privacy: .public); dictated: \(dictated, privacy: .private)")
+            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public)\(record, privacy: .public) — \(account.facts, privacy: .public); dictated: \(dictated, privacy: .private)")
         }
     }
 
