@@ -32,16 +32,22 @@ private final class BenchDirectory {
 /// Made and ejected on a thread of its own: hdiutil ran past 14 s on the macos-26 runner (run
 /// 39503764240), and a test body waiting on it there holds a thread of the cooperative pool.
 private enum CaseSensitiveVolume {
-    /// Runs `body` with the mount point of a fresh volume, ejected once `body` returns or throws.
+    /// Runs `body` with the mount point of a fresh volume, ejected and removed once the volume
+    /// fails to mount or `body` returns or throws.
     static func with<T>(_ body: (URL) throws -> T) async throws -> T {
         let mountPoint = FileManager.default.temporaryDirectory.appending(path: "lowtalker-cs-\(UUID().uuidString)")
         let image = mountPoint.appendingPathExtension("dmg")
-        try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
-        try await onAThreadOfItsOwn {
-            try hdiutil("create", "-size", "8m", "-fs", "Case-sensitive APFS", "-volname", "lowtalker-cs", "-quiet", image.path)
-            try hdiutil("attach", image.path, "-mountpoint", mountPoint.path, "-nobrowse", "-quiet")
+        let result: Result<T, any Error>
+        do {
+            try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+            try await onAThreadOfItsOwn {
+                try hdiutil("create", "-size", "8m", "-fs", "Case-sensitive APFS", "-volname", "lowtalker-cs", "-quiet", image.path)
+                try hdiutil("attach", image.path, "-mountpoint", mountPoint.path, "-nobrowse", "-quiet")
+            }
+            result = Result { try body(mountPoint) }
+        } catch {
+            result = .failure(error)
         }
-        let result = Result { try body(mountPoint) }
         try await onAThreadOfItsOwn {
             try? hdiutil("detach", mountPoint.path, "-quiet")
             try? FileManager.default.removeItem(at: mountPoint)
