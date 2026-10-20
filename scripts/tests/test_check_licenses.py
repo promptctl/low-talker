@@ -34,6 +34,11 @@ class CheckLicensesTests(unittest.TestCase):
         result = self.check(library("a", "1.0", spdx("MIT"), vendored=[library("b", "2.0", spdx("Apache-2.0"))]))
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_attribution_only_creative_commons_passes_and_share_alike_fails(self):
+        self.assertEqual(self.check(library("data", "1", spdx("CC-BY-4.0"), spdx("CC-BY-3.0"), spdx("CC0-1.0"))).returncode, 0)
+        self.assertRefused(self.check(library("vocalsound", "1", spdx("CC-BY-SA-4.0"))),
+                           "check-licenses: vocalsound 1 is under CC-BY-SA-4.0, which is not an accepted license")
+
     def test_gpl_fails_naming_component_version_and_license(self):
         self.assertRefused(self.check(library("readline", "8.2", spdx("GPL-3.0-only"))),
                            "check-licenses: readline 8.2 is under GPL-3.0-only, which is not an accepted license")

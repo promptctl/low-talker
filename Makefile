@@ -54,7 +54,7 @@ APP := $(PRODUCTS)/LowTalker.app
 INPUT_METHOD := $(PRODUCTS)/LowTalker Input Method.app
 XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 
-.PHONY: app package install run variants test model-tool sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure
+.PHONY: app package install run variants test model-tool sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure gate-classifier
 
 # Regeneration is unconditional: xcodegen is idempotent and sub-second, and a
 # timestamp rule cannot see removed sources or in-place rewrites of the project.
@@ -161,6 +161,17 @@ gate-replay-measure:
 	rm -f $(GATE_REPLAY)/measured.tsv
 	GATE_REPLAY_OUT="$(abspath $(GATE_REPLAY))/measured.tsv" GATE_REPLAY_ESC50="$(abspath $(GATE_REPLAY))/esc50" \
 		swift test --filter GateReplayTests
+
+# The gate classifier trained again: its audio fetched into $(GATE_CLASSIFIER), never committed,
+# and a candidate written beside it. Training runs differ, so this never writes the bundled
+# Sources/LowTalkerCore/GateClassifier.mlpackage: shipping a candidate is copying it there,
+# with its threshold in GateClassifier.swift and its digest and manifest's licenses in
+# sbom/rules.json, which `make sbom` holds the bundled model to.
+GATE_CLASSIFIER := .build/gate-classifier
+
+gate-classifier:
+	scripts/gate-classifier/fetch-data $(GATE_CLASSIFIER)
+	scripts/gate-classifier/train $(GATE_CLASSIFIER) $(GATE_CLASSIFIER)/trained.mlpackage
 
 # What a release ships and under what license, as CycloneDX, read off the resolved
 # build: Package.resolved, the checkouts `swift build` resolves under .build, and the

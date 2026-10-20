@@ -4,8 +4,9 @@
     scripts/sbom <model-tool> <output.cdx.json> [model store]
 
 CycloneDX 1.6, one component per thing that reaches a user's Mac: every package
-Package.resolved pins, the third-party code vendored inside those packages, and the model
-the app loads (its weights and its tokenizer). Identity, URL, version and revision come
+Package.resolved pins, the third-party code vendored inside those packages, the model
+the app loads (its weights and its tokenizer), and the classifiers it bundles, which are
+under the licenses of the audio they were trained on. Identity, URL, version and revision come
 from Package.resolved, the checkouts under .build, and model-tool; sbom/rules.json holds
 only what none of those can say - the license of each component, which packages carry
 code no manifest declares, which Hugging Face repos the default model's two parts come
@@ -25,6 +26,7 @@ The store changes nothing in the output; it only refuses a wrong rule.
 Run through `make sbom`, which builds model-tool first, names it, and names this Mac's store
 when it has one.
 """
+import csv
 import hashlib
 import json
 import re
@@ -246,6 +248,53 @@ def confirm_against_store(store, model, part, repo):
     return True
 
 
+def classifier_components(rules):
+    """The classifiers the app bundles, each a model trained here. It is under the licenses
+    of the audio it was trained on, which its manifest names clip by clip; the rule maps
+    each license the manifest names to its SPDX id and text, so a retrain on audio under
+    a license nobody has read stops the run. [LAW:one-source-of-truth] The digest the rule
+    records holds the rule to the one model it was written for: a swapped model stops the
+    run until its rule is read again."""
+    components = []
+    for name, rule in rules.items():
+        folder = repository / need(rule, "path", name)
+        files = sorted(path for path in folder.rglob("*") if path.is_file())
+        if not files:
+            fail(f"{name}: no model at {folder}")
+        digest = hashlib.sha256("".join(f"{path.relative_to(folder)}\0{sha256(path)}\n" for path in files).encode()).hexdigest()
+        if digest != need(rule, "sha256", name):
+            fail(f"{name}: {rule['path']} has digest {digest}, not the {rule['sha256']} rules.json was written for; read its manifest's licenses and record the new digest")
+        manifest = repository / need(rule, "trainedOn", name)
+        with manifest.open() as file:
+            named = {row["license"] for row in csv.DictReader(file, delimiter="\t")}
+        mapped = need(rule, "licenses", name)
+        if named - set(mapped):
+            fail(f"{name}: {rule['trainedOn']} names {', '.join(sorted(named - set(mapped)))}, which rules.json maps to no SPDX license")
+        if set(mapped) - named:
+            fail(f"{name}: rules.json maps {', '.join(sorted(set(mapped) - named))}, which {rule['trainedOn']} no longer names")
+        licenses, properties = [], [
+            {"name": "low-talker:trained-on", "value": rule["trainedOn"]},
+            {"name": "low-talker:trained-on-sha256", "value": sha256(manifest)},
+        ]
+        for license_name in sorted(named):
+            entries, more = license_entry(f"{name} {license_name}", repository, mapped[license_name])
+            licenses += entries
+            properties += more
+        components.append({
+            "type": "machine-learning-model",
+            "bom-ref": f"low-talker/{name}",
+            "group": "low-talker",
+            "name": name,
+            "hashes": [{"alg": "SHA-256", "content": digest}],
+            "licenses": licenses,
+            "description": f"Trained by scripts/gate-classifier/train on the audio {rule['trainedOn']} names, "
+                           "which carries each clip's source, license and uploader: the attribution its licenses ask for",
+            "externalReferences": [{"type": "other", "url": f"https://github.com/promptctl/low-talker/blob/master/{rule['trainedOn']}"}],
+            "properties": properties,
+        })
+    return components
+
+
 def application():
     settings = json.loads(run("xcodegen", ["dump", "--type", "json"], "the app's version")).get("settings", {}).get("base", {})
     version = settings.get("MARKETING_VERSION")
@@ -276,6 +325,7 @@ def main():
     components = [package_component(pin, rules["packages"][pin["identity"]]) for pin in pins]
     models, confirmed = model_components(tool, rules["models"], store)
     components += models
+    components += classifier_components(rules["classifiers"])
     components.sort(key=lambda c: c["bom-ref"])
     app = application()
     bom = {

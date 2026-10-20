@@ -15,7 +15,9 @@
     "moves the SBOM.",
     "`silentOnTheWireAt` is the revision of a package that can reach the network which",
     "scripts/wire-check last watched through a launch and a dictation and found silent; a",
-    "Package.resolved pinning any other revision of it fails the build until that is re-run."
+    "Package.resolved pinning any other revision of it fails the build until that is re-run.",
+    "A classifier's `licenses` maps each license its `trainedOn` manifest names to an SPDX",
+    "id and text; `sha256` is the model it was written for, over its files' paths and digests."
   ],
   "packages": {
     "argmax-oss-swift": {
@@ -71,6 +73,27 @@
         "repo": "openai/whisper-large-v3",
         "license": "Apache-2.0",
         "licenseFile": "sbom/licenses/whisper-large-v3.txt"
+      }
+    }
+  },
+  "classifiers": {
+    "GateClassifier": {
+      "path": "Sources/LowTalkerCore/GateClassifier.mlpackage",
+      "sha256": "01b43fc4c916bdac1647059c6624da2666dd359ea2a88b331b705b228d6d2666",
+      "trainedOn": "scripts/gate-classifier/manifest.tsv",
+      "licenses": {
+        "CC BY 4.0": {
+          "license": "CC-BY-4.0",
+          "licenseFile": "sbom/licenses/CC-BY-4.0.txt"
+        },
+        "CC BY 3.0": {
+          "license": "CC-BY-3.0",
+          "licenseFile": "sbom/licenses/CC-BY-3.0.txt"
+        },
+        "CC0 1.0": {
+          "license": "CC0-1.0",
+          "licenseFile": "sbom/licenses/CC0-1.0.txt"
+        }
       }
     }
   }
