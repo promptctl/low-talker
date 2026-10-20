@@ -735,8 +735,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard capture.atRest == nil else { return .running }
             let grant = try readMicrophone().grant()
             // Awaited, never assumed: a come-up the menu or the setup started at launch waits
-            // here for the reading. [LAW:no-ambient-temporal-coupling]
-            let atRest = try await reading.value.get().config.get().microphone
+            // here for the reading. [LAW:no-ambient-temporal-coupling] What it then runs on is
+            // the config as it stands, which a save may have moved past the launch reading.
+            _ = try await reading.value.get()
+            guard let config else { preconditionFailure("the launch reading sets the running config before it ends") }
+            let atRest = try config.get().microphone
             // Awaited, so the menu and the readings queued behind the come-up run while
             // a slow input is reached.
             try await capture.start(grant, atRest: atRest)
