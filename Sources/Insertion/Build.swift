@@ -64,6 +64,6 @@ public struct BuildMismatch: Error, Equatable, Sendable, CustomStringConvertible
     public static let fix = "reinstall \(AppIdentity.displayName) so the two match"
 
     public var description: String {
-        "WARNING: Words go only to the input method of the app's own build, and \(facts). Your dictation was not sent; it is held until the two match. To fix it, \(Self.fix)."
+        "WARNING: Words go only to the input method of the app's own build: \(facts). Your dictation was not sent; it is held until the two match. To fix it, \(Self.fix)."
     }
 }
