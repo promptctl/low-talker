@@ -6,7 +6,7 @@ import Testing
 /// a file that was written but cannot be understood says instead of running anyway.
 @Suite struct ConfigTests {
     static func config(_ toml: String) throws(ConfigError) -> Config {
-        try Config(toml: toml)
+        try Config(toml: toml, prompting: .countingWords())
     }
 
     /// Every key at once: the engine choice, the microphone at rest, chords to modes, and a
@@ -115,7 +115,7 @@ import Testing
     /// [LAW:one-source-of-truth] A mode with no chord listens for the default one, the
     /// chord `Hotkey.defaultChord` names.
     @Test func aModeWithNoChordHearsTheDefaultChord() throws {
-        let config = try Config(toml: """
+        let config = try Self.config("""
             [[modes]]
             name = "dictation"
             """)
@@ -338,19 +338,42 @@ import Testing
         #expect(keys.first?.hasSuffix(".chrod") == true)
     }
 
+    /// A mode whose vocabulary the engine cannot be told refuses the file as it is read,
+    /// naming the mode, the vocabulary's size and the limit, so no press in it ever begins.
+    @Test func aVocabularyTooLongForTheEngineRefusesTheFileByMode() {
+        let error = #expect(throws: ConfigError.vocabulary(mode: "names", .tooLong(tokens: 6, limit: 5))) {
+            try Config(toml: Self.names(6), prompting: .countingWords(limit: 5))
+        }
+        #expect(error?.description == #"mode "names": the vocabulary is 6 prompt tokens and the engine keeps at most 5"#)
+    }
+
+    @Test func aVocabularyAtTheEnginesLimitIsRead() throws {
+        let config = try Config(toml: Self.names(5), prompting: .countingWords(limit: 5))
+        #expect(config.modes.map(\.vocabulary.terms.count) == [5])
+    }
+
+    /// A mode named "names" whose vocabulary is `count` one-word terms.
+    static func names(_ count: Int) -> String {
+        """
+        [[modes]]
+        name = "names"
+        vocabulary = [\((1...count).map { "\"Name\($0)\"" }.joined(separator: ", "))]
+        """
+    }
+
     // MARK: - Reading the file
 
     /// No file at all is the one case that yields the defaults.
     @Test func noFileIsTheDefaults() throws {
         let missing = URL(filePath: NSTemporaryDirectory()).appending(path: "low-talker-\(UUID().uuidString)/config.toml")
-        #expect(try Config.load(missing) == Config.default)
+        #expect(try Config.load(missing, prompting: .countingWords()) == Config.default)
     }
 
     @Test func aFileOnDiskIsWhatTheAppRunsOn() throws {
         let url = URL(filePath: NSTemporaryDirectory()).appending(path: "low-talker-\(UUID().uuidString).toml")
         try Self.full.write(to: url, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: url) }
-        #expect(try Config.load(url) == Self.config(Self.full))
+        #expect(try Config.load(url, prompting: .countingWords()) == Self.config(Self.full))
     }
 
     /// [LAW:no-silent-failure] A path that exists but hands back no config text is an
@@ -360,7 +383,7 @@ import Testing
         let directory = URL(filePath: NSTemporaryDirectory()).appending(path: "low-talker-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        #expect(throws: ConfigError.self) { try Config.load(directory) }
+        #expect(throws: ConfigError.self) { try Config.load(directory, prompting: .countingWords()) }
     }
 
     /// A file saved in some other encoding is a file whose owner needs to be told which
@@ -370,7 +393,7 @@ import Testing
         let url = URL(filePath: NSTemporaryDirectory()).appending(path: "low-talker-\(UUID().uuidString).toml")
         try Data([0xFF, 0xFE, 0xFD]).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
-        let error = #expect(throws: ConfigError.self) { try Config.load(url) }
+        let error = #expect(throws: ConfigError.self) { try Config.load(url, prompting: .countingWords()) }
         guard case .unreadable(let path, _)? = error else {
             Issue.record("expected .unreadable, got \(String(describing: error))")
             return

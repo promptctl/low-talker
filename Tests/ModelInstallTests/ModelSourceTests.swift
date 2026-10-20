@@ -1,4 +1,5 @@
 import Foundation
+import LowTalkerCore
 @testable import ModelInstall
 import Testing
 @testable import WhisperKit
@@ -12,6 +13,13 @@ import Testing
     func tokenizerRepoMatchesWhisperKit(logitsDim: Int, encoderDim: Int) {
         let whisperKit = ModelUtilities.tokenizerNameForVariant(ModelUtilities.detectVariant(logitsDim: logitsDim, encoderDim: encoderDim))
         #expect(ModelVariant(logitsDim: logitsDim, encoderDim: encoderDim).tokenizerRepo == whisperKit)
+    }
+
+    /// After the store's hub folder, WhisperKit's load looks in the model folder and then
+    /// the hub layout under it; the prompt encoder looks in the same places in that order.
+    @Test func tokenizerSearchPathsAreWhisperKits() {
+        let folder = URL(filePath: "/store/models/argmaxinc/whisperkit-coreml/openai_whisper-large-v3")
+        #expect(ModelVariant.largev3.tokenizerSearchPaths(in: folder) == [folder, folder.appending(path: "models/openai/whisper-large-v3")])
     }
 
     /// A task cancelled before it was resumed can end before the caller waits; the

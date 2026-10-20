@@ -89,7 +89,7 @@ public struct WhisperKitTranscriber: Transcriber {
         // audio is taken in, so a hold never gets as far as the gate with a prompt
         // the engine cannot carry.
         let prompt = try await turns.decode(as: caller) { () throws(TranscriptionFailure) in
-            do throws(VocabularyError) { return try pipeline.prompt(for: vocabulary) } catch { throw .vocabulary(error) }
+            do throws(VocabularyError) { return try pipeline.prompts.prompt(for: vocabulary) } catch { throw .vocabulary(error) }
         }
         // [LAW:composability] The passes are Hearing's to run; this engine is one
         // decode of what a pass asks for, and its floor and prefix length are the
@@ -106,6 +106,19 @@ public struct WhisperKitTranscriber: Transcriber {
     struct Pipeline: @unchecked Sendable {
         private let whisperKit: WhisperKit
         private let tokenizer: any WhisperTokenizer
+        /// The vocabulary as the decoder's prompt: the text of a segment before the
+        /// utterance, which is how Whisper is told spellings it could not guess.
+        /// Told " Brynleigh Fryslie" and then hearing the names, it writes them so
+        /// rather than "Brynley Frisley". The prompt stands before the start of the
+        /// transcript and the forced prefix after it, so one pass carries both. A
+        /// prompt is decoded against audio that does not hold it, and Whisper will
+        /// read prompted words a second time out of the audio that follows when
+        /// they were the words just heard; a list of terms is not, which is why the
+        /// vocabulary goes here and the confirmed words go in the prefix.
+        ///
+        /// The rule is `PromptEncoder`'s, over this pipeline's own tokenizer, and it is the
+        /// rule the config file's vocabularies were read by. [LAW:single-enforcer]
+        let prompts: PromptEncoder
 
         /// Word timings are the whole point: without them a result carries no per-word
         /// confidence and the mapping refuses it. A segment's text is its words alone:
@@ -182,32 +195,7 @@ public struct WhisperKitTranscriber: Transcriber {
                 throw WhisperKitTranscriberError.tokenizerNotLoaded(installed.model)
             }
             self.tokenizer = tokenizer
-        }
-
-        /// The vocabulary as the decoder's prompt: the text of a segment before the
-        /// utterance, which is how Whisper is told spellings it could not guess.
-        /// Told " Brynleigh Fryslie" and then hearing the names, it writes them so
-        /// rather than "Brynley Frisley". The prompt stands before the start of the
-        /// transcript and the forced prefix after it, so one pass carries both. A
-        /// prompt is decoded against audio that does not hold it, and Whisper will
-        /// read prompted words a second time out of the audio that follows when
-        /// they were the words just heard; a list of terms is not, which is why the
-        /// vocabulary goes here and the confirmed words go in the prefix.
-        ///
-        /// [LAW:no-silent-failure] A vocabulary past WhisperKit's prompt limit is
-        /// refused with its size, where WhisperKit would keep the last of it and say
-        /// nothing, losing the first terms without a word said. The count is of the
-        /// tokens WhisperKit would keep, its special tokens filtered out as its
-        /// decoder does. Every prompt token also takes one of the decoder steps a
-        /// window has (`Constants.maxTokenContext` less one, prefill included), so a
-        /// long vocabulary leaves a 30 s window fewer words to read.
-        func prompt(for vocabulary: Vocabulary) throws(VocabularyError) -> [Int] {
-            let tokens = tokenizer.encode(text: vocabulary.whisperPrompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-            let limit = SpeechAlignedSegmentSeeker.promptTokenLimit
-            guard tokens.count <= limit else {
-                throw .tooLong(tokens: tokens.count, limit: limit)
-            }
-            return tokens
+            prompts = PromptEncoder(whisper: tokenizer)
         }
 
         /// One pass: the words in `samples` from `cut` on, the first of them forced to

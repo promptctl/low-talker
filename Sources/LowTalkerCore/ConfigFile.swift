@@ -23,9 +23,12 @@ public extension Config {
     /// back holds together or this throws naming what does not, so nothing downstream
     /// examines the file again: there is no text left to examine.
     ///
+    /// Each mode's vocabulary is told to `prompting` as the file is read, so a mode the
+    /// engine could not be told is refused by name here, before any press can begin in it.
+    ///
     /// [LAW:effects-at-boundaries] Pure. It opens nothing and reads no clock, so a test
     /// hands it a string rather than a filesystem.
-    init(toml: String) throws(ConfigError) {
+    init(toml: String, prompting: PromptEncoder) throws(ConfigError) {
         var decoder = TOMLDecoder()
         // A key this schema has no place for is a typo the author wants told, not a
         // line quietly doing nothing. [LAW:no-silent-failure]
@@ -50,7 +53,7 @@ public extension Config {
         try self.init(
             model: file.model ?? Config.default.model,
             microphone: file.microphone?.atRest ?? Config.default.microphone,
-            modes: file.modes?.map { $0.mode } ?? Array(Config.default.modes),
+            modes: try file.modes?.map { entry throws(ConfigError) in try entry.mode(prompting: prompting) } ?? Array(Config.default.modes),
             serve: try file.serve.map { entry throws(ConfigError) in try entry.binding } ?? Config.default.serve
         )
     }
@@ -61,7 +64,7 @@ public extension Config {
     /// [LAW:no-silent-failure] Only a file that is not there yields the defaults. One
     /// that exists and cannot be read, or cannot be understood, throws - so a config the
     /// user wrote is never quietly replaced by one they did not.
-    static func load(_ url: URL = fileURL) throws(ConfigError) -> Config {
+    static func load(_ url: URL = fileURL, prompting: PromptEncoder) throws(ConfigError) -> Config {
         let text: String
         do {
             text = try String(contentsOf: url, encoding: .utf8)
@@ -70,7 +73,7 @@ public extension Config {
         } catch {
             throw ConfigError.unreadable(path: url.path, why: error.localizedDescription)
         }
-        return try Config(toml: text)
+        return try Config(toml: text, prompting: prompting)
     }
 }
 
@@ -146,8 +149,13 @@ private struct ModeEntry: Decodable {
     ///
     /// [LAW:one-source-of-truth] A mode the file gives no chord listens for the default
     /// one, which is the chord `Config.default` names.
-    var mode: Mode {
-        Mode(name: name, chord: chord ?? Hotkey.defaultChord, vocabulary: Vocabulary(vocabulary ?? []))
+    ///
+    /// [LAW:parse-dont-validate] An entry becomes a Mode only once the engine can be told
+    /// its vocabulary, so no press ever begins in a mode whose every press would fail.
+    func mode(prompting: PromptEncoder) throws(ConfigError) -> Mode {
+        let mode = Mode(name: name, chord: chord ?? Hotkey.defaultChord, vocabulary: Vocabulary(vocabulary ?? []))
+        do throws(VocabularyError) { _ = try prompting.prompt(for: mode.vocabulary) } catch { throw .vocabulary(mode: mode.name, error) }
+        return mode
     }
 }
 
