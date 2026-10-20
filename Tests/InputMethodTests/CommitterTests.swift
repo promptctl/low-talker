@@ -33,6 +33,7 @@ import Testing
     private static let request = InsertRequest("🫠 hello", into: .cursorInFront)
 
     /// What `FocusedClient` would have seen: the cursor chosen, or the refusal.
+    @MainActor
     private static func seen(_ cursor: Result<any TextCursor, Refusal>) -> InFront {
         InFront(frontmost: "com.example.editor", secureInputHolder: nil, selected: true, cursorApplication: "com.example.editor",
                 field: nil, screens: [], cursor: cursor)

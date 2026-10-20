@@ -13,7 +13,6 @@ import Insertion
 /// On the main actor, every member: each is a call into the client, or a fact read off it
 /// there, and IMK rules 3 and 4 put every client call on the main actor. `Committer` owns
 /// how an insert reaches it.
-@MainActor
 public protocol TextCursor: AnyObject {
     /// The app this cursor belongs to, which is how a cursor left over from an app the
     /// person has since switched away from is told from the one in front of them.
@@ -79,7 +78,6 @@ public enum FieldAnswer: Sendable, Equatable {
 /// Its whole state is which cursor is in front, which is a fact macOS owns and this only
 /// mirrors. [FRAMING:representation] Nothing is remembered about text already inserted -
 /// the client is the document, and a second copy of what it holds could only disagree.
-@MainActor
 public final class FocusedClient {
     public static let shared = FocusedClient()
 

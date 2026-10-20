@@ -28,7 +28,7 @@ import os
 /// where the words land in plain sight, answers `length()` of 0 before and after, so a check
 /// for "did the document grow" would refuse the terminal. The client's field is asked about
 /// before the commit instead (`FocusedClient`). [LAW:no-silent-failure]
-public final class Committer: Sendable {
+public nonisolated final class Committer: Sendable {
     /// One phase of the app's wait is 1.25 s, and IMK's own wait on a hung app is 3 s;
     /// `CommitterTests` holds this beneath both.
     public static let standardBound = Duration.seconds(1)
@@ -104,7 +104,7 @@ public final class Committer: Sendable {
 /// The main actor claims the turn before any call into an app and begins it before the
 /// commit; the port, its wait over, abandons it. A turn abandoned before it began is never
 /// committed into, so the refusal the port answered stays true.
-final class Turn: Sendable {
+nonisolated final class Turn: Sendable {
     /// While open, the state is the port's answer if its wait ended now, so the port's answer
     /// is read off the state and not mapped from it. [LAW:one-source-of-truth]
     private enum State {
@@ -162,7 +162,7 @@ final class Turn: Sendable {
 
 /// What the port answered one insert, and what it knew when it did: the line the insert port
 /// logs for every request. [LAW:nothing-unseen]
-public struct Placed: Sendable, CustomStringConvertible {
+public nonisolated struct Placed: Sendable, CustomStringConvertible {
     /// How the port's wait ended.
     enum Outcome: Equatable, Sendable {
         /// The main actor had not finished deciding in time - had not reached the insert at
@@ -204,7 +204,7 @@ public struct Placed: Sendable, CustomStringConvertible {
 /// held it: the line said once
 /// the turn has run, which is the only account of a commit that outlasted the port's answer.
 /// [LAW:nothing-unseen]
-public struct Ended: Sendable, CustomStringConvertible {
+public nonisolated struct Ended: Sendable, CustomStringConvertible {
     enum Did: Equatable, Sendable {
         /// Reached after the port answered: no call was made into any app.
         case letGo
