@@ -192,7 +192,7 @@ struct Fixtures {
     var readers: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("librispeech/") } }
     var shortPresses: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("say/") } }
 
-    var cases: [Case] { bench + transientCases + talk + tap }
+    var cases: [Case] { bench + transientCases + talk + tap + tapAfter }
 
     /// Every fixture at 0 and -20 dB, whole and from its first sound, clean and in a quiet
     /// and a loud room.
@@ -294,6 +294,21 @@ struct Fixtures {
                     return zip(audio, Noise.samples(audio.count, at: Float(pow(10, Double(db) / 20)))).map(+)
                 }
             }
+        }
+    }
+
+    /// A tap left open after a sound and nothing said: each ESC-50 clip, then 10 s of room at
+    /// -51 and -35 dBFS, beside the same room alone (`source=none`). The clip is the inserted
+    /// stretch, so the windows of a case and of its room alone line up.
+    var tapAfter: [Case] {
+        let room = 10 * Self.rate
+        return [("-51", Self.quietRoom), ("-35", Self.loudRoom)].flatMap { name, level in
+            [Case(id: "family=tap-after source=none room=\(name)", inserted: nil) { Noise.samples(room, at: level) }]
+                + transients.map { clip, segment in
+                    Case(id: "family=tap-after source=\(clip) room=\(name)", inserted: 0..<segment.count) {
+                        segment + Noise.samples(room, at: level)
+                    }
+                }
         }
     }
 }
