@@ -40,8 +40,7 @@ extension KeyChord {
     }
 
     /// Whether `key` going down would have completed this chord, but for other modifiers
-    /// already held with it: what an arrow or navigation key held does too, since it reads
-    /// as Function.
+    /// already held with it.
     func isBlocked(by key: Modifier, holding held: Set<Modifier>) -> Bool {
         held.isStrictSuperset(of: modifiers) && modifiers.contains(key)
     }
@@ -161,7 +160,9 @@ public struct HotkeyDetector: Sendable {
             return .blocked(mode, by: event.modifiers.subtracting(mode.chord.modifiers))
         // Its own chord ends it too, listened for or not: the press belongs to the chord that
         // began it, so a chord moved by `listen(for:)` mid-latch still ends what it started.
-        case (.latched(let chord), _, _) where completed != nil || chord.isCompleted(by: event.key, holding: event.modifiers):
+        // Pressed with other modifiers held, it still ends it, since the person was reaching
+        // for it to stop listening.
+        case (.latched(let chord), _, _) where completed != nil || chord.isCompleted(by: event.key, holding: event.modifiers) || chord.isBlocked(by: event.key, holding: event.modifiers):
             phase = .idle
             return .ended(.released(.tap, at: event.time))
         case (.held, _, _), (.blocked, _, _), (.latched, _, _), (.idle, nil, nil):

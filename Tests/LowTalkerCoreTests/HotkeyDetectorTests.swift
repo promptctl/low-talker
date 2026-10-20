@@ -106,11 +106,15 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         #expect(keyboard.press(.rightOption, at: 1000) == began(rightOption, at: 1000))
     }
 
-    /// An arrow or navigation key held reads as Function, and blocks the chord like any other.
-    @Test func anArrowKeyHeldBlocksTheChord() {
+    /// A latched tap's chord pressed with Shift held still ends it: the person reached for it
+    /// to stop listening.
+    @Test func theChordWithAnotherModifierHeldEndsALatchedTap() {
         var keyboard = Keyboard()
-        _ = keyboard.press(.function, at: 0)
-        #expect(keyboard.press(.rightOption, at: 10) == .blocked(rightOption, by: [.function]))
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 50)
+        _ = keyboard.press(.leftShift, at: 500)
+        #expect(keyboard.press(.rightOption, at: 510) == ended(.tap, at: 510))
+        #expect(keyboard.detector.phase == .idle)
     }
 
     /// Nothing is listening, so a blocked chord let go quickly latches nothing: it ends, and

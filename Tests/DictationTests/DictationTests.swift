@@ -1997,8 +1997,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.shown.activities == [refused, .transcribing, .idle])
     }
 
-    /// The chord pressed with an arrow key held, which reads as Function, begins no press: it
-    /// is shown refused while it is down, saying which key to let go of, opens no microphone,
+    /// The chord pressed with Fn held begins no press: it is shown refused while it is down,
+    /// saying to press the chord alone, opens no microphone,
     /// takes no turn of the engine, and is reported refused once it comes up.
     @Test func aChordBlockedByAnotherKeyIsShownRefusedAtTheChord() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
@@ -2020,10 +2020,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(try await rig.session().transcription.transcript.text == "a")
     }
 
-    /// A refused chord that turns out to be a typed key's modifier - Shift and Right Option
-    /// held for a special character - was never dictation, so its refusal turned nothing away
-    /// and nothing is reported as failed.
-    @Test func aRefusedChordUsedAsAModifierIsNoFailure() async throws {
+    /// A blocked chord that turns out to be a typed key's modifier - Shift and Right Option
+    /// held for a special character - was never dictation, so it turned nothing away and
+    /// nothing is reported as failed.
+    @Test func aBlockedChordUsedAsAModifierIsNoFailure() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.dictation.press(.blocked(Rig.dictation, by: [.leftShift]))
         rig.dictation.press(.ended(.usedAsModifier))
@@ -2031,11 +2031,21 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.held == nil)
     }
 
-    /// The refusal names the chord and the keys held with it, and says an arrow key reads as
-    /// Function, since that is the key the person actually held.
-    @Test func aBlockedChordSaysWhichKeysToLetGoOf() {
-        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.leftShift]))" == "WARNING: Left Shift was held with Right Option, so nothing is listening. Let go and press Right Option alone.")
-        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.function, .leftCommand]))" == "WARNING: Left Command+Function was held with Right Option, so nothing is listening. An arrow or navigation key held counts as Function. Let go and press Right Option alone.")
+    /// A press refused its microphone stays a failure when a key is typed under its chord:
+    /// the microphone failed whatever the chord was for, and the report says so.
+    @Test func aPressRefusedItsMicrophoneUsedAsAModifierIsStillItsFailure() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.hardware.failingToLaunch = BadBuffer()
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.dictation.press(.ended(.usedAsModifier))
+        #expect(await rig.report().failure is NoMicrophone)
+    }
+
+    /// The refusal names the chord and the keys held with it, in words as true on the panel
+    /// while the chord is down as in the menu once it is up.
+    @Test func aBlockedChordSaysWhichKeysWereHeld() {
+        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.leftShift]))" == "WARNING: Right Option pressed with Left Shift held begins no dictation. Press Right Option alone.")
+        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.function, .leftCommand]))" == "WARNING: Right Option pressed with Left Command+Function held begins no dictation. Press Right Option alone.")
     }
 
     /// A press made while an earlier one is still on its way is shown listening, and the

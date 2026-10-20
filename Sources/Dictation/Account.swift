@@ -41,11 +41,9 @@ public struct ChordBlocked: WordFree {
         self.others = others
     }
 
+    /// True while the chord is down, on the panel, and once it is up, in the menu.
     public var description: String {
         let pressed = Hotkey.named(chord)
-        // The session reads a held arrow or navigation key as Function, so a person who held
-        // one is told so by name.
-        let function = others.contains(.function) ? " An arrow or navigation key held counts as Function." : ""
-        return "WARNING: \(Hotkey.named(others)) was held with \(pressed), so nothing is listening.\(function) Let go and press \(pressed) alone."
+        return "WARNING: \(pressed) pressed with \(Hotkey.named(others)) held begins no dictation. Press \(pressed) alone."
     }
 }

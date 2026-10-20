@@ -331,7 +331,8 @@ public final class Dictation {
 
     /// What key-down left for key-up: the mode its chord began it in, and the marks on the
     /// ring, the decode already hearing the press and the commits already queued behind it, or
-    /// the reason nothing is hearing it.
+    /// the reason nothing is hearing it: a press refused, or a chord blocked, which was no
+    /// press at all.
     /// [LAW:types-are-the-program] One value, so an end can never find half a beginning.
     /// [LAW:one-source-of-truth] Key-up reads the mode here, so the press is reported in the
     /// mode its decode was told.
@@ -339,6 +340,7 @@ public final class Dictation {
         case up
         case down(Mode, Open)
         case refused(Mode, Failed)
+        case blocked(Mode, ChordBlocked)
     }
 
     private struct Open {
@@ -466,6 +468,7 @@ public final class Dictation {
         switch press {
         case .down(_, let open): .listening(heard: open.streaming.heard)
         case .refused(_, let failed): .refused(why: failed.failure.account.facts)
+        case .blocked(_, let blocked): .refused(why: blocked.account.facts)
         case .up: unreported > 0 ? .transcribing : .idle
         }
     }
@@ -532,7 +535,7 @@ public final class Dictation {
             guard case .up = press else { preconditionFailure("a chord was blocked while a press was open; the detector pairs every began with an ended") }
             // No microphone and no turn of the engine: nothing is listening, so nothing is
             // taken from a served caller for it.
-            press = .refused(mode, Failed(ChordBlocked(chord: mode.chord, others: others)))
+            press = .blocked(mode, ChordBlocked(chord: mode.chord, others: others))
             show()
         case .ended(let ending):
             let told = ContinuousClock.now
@@ -560,10 +563,15 @@ public final class Dictation {
             case .up:
                 preconditionFailure("a press ended that never began; the detector pairs every ended with a began")
             case .refused(let began, let error):
+                // The microphone or the engine failed whatever the chord turned out to be.
                 mode = began
-                // A chord that was a typed key's modifier was never dictation, so its refusal
-                // turned nothing away. [LAW:types-are-the-program]
-                pending = .unheard(ending == .usedAsModifier ? .usedAsModifier(landed: 0, held: 0) : .failed(error))
+                pending = .unheard(.failed(error))
+                opening = nil
+            case .blocked(let began, let blocked):
+                // A blocked chord that was a typed key's modifier, Shift and Right Option for
+                // a special character, was never dictation, so it turned nothing away.
+                mode = began
+                pending = .unheard(ending == .usedAsModifier ? .usedAsModifier(landed: 0, held: 0) : .failed(Failed(blocked)))
                 opening = nil
             case .down(let began, let down):
                 mode = began
@@ -717,7 +725,7 @@ public final class Dictation {
         let arrived = ContinuousClock.now
         switch press {
         case .down: arrivedDuringPress = hold.held.map { _ in arrived } ?? arrivedDuringPress
-        case .up, .refused: offer(since: .cursorArrived(arrived))
+        case .up, .refused, .blocked: offer(since: .cursorArrived(arrived))
         }
     }
 
@@ -730,7 +738,7 @@ public final class Dictation {
         let vouched = hold.standingGeneration
         switch press {
         case .down: Executor.log.notice("an ask to insert the held words came as a press began and was let go")
-        case .up, .refused:
+        case .up, .refused, .blocked:
             queue("an ask to insert the held words") {
                 // [LAW:no-ambient-temporal-coupling] Taken in its own turn, once every insert
                 // queued before it is answered, so none of those settles words it never carried
@@ -752,7 +760,7 @@ public final class Dictation {
     public func bringBackDismissed() {
         switch press {
         case .down: broughtBackDuringPress = true
-        case .up, .refused: bringBack()
+        case .up, .refused, .blocked: bringBack()
         }
     }
 
