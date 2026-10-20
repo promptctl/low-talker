@@ -38,8 +38,10 @@ public struct InputMethodWatch: Sendable {
 public enum InputMethodStanding: Equatable, Sendable, CustomStringConvertible {
     /// Running, and words may go to it: its build is the app's, or it has not said its build
     /// yet. Not yet said is not refused here. Its greeting says the build before any words go,
-    /// and the inserter refuses there. And a process the supervisor opens is handed the cursor
+    /// and the inserter refuses there. A process the supervisor launched is given the client
     /// in front at once (`InputMethodSupervisor`), so its first arrival follows straight away.
+    /// One already running says its build at the next cursor it is given, and one from before
+    /// cursor arrivals only in the first press's greeting.
     case running(pid: Int32, build: Said)
     /// Running, and of another build, so no words go to it.
     case otherBuild(pid: Int32, BuildMismatch)
