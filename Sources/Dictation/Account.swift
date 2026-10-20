@@ -10,7 +10,7 @@ extension SerialQueueError: WordFree {}
 extension InsertFailure: Accounted {
     public var account: Account {
         switch self {
-        case .refused, .notYetTaken, .unreachable, .answererUnreadable: Account(facts: description)
+        case .refused, .notYetTaken, .unreachable, .answererUnreadable, .buildMismatch: Account(facts: description)
         }
     }
 }

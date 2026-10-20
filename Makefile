@@ -67,14 +67,19 @@ XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swift
 # Package targets, such as the bundle carrying LowTalkerCore's resources, never read
 # project.yml's settings and sign automatically, which refuses a named Developer ID identity.
 # Manual signing set here reaches them too.
+#
+# The source revision is read once and handed to the one xcodebuild call, which hands a
+# command-line setting to every target, so the app and its input method carry the same one
+# and the app sends words only to an input method of its own build.
 define build_app
 	xcodegen generate
 	mkdir -p $(XCODE_RESOLVED_DIR)
 	cp Package.resolved $(XCODE_RESOLVED_DIR)/Package.resolved
+	revision=$$(scripts/source-revision) && \
 	xcodebuild -project LowTalker.xcodeproj -scheme $(SCHEME) -configuration $(CONFIGURATION) \
 		-onlyUsePackageVersionsFromResolvedFile \
 		-derivedDataPath $(DERIVED_DATA) BUNDLED_MODEL_STORE="$(BUNDLED_MODEL_STORE)" \
-		ACCEPTS_CONNECTIONS=$(ACCEPTS_CONNECTIONS) CODE_SIGN_STYLE=Manual \
+		ACCEPTS_CONNECTIONS=$(ACCEPTS_CONNECTIONS) CODE_SIGN_STYLE=Manual SOURCE_REVISION="$$revision" \
 		$(if $(SIGNING_IDENTITY),CODE_SIGN_IDENTITY="$(SIGNING_IDENTITY)") build
 endef
 

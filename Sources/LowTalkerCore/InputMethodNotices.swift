@@ -18,18 +18,18 @@ public final class InputMethodNotices {
     /// The port, where an arrival goes, and how the supervision stops: held together, because
     /// an arrival can still be on its way to the main queue when the notices stop, and
     /// notices that have stopped tell nothing after it. [LAW:no-ambient-temporal-coupling]
-    private var open: (port: NoticePort, cursorArrived: @MainActor () -> Void, unsupervise: Disposal)?
+    private var open: (port: NoticePort, cursorArrived: @MainActor (CursorArrival) -> Void, unsupervise: Disposal)?
 
     /// Throws when the port cannot be hosted, most often because another copy of the app
     /// already hears on it.
-    public init(cursorArrived: @escaping @MainActor () -> Void,
+    public init(cursorArrived: @escaping @MainActor (CursorArrival) -> Void,
                 superviseInputMethod: @MainActor () -> Disposal) throws(PortNotHosted) {
         let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
         let port = try NoticePort(
             queue: DispatchQueue(label: AppIdentity.hotkeyPortName),
             told: { event in log.error("\(event.description, privacy: .public)") },
-            cursorArrived: { [weak self] in
-                DispatchQueue.main.async { MainActor.assumeIsolated { self?.open?.cursorArrived() } }
+            cursorArrived: { [weak self] arrival in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.open?.cursorArrived(arrival) } }
             })
         // Supervised only once the port is hosted, so the first arrival has somewhere to go.
         open = (port, cursorArrived, superviseInputMethod())

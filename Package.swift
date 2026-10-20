@@ -34,14 +34,15 @@ let package = Package(
         // upper layers can both read it without either depending on the other.
         // [LAW:one-way-deps]
         .target(name: "Identity"),
-        .testTarget(name: "IdentityTests", dependencies: ["Identity"]),
+        .testTarget(name: "IdentityTests", dependencies: ["Identity", "Insertion"]),
         // The Text Input Sources framework as this program uses it: where the
         // input source stands on this Mac, the steps that put it there, and the input method's
         // process kept running through LaunchServices. It links only
-        // Identity and the Text Input Sources lock beneath it, so the app reaches it without
-        // the input method process linking anything of the app's. [LAW:one-way-deps]
-        .target(name: "InputSource", dependencies: ["Identity", "TextInputSources"]),
-        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity"]),
+        // Identity, the Text Input Sources lock beneath it, and Insertion for the build the
+        // input method says, so the app reaches it without the input method process linking
+        // anything of the app's. [LAW:one-way-deps]
+        .target(name: "InputSource", dependencies: ["Identity", "TextInputSources", "Insertion"]),
+        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion"]),
         // What macOS has let this process do - listen - read without ever prompting, and asked
         // for only when called. Beneath the core and the setup list alike, so both read one
         // reading. [LAW:one-way-deps]

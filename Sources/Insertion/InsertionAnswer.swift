@@ -252,6 +252,9 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     case unreachable(Unreachable)
     /// This end could not write down who may answer, so it asked nobody.
     case answererUnreadable(PeerIdentity.Unreadable)
+    /// The input method that answered the greeting is from another build, so the words were
+    /// not sent: what it would make of them is not this build's to know.
+    case buildMismatch(BuildMismatch)
 
     public var description: String {
         switch self {
@@ -259,6 +262,7 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
         case .notYetTaken(let notYetTaken): "\(notYetTaken)"
         case .unreachable(let unreachable): "\(unreachable)"
         case .answererUnreadable(let unreadable): "WARNING: The app could not say which input method may answer it: \(unreadable). Your dictation was not sent."
+        case .buildMismatch(let mismatch): "\(mismatch)"
         }
     }
 
@@ -271,7 +275,7 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
         switch self {
         case .notYetTaken: true
         case .unreachable(let unreachable): unreachable.words == .mayHaveLanded
-        case .refused, .answererUnreadable: false
+        case .refused, .answererUnreadable, .buildMismatch: false
         }
     }
 }
@@ -279,9 +283,12 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
 /// The wire, which is the one place either half turns a value into bytes or back.
 ///
 /// Three messages cross it, told apart by their Mach id: the greeting, empty, which the input
-/// method answers empty once it has admitted the sender; the words; and, the other way and
-/// empty, a cursor the input method was just given focus in, which nobody answers.
-/// [LAW:single-enforcer]
+/// method answers with its build once it has admitted the sender; the words; and, the other
+/// way, a cursor the input method was just given focus in, carrying its build, which nobody
+/// answers. [LAW:single-enforcer]
+///
+/// A build crosses as JSON, and none crosses as nothing at all, which is how every input
+/// method from before builds were compared answers a greeting and tells an arrival.
 ///
 /// The request and the answer are both values with more than one field, so both cross as
 /// JSON, which is the codec Swift already writes for them. Both directions are held by
@@ -312,6 +319,31 @@ enum Wire {
 
     static func answer(_ answer: InsertionAnswer) -> Data { try! JSONEncoder().encode(answer) }
 
+    /// The build an input method says, in a greeting's answer and in each arrival.
+    static func said(_ build: Build?) -> Data { build.map { try! JSONEncoder().encode($0) } ?? Data() }
+
+    /// [LAW:parse-dont-validate] The build said, nothing when nothing was said, or nil when
+    /// what was said is no build.
+    private static func build(of data: Data) -> Build?? {
+        guard !data.isEmpty else { return .some(nil) }
+        return (try? JSONDecoder().decode(Build.self, from: data)).map(Optional.some)
+    }
+
+    /// [LAW:parse-dont-validate] A greeting's answer, or nothing at all. The refusal is an
+    /// insert's answer, because the port refuses a sender the same way whichever message
+    /// it sent.
+    static func greeting(of data: Data) -> Greeting? {
+        if let build = build(of: data) { return .admitted(by: build) }
+        guard case .refused(let refusal)? = answer(of: data) else { return nil }
+        return .refused(refusal)
+    }
+
+    enum Greeting: Equatable {
+        /// Admitted, by an input method that said this build, or none.
+        case admitted(by: Build?)
+        case refused(Refusal)
+    }
+
     /// [LAW:parse-dont-validate] An answer or nothing at all.
     ///
     /// An insert naming no app is not refused here: only this installation's input method
@@ -320,9 +352,9 @@ enum Wire {
         try? JSONDecoder().decode(InsertionAnswer.self, from: data)
     }
 
-    /// [LAW:parse-dont-validate] A cursor arrival or not: one carries nothing, so one carrying
-    /// anything is not one.
-    static func isCursorArrival(id: mach_msg_id_t, payload: Data?) -> Bool {
-        id == cursorArrived && (payload ?? Data()).isEmpty
+    /// [LAW:parse-dont-validate] The build a cursor arrival said, nothing when it said none,
+    /// or nil when the message is no cursor arrival.
+    static func arrival(id: mach_msg_id_t, payload: Data?) -> Build?? {
+        id == cursorArrived ? build(of: payload ?? Data()) : nil
     }
 }

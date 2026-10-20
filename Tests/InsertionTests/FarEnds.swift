@@ -15,14 +15,18 @@ import Testing
 /// took too long, and the timeout under test could never fire. [LAW:behavior-not-structure]
 func hostInsertion(name: String, answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer) throws -> InsertionPort {
     try InsertionPort(
-        portName: name, senders: try OwnProcess.identity(), queue: DispatchQueue(label: name),
+        portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: DispatchQueue(label: name),
         told: { Issue.record("the port was told \($0)") }, answer: answer)
 }
 
 /// The app's end, believing only this process.
 func inserter(_ name: String, timeout: Duration = aBudgetTheRunnerCannotSpend) throws -> InputMethodInserter {
-    InputMethodInserter(portName: name, timeout: timeout, answerer: .success(try OwnProcess.identity()))
+    InputMethodInserter(portName: name, timeout: timeout, answerer: .success(try OwnProcess.identity()), build: aBuild)
 }
+
+/// The build the suite plays on both ends. Any values at all: what is under test is that the
+/// two ends agree or do not, never which build either is.
+let aBuild = Build(number: "1", revision: "0123456789ab")
 
 /// Sends `payload` to the port on `name` by hand and returns the bytes it answered, for the
 /// cases that put something on the wire no `Inserter` would. Blocking: call it from a
@@ -102,7 +106,8 @@ enum Probe {
     ) async throws -> String {
         let probe = try url ?? self.url()
         let answering = String(decoding: try JSONEncoder().encode(answerer), as: UTF8.self)
-        return try await onAThreadOfItsOwn { try run(probe, [name, answering, text]) }
+        let playing = String(decoding: try JSONEncoder().encode(aBuild), as: UTF8.self)
+        return try await onAThreadOfItsOwn { try run(probe, [name, answering, playing, text]) }
     }
 
     /// Runs `executable` to completion and returns what it printed, trimmed. Blocking: call

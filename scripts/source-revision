@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# The source revision a build is made from, which both its bundles carry as LTSourceRevision:
+# the commit, and when the working tree differs from it, the tree that was built.
+#
+#   scripts/source-revision    # prints d0830e7a1b2c, or d0830e7a1b2c-dirty-4f1e9c03ab7d
+#
+# The build number counts releases, so every build between two releases carries the same one.
+# This is what tells two of them apart, so a branch package is not taken for the release it
+# replaced (low-reliability-z2z.y22). The tree is written through an index of its own, with
+# every file git does not ignore, so two builds of one HEAD with different edits differ, and
+# two of the same edits agree. [LAW:one-source-of-truth]
+set -euo pipefail
+
+head=$(git rev-parse --short=12 HEAD)
+index=$(mktemp)
+trap '/bin/rm -f "$index"' EXIT
+# A copy of the real index, so files git already hashed are not hashed again.
+/bin/cp "$(git rev-parse --git-path index)" "$index"
+GIT_INDEX_FILE="$index" git add -A
+tree=$(GIT_INDEX_FILE="$index" git write-tree)
+if [ "$tree" = "$(git rev-parse 'HEAD^{tree}')" ]; then
+  echo "$head"
+else
+  echo "$head-dirty-${tree:0:12}"
+fi

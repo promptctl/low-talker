@@ -6,7 +6,7 @@ import Testing
 
 /// What the hotkey port did, in the order it did it, for a case to wait on.
 private enum Arrival: Equatable {
-    case cursorArrived
+    case cursorArrived(CursorArrival)
     case told(String)
 }
 
@@ -16,7 +16,7 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
     let (arrivals, continuation) = AsyncStream<Arrival>.makeStream()
     let port = try NoticePort(
         portName: name, senders: senders, queue: DispatchQueue(label: name),
-        told: { continuation.yield(.told($0.description)) }, cursorArrived: { continuation.yield(.cursorArrived) })
+        told: { continuation.yield(.told($0.description)) }, cursorArrived: { continuation.yield(.cursorArrived($0)) })
     return (port, arrivals)
 }
 
@@ -29,19 +29,31 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
     @Test(.timeLimit(.minutes(1))) func everyCursorArrivalIsHeard() async throws {
         let name = aPortNobodyElseUses()
         let (port, arrivals) = try hostNotices(name: name, senders: try OwnProcess.identity())
-        let sender = NoticeSender(portName: name)
+        let sender = NoticeSender(portName: name, build: aBuild)
         #expect((0..<3).map { _ in sender.tellCursorArrived() } == Array(repeating: .told, count: 3))
         var arrived: [Arrival] = []
         for await arrival in arrivals.prefix(3) { arrived.append(arrival) }
-        #expect(arrived == Array(repeating: .cursorArrived, count: 3))
+        #expect(arrived == Array(repeating: .cursorArrived(CursorArrival(pid: getpid(), build: aBuild)), count: 3))
         withExtendedLifetime(port) {}
     }
 
-    /// A cursor arrival carries nothing, so one carrying bytes is not one.
-    @Test func aCursorArrivalCarryingBytesIsNotOne() {
-        #expect(Wire.isCursorArrival(id: Wire.cursorArrived, payload: nil))
-        #expect(Wire.isCursorArrival(id: Wire.cursorArrived, payload: Data()))
-        #expect(!Wire.isCursorArrival(id: Wire.cursorArrived, payload: Data([1])))
+    /// An input method whose bundle carries no build tells its arrivals without one, as every
+    /// input method from before builds were compared does, and the app hears that it said none.
+    @Test(.timeLimit(.minutes(1))) func anArrivalWithoutABuildIsHeardSayingNone() async throws {
+        let name = aPortNobodyElseUses()
+        let (port, arrivals) = try hostNotices(name: name, senders: try OwnProcess.identity())
+        #expect(NoticeSender(portName: name, build: nil).tellCursorArrived() == .told)
+        #expect(await arrivals.first(where: { _ in true }) == .cursorArrived(CursorArrival(pid: getpid(), build: nil)))
+        withExtendedLifetime(port) {}
+    }
+
+    /// A cursor arrival carries a build or nothing, so one carrying other bytes is not one.
+    @Test func aCursorArrivalCarryingBytesThatAreNoBuildIsNotOne() {
+        #expect(Wire.arrival(id: Wire.cursorArrived, payload: nil) == .some(nil))
+        #expect(Wire.arrival(id: Wire.cursorArrived, payload: Data()) == .some(nil))
+        #expect(Wire.arrival(id: Wire.cursorArrived, payload: Wire.said(aBuild)) == .some(aBuild))
+        #expect(Wire.arrival(id: Wire.cursorArrived, payload: Data([1])) == nil)
+        #expect(Wire.arrival(id: Wire.greeting, payload: Wire.said(aBuild)) == nil)
     }
 
     /// The name is one anyone can compute, and an arrival heard from anyone would offer held
@@ -51,7 +63,7 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
         let name = aPortNobodyElseUses()
         let someoneElse = PeerIdentity.signed(identifier: "ai.promptctl.low-talker.test.inputmethod", certificate: String(repeating: "0", count: 40))
         let (port, arrivals) = try hostNotices(name: name, senders: someoneElse)
-        #expect(NoticeSender(portName: name).tellCursorArrived() == .told)
+        #expect(NoticeSender(portName: name, build: aBuild).tellCursorArrived() == .told)
         guard case .told(let said)? = await arrivals.first(where: { _ in true }) else {
             Issue.record("the port heard a sender it was not told to hear")
             return
@@ -80,7 +92,7 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
 
     @Test func anArrivalWithNobodyListeningSaysSo() {
         let name = aPortNobodyElseUses()
-        #expect(NoticeSender(portName: name).tellCursorArrived() == .nobodyIsListening(port: name))
+        #expect(NoticeSender(portName: name, build: aBuild).tellCursorArrived() == .nobodyIsListening(port: name))
     }
 
     /// The app hosts the name again each time it rebuilds its loop, straight after letting

@@ -203,8 +203,9 @@ targets:
           printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Move</key><array><array><string>%s</string><string>%s</string></array></array></dict></plist>\n' \
             '${Home}/.config/low-talker/config.toml' "${CONFIG_IN_CONTAINER}" \
             > "${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/container-migration.plist"
-      # [LAW:no-silent-failure] A bundle that ships without the version project.yml sets
-      # fails the build rather than shipping quietly. Checked here, on the built plist,
+      # [LAW:no-silent-failure] A bundle that ships without the version project.yml sets,
+      # or without the source revision the Makefile hands the build, fails the build rather
+      # than shipping quietly. Checked here, on the built plist,
       # because no test sees a shipped bundle: `make test` never builds the app. The input
       # method runs the same step.
       - &versionCheck
@@ -218,11 +219,12 @@ targets:
           set -euo pipefail
           plist="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
           # An empty setting reaches the script unset, not empty.
-          wanted="${MARKETING_VERSION:-} (${CURRENT_PROJECT_VERSION:-})"
+          wanted="${MARKETING_VERSION:-} (${CURRENT_PROJECT_VERSION:-}) ${SOURCE_REVISION:-}"
           short=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${plist}" 2>/dev/null) || short="none"
           build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${plist}" 2>/dev/null) || build="none"
-          if [ -z "${MARKETING_VERSION:-}" ] || [ -z "${CURRENT_PROJECT_VERSION:-}" ] || [ "${short} (${build})" != "${wanted}" ]; then
-            echo "error: ${plist} carries version ${short} (${build}); project.yml sets '${wanted}', and both must be set and equal" >&2
+          revision=$(/usr/libexec/PlistBuddy -c "Print :LTSourceRevision" "${plist}" 2>/dev/null) || revision="none"
+          if [ -z "${MARKETING_VERSION:-}" ] || [ -z "${CURRENT_PROJECT_VERSION:-}" ] || [ -z "${SOURCE_REVISION:-}" ] || [ "${short} (${build}) ${revision}" != "${wanted}" ]; then
+            echo "error: ${plist} carries version ${short} (${build}) ${revision}; the build sets '${wanted}', and all three must be set and equal. SOURCE_REVISION is the Makefile's: build with make app" >&2
             exit 1
           fi
     # xcodegen writes this plist, and Xcode merges it with the keys GENERATE_INFOPLIST_FILE
@@ -234,6 +236,8 @@ targets:
         # second version the shipped bundle never carries.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # What `Build` reads beside the number, and the Makefile alone sets: see build_app.
+        LTSourceRevision: $(SOURCE_REVISION)
     settings:
       base:
         PRODUCT_NAME: LowTalker
@@ -298,6 +302,7 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LTSourceRevision: $(SOURCE_REVISION)
         LSUIElement: true
         NSPrincipalClass: NSApplication
         NSSupportsSuddenTermination: true
