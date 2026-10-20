@@ -49,7 +49,7 @@ private enum CaseSensitiveVolume {
         } catch {
             result = .failure(error)
         }
-        try await onAThreadOfItsOwn {
+        await onAThreadOfItsOwn {
             try? hdiutil("detach", mountPoint.path, "-quiet")
             try? FileManager.default.removeItem(at: mountPoint)
             try? FileManager.default.removeItem(at: image)

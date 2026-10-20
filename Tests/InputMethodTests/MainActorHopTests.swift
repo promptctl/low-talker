@@ -1,6 +1,7 @@
 import Foundation
 @testable import InputMethod
-import OSLog
+import os
+import TestProbes
 import Testing
 
 /// An IMK callback reaches the main actor however IMK called it, and says which way it came in
@@ -38,13 +39,7 @@ import Testing
         #expect(said.allSatisfy { $0.hasPrefix("MainActorHopTests.offThread reached the main actor from another thread, after waiting ") })
     }
 
-    /// The `imk` lines since `since`, read off the main actor: the store takes seconds, and the
-    /// main actor's other tests would wait on it.
     private static func lines(since: Date) async throws -> [String] {
-        try await Task.detached {
-            let store = try OSLogStore(scope: .currentProcessIdentifier)
-            return try store.getEntries(at: store.position(date: since), matching: NSPredicate(format: "category == 'imk'"))
-                .map(\.composedMessage)
-        }.value
+        try await loggedLines(category: "imk", since: since)
     }
 }
