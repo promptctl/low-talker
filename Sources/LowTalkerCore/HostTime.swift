@@ -16,6 +16,13 @@ public struct HostTime: Hashable, Comparable, Sendable {
         self.uptime = uptime
     }
 
+    /// A moment given in seconds since the machine came up, the unit `NSEvent.timestamp` and
+    /// `ProcessInfo.systemUptime` count in. Rounded: seconds as a double do not land on whole
+    /// nanoseconds.
+    public init(seconds: TimeInterval) {
+        self.init(uptime: .nanoseconds(Int64((seconds * 1_000_000_000).rounded())))
+    }
+
     /// [LAW:effects-at-boundaries] The one reading of this clock; a moment that comes
     /// from an event carries its own and never wants this.
     public static var now: HostTime {

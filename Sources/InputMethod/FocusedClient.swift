@@ -137,7 +137,8 @@ public final class FocusedClient {
     /// reading, and it is here because committing into a window the person has left is the
     /// one outcome worse than refusing.
     ///
-    /// Which app is in front, which app holds secure input and where the screens are arrive
+    /// Which app is in front, which app holds secure input, whether this source is selected
+    /// and where the screens are arrive
     /// as values rather than being read here, so the whole of this decision is testable
     /// without a window server and the one reading of the workspace happens where the other
     /// effects are. [LAW:effects-at-boundaries]
@@ -152,6 +153,10 @@ public final class FocusedClient {
     /// has stopped routing to - so no commit is attempted and the refusal names the thing to
     /// fix. [LAW:no-silent-failure]
     ///
+    /// Then the input source: with another one selected the text input system hands this
+    /// input method no client, so the cursor last held is one it has stopped routing to. The
+    /// refusal names the Input menu, which is the fix, and not a field, which is not.
+    ///
     /// Last, the cursor's client has to answer that a text field is behind it. Every app
     /// hands the input method a client, a window with no field focused included, and what is
     /// committed into such a client goes nowhere while the commit returns as if it landed.
@@ -159,13 +164,14 @@ public final class FocusedClient {
     /// go to, and the log line names that answer rather than asking again.
     /// [LAW:no-silent-failure] [LAW:one-source-of-truth]
     public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?,
-                        screens: [CGRect]) -> InFront {
+                        selected: Bool, screens: [CGRect]) -> InFront {
         func seen(_ field: FieldAnswer?, _ cursor: Result<any TextCursor, Refusal>) -> InFront {
-            InFront(frontmost: frontmost, secureInputHolder: holder, cursorApplication: self.focus?.application, field: field,
-                    screens: screens, cursor: cursor)
+            InFront(frontmost: frontmost, secureInputHolder: holder, selected: selected, cursorApplication: self.focus?.application,
+                    field: field, screens: screens, cursor: cursor)
         }
         guard destination.admits(frontmost) else { return seen(nil, .failure(.dictationIsInAnotherApp)) }
         guard holder == nil else { return seen(nil, .failure(.secureInputIsOn)) }
+        guard selected else { return seen(nil, .failure(.inputSourceIsNotSelected)) }
         guard let focus else { return seen(nil, .failure(.noTextFieldHasFocus)) }
         guard focus.application == frontmost else { return seen(nil, .failure(.cursorIsInAnotherApp)) }
         let field = focus.field
@@ -174,7 +180,7 @@ public final class FocusedClient {
 }
 
 /// What an insert saw on the main actor: the app in front, the app holding secure input,
-/// the cursor held, what its client answered about its field, and the decision made from
+/// whether this source was selected, the cursor held, what its client answered about its field, and the decision made from
 /// them.
 ///
 /// The app in front is named because the refusal that matters most is the one where it is
@@ -186,6 +192,7 @@ public final class FocusedClient {
 public struct InFront: Sendable, CustomStringConvertible {
     let frontmost: String?
     let secureInputHolder: String?
+    let selected: Bool
     let cursorApplication: String?
     /// Asked only of the cursor the words would go to, so absent for every refusal decided
     /// before it.
@@ -198,6 +205,7 @@ public struct InFront: Sendable, CustomStringConvertible {
             + (cursorApplication.map { "the cursor in \($0)" } ?? "no cursor")
             + (field.map(said) ?? "")
             + (secureInputHolder.map { ", secure input held by \($0)" } ?? "")
+            + (selected ? "" : ", another input source selected")
     }
 
     /// A caret on no screen names the screens it was judged against, so an empty list reads

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Identity
 
 /// Which cursor an insert's words may go to.
 ///
@@ -133,6 +134,11 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// holds it. Measured on 2026-09-22: iTerm2 with Secure Keyboard Entry on greys this
     /// input method out of the Input menu and it is never handed a client.
     case secureInputIsOn
+    /// Another input source is selected, so the text input system hands this input method
+    /// no client to type into. Its own reason and not `noTextFieldHasFocus`, because the fix
+    /// is the Input menu and not a click into a field, and because selecting this source
+    /// again is the cursor arrival that offers the words once more.
+    case inputSourceIsNotSelected
     /// The request came from a process that is not this installation's app, signed as the
     /// input method is. Answered rather than ignored, so the sender learns why instead of
     /// waiting out its timeout. This installation's own app never reads it: an input method
@@ -151,6 +157,8 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
         case .dictationIsInAnotherApp: "WARNING: You moved to another app while dictating."
         case .requestWasNotReadable: "WARNING: The input method was asked something it could not read. Nothing was inserted."
         case .secureInputIsOn: "WARNING: An app has secure keyboard entry on, and macOS turns input methods off while it does. Your dictation was not inserted."
+        case .inputSourceIsNotSelected:
+            "WARNING: \(AppIdentity.displayName) is not the selected input source, so it cannot type. Your dictation was not inserted; select \(AppIdentity.displayName) in the Input menu and it is offered again."
         case .senderIsNotThisInstallationsApp:
             "WARNING: The input method takes words only from the app, signed by the certificate that signed it, and this process is not that app. Your dictation was not inserted."
         case .inputMethodIsBusy:
@@ -270,10 +278,9 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
 
 /// The wire, which is the one place either half turns a value into bytes or back.
 ///
-/// Four messages cross it, told apart by their Mach id: the greeting, empty, which the input
-/// method answers empty once it has admitted the sender; the words; and, the other way, the
-/// notices: the modifier keys the input method was just handed, and, empty, a cursor it was
-/// just given focus in, neither of which anybody answers.
+/// Three messages cross it, told apart by their Mach id: the greeting, empty, which the input
+/// method answers empty once it has admitted the sender; the words; and, the other way and
+/// empty, a cursor the input method was just given focus in, which nobody answers.
 /// [LAW:single-enforcer]
 ///
 /// The request and the answer are both values with more than one field, so both cross as
@@ -283,7 +290,8 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
 enum Wire {
     static let greeting: mach_msg_id_t = 1
     static let insert: mach_msg_id_t = 2
-    static let modifiers: mach_msg_id_t = 3
+    // 3 was the modifier keys, which the app now hears itself. Not reused, so an input method
+    // from before still running past an install is told as not understood, not misread.
     static let cursorArrived: mach_msg_id_t = 4
 
     /// The first byte of every request, and one no UTF-8 text contains. An input method built
@@ -312,42 +320,9 @@ enum Wire {
         try? JSONDecoder().decode(InsertionAnswer.self, from: data)
     }
 
-    /// Two words, the flags and the moment, then a third when a key was typed before the
-    /// change, in this Mac's own byte order: both ends run on the one machine.
-    static func modifiers(_ held: HeldModifiers) -> Data {
-        held.typedUptimeNanoseconds.map { typed in withUnsafeBytes(of: (held.flags, held.uptimeNanoseconds, typed)) { Data($0) } }
-            ?? withUnsafeBytes(of: (held.flags, held.uptimeNanoseconds)) { Data($0) }
-    }
-
-    static func notice(_ notice: Notice) -> (id: mach_msg_id_t, payload: Data) {
-        switch notice {
-        case .modifiersMoved(let held): (modifiers, modifiers(held))
-        case .cursorArrived: (cursorArrived, Data())
-        }
-    }
-
-    /// [LAW:parse-dont-validate] A notice or nothing at all. A cursor arrival carries nothing,
-    /// so one carrying anything is not one.
-    static func notice(id: mach_msg_id_t, payload: Data?) -> Notice? {
-        switch id {
-        case modifiers: payload.flatMap(heldModifiers(of:)).map(Notice.modifiersMoved)
-        case cursorArrived: (payload ?? Data()).isEmpty ? .cursorArrived : nil
-        default: nil
-        }
-    }
-
-    /// [LAW:parse-dont-validate] Held modifiers or nothing at all: bytes of any other length
-    /// are not a message this wire sends.
-    static func heldModifiers(of data: Data) -> HeldModifiers? {
-        switch data.count {
-        case MemoryLayout<(UInt64, UInt64)>.size:
-            let (flags, uptime) = data.withUnsafeBytes { $0.loadUnaligned(as: (UInt64, UInt64).self) }
-            return HeldModifiers(flags: flags, uptimeNanoseconds: uptime, typedUptimeNanoseconds: nil)
-        case MemoryLayout<(UInt64, UInt64, UInt64)>.size:
-            let (flags, uptime, typed) = data.withUnsafeBytes { $0.loadUnaligned(as: (UInt64, UInt64, UInt64).self) }
-            return HeldModifiers(flags: flags, uptimeNanoseconds: uptime, typedUptimeNanoseconds: typed)
-        default:
-            return nil
-        }
+    /// [LAW:parse-dont-validate] A cursor arrival or not: one carries nothing, so one carrying
+    /// anything is not one.
+    static func isCursorArrival(id: mach_msg_id_t, payload: Data?) -> Bool {
+        id == cursorArrived && (payload ?? Data()).isEmpty
     }
 }

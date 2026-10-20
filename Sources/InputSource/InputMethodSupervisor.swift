@@ -1,14 +1,14 @@
 import AppKit
 import Identity
 
-/// The input method's process kept running for as long as the app hears its hotkey through
-/// it: opened through LaunchServices, watched until it ends, and opened again.
+/// The input method's process kept running for as long as the app listens: opened through
+/// LaunchServices, watched until it ends, and opened again.
 ///
 /// Measured on studious, 2026-10-18: an input method that crashes stays gone. Nothing
-/// relaunches it - not the app in front, not a switch to another app - and every chord
-/// goes unheard while the menu still says how to press it. Opened again through
-/// LaunchServices without taking the front, it is handed keys at once by the app that was
-/// in front, with no change of focus; the first chord after loses its key-down.
+/// relaunches it - not the app in front, not a switch to another app - and nothing can type
+/// a dictation's words while it is gone. Opened again through LaunchServices without taking
+/// the front, it is given the client of the app that was in front at once, with no change
+/// of focus.
 ///
 /// [LAW:dataflow-not-control-flow] Every turn of the watch is the same steps: wait out the
 /// throttle, open, tell, wait for the end, tell. Opening an input method that is already

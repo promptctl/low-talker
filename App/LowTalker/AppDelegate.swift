@@ -216,6 +216,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private struct Listening {
         let hotkey: Hotkey
         let dictation: Dictation
+        /// The input method's notices, hosted for as long as the hotkey is up. Nil when they or
+        /// the hotkey could not come up, and then neither is.
+        let notices: InputMethodNotices?
+
+        /// [LAW:single-enforcer] Every teardown, in one order: the hotkey comes down and what
+        /// it handed the main queue is delivered, then the notices stop, so the port's name is
+        /// free for the loop built next.
+        @MainActor func stop() async {
+            await hotkey.stopAndDeliver()
+            notices?.stop()
+        }
     }
 
     private var listening: Listening?
@@ -269,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func adopt() async {
         if let previous = listening {
             listening = nil
-            await previous.hotkey.stopAndDeliver()
+            await previous.stop()
             // A refused wait is reported and the rebuild still made: a loop that cannot be
             // replaced would be the worse failure of the two. [LAW:no-silent-failure]
             do throws(SerialQueueError) { try await previous.dictation.finish() } catch { reportFailure(Dictation.Failed(error), of: nil) }
@@ -281,10 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A loop is built only over capture holding the microphone, capture starts only over
         // a config that was read, and a save the file refused keeps the one that ran.
         guard case .success(let config) = config else { preconditionFailure("a loop is adopted only once the config has been read") }
-        // The input method tells each cursor it is given focus in, and the loop listening then
-        // offers it what is held.
-        let hotkey = Hotkey(listeningFor: config, cursorArrived: { [unowned self] in listening?.dictation.cursorArrived() },
-                            superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
+        let hotkey = Hotkey(listeningFor: config)
         let dictation = Dictation(
             capture: capture,
             // A press asks the bench first: while a run holds the Neural Engine, the press is
@@ -305,25 +313,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             report: { [unowned self] in report($0) },
             showing: { [unowned self] in show($0) }
         )
-        listening = Listening(hotkey: hotkey, dictation: dictation)
         // The hotkey goes up only over an input method that installed: a hotkey over one that
         // refused would open the microphone on every press for words that go nowhere, while
         // the status line said the loop was off. [LAW:no-silent-failure]
-        let hearing = installed.flatMap {
+        //
+        // And only over notices that were hosted. The input method tells each cursor it is
+        // given focus in, and the loop listening then offers it what is held. The port's name
+        // is one per login session, so a second copy of the app stops here and hears nothing.
+        let notices = installed.flatMap {
+            Result { () throws(PortNotHosted) in
+                try InputMethodNotices(
+                    cursorArrived: { [unowned self] in listening?.dictation.cursorArrived() },
+                    superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
+            }.mapError { LoopRefusal(stringLiteral: "\($0)") }
+        }
+        // Notices whose hotkey did not go up are stopped with it, so their supervision says
+        // nothing that would put a listening line over the refusal.
+        let hearing = notices.flatMap { notices in
             Result {
                 try hotkey.start { [unowned self] transition in
                     if case .began = transition { lastFailure = nil }
                     dictation.press(transition)
                 }
-            }.mapError { LoopRefusal(stringLiteral: "\($0)") }
+                return notices
+            }.mapError { error in
+                notices.stop()
+                return LoopRefusal(stringLiteral: "\(error)")
+            }
         }
+        listening = Listening(hotkey: hotkey, dictation: dictation, notices: try? hearing.get())
         // A hotkey that went up says how to press it once the input method's process is
         // running, which is that process's event to tell; see `show(_:)`.
         if case .failure(let refusal) = hearing { showHotkeyStatus(.off(refusal.reason)) }
     }
 
-    /// The input method's process as the hotkey keeps it: the line says how to press only
-    /// while one is running, since a chord is heard through nothing else.
+    /// The input method's process as the notices keep it: the line says how to press only
+    /// while one is running, since nothing else can type the words.
     private func show(_ inputMethod: InputMethodSupervisor.Event) {
         log.notice("input method: \(inputMethod, privacy: .public)")
         switch inputMethod {
@@ -674,7 +699,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // when the quit arrives is ended as lapsed and reported, rather than the app
             // going mid-utterance leaving nothing behind to say it did, and no key-down
             // arriving during the wait can open a session there is no longer anyone to close.
-            await listening?.hotkey.stopAndDeliver()
+            await listening?.stop()
             // Every session's audio ended at its key-up and no key-down can open another, so
             // the microphone goes now: a resting mode that holds it open does not hold it
             // through a drain that can wait minutes on a cold load.
@@ -786,20 +811,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return microphone
     }
 
-    /// Why a press of the chord would not be heard right now, read at the moment the menu
-    /// opens: the input method is handed keys only while its source is the one in use, and by
-    /// no app while one holds Secure Event Input. Empty when neither stands in the way.
+    /// Why the words of a press would be held rather than typed right now, read at the moment
+    /// the menu opens: the input method types only while its source is the one in use, and
+    /// into nothing while an app holds Secure Event Input. Empty when neither stands in the way.
+    /// The chord is heard either way.
     ///
-    /// [LAW:no-silent-failure] A hotkey line that read as working while nothing could hear
-    /// it would send the person after a broken app rather than the Input menu or the
-    /// password field in front of them.
-    private func unheardBecause() -> [String] {
+    /// [LAW:no-silent-failure] A hotkey line that read as working while nothing could type
+    /// would send the person after a broken app rather than the Input menu or the password
+    /// field in front of them.
+    private func untypedBecause() -> [String] {
         let reasons: [String?] = [
             InstalledInputMethod.isSelected() ? nil : "\(AppIdentity.displayName) is not the selected input source",
             IsSecureEventInputEnabled() ? "an app holds Secure Event Input, as a password field does" : nil,
         ]
         let found = reasons.compactMap { $0 }
-        log.notice("hotkey: unheard because [\(found.joined(separator: "; "), privacy: .public)]")
+        log.notice("hotkey: words held, not typed, because [\(found.joined(separator: "; "), privacy: .public)]")
         return found
     }
 
@@ -833,7 +859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // the config asked to hold open says so here too. [LAW:no-silent-failure]
         let microphone = capture.doing
         log.notice("microphone at rest: \(microphone, privacy: .public)")
-        let unheard = unheardBecause()
+        let untyped = untypedBecause()
         let globeKey = globeKeyClash()
         let openAtLogin = loginItem.current
         loginLog.notice("open at login: \(openAtLogin, privacy: .public)")
@@ -857,7 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hotkey = "Hotkey: \(hotkeyStatus)"
         let hotkeyRow = if case .off = hotkeyStatus { errorRow(hotkey, .hotkey) } else { readout(hotkey) }
         menu.addItem(hotkeyRow)
-        for reason in unheard { menu.addItem(readout("    Not heard now: \(reason)")) }
+        for reason in untyped { menu.addItem(readout("    Not typed now: \(reason)")) }
         globeKey.map { menu.addItem(readout("    \($0)")) }
         lastFailure.map { menu.addItem(errorRow($0, .lastDictation)) }
         // What keeping the held words for the next launch failed at: a fact about the store,

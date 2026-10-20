@@ -1,10 +1,9 @@
 import IOKit.hidsystem
-import Insertion
 
 /// Where the hotkey is told each modifier key moving.
 ///
-/// [LAW:effects-at-boundaries] What tells it is an effect against another process - the
-/// input method, and the session's modifier state behind it - so it sits behind this seam,
+/// [LAW:effects-at-boundaries] What tells it is the window server - its events, and the
+/// session's modifier state behind them - so it sits behind this seam,
 /// and the press detection above runs in tests against a keyboard a test types on.
 @MainActor
 public protocol ModifierFeed {
