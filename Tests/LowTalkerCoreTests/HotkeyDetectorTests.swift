@@ -19,12 +19,12 @@ private struct Keyboard {
         detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
 
-    mutating func press(_ modifier: Modifier, at ms: Int64) -> HotkeyDetector.Transition? {
+    mutating func press(_ modifier: Modifier, at ms: Int64) -> [HotkeyDetector.Transition] {
         held.insert(modifier)
         return detector.handle(KeyEvent(key: modifier, direction: .down, modifiers: held, time: at(ms), lastTyped: lastTyped))
     }
 
-    mutating func release(_ modifier: Modifier, at ms: Int64) -> HotkeyDetector.Transition? {
+    mutating func release(_ modifier: Modifier, at ms: Int64) -> [HotkeyDetector.Transition] {
         held.remove(modifier)
         return detector.handle(KeyEvent(key: modifier, direction: .up, modifiers: held, time: at(ms), lastTyped: lastTyped))
     }
@@ -38,8 +38,8 @@ private struct Keyboard {
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }
 
-private func began(_ mode: Mode, at ms: Int64) -> HotkeyDetector.Transition { .began(mode, at: at(ms)) }
-private func ended(_ press: PressKind, at ms: Int64) -> HotkeyDetector.Transition { .ended(.released(press, at: at(ms))) }
+private func began(_ mode: Mode, at ms: Int64) -> [HotkeyDetector.Transition] { [.began(mode, at: at(ms))] }
+private func ended(_ press: PressKind, at ms: Int64) -> [HotkeyDetector.Transition] { [.ended(.released(press, at: at(ms)))] }
 
 /// Modes the test vouches for: listed by hand, none sharing a chord or a name.
 private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
@@ -48,7 +48,7 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     @Test func aPressReleasedAfterTheThresholdIsAHold() {
         var keyboard = Keyboard()
         #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
-        #expect(keyboard.detector.phase == .held(rightOption.chord, since: at(0)))
+        #expect(keyboard.detector.phase == .held(rightOption, since: at(0)))
         #expect(keyboard.release(.rightOption, at: 400) == ended(.hold, at: 400))
         #expect(keyboard.detector.phase == .idle)
     }
@@ -58,11 +58,11 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     @Test func aPressReleasedWithinTheThresholdLatchesUntilTheNextPress() {
         var keyboard = Keyboard()
         #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
-        #expect(keyboard.release(.rightOption, at: 100) == nil)
-        #expect(keyboard.detector.phase == .latched(rightOption.chord))
+        #expect(keyboard.release(.rightOption, at: 100) == [])
+        #expect(keyboard.detector.phase == .latched(rightOption))
         #expect(keyboard.press(.rightOption, at: 5000) == ended(.tap, at: 5000))
         #expect(keyboard.detector.phase == .idle)
-        #expect(keyboard.release(.rightOption, at: 6000) == nil)
+        #expect(keyboard.release(.rightOption, at: 6000) == [])
         #expect(keyboard.detector.phase == .idle)
     }
 
@@ -82,14 +82,14 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     @Test func otherModifiersChangeNothingInEveryPhase() {
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 20)
-        #expect(keyboard.press(.leftOption, at: 50) == nil)
-        #expect(keyboard.release(.leftOption, at: 60) == nil)
-        #expect(keyboard.detector.phase == .held(rightOption.chord, since: at(20)))
+        #expect(keyboard.press(.leftOption, at: 50) == [])
+        #expect(keyboard.release(.leftOption, at: 60) == [])
+        #expect(keyboard.detector.phase == .held(rightOption, since: at(20)))
         _ = keyboard.release(.rightOption, at: 70)
-        #expect(keyboard.detector.phase == .latched(rightOption.chord))
-        #expect(keyboard.press(.leftShift, at: 80) == nil)
-        #expect(keyboard.release(.leftShift, at: 90) == nil)
-        #expect(keyboard.detector.phase == .latched(rightOption.chord))
+        #expect(keyboard.detector.phase == .latched(rightOption))
+        #expect(keyboard.press(.leftShift, at: 80) == [])
+        #expect(keyboard.release(.leftShift, at: 90) == [])
+        #expect(keyboard.detector.phase == .latched(rightOption))
     }
 
     /// Right Option with Command already held is not the chord, so no press begins, but it is
@@ -97,10 +97,10 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     /// before speaking.
     @Test func theChordWithAnotherModifierHeldIsBlocked() {
         var keyboard = Keyboard()
-        #expect(keyboard.press(.leftCommand, at: 0) == nil)
-        #expect(keyboard.press(.rightOption, at: 10) == .blocked(rightOption, by: [.leftCommand]))
+        #expect(keyboard.press(.leftCommand, at: 0) == [])
+        #expect(keyboard.press(.rightOption, at: 10) == [.blocked(rightOption, by: [.leftCommand])])
         #expect(keyboard.detector.phase == .blocked(rightOption.chord, since: at(10)))
-        #expect(keyboard.release(.leftCommand, at: 300) == nil)
+        #expect(keyboard.release(.leftCommand, at: 300) == [])
         #expect(keyboard.release(.rightOption, at: 400) == ended(.hold, at: 400))
         #expect(keyboard.detector.phase == .idle)
         #expect(keyboard.press(.rightOption, at: 1000) == began(rightOption, at: 1000))
@@ -136,7 +136,7 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         _ = keyboard.press(.leftShift, at: 0)
         _ = keyboard.press(.rightOption, at: 10)
         keyboard.type(at: 40)
-        #expect(keyboard.release(.rightOption, at: 90) == .ended(.usedAsModifier))
+        #expect(keyboard.release(.rightOption, at: 90) == [.ended(.usedAsModifier)])
     }
 
     /// Of the chords the extra keys block, the one with the most keys is the one named.
@@ -144,7 +144,7 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         var keyboard = Keyboard(modes: modes(rightOption, command))
         _ = keyboard.press(.leftShift, at: 0)
         _ = keyboard.press(.function, at: 5)
-        #expect(keyboard.press(.rightOption, at: 10) == .blocked(command, by: [.function]))
+        #expect(keyboard.press(.rightOption, at: 10) == [.blocked(command, by: [.function])])
     }
 
     /// A blocked chord ends with the hotkey's lapse like any press.
@@ -162,7 +162,7 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         _ = keyboard.press(.leftShift, at: 0)
         _ = keyboard.press(.rightOption, at: 10)
         _ = keyboard.release(.leftShift, at: 20)
-        #expect(keyboard.press(.rightCommand, at: 30) == nil)
+        #expect(keyboard.press(.rightCommand, at: 30) == [])
         #expect(keyboard.detector.phase == .blocked(rightOption.chord, since: at(10)))
     }
 
@@ -171,9 +171,9 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     @Test func aChordCompletedOnTopOfAHeldOneIsIgnored() {
         var keyboard = Keyboard(modes: modes(rightOption, command))
         #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
-        #expect(keyboard.press(.leftShift, at: 100) == nil)
-        #expect(keyboard.detector.phase == .held(rightOption.chord, since: at(0)))
-        #expect(keyboard.release(.leftShift, at: 200) == nil)
+        #expect(keyboard.press(.leftShift, at: 100) == [])
+        #expect(keyboard.detector.phase == .held(rightOption, since: at(0)))
+        #expect(keyboard.release(.leftShift, at: 200) == [])
         #expect(keyboard.release(.rightOption, at: 400) == ended(.hold, at: 400))
     }
 
@@ -181,11 +181,11 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     /// the press.
     @Test func theOrderOfKeysPicksTheChord() {
         var keyboard = Keyboard(modes: modes(rightOption, command))
-        #expect(keyboard.press(.leftShift, at: 0) == nil)
+        #expect(keyboard.press(.leftShift, at: 0) == [])
         #expect(keyboard.press(.rightOption, at: 10) == began(command, at: 10))
         #expect(keyboard.release(.leftShift, at: 400) == ended(.hold, at: 400))
         #expect(keyboard.detector.phase == .idle)
-        #expect(keyboard.release(.rightOption, at: 410) == nil)
+        #expect(keyboard.release(.rightOption, at: 410) == [])
     }
 
     /// The two-key chord released on either key within the threshold latches like any tap.
@@ -193,10 +193,10 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         var keyboard = Keyboard(modes: modes(rightOption, command))
         _ = keyboard.press(.leftShift, at: 0)
         #expect(keyboard.press(.rightOption, at: 10) == began(command, at: 10))
-        #expect(keyboard.release(.leftShift, at: 100) == nil)
-        #expect(keyboard.detector.phase == .latched(command.chord))
-        #expect(keyboard.release(.rightOption, at: 110) == nil)
-        #expect(keyboard.detector.phase == .latched(command.chord))
+        #expect(keyboard.release(.leftShift, at: 100) == [])
+        #expect(keyboard.detector.phase == .latched(command))
+        #expect(keyboard.release(.rightOption, at: 110) == [])
+        #expect(keyboard.detector.phase == .latched(command))
     }
 
     /// A saved config moves the chord mid-hold: the press open under the old chord is
@@ -206,10 +206,10 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         var keyboard = Keyboard()
         #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
         keyboard.detector.listen(for: modes(rightCommand))
-        #expect(keyboard.detector.phase == .held(rightOption.chord, since: at(0)))
+        #expect(keyboard.detector.phase == .held(rightOption, since: at(0)))
         #expect(keyboard.release(.rightOption, at: 400) == ended(.hold, at: 400))
-        #expect(keyboard.press(.rightOption, at: 500) == nil)
-        #expect(keyboard.release(.rightOption, at: 900) == nil)
+        #expect(keyboard.press(.rightOption, at: 500) == [])
+        #expect(keyboard.release(.rightOption, at: 900) == [])
         #expect(keyboard.press(.rightCommand, at: 1000) == began(rightCommand, at: 1000))
     }
 
@@ -226,16 +226,28 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     }
 
     /// A tap latched under the old chord stays latched, and is ended by the chord that began
-    /// it - the one the person tapped to start - or by the chord listened for now, the one
+    /// it - the one the person tapped to start - or by the chord its mode moved to, the one
     /// the menu names. Neither leaves the microphone recording with no way to stop it.
     @Test(arguments: [Modifier.rightOption, .rightCommand])
     func aTapLatchedWhenTheChordMovesIsEndedByEitherChord(_ ending: Modifier) {
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
         _ = keyboard.release(.rightOption, at: 100)
-        keyboard.detector.listen(for: modes(rightCommand))
-        #expect(keyboard.detector.phase == .latched(rightOption.chord))
+        keyboard.detector.listen(for: modes(Mode(name: rightOption.name, chord: rightCommand.chord)))
+        #expect(keyboard.detector.phase == .latched(rightOption))
         #expect(keyboard.press(ending, at: 2000) == ended(.tap, at: 2000))
+        #expect(keyboard.detector.phase == .idle)
+    }
+
+    /// A tap latched under a chord a saved config gave to a mode of another name, the same
+    /// mode renamed among them, is ended by that chord alone: the person tapped it to start
+    /// and taps it to stop, and a stop that began a press would leave the microphone on.
+    @Test func aTapLatchedUnderAChordAnotherModeTookIsEndedByItAlone() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+        keyboard.detector.listen(for: modes(Mode(name: "speak", chord: rightOption.chord)))
+        #expect(keyboard.press(.rightOption, at: 2000) == ended(.tap, at: 2000))
         #expect(keyboard.detector.phase == .idle)
     }
 
@@ -247,7 +259,7 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         _ = keyboard.press(.rightOption, at: 0)
         #expect(keyboard.detector.lapse() == .ended(.lapsed))
         #expect(keyboard.detector.phase == .idle)
-        #expect(keyboard.release(.rightOption, at: 10) == nil)
+        #expect(keyboard.release(.rightOption, at: 10) == [])
         _ = keyboard.press(.rightOption, at: 100)
         _ = keyboard.release(.rightOption, at: 150)
         #expect(keyboard.detector.lapse() == .ended(.lapsed))
@@ -266,18 +278,64 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         let released = releasing.release(.rightOption, at: 400)
 
         #expect(lapsed == .ended(.lapsed))
-        #expect(released == .ended(.released(.hold, at: at(400))))
-        #expect(lapsed != released)
+        #expect(released == [.ended(.released(.hold, at: at(400)))])
+        #expect(lapsed != released.first)
     }
 
-    /// While latched, any configured chord ends the listening, not only the one that
-    /// began it.
-    @Test func anyChordPressEndsALatchedSession() {
+    /// While latched, another mode's chord ends the listening and begins a press in that mode
+    /// on the same key-down, as low-reliability-z2z.4x7 asks: tap A, speak, tap B, speak, and
+    /// both are heard. The chord that completes decides, so Shift held under Right Option
+    /// is the command chord and not the dictation chord blocked.
+    @Test(arguments: [(command, [Modifier.leftShift, .rightOption]), (rightCommand, [.rightCommand])])
+    func anotherModesChordEndsALatchedTapAndBeginsThatMode(_ next: Mode, _ keys: [Modifier]) {
+        var keyboard = Keyboard(modes: modes(rightOption, command, rightCommand))
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+        for key in keys.dropLast() { _ = keyboard.press(key, at: 1000) }
+        #expect(keyboard.press(keys.last!, at: 1010) == ended(.tap, at: 1010) + began(next, at: 1010))
+        #expect(keyboard.detector.phase == .held(next, since: at(1010)))
+    }
+
+    /// The superset chord in the other order switches too, in two key-downs: Right Option
+    /// alone ends the tap, and Shift under it completes the command chord from rest.
+    @Test func theSupersetChordSwitchesWithItsSharedKeyDownFirst() {
         var keyboard = Keyboard(modes: modes(rightOption, command))
         _ = keyboard.press(.rightOption, at: 0)
         _ = keyboard.release(.rightOption, at: 100)
-        _ = keyboard.press(.leftShift, at: 1000)
-        #expect(keyboard.press(.rightOption, at: 1010) == ended(.tap, at: 1010))
+        #expect(keyboard.press(.rightOption, at: 1000) == ended(.tap, at: 1000))
+        #expect(keyboard.press(.leftShift, at: 1010) == began(command, at: 1010))
+        #expect(keyboard.detector.phase == .held(command, since: at(1010)))
+    }
+
+    /// A switch's two transitions name one moment in the hotkey's log, which is how the line
+    /// tells a switch from a press made after the tap ended.
+    @Test func aSwitchIsLoggedAsOneMoment() {
+        var keyboard = Keyboard(modes: modes(rightOption, rightCommand))
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+        #expect(keyboard.press(.rightCommand, at: 1500).map(\.description) == [
+            "ended as a tap at 1500.0 ms of uptime",
+            "\(rightCommand) began at 1500.0 ms of uptime",
+        ])
+    }
+
+    /// The press a switch begins is told a hold or a tap by its own release, as one begun from
+    /// rest is: tapped it latches, and its chord ends it; held it ends as it comes up.
+    @Test func thePressASwitchBeginsIsAHoldOrATapByItsOwnRelease() {
+        var tapping = Keyboard(modes: modes(rightOption, rightCommand))
+        _ = tapping.press(.rightOption, at: 0)
+        _ = tapping.release(.rightOption, at: 100)
+        _ = tapping.press(.rightCommand, at: 1000)
+        #expect(tapping.release(.rightCommand, at: 1100) == [])
+        #expect(tapping.detector.phase == .latched(rightCommand))
+        #expect(tapping.press(.rightCommand, at: 3000) == ended(.tap, at: 3000))
+
+        var holding = Keyboard(modes: modes(rightOption, rightCommand))
+        _ = holding.press(.rightOption, at: 0)
+        _ = holding.release(.rightOption, at: 100)
+        _ = holding.press(.rightCommand, at: 1000)
+        #expect(holding.release(.rightCommand, at: 2000) == ended(.hold, at: 2000))
+        #expect(holding.detector.phase == .idle)
     }
 
     /// Right Option held to type a special character, quicker than a tap: the chord was the
@@ -287,7 +345,7 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         var keyboard = Keyboard()
         #expect(keyboard.press(.rightOption, at: 0) == began(rightOption, at: 0))
         keyboard.type(at: 40)
-        #expect(keyboard.release(.rightOption, at: ms) == .ended(.usedAsModifier))
+        #expect(keyboard.release(.rightOption, at: ms) == [.ended(.usedAsModifier)])
         #expect(keyboard.detector.phase == .idle)
     }
 
@@ -298,8 +356,8 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
         keyboard.type(at: ms)
-        #expect(keyboard.release(.rightOption, at: 100) == nil)
-        #expect(keyboard.detector.phase == .latched(rightOption.chord))
+        #expect(keyboard.release(.rightOption, at: 100) == [])
+        #expect(keyboard.detector.phase == .latched(rightOption))
     }
 
     /// A release whose reading cannot say when a key was typed before it, because one typed
@@ -307,8 +365,8 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
     @Test func aReleaseThatCannotSayWhatWasTypedIsToldByItsLength() {
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
-        #expect(keyboard.detector.handle(KeyEvent(key: .rightOption, direction: .up, modifiers: [], time: at(100), lastTyped: nil)) == nil)
-        #expect(keyboard.detector.phase == .latched(rightOption.chord))
+        #expect(keyboard.detector.handle(KeyEvent(key: .rightOption, direction: .up, modifiers: [], time: at(100), lastTyped: nil)) == [])
+        #expect(keyboard.detector.phase == .latched(rightOption))
     }
 
     /// Typing while a tap is latched is what a latched tap is for, and ends nothing.

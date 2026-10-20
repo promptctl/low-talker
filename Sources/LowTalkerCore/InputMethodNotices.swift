@@ -24,10 +24,9 @@ public final class InputMethodNotices {
     /// already hears on it.
     public init(cursorArrived: @escaping @MainActor (CursorArrival) -> Void,
                 superviseInputMethod: @MainActor () -> Disposal) throws(PortNotHosted) {
-        let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
         let port = try NoticePort(
             queue: DispatchQueue(label: AppIdentity.hotkeyPortName),
-            told: { event in log.error("\(event.description, privacy: .public)") },
+            told: { event in Logger.hotkey.error("\(event.description, privacy: .public)") },
             cursorArrived: { [weak self] arrival in
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.open?.cursorArrived(arrival) } }
             })

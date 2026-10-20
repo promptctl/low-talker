@@ -500,8 +500,28 @@ private struct Authorized: MicrophoneAuthority {
         for await clip in held.audio { heard += clip.samples }
         #expect(heard.count == long)
 
-        let reaching = capture.stream(try capture.beginSession(at: after(long), preRoll: 0.8))
+        // Captured while no press was open, so the next press's pre-roll may reach over it.
+        hardware.engines[0].appending([Float](repeating: 1, count: long), after(long))
+        let reaching = capture.stream(try capture.beginSession(at: after(2 * long), preRoll: 0.8))
         #expect(capture.endSession(reaching).lost?.scrolledOff == AudioClip.sampleCount(for: 0.3))
+    }
+
+    /// A press begun on a held microphone before the last one's pre-roll has passed, as a
+    /// mode switched mid-tap always is, begins where the last one ended: those words were
+    /// heard and inserted with it, and reaching back over them would insert them twice.
+    @Test func aPressOnAHeldMicrophoneBeginsWhereTheLastOneEnded() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .open)
+        let first = try capture.beginSession(at: origin, preRoll: 0)
+        hardware.engines[0].appending([1, 2, 3, 4], origin)
+        #expect(capture.endSession(first) == .whole(AudioClip(samples: [1, 2, 3, 4])))
+
+        let second = try capture.beginSession(at: after(2), preRoll: AudioSession.defaultPreRoll)
+        #expect(second.begin == 4)
+        #expect(second.preRoll == 0)
+        hardware.engines[0].appending([5, 6], after(4))
+        #expect(capture.endSession(second) == .whole(AudioClip(samples: [5, 6])))
     }
 
     // MARK: - what a press's microphone delivered
@@ -1250,7 +1270,7 @@ private struct Authorized: MicrophoneAuthority {
     /// when that report lands before the default-input one, the default-input one is about a
     /// change already answered. Reading it as news had the key-up give up the replacement
     /// and relaunch, which splices the ring at the key-up and leaves the next press no
-    /// look-back over audio the replacement had already captured: the one thing `open` is
+    /// look-back over audio the replacement had captured since: the one thing `open` is
     /// held for.
     @Test(arguments: UnplugReports.allCases)
     func aHeldMicrophoneUnpluggedMidPressIsReplacedOnceWhicheverReportLandsFirst(_ order: UnplugReports) async throws {
@@ -1270,12 +1290,13 @@ private struct Authorized: MicrophoneAuthority {
         #expect(capture.deviceChanges == 1)
 
         // The replacement kept running across the key-up, so the next press reaches back
-        // over what it captured before and after it.
+        // over what it captured after it, and no further, since what came before was the
+        // last press's.
         hardware.engines[1].appending([5, 6], after(4))
         let next = try capture.beginSession(at: after(6), preRoll: AudioSession.defaultPreRoll)
-        #expect(next.preRoll == 4)
+        #expect(next.preRoll == 2)
         hardware.engines[1].appending([7, 8], after(6))
-        #expect(capture.endSession(next) == .whole(AudioClip(samples: [3, 4, 5, 6, 7, 8])))
+        #expect(capture.endSession(next) == .whole(AudioClip(samples: [5, 6, 7, 8])))
     }
 
     /// The same unplug under `shut`, where what a second answer costs is a readying at the

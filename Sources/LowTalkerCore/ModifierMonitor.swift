@@ -1,6 +1,5 @@
 import AppKit
 import Carbon.HIToolbox
-import Identity
 import os
 
 /// The hotkey heard from the window server's own events: every change of the modifier keys,
@@ -100,11 +99,10 @@ public struct ModifierMonitor: ModifierFeed {
 
     /// Throws when macOS installs no monitor, which leaves the chord unheard.
     public func install(handling handle: @escaping @MainActor (KeyEvent) -> Void) throws -> Disposal {
-        let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
         // What is held as listening begins is read, not assumed to be nothing, so a key
         // already down when this comes up is not heard going down when it next moves.
         let installed = Installed(told: ToldModifiers(held: Modifier.heldInSession()), session: SessionModifiers.read,
-                                  noted: { log.info("\($0, privacy: .public)") })
+                                  noted: { Logger.hotkey.info("\($0, privacy: .public)") })
         // The global monitor is handed what goes to every other app, and the local one what
         // comes to this app's own windows. Both call on the main thread.
         guard let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { event in

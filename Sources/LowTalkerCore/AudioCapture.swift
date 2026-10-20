@@ -154,6 +154,11 @@ public final class AudioCapture {
         /// running, and positions advance only on capture, so the audio on either side
         /// of the break is spliced together with no seam in the samples to find it by.
         var continuousSince = 0
+        /// Where the last session ended. The audio before it is that session's, heard and
+        /// inserted already, and a session that reached back over it - a press begun on a
+        /// held microphone within its pre-roll of the last one ending, a mode switched mid-tap
+        /// - would insert those words a second time. [LAW:one-source-of-truth]
+        var lastSessionEnd = 0
         /// The generation whose buffers this stream is the audio of. Whatever the input has
         /// not finished handing over when `dispose()` begins still arrives, closing the input
         /// hands over the rest, and all of it belongs to a press the speaker has already let
@@ -343,8 +348,9 @@ public final class AudioCapture {
     /// marks the ring where the key went down. It names a position within this run of
     /// capture and nowhere else: a moment later than the newest sample marks the newest
     /// sample, since a session cannot begin in audio that has not been captured, and a
-    /// moment earlier than the engine's first sample marks that first sample, since the
-    /// audio before it is some earlier press's and belongs to no part of this one. Where
+    /// moment earlier than the engine's first sample, or than the last session's end, marks
+    /// that position, since the audio before it is some earlier press's and belongs to no
+    /// part of this one. Where
     /// the microphone opens for the session both clamps land on the same position, and the
     /// session begins where the microphone did; where the resting mode has held it open
     /// since `start()`, this run of capture reaches back that far and so may the pre-roll.
@@ -413,13 +419,15 @@ public final class AudioCapture {
         phase = .started(started)
         return shared.stream.withLock { stream in
             // One floor for the mark and for what the mark reaches back over: the
-            // position this run of capture began at. [LAW:one-source-of-truth]
-            let opened = stream.continuousSince
+            // position this run of capture began at, or the last session's end if later,
+            // since the audio before either belongs to no part of this press.
+            // [LAW:one-source-of-truth]
+            let floor = max(stream.continuousSince, stream.lastSessionEnd)
             let session = AudioSession(
-                beginningAt: min(max(stream.timeline.position(at: moment), opened), stream.ring.end),
+                beginningAt: min(max(stream.timeline.position(at: moment), floor), stream.ring.end),
                 at: moment,
                 preRoll: preRoll,
-                notReachingBefore: opened
+                notReachingBefore: floor
             )
             // A key that lands among samples already delivered - a held microphone, and a
             // handler that ran after its buffers - has its head among them, captured from
@@ -481,6 +489,7 @@ public final class AudioCapture {
             let lost = Self.loss(of: session, in: stream, scrolledOff: scrolledOff(stream.ring, range), open: open, ended: true)
             stream.feed?.finish()
             stream.feed = nil
+            stream.lastSessionEnd = range.upperBound
             return deliver(stream, range, lost)
         }
         rest()
