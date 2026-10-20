@@ -4,13 +4,13 @@
 #     scripts/gate-replay/fetch-esc50 <folder>
 #
 # Every clip of the sounds a person makes or meets mid-press, louder than their voice and
-# not speech. ESC-50 is CC BY-NC, so the clips are fetched here, never committed. They come
+# not speech, and of breathing, softer than it and as long as a syllable. ESC-50 is CC BY-NC, so the clips are fetched here, never committed. They come
 # from one commit of the dataset, so every replay, and the baseline, hears the same audio.
 # A clip already fetched is not fetched again; one that fails stops the run.
 set -euo pipefail
 
 COMMIT=33c8ce9eb2cf0b1c2f8bcf322eb349b6be34dbb6
-CATEGORIES="coughing sneezing door_wood_knock clapping"
+CATEGORIES="coughing sneezing door_wood_knock clapping breathing"
 BASE="https://raw.githubusercontent.com/karolpiczak/ESC-50/$COMMIT"
 
 folder=${1:?usage: fetch-esc50 <folder>}

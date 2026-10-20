@@ -4,6 +4,12 @@ family=bench fixture=librispeech/2277-149896-0000 level=-20 trim=trimmed room=cl
 family=bench fixture=librispeech/2277-149896-0000 level=-20 trim=whole room=-35	110240	2b6a95f5f62084be	0-658
 family=bench fixture=librispeech/2277-149896-0000 level=-20 trim=whole room=-51	101676	787efc003c92ee3b	4-639
 family=bench fixture=librispeech/2277-149896-0000 level=-20 trim=whole room=clean	101796	fb4e0f72ed748b0d	3-639
+family=bench fixture=librispeech/2277-149896-0000 level=-40 trim=trimmed room=-35	105440	77472ef02af6f4bf	0-628
+family=bench fixture=librispeech/2277-149896-0000 level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/2277-149896-0000 level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=librispeech/2277-149896-0000 level=-40 trim=whole room=-35	110240	ce9741e2b2f865a0	0-658
+family=bench fixture=librispeech/2277-149896-0000 level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/2277-149896-0000 level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=librispeech/2277-149896-0000 level=0 trim=trimmed room=-35	99200	7bc86773ef4da984	0-619
 family=bench fixture=librispeech/2277-149896-0000 level=0 trim=trimmed room=-51	99200	b000bc8dd02fff22	0-619
 family=bench fixture=librispeech/2277-149896-0000 level=0 trim=trimmed room=clean	99200	61b3c495f95b8925	0-619
@@ -16,6 +22,12 @@ family=bench fixture=librispeech/251-137823-0018 level=-20 trim=trimmed room=cle
 family=bench fixture=librispeech/251-137823-0018 level=-20 trim=whole room=-35	124880	3027140a60caec6d	0-750
 family=bench fixture=librispeech/251-137823-0018 level=-20 trim=whole room=-51	113812	f0ae82452ab78004	18-729
 family=bench fixture=librispeech/251-137823-0018 level=-20 trim=whole room=clean	113964	88d8c238655ea483	17-729
+family=bench fixture=librispeech/251-137823-0018 level=-40 trim=trimmed room=-35	118480	9b2f6a926b82b334	0-710
+family=bench fixture=librispeech/251-137823-0018 level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/251-137823-0018 level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=librispeech/251-137823-0018 level=-40 trim=whole room=-35	124880	5d6e221483c7f0c	0-750
+family=bench fixture=librispeech/251-137823-0018 level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/251-137823-0018 level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=librispeech/251-137823-0018 level=0 trim=trimmed room=-35	112000	355dd9a699ddd6c1	0-699
 family=bench fixture=librispeech/251-137823-0018 level=0 trim=trimmed room=-51	110400	eda6adc70ab98910	0-689
 family=bench fixture=librispeech/251-137823-0018 level=0 trim=trimmed room=clean	110400	7135795a1c5b9c25	0-689
@@ -28,6 +40,12 @@ family=bench fixture=librispeech/2803-154328-0011 level=-20 trim=trimmed room=cl
 family=bench fixture=librispeech/2803-154328-0011 level=-20 trim=whole room=-35	110320	e971cff91f35b82	0-659
 family=bench fixture=librispeech/2803-154328-0011 level=-20 trim=whole room=-51	102659	45621f78c8c2a7d8	27-349,351-659
 family=bench fixture=librispeech/2803-154328-0011 level=-20 trim=whole room=clean	103341	84814cccb3f7290c	24-659
+family=bench fixture=librispeech/2803-154328-0011 level=-40 trim=trimmed room=-35	102320	f6036a01993c6f9f	0-609
+family=bench fixture=librispeech/2803-154328-0011 level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/2803-154328-0011 level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=librispeech/2803-154328-0011 level=-40 trim=whole room=-35	110320	f983f187322bd132	0-659
+family=bench fixture=librispeech/2803-154328-0011 level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/2803-154328-0011 level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=librispeech/2803-154328-0011 level=0 trim=trimmed room=-35	99200	17ac078d911b3cfd	0-609
 family=bench fixture=librispeech/2803-154328-0011 level=0 trim=trimmed room=-51	99200	3e30693008cc5148	0-609
 family=bench fixture=librispeech/2803-154328-0011 level=0 trim=trimmed room=clean	99200	9c3bedefd944e725	0-609
@@ -40,6 +58,12 @@ family=bench fixture=librispeech/3536-8226-0018 level=-20 trim=trimmed room=clea
 family=bench fixture=librispeech/3536-8226-0018 level=-20 trim=whole room=-35	154960	a1ca1cd86fb17700	0-938
 family=bench fixture=librispeech/3536-8226-0018 level=-20 trim=whole room=-51	137867	72843e9c9341644	10-589,607-889
 family=bench fixture=librispeech/3536-8226-0018 level=-20 trim=whole room=clean	148781	7a0c48ca26d8464c	10-938
+family=bench fixture=librispeech/3536-8226-0018 level=-40 trim=trimmed room=-35	150160	4d44fa58ca2d8a3a	0-908
+family=bench fixture=librispeech/3536-8226-0018 level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/3536-8226-0018 level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=librispeech/3536-8226-0018 level=-40 trim=whole room=-35	154960	5300a52241796258	0-938
+family=bench fixture=librispeech/3536-8226-0018 level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/3536-8226-0018 level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=librispeech/3536-8226-0018 level=0 trim=trimmed room=-35	145600	9c33da09ee8495f8	0-908
 family=bench fixture=librispeech/3536-8226-0018 level=0 trim=trimmed room=-51	145600	d94c8ac957628a4c	0-908
 family=bench fixture=librispeech/3536-8226-0018 level=0 trim=trimmed room=clean	145600	8201c2058511225	0-908
@@ -52,6 +76,12 @@ family=bench fixture=librispeech/6313-76958-0018 level=-20 trim=trimmed room=cle
 family=bench fixture=librispeech/6313-76958-0018 level=-20 trim=whole room=-35	103920	96ccda0207d2f90f	0-619
 family=bench fixture=librispeech/6313-76958-0018 level=-20 trim=whole room=-51	97772	110e169bd041c2a3	8-619
 family=bench fixture=librispeech/6313-76958-0018 level=-20 trim=whole room=clean	98094	882290265ed0552e	6-619
+family=bench fixture=librispeech/6313-76958-0018 level=-40 trim=trimmed room=-35	99120	924c2ee83ac44487	0-589
+family=bench fixture=librispeech/6313-76958-0018 level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/6313-76958-0018 level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=librispeech/6313-76958-0018 level=-40 trim=whole room=-35	103920	98dfc3ff569ad5bc	0-619
+family=bench fixture=librispeech/6313-76958-0018 level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/6313-76958-0018 level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=librispeech/6313-76958-0018 level=0 trim=trimmed room=-35	94400	a25ba84641aa16e1	0-589
 family=bench fixture=librispeech/6313-76958-0018 level=0 trim=trimmed room=-51	94400	72413acf82ba2437	0-589
 family=bench fixture=librispeech/6313-76958-0018 level=0 trim=trimmed room=clean	94400	9ff4e87d580b6e25	0-589
@@ -64,6 +94,12 @@ family=bench fixture=librispeech/777-126732-0070 level=-20 trim=trimmed room=cle
 family=bench fixture=librispeech/777-126732-0070 level=-20 trim=whole room=-35	121840	a15b954e45b6dd6f	0-731
 family=bench fixture=librispeech/777-126732-0070 level=-20 trim=whole room=-51	112634	617ac527cfc3f5d7	7-529,538-719
 family=bench fixture=librispeech/777-126732-0070 level=-20 trim=whole room=clean	110571	17397e622ac117ed	28-719
+family=bench fixture=librispeech/777-126732-0070 level=-40 trim=trimmed room=-35	117040	a50f1a485f24e9d4	0-701
+family=bench fixture=librispeech/777-126732-0070 level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/777-126732-0070 level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=librispeech/777-126732-0070 level=-40 trim=whole room=-35	121840	bc9cb3ca01066c8b	0-731
+family=bench fixture=librispeech/777-126732-0070 level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=librispeech/777-126732-0070 level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=librispeech/777-126732-0070 level=0 trim=trimmed room=-35	117040	1759adce2772bb1	0-701
 family=bench fixture=librispeech/777-126732-0070 level=0 trim=trimmed room=-51	110400	5d06b1085b060212	0-689
 family=bench fixture=librispeech/777-126732-0070 level=0 trim=trimmed room=clean	110400	7fe16badceb4425	0-689
@@ -76,6 +112,12 @@ family=bench fixture=say/app-commands level=-20 trim=trimmed room=clean	67200	b7
 family=bench fixture=say/app-commands level=-20 trim=whole room=-35	68004	98e7d0dcb5f768e7	0-395
 family=bench fixture=say/app-commands level=-20 trim=whole room=-51	67200	b76a202966b79eec	0-395
 family=bench fixture=say/app-commands level=-20 trim=whole room=clean	67200	b7d0c4e8bc929cce	0-395
+family=bench fixture=say/app-commands level=-40 trim=trimmed room=-35	68004	dfc95eac5529f8fd	0-395
+family=bench fixture=say/app-commands level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/app-commands level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/app-commands level=-40 trim=whole room=-35	68004	dfc95eac5529f8fd	0-395
+family=bench fixture=say/app-commands level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/app-commands level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/app-commands level=0 trim=trimmed room=-35	68004	7f9ca8f69a622ace	0-395
 family=bench fixture=say/app-commands level=0 trim=trimmed room=-51	67200	218f1a8e0aaba404	0-395
 family=bench fixture=say/app-commands level=0 trim=trimmed room=clean	67200	d2658ddc7e0acd25	0-395
@@ -88,6 +130,12 @@ family=bench fixture=say/greeting level=-20 trim=trimmed room=clean	36800	70dd77
 family=bench fixture=say/greeting level=-20 trim=whole room=-35	37061	c475a1056276447	0-201
 family=bench fixture=say/greeting level=-20 trim=whole room=-51	36800	3e2e1f9b70d681ec	0-201
 family=bench fixture=say/greeting level=-20 trim=whole room=clean	36800	70dd77536c4751cd	0-201
+family=bench fixture=say/greeting level=-40 trim=trimmed room=-35	37061	9a0ebee7c111a1a6	0-201
+family=bench fixture=say/greeting level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/greeting level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/greeting level=-40 trim=whole room=-35	37061	9a0ebee7c111a1a6	0-201
+family=bench fixture=say/greeting level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/greeting level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/greeting level=0 trim=trimmed room=-35	36800	2b0f33ae0ed1cf73	0-201
 family=bench fixture=say/greeting level=0 trim=trimmed room=-51	36800	50b30811304354fa	0-201
 family=bench fixture=say/greeting level=0 trim=trimmed room=clean	36800	f9b4cfb81fe70a25	0-201
@@ -100,6 +148,12 @@ family=bench fixture=say/jargon level=-20 trim=trimmed room=clean	78400	b4641622
 family=bench fixture=say/jargon level=-20 trim=whole room=-35	79637	b299c1a8eaec0afd	0-467
 family=bench fixture=say/jargon level=-20 trim=whole room=-51	78400	e0686f2097a90f1a	0-467
 family=bench fixture=say/jargon level=-20 trim=whole room=clean	78400	b4641622ee2b39c9	0-467
+family=bench fixture=say/jargon level=-40 trim=trimmed room=-35	79637	a165a4606c201a2	0-467
+family=bench fixture=say/jargon level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/jargon level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/jargon level=-40 trim=whole room=-35	79637	a165a4606c201a2	0-467
+family=bench fixture=say/jargon level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/jargon level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/jargon level=0 trim=trimmed room=-35	78400	bb58b5c63776f4ac	0-467
 family=bench fixture=say/jargon level=0 trim=trimmed room=-51	78400	70f75c91f6d7d232	0-467
 family=bench fixture=say/jargon level=0 trim=trimmed room=clean	78400	3ef772b47791cc25	0-467
@@ -112,6 +166,12 @@ family=bench fixture=say/meeting-request level=-20 trim=trimmed room=clean	75172
 family=bench fixture=say/meeting-request level=-20 trim=whole room=-35	75172	4a9a97fccfcd39b2	0-439
 family=bench fixture=say/meeting-request level=-20 trim=whole room=-51	75172	c9169f631d493cd1	0-439
 family=bench fixture=say/meeting-request level=-20 trim=whole room=clean	75172	8537fdb077e3b6b2	0-439
+family=bench fixture=say/meeting-request level=-40 trim=trimmed room=-35	75172	5d539d760b3ac5c	0-439
+family=bench fixture=say/meeting-request level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/meeting-request level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/meeting-request level=-40 trim=whole room=-35	75172	5d539d760b3ac5c	0-439
+family=bench fixture=say/meeting-request level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/meeting-request level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/meeting-request level=0 trim=trimmed room=-35	75172	2f29543076a807e7	0-439
 family=bench fixture=say/meeting-request level=0 trim=trimmed room=-51	75172	187c12b16f768f7	0-439
 family=bench fixture=say/meeting-request level=0 trim=trimmed room=clean	75172	cd76ec5b8db6c075	0-439
@@ -124,6 +184,12 @@ family=bench fixture=say/names level=-20 trim=trimmed room=clean	70400	366cbe481
 family=bench fixture=say/names level=-20 trim=whole room=-35	71992	bd6f6d0a887cb7c1	0-419
 family=bench fixture=say/names level=-20 trim=whole room=-51	70400	a9686101ade11479	0-419
 family=bench fixture=say/names level=-20 trim=whole room=clean	70400	366cbe481b78b39	0-419
+family=bench fixture=say/names level=-40 trim=trimmed room=-35	71992	72264fc5441ced77	0-419
+family=bench fixture=say/names level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/names level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/names level=-40 trim=whole room=-35	71992	72264fc5441ced77	0-419
+family=bench fixture=say/names level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/names level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/names level=0 trim=trimmed room=-35	70400	3ab7d306bef290ce	0-419
 family=bench fixture=say/names level=0 trim=trimmed room=-51	70400	43b3b9819266b019	0-419
 family=bench fixture=say/names level=0 trim=trimmed room=clean	70400	f6a7bcea8d435f25	0-419
@@ -136,6 +202,12 @@ family=bench fixture=say/short-reply level=-20 trim=trimmed room=clean	34567	bf3
 family=bench fixture=say/short-reply level=-20 trim=whole room=-35	34567	fe1f4b03de134e81	0-186
 family=bench fixture=say/short-reply level=-20 trim=whole room=-51	33600	207a4be005d9b964	0-186
 family=bench fixture=say/short-reply level=-20 trim=whole room=clean	34567	bf371b033eb14ad6	0-186
+family=bench fixture=say/short-reply level=-40 trim=trimmed room=-35	34567	54cbe48346866e6e	0-186
+family=bench fixture=say/short-reply level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/short-reply level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/short-reply level=-40 trim=whole room=-35	34567	54cbe48346866e6e	0-186
+family=bench fixture=say/short-reply level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/short-reply level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/short-reply level=0 trim=trimmed room=-35	34567	7c4657a771bd809f	0-186
 family=bench fixture=say/short-reply level=0 trim=trimmed room=-51	34567	bc0dc34953c79d8f	0-186
 family=bench fixture=say/short-reply level=0 trim=trimmed room=clean	34567	1cb2e1ab56bdfaa7	0-186
@@ -148,6 +220,12 @@ family=bench fixture=say/status-update level=-20 trim=trimmed room=clean	132800	
 family=bench fixture=say/status-update level=-20 trim=whole room=-35	134096	a0d607dfc2119d4c	0-808
 family=bench fixture=say/status-update level=-20 trim=whole room=-51	132800	938499559a55413f	0-808
 family=bench fixture=say/status-update level=-20 trim=whole room=clean	132800	47d3186e1ccb3ab5	0-808
+family=bench fixture=say/status-update level=-40 trim=trimmed room=-35	134096	c6f0b1ef9700a664	0-808
+family=bench fixture=say/status-update level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/status-update level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/status-update level=-40 trim=whole room=-35	134096	c6f0b1ef9700a664	0-808
+family=bench fixture=say/status-update level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/status-update level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/status-update level=0 trim=trimmed room=-35	132800	211bdcb829f78542	0-808
 family=bench fixture=say/status-update level=0 trim=trimmed room=-51	132800	33a38f00ffb28ede	0-808
 family=bench fixture=say/status-update level=0 trim=trimmed room=clean	132800	643763534e249a25	0-808
@@ -160,12 +238,386 @@ family=bench fixture=say/yes level=-20 trim=trimmed room=clean	11200	f149d2f4d36
 family=bench fixture=say/yes level=-20 trim=whole room=-35	12490	fe0d96350ed33501	0-48
 family=bench fixture=say/yes level=-20 trim=whole room=-51	11200	36199ceea56b560f	0-48
 family=bench fixture=say/yes level=-20 trim=whole room=clean	11200	f149d2f4d36f6cdb	0-48
+family=bench fixture=say/yes level=-40 trim=trimmed room=-35	12490	437fc9b8e5b51eef	0-48
+family=bench fixture=say/yes level=-40 trim=trimmed room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/yes level=-40 trim=trimmed room=clean	0	cbf29ce484222325	-
+family=bench fixture=say/yes level=-40 trim=whole room=-35	12490	437fc9b8e5b51eef	0-48
+family=bench fixture=say/yes level=-40 trim=whole room=-51	0	cbf29ce484222325	-
+family=bench fixture=say/yes level=-40 trim=whole room=clean	0	cbf29ce484222325	-
 family=bench fixture=say/yes level=0 trim=trimmed room=-35	12490	383142b2da15ded7	0-48
 family=bench fixture=say/yes level=0 trim=trimmed room=-51	11200	28f7fe6704afca1	0-48
 family=bench fixture=say/yes level=0 trim=trimmed room=clean	11200	9d8799fe512ca425	0-48
 family=bench fixture=say/yes level=0 trim=whole room=-35	12490	383142b2da15ded7	0-48
 family=bench fixture=say/yes level=0 trim=whole room=-51	11200	28f7fe6704afca1	0-48
 family=bench fixture=say/yes level=0 trim=whole room=clean	11200	9d8799fe512ca425	0-48
+family=soft-before source=breathing/1-18631-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=breathing/1-18631-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/1-18631-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=breathing/1-18631-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/1-30709-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/1-30709-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/1-30709-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/1-30709-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/1-30709-B-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103006	cff47eb8b7832303	226-859
+family=soft-before source=breathing/1-30709-B-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103063	2845d3de163e912b	225-859
+family=soft-before source=breathing/1-30709-B-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103060	d47afb07535bc248	225-859
+family=soft-before source=breathing/1-30709-B-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103343	214ae3dcd2471ee8	224-859
+family=soft-before source=breathing/1-30709-C-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/1-30709-C-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/1-30709-C-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/1-30709-C-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/1-36393-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/1-36393-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/1-36393-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/1-36393-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/1-36397-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/1-36397-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	110568	dcba02adf093bee6	228-919
+family=soft-before source=breathing/1-36397-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/1-36397-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	110569	96fba2b3d2e5994a	228-919
+family=soft-before source=breathing/1-36400-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=breathing/1-36400-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/1-36400-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=breathing/1-36400-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/1-36402-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/1-36402-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/1-36402-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/1-36402-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/2-50774-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103061	52ccb089f7c1e552	225-859
+family=soft-before source=breathing/2-50774-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103404	49554af1c49fccca	223-859
+family=soft-before source=breathing/2-50774-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103061	52ccb089f7c1e552	225-859
+family=soft-before source=breathing/2-50774-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103404	49554af1c49fccca	223-859
+family=soft-before source=breathing/2-54961-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/2-54961-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/2-54961-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/2-54961-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/2-54962-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/2-54962-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/2-54962-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/2-54962-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/2-66205-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/2-66205-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/2-66205-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/2-66205-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/2-82455-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101752	fcbeb4d3a4f3a57	204-839
+family=soft-before source=breathing/2-82455-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101796	c61dba0850033382	203-839
+family=soft-before source=breathing/2-82455-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101756	84c388e893cc1fd7	204-839
+family=soft-before source=breathing/2-82455-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/2-84965-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/2-84965-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/2-84965-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/2-84965-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/2-95567-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103003	e939d21d725c0a28	226-859
+family=soft-before source=breathing/2-95567-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103062	55fa3d6b5064dec9	225-859
+family=soft-before source=breathing/2-95567-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103006	cff47eb8b7832303	226-859
+family=soft-before source=breathing/2-95567-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103063	2845d3de163e912b	225-859
+family=soft-before source=breathing/2-98392-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/2-98392-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/2-98392-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/2-98392-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/3-108160-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/3-108160-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/3-108160-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/3-108160-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/3-112557-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/3-112557-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/3-112557-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/3-112557-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/3-112557-B-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101752	fcbeb4d3a4f3a57	204-839
+family=soft-before source=breathing/3-112557-B-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101796	c61dba0850033382	203-839
+family=soft-before source=breathing/3-112557-B-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=breathing/3-112557-B-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/3-144128-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/3-144128-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/3-144128-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/3-144128-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/3-144128-B-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103060	d47afb07535bc248	225-859
+family=soft-before source=breathing/3-144128-B-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103349	d4c59ded5c89ec87	224-859
+family=soft-before source=breathing/3-144128-B-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103060	d47afb07535bc248	225-859
+family=soft-before source=breathing/3-144128-B-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103403	7e2d45a099d555db	223-859
+family=soft-before source=breathing/3-151206-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148769	5fa0cece94e238e	210-1138
+family=soft-before source=breathing/3-151206-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/3-151206-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148769	5fa0cece94e238e	210-1138
+family=soft-before source=breathing/3-151206-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/3-166125-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/3-166125-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/3-166125-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/3-166125-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/3-166125-B-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/3-166125-B-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/3-166125-B-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/3-166125-B-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/4-171706-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101752	fcbeb4d3a4f3a57	204-839
+family=soft-before source=breathing/4-171706-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101762	afbb5d177adc4d62	203-839
+family=soft-before source=breathing/4-171706-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101752	fcbeb4d3a4f3a57	204-839
+family=soft-before source=breathing/4-171706-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101796	c61dba0850033382	203-839
+family=soft-before source=breathing/4-176914-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/4-176914-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/4-176914-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/4-176914-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/4-198025-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103003	e939d21d725c0a28	226-859
+family=soft-before source=breathing/4-198025-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103063	2845d3de163e912b	225-859
+family=soft-before source=breathing/4-198025-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103060	d47afb07535bc248	225-859
+family=soft-before source=breathing/4-198025-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103343	214ae3dcd2471ee8	224-859
+family=soft-before source=breathing/4-205526-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/4-205526-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/4-205526-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148769	5fa0cece94e238e	210-1138
+family=soft-before source=breathing/4-205526-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/4-205526-B-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/4-205526-B-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/4-205526-B-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=breathing/4-205526-B-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/4-207116-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/4-207116-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	110568	dcba02adf093bee6	228-919
+family=soft-before source=breathing/4-207116-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/4-207116-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/4-210000-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=breathing/4-210000-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/4-210000-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=breathing/4-210000-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=breathing/4-210000-B-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/4-210000-B-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/4-210000-B-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/4-210000-B-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/5-213293-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103056	a561ae5b86076a05	225-859
+family=soft-before source=breathing/5-213293-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103343	214ae3dcd2471ee8	224-859
+family=soft-before source=breathing/5-213293-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103060	d47afb07535bc248	225-859
+family=soft-before source=breathing/5-213293-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103403	7e2d45a099d555db	223-859
+family=soft-before source=breathing/5-232816-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/5-232816-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/5-232816-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/5-232816-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/5-233260-A-23 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/5-233260-A-23 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/5-233260-A-23 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98089	ede9f4c17d8a3aeb	206-819
+family=soft-before source=breathing/5-233260-A-23 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=breathing/5-234335-A-23 db=-45 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/5-234335-A-23 db=-45 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/5-234335-A-23 db=-55 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=breathing/5-234335-A-23 db=-55 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=breathing/5-235593-A-23 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101752	fcbeb4d3a4f3a57	204-839
+family=soft-before source=breathing/5-235593-A-23 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101762	afbb5d177adc4d62	203-839
+family=soft-before source=breathing/5-235593-A-23 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101756	84c388e893cc1fd7	204-839
+family=soft-before source=breathing/5-235593-A-23 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101822	5bcacc046ba108b7	203-839
+family=soft-before source=breathing/5-238492-A-23 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/5-238492-A-23 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/5-238492-A-23 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=breathing/5-238492-A-23 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=breathing/5-260164-A-23 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103003	e939d21d725c0a28	226-859
+family=soft-before source=breathing/5-260164-A-23 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103062	55fa3d6b5064dec9	225-859
+family=soft-before source=breathing/5-260164-A-23 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103006	cff47eb8b7832303	226-859
+family=soft-before source=breathing/5-260164-A-23 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103063	2845d3de163e912b	225-859
+family=soft-before source=breathing/5-261464-A-23 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/5-261464-A-23 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=breathing/5-261464-A-23 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148766	357bc522abe2281e	210-1138
+family=soft-before source=breathing/5-261464-A-23 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-45 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-60 fixture=librispeech/2277-149896-0000	101761	1ba903d1969b99b7	203-839
+family=soft-before source=talk/librispeech/2277-149896-0000 db=-55 room=-70 fixture=librispeech/2277-149896-0000	101888	39db2c8653b54f42	203-839
+family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=talk/librispeech/251-137823-0018 db=-45 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-60 fixture=librispeech/251-137823-0018	113891	c449eb8ffd14625e	218-929
+family=soft-before source=talk/librispeech/251-137823-0018 db=-55 room=-70 fixture=librispeech/251-137823-0018	113964	7f910e3434e5fed4	217-929
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-60 fixture=librispeech/2803-154328-0011	103060	d47afb07535bc248	225-859
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-45 room=-70 fixture=librispeech/2803-154328-0011	103403	7e2d45a099d555db	223-859
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-60 fixture=librispeech/2803-154328-0011	103060	d47afb07535bc248	225-859
+family=soft-before source=talk/librispeech/2803-154328-0011 db=-55 room=-70 fixture=librispeech/2803-154328-0011	103404	49554af1c49fccca	223-859
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-60 fixture=librispeech/3536-8226-0018	148769	5fa0cece94e238e	210-1138
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-45 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-60 fixture=librispeech/3536-8226-0018	148769	5fa0cece94e238e	210-1138
+family=soft-before source=talk/librispeech/3536-8226-0018 db=-55 room=-70 fixture=librispeech/3536-8226-0018	148799	abe48e6b35dd8952	210-1138
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-45 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-60 fixture=librispeech/6313-76958-0018	98093	32bf311b6ae10c38	206-819
+family=soft-before source=talk/librispeech/6313-76958-0018 db=-55 room=-70 fixture=librispeech/6313-76958-0018	98094	26d2bb9af7e45cfe	206-819
+family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=talk/librispeech/777-126732-0070 db=-45 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-60 fixture=librispeech/777-126732-0070	109241	e2326d24a91c15fc	228-729,738-919
+family=soft-before source=talk/librispeech/777-126732-0070 db=-55 room=-70 fixture=librispeech/777-126732-0070	110570	38c4fb0c411b2ff7	228-919
+family=soft-room source=breathing/1-18631-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-18631-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-18631-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-18631-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-B-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-B-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-B-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-B-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-C-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-C-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-C-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-30709-C-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36393-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36393-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36393-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36393-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36397-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36397-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36397-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36397-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36400-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36400-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36400-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36400-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36402-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36402-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36402-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/1-36402-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-50774-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-50774-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-50774-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-50774-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54961-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54961-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54961-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54961-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54962-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54962-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54962-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-54962-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-66205-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-66205-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-66205-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-66205-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-82455-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-82455-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-82455-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-82455-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-84965-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-84965-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-84965-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-84965-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-95567-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-95567-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-95567-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-95567-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-98392-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-98392-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-98392-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/2-98392-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-108160-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-108160-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-108160-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-108160-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-B-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-B-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-B-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-112557-B-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-B-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-B-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-B-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-144128-B-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-151206-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-151206-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-151206-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-151206-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-B-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-B-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-B-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/3-166125-B-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-171706-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-171706-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-171706-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-171706-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-176914-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-176914-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-176914-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-176914-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-198025-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-198025-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-198025-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-198025-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-B-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-B-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-B-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-205526-B-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-207116-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-207116-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-207116-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-207116-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-B-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-B-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-B-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/4-210000-B-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-213293-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-213293-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-213293-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-213293-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-232816-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-232816-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-232816-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-232816-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-233260-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-233260-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-233260-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-233260-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-234335-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-234335-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-234335-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-234335-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-235593-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-235593-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-235593-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-235593-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-238492-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-238492-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-238492-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-238492-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-260164-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-260164-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-260164-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-260164-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-261464-A-23 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-261464-A-23 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-261464-A-23 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=breathing/5-261464-A-23 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2277-149896-0000 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2277-149896-0000 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2277-149896-0000 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2277-149896-0000 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/251-137823-0018 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/251-137823-0018 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/251-137823-0018 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/251-137823-0018 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2803-154328-0011 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2803-154328-0011 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2803-154328-0011 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/2803-154328-0011 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/3536-8226-0018 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/3536-8226-0018 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/3536-8226-0018 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/3536-8226-0018 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/6313-76958-0018 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/6313-76958-0018 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/6313-76958-0018 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/6313-76958-0018 db=-55 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/777-126732-0070 db=-45 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/777-126732-0070 db=-45 room=-70	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/777-126732-0070 db=-55 room=-60	0	cbf29ce484222325	-
+family=soft-room source=talk/librispeech/777-126732-0070 db=-55 room=-70	0	cbf29ce484222325	-
 family=talk press=long fixture=librispeech/2277-149896-0000 under=librispeech/251-137823-0018 db=-24	108919	e727fdf2f9f9f97c	19-699
 family=talk press=long fixture=librispeech/2277-149896-0000 under=librispeech/251-137823-0018 db=-27	108629	39705178072d1b2f	21-699
 family=talk press=long fixture=librispeech/2277-149896-0000 under=librispeech/251-137823-0018 db=-30	108591	a4bb82d48bd7319b	21-699
