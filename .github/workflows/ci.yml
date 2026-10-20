@@ -42,11 +42,14 @@ jobs:
         run: |
           swift build --build-tests
           swift test --skip-build > /tmp/tests.log 2>&1 &
-          until pgrep -f "low-talkerPackageTests --testing-library swift-testing" > /dev/null; do sleep 0.1; done
-          p=$(pgrep -f "low-talkerPackageTests --testing-library swift-testing" | head -1)
+          until grep -q "Test run started" /tmp/tests.log 2>/dev/null; do sleep 0.1; done
+          pgrep -fl "low-talkerPackageTests" || true
+          p=$(pgrep -f "testing-library swift-testing" | tail -1)
+          echo "sampling $p"
           sample "$p" 15 5 -mayDie -file /tmp/sample.txt || true
           wait || true
-          grep -E "Test run with|Fatal|✘ Test" /tmp/tests.log | head -20 || true
+          grep -E "Test run with|Fatal" /tmp/tests.log | head -5 || true
+          grep -E "Suite \S+ passed after" /tmp/tests.log | awk '{print $NF, $(NF-1)}' | sort | uniq -c | sort -rn | head -5 || true
           echo "===SAMPLE==="
           cat /tmp/sample.txt
           echo "===END==="
