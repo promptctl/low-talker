@@ -417,6 +417,9 @@ public final class Dictation {
     private var unreported = 0
     /// When a cursor last arrived while the open press was down, for the offer queued behind it.
     private var arrivedDuringPress: ContinuousClock.Instant?
+    /// Whether the person asked for the dismissed words back while the open press was down,
+    /// for the bring-back queued behind it.
+    private var broughtBackDuringPress = false
     /// The decode of the latest press, which the next press's decode waits out before it
     /// takes the engine. Nil until the first press.
     private var latestDecode: Task<Decoded, Never>?
@@ -601,6 +604,8 @@ public final class Dictation {
             }
             arrivedDuringPress.map { offer(since: .cursorArrived($0)) }
             arrivedDuringPress = nil
+            if broughtBackDuringPress { bringBack() }
+            broughtBackDuringPress = false
         }
     }
 
@@ -719,6 +724,22 @@ public final class Dictation {
                 _ = try? await self.place(Transcript(words: []), following: nil, since: .asked(asked))
             }
         }
+    }
+
+    /// The person asked for the words they dismissed last back. A press's inserts carry what is
+    /// held ahead of their own words, so words brought back amid them would land amid what it
+    /// heard: they come back in their turn on the queue, after every press before. One asked
+    /// while a press is down is queued at its key-up, since queued now it would take its turn
+    /// between the press's commits and its key-up insert.
+    public func bringBackDismissed() {
+        switch press {
+        case .down: broughtBackDuringPress = true
+        case .up, .refused: bringBack()
+        }
+    }
+
+    private func bringBack() {
+        queue("bringing back the dismissed words") { await self.hold.bringBack() }
     }
 
     /// Offers what is held to the cursor in front.

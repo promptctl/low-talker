@@ -16,35 +16,35 @@ public struct HeldFile: HeldStore, Sendable {
     /// it outlives an upgrade.
     public static let app = HeldFile(url: .applicationSupportDirectory.appending(components: "low-talker", "held.json"))
 
-    /// No file is nothing held. One that cannot be read is moved aside, so no write replaces
-    /// the words in it, and the error says where it went.
-    public func read() throws(HeldUnreadable) -> Held? {
+    /// No file is nothing held or dismissed. One that cannot be read is moved aside, so no
+    /// write replaces the words in it, and the error says where it went.
+    public func read() throws(HeldUnreadable) -> HoldState {
         let data: Data
         do {
             data = try Data(contentsOf: url)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            return nil
+            return HoldState()
         } catch {
             throw keptAside(why: error.localizedDescription)
         }
         do {
-            return try JSONDecoder().decode(HeldRecord.self, from: data).held()
+            return try JSONDecoder().decode(HoldRecord.self, from: data).state()
         } catch {
             throw keptAside(why: "\(error)")
         }
     }
 
-    /// Writes `held`, or removes the file when nothing is held. A write that fails removes
-    /// the file it could not replace, since an unlink needs no free space and an older state
-    /// left there would be offered at the next launch.
-    public func write(_ held: Held?) throws(HeldUnkept) {
-        switch held {
-        case nil:
+    /// Writes `state`, or removes the file when nothing is held or dismissed. A write that
+    /// fails removes the file it could not replace, since an unlink needs no free space and an
+    /// older state left there would be offered at the next launch.
+    public func write(_ state: HoldState) throws(HeldUnkept) {
+        switch state {
+        case HoldState():
             do { try remove() } catch { throw .stale(why: error.localizedDescription) }
-        case let held?:
+        default:
             do {
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try JSONEncoder().encode(HeldRecord(held)).write(to: url, options: .atomic)
+                try JSONEncoder().encode(HoldRecord(state)).write(to: url, options: .atomic)
             } catch {
                 do { try remove() } catch let removal {
                     throw .stale(why: "\(error.localizedDescription); the older file could not be removed: \(removal.localizedDescription)")
@@ -73,7 +73,42 @@ public struct HeldFile: HeldStore, Sendable {
     }
 }
 
-/// The facts the file keeps, each decoded if present, so a field a later build adds leaves
+/// The file's record: what is held, in the fields an earlier release wrote at the top level, so
+/// its files still read, and what the person dismissed last, in a record of its own.
+struct HoldRecord: Codable, Equatable {
+    var held: HeldRecord
+    var dismissed: HeldRecord?
+
+    init(_ state: HoldState) {
+        held = state.held.map { HeldRecord($0) } ?? HeldRecord()
+        dismissed = state.dismissed.map { HeldRecord($0) }
+    }
+
+    private enum Key: CodingKey {
+        case dismissed
+    }
+
+    init(from decoder: any Decoder) throws {
+        held = try HeldRecord(from: decoder)
+        dismissed = try decoder.container(keyedBy: Key.self).decodeIfPresent(HeldRecord.self, forKey: .dismissed)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        try held.encode(to: encoder)
+        var container = encoder.container(keyedBy: Key.self)
+        try container.encodeIfPresent(dismissed, forKey: .dismissed)
+    }
+
+    /// [LAW:parse-dont-validate] The one place the file becomes a `HoldState`: each record fits
+    /// a `Held` or nothing, and the file keeps at least one, since an empty state is no file.
+    func state() throws(HeldRecord.Unfitting) -> HoldState {
+        let state = HoldState(held: try held.held(), dismissed: try dismissed?.held())
+        guard state != HoldState() else { throw HeldRecord.Unfitting(record: held) }
+        return state
+    }
+}
+
+/// The facts kept of one `Held`, each decoded if present, so a field a later build adds leaves
 /// the file an earlier one wrote readable.
 struct HeldRecord: Codable, Equatable {
     /// The words no cursor took.
@@ -97,8 +132,8 @@ struct HeldRecord: Codable, Equatable {
     }
 
     /// [LAW:parse-dont-validate] The one place a record becomes `Held`: each part whole or
-    /// absent, its words said, and at least one part.
-    func held() throws(Unfitting) -> Held {
+    /// absent, its words said. A record with neither part is nothing held.
+    func held() throws(Unfitting) -> Held? {
         func part(_ words: Transcript?, _ warning: String?) throws(Unfitting) -> Held.Part? {
             switch (words, warning) {
             case (nil, nil): return nil
@@ -108,8 +143,7 @@ struct HeldRecord: Codable, Equatable {
             default: throw Unfitting(record: self)
             }
         }
-        guard let held = Held(unplaced: try part(unplaced, warning), unaccounted: try part(unaccounted, unaccountedWarning)) else { throw Unfitting(record: self) }
-        return held
+        return Held(unplaced: try part(unplaced, warning), unaccounted: try part(unaccounted, unaccountedWarning))
     }
 
     /// Fields that fit no `Held`.
@@ -119,7 +153,7 @@ struct HeldRecord: Codable, Equatable {
         var description: String {
             let present = [("unplaced", record.unplaced != nil), ("warning", record.warning != nil), ("unaccounted", record.unaccounted != nil), ("unaccountedWarning", record.unaccountedWarning != nil)]
             let fields = present.filter(\.1).map(\.0)
-            return "a held record with \(fields.isEmpty ? "no fields" : fields.joined(separator: ", ")) fits nothing held"
+            return "a held record with \(fields.isEmpty ? "no fields" : fields.joined(separator: ", ")) fits nothing held or dismissed"
         }
     }
 }

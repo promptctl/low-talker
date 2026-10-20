@@ -1,5 +1,6 @@
 import AppKit
 import Dictation
+import Identity
 import LowTalkerCore
 
 /// The small panel near the bottom of the screen while a press is on its way, or while words
@@ -144,6 +145,7 @@ final class HUD {
         close.isBordered = false
         close.imagePosition = .imageOnly
         close.setAccessibilityLabel("Dismiss the held words")
+        close.toolTip = "Dismiss the held words. Bring them back from the \(AppIdentity.displayName) menu."
         return close
     }()
 
