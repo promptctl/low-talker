@@ -129,7 +129,8 @@ def main(folder):
         path = os.path.join(folder, "nonspeech", f"{name}.wav")
         if not os.path.exists(path):
             raw = fetch(f"{FSD50K}clips/{split}/{name}.wav", path + ".source.wav")
-            subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", raw, path], check=True)
+            subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", raw, path + ".part.wav"], check=True)
+            os.replace(path + ".part.wav", path)
             os.remove(raw)
         return path
     with ThreadPoolExecutor(8) as pool:
