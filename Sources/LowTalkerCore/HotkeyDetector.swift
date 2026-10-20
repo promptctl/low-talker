@@ -162,9 +162,11 @@ public struct HotkeyDetector: Sendable {
             return [.blocked(mode, by: event.modifiers.subtracting(mode.chord.modifiers))]
         // A chord a mode is listened for under decides what it does to a latched tap, as it
         // decides a press from rest: its own mode's chord, moved by `listen(for:)` or not, ends
-        // it, and another mode's ends it and begins that mode's press, since the person
+        // it, and so do the keys that began it, whichever mode a save gave them to (a renamed
+        // mode among them), since the person tapped them to start and taps them to stop.
+        // Another mode's chord ends it and begins that mode's press, since the person
         // switched modes and is speaking into the one they pressed.
-        case (.latched(let latched), let mode?, _) where mode.name == latched.name:
+        case (.latched(let latched), let mode?, _) where mode.name == latched.name || mode.chord == latched.chord:
             phase = .idle
             return [.ended(.released(.tap, at: event.time))]
         case (.latched, let mode?, _):
@@ -208,8 +210,8 @@ public struct HotkeyDetector: Sendable {
 
     /// Listens for `modes` from the next press on. A press already open is left open: it
     /// belongs to the chord that began it, and ends the way it would have, when a key of that
-    /// chord comes up or, latched, when that chord or one now listened for goes down; another
-    /// mode's chord begins that mode's press as it ends this one.
+    /// chord comes up or, latched, when that chord or its mode's chord now goes down; any
+    /// other mode's chord begins that mode's press as it ends this one.
     public mutating func listen(for modes: Modes) {
         self.modes = modes
     }

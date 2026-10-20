@@ -239,16 +239,16 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         #expect(keyboard.detector.phase == .idle)
     }
 
-    /// A tap latched under a chord a saved config gave to another mode is ended by it, and that
-    /// mode's press begins: what is said next is heard in the mode the chord now selects.
-    @Test func aTapLatchedUnderAChordAnotherModeTookEndsAndBeginsThatMode() {
-        let notes = Mode(name: rightCommand.name, chord: rightOption.chord)
+    /// A tap latched under a chord a saved config gave to a mode of another name, the same
+    /// mode renamed among them, is ended by that chord alone: the person tapped it to start
+    /// and taps it to stop, and a stop that began a press would leave the microphone on.
+    @Test func aTapLatchedUnderAChordAnotherModeTookIsEndedByItAlone() {
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
         _ = keyboard.release(.rightOption, at: 100)
-        keyboard.detector.listen(for: modes(notes))
-        #expect(keyboard.press(.rightOption, at: 2000) == ended(.tap, at: 2000) + began(notes, at: 2000))
-        #expect(keyboard.detector.phase == .held(notes, since: at(2000)))
+        keyboard.detector.listen(for: modes(Mode(name: "speak", chord: rightOption.chord)))
+        #expect(keyboard.press(.rightOption, at: 2000) == ended(.tap, at: 2000))
+        #expect(keyboard.detector.phase == .idle)
     }
 
     /// A lapse ends whatever press is open, a hold or a latched tap, and says that is

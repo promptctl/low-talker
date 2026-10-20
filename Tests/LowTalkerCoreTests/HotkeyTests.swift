@@ -1,6 +1,7 @@
 import Dispatch
 import Foundation
 import LowTalkerCore
+import OSLog
 import Testing
 
 private struct Refused: Error, Equatable {}
@@ -165,6 +166,25 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
             try hotkey.start { _ in }
         }
         #expect(feed.installations[0].disposed)
+    }
+
+    /// Each transition is a line under the `hotkey` category, read back from this process's
+    /// own log. The press is stamped at a moment no other test uses, so the line is this one's.
+    @Test func aTransitionIsLoggedUnderTheHotkeyCategory() async throws {
+        let feed = FakeFeed()
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
+        try hotkey.start { _ in }
+        let since = Date.now
+        let down = rightOption(.down, at: 987_654)
+        try #require(feed.installations.first).handle(down)
+        hotkey.stop()
+        // Read off the main actor: the store takes seconds, and this suite's other tests wait on it.
+        let lines = try await Task.detached {
+            let store = try OSLogStore(scope: .currentProcessIdentifier)
+            return try store.getEntries(at: store.position(date: since), matching: NSPredicate(format: "category == 'hotkey'"))
+                .map(\.composedMessage)
+        }.value
+        #expect(lines.contains("\(HotkeyDetector.Transition.began(rightOption, at: down.time))"))
     }
 }
 

@@ -26,7 +26,7 @@ public final class InputMethodNotices {
                 superviseInputMethod: @MainActor () -> Disposal) throws(PortNotHosted) {
         let port = try NoticePort(
             queue: DispatchQueue(label: AppIdentity.hotkeyPortName),
-            told: { event in Hotkey.log.error("\(event.description, privacy: .public)") },
+            told: { event in Logger.hotkey.error("\(event.description, privacy: .public)") },
             cursorArrived: { [weak self] arrival in
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.open?.cursorArrived(arrival) } }
             })

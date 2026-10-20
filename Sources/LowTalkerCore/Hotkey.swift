@@ -2,6 +2,12 @@ import Dispatch
 import Identity
 import os
 
+extension Logger {
+    /// [LAW:one-source-of-truth] The `hotkey` category of the unified log, for everything
+    /// the hotkey, its modifier feed and its input method's notices hear and decide.
+    static let hotkey = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
+}
+
 /// The hotkey for the life of the app: the modifier keys as the window server's events tell
 /// them, a detector reading them, and the presses it finds handed on by the main queue.
 @MainActor
@@ -9,9 +15,6 @@ public final class Hotkey {
     nonisolated public static let defaultTapThreshold: Duration = .milliseconds(250)
     /// The chord listened for where the config names no other: Right Option.
     nonisolated public static let defaultChord = KeyChord(modifiers: .rightOption)
-    /// [LAW:one-source-of-truth] The `hotkey` category of the unified log, for everything
-    /// the hotkey hears and decides.
-    nonisolated static let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
 
     /// The chord in the words a person presses it by, in `Modifier.allCases` order, so one
     /// chord always spells one name: `rightOption` as "Right Option", the case's own name
@@ -127,7 +130,7 @@ public final class Hotkey {
     /// one, so the order is a correctness property and not a preference.
     private func deliver(_ transition: HotkeyDetector.Transition,
                          to onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) {
-        Self.log.notice("\(transition, privacy: .public)")
+        Logger.hotkey.notice("\(transition, privacy: .public)")
         DispatchQueue.main.async { MainActor.assumeIsolated { onTransition(transition) } }
     }
 
