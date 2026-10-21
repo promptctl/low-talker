@@ -92,14 +92,15 @@ public enum InputMethodNotice: Equatable, Sendable {
     case overMemoryCeiling(pid: pid_t, Overrun)
 }
 
-/// An input method's memory footprint over its ceiling, in bytes. One under or at the ceiling
-/// cannot be made, here or off the wire. [LAW:parse-dont-validate]
+/// An input method's memory footprint over its ceiling, in bytes. One under or at the ceiling,
+/// or past the most bytes a byte count can say, cannot be made, here or off the wire.
+/// [LAW:parse-dont-validate]
 public struct Overrun: Equatable, Sendable, Codable, CustomStringConvertible {
     public let footprint: UInt64
     public let ceiling: UInt64
 
     public init?(footprint: UInt64, ceiling: UInt64) {
-        guard footprint > ceiling else { return nil }
+        guard footprint > ceiling, footprint <= Int64.max else { return nil }
         self.footprint = footprint
         self.ceiling = ceiling
     }

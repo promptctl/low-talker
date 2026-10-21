@@ -112,6 +112,29 @@ private let another = Build(number: "9", revision: "ba9876543210")
         #expect(watch.standing == .overMemoryCeiling(pid: 7, overrun))
         _ = watch.told(.running(pid: 8, opening: 2))
         #expect(watch.standing == .running(pid: 8, build: .notYetSaid))
+        #expect(watch.lastOverrun == overrun)
+    }
+
+    /// The process that said it is ending stands as ending for as long as it runs, and once the
+    /// supervisor has seen it end, a later process given its pid is another one.
+    @Test func aProcessGivenThePidOfOneThatEndedItselfIsAnotherOne() throws {
+        var watch = InputMethodWatch(app: app)
+        let overrun = try #require(Overrun(footprint: 3 << 29, ceiling: 1 << 30))
+        _ = watch.told(.running(pid: 7, opening: 1))
+        _ = watch.heard(.overMemoryCeiling(pid: 7, overrun))
+        _ = watch.told(.running(pid: 7, opening: 1))
+        #expect(watch.standing == .overMemoryCeiling(pid: 7, overrun))
+        _ = watch.told(.ended(pid: 7, launched: nil))
+        _ = watch.told(.running(pid: 7, opening: 2))
+        #expect(watch.standing == .running(pid: 7, build: .notYetSaid))
+        #expect(watch.lastOverrun == overrun)
+    }
+
+    @Test func noOverrunIsSaidWhileNoneHasBeenHeard() {
+        var watch = InputMethodWatch(app: app)
+        _ = watch.told(.running(pid: 7, opening: 1))
+        _ = watch.told(.ended(pid: 7, launched: nil))
+        #expect(watch.lastOverrun == nil)
     }
 
     /// An overrun says which process it was, and another process ending is not that one.

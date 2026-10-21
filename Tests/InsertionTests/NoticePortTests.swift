@@ -68,13 +68,16 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
         withExtendedLifetime(port) {}
     }
 
-    /// An overrun is only ever over: one at or under its ceiling cannot be made, nor read off
-    /// the wire from a sender that wrote one.
+    /// An overrun is only ever over, and only by what a byte count can say: one at or under its
+    /// ceiling, or past that, cannot be made, nor read off the wire from a sender that wrote one.
     @Test func anOverrunAtOrUnderItsCeilingIsNone() throws {
         #expect(Overrun(footprint: 1 << 30, ceiling: 1 << 30) == nil)
         #expect(Overrun(footprint: 1, ceiling: 1 << 30) == nil)
+        #expect(Overrun(footprint: UInt64(Int64.max) + 1, ceiling: 1 << 30) == nil)
         let under = Data(#"{"footprint":1,"ceiling":1073741824}"#.utf8)
         #expect(Wire.notice(id: Wire.overMemoryCeiling, payload: under, from: 7) == nil)
+        let unsayable = Data(#"{"footprint":18446744073709551615,"ceiling":1073741824}"#.utf8)
+        #expect(Wire.notice(id: Wire.overMemoryCeiling, payload: unsayable, from: 7) == nil)
         #expect(Wire.notice(id: Wire.overMemoryCeiling, payload: nil, from: 7) == nil)
         let over = try #require(Overrun(footprint: (1 << 30) + 1, ceiling: 1 << 30))
         #expect(Wire.notice(id: Wire.overMemoryCeiling, payload: Wire.overrun(over), from: 7) == .overMemoryCeiling(pid: 7, over))

@@ -2,7 +2,8 @@ import Insertion
 
 /// What the app knows of its input method: the supervisor's latest word on the process, the
 /// latest cursor arrival, which says the build of the process that told it, and the latest
-/// process to end itself over its memory ceiling.
+/// process to end itself over its memory ceiling, which the person is told for as long as the
+/// app runs, since the supervisor has the next process running within the second.
 ///
 /// [LAW:one-source-of-truth] All are folded here and the standing is read off them, so the
 /// supervisor and the notices never each write a status of their own. An overrun and the
@@ -16,7 +17,8 @@ public struct InputMethodWatch: Sendable {
     private let app: Build
     private var process: InputMethodSupervisor.Event?
     private var arrival: CursorArrival?
-    private var overrun: (pid: Int32, overrun: Overrun)?
+    /// Once the supervisor has seen this process end, a process given its pid again is another.
+    private var overrun: (pid: Int32, overrun: Overrun, ended: Bool)?
     /// The standing last shown, so the log says each one once.
     private var shown: InputMethodStanding?
 
@@ -33,6 +35,7 @@ public struct InputMethodWatch: Sendable {
     /// up while it set the input method up.
     public mutating func told(_ event: InputMethodSupervisor.Event) -> Showing {
         process = event
+        if case .ended(let pid, _) = event, pid == overrun?.pid { overrun?.ended = true }
         return show(standing(of: event))
     }
 
@@ -43,7 +46,9 @@ public struct InputMethodWatch: Sendable {
     public mutating func heard(_ notice: InputMethodNotice) -> Showing? {
         switch notice {
         case .cursorArrived(let arrival): self.arrival = arrival
-        case let .overMemoryCeiling(pid, overrun): self.overrun = (pid, overrun)
+        case let .overMemoryCeiling(pid, overrun):
+            let ended = if case .ended(pid, _) = process { true } else { false }
+            self.overrun = (pid, overrun, ended)
         }
         guard let standing, standing != shown else { return nil }
         return show(standing)
@@ -52,6 +57,9 @@ public struct InputMethodWatch: Sendable {
     /// Where the input method stands, or nil while the supervisor has said nothing.
     public var standing: InputMethodStanding? { process.map(standing(of:)) }
 
+    /// The latest process to end itself over its memory ceiling, or nil while none has.
+    public var lastOverrun: Overrun? { overrun?.overrun }
+
     private mutating func show(_ standing: InputMethodStanding) -> Showing {
         defer { shown = standing }
         return Showing(standing: standing, isNew: standing != shown)
@@ -59,15 +67,16 @@ public struct InputMethodWatch: Sendable {
 
     private func standing(of process: InputMethodSupervisor.Event) -> InputMethodStanding {
         switch process {
-        case .running(let pid, _): overran(pid) ?? running(pid)
-        case .ended(let pid, _): overran(pid) ?? .ended(pid: pid)
+        case .running(let pid, _): overran(pid, running: true) ?? running(pid)
+        case .ended(let pid, _): overran(pid, running: false) ?? .ended(pid: pid)
         case .notOpened(let reason, _): .notOpened(reason)
         }
     }
 
-    /// The process `pid` ending itself, if it said so.
-    private func overran(_ pid: Int32) -> InputMethodStanding? {
-        overrun.flatMap { $0.pid == pid ? .overMemoryCeiling(pid: pid, $0.overrun) : nil }
+    /// The process `pid` ending itself, if it said so and, while `running`, has not ended.
+    private func overran(_ pid: Int32, running: Bool) -> InputMethodStanding? {
+        guard let overrun, overrun.pid == pid, !(running && overrun.ended) else { return nil }
+        return .overMemoryCeiling(pid: pid, overrun.overrun)
     }
 
     private func running(_ pid: Int32) -> InputMethodStanding {

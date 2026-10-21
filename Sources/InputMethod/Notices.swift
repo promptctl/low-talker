@@ -41,13 +41,15 @@ public nonisolated final class Notices: Sendable {
         continuation.yield(.cursorArrived)
     }
 
-    /// A controller was activated while this process held `footprint` bytes.
-    public func activated(holding footprint: UInt64) {
+    /// A controller was activated while this process held `footprint` bytes. The overrun, when
+    /// it is over the ceiling, which the controller answers by taking no client.
+    public func activated(holding footprint: UInt64) -> Overrun? {
         log.info("activated holding \(footprint, privacy: .public) bytes of a \(Self.memoryCeiling, privacy: .public) byte ceiling")
-        Overrun(footprint: footprint, ceiling: Self.memoryCeiling).map { overrun in
+        return Overrun(footprint: footprint, ceiling: Self.memoryCeiling).map { overrun in
             log.fault("ending this process: \(overrun.description, privacy: .public)")
             continuation.yield(.overMemoryCeiling(overrun))
             continuation.finish()
+            return overrun
         }
     }
 

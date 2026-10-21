@@ -430,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .otherBuild(_, let mismatch): .off("\(mismatch.facts); \(BuildMismatch.fix)")
         case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
         case .overMemoryCeiling(_, let overrun):
-            .off("the input method ended itself \(overrun); \(AppIdentity.displayName) is starting it again")
+            .off("the input method is ending itself, \(overrun); \(AppIdentity.displayName) will start it again")
         case .notOpened(let reason):
             .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
         }
@@ -489,8 +489,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// The status line of a hotkey that is listening.
-    private var listeningStatus: String { "hold \(chordName), or tap it to start and again to stop" }
+    /// The status line of a hotkey that is listening, and the input method that last ended
+    /// itself over its memory ceiling, which the person would otherwise never see (IMK rule 7).
+    private var listeningStatus: String {
+        "hold \(chordName), or tap it to start and again to stop"
+            + (inputMethod.lastOverrun.map { "; the input method ended itself \($0), and was started again" } ?? "")
+    }
 
     /// The chords the config listens for, in the words a person presses them by.
     private var chordName: String {
