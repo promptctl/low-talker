@@ -128,6 +128,24 @@ private let another = Build(number: "9", revision: "ba9876543210")
         _ = watch.told(.running(pid: 7, opening: 2))
         #expect(watch.standing == .running(pid: 7, build: .notYetSaid))
         #expect(watch.lastOverrun == overrun)
+        _ = watch.told(.ended(pid: 7, launched: nil))
+        #expect(watch.standing == .ended(pid: 7))
+    }
+
+    /// An overrun heard after the supervisor opened the next process is said on the line, and
+    /// is not taken for a later process given its pid.
+    @Test func anOverrunHeardAfterTheNextOpenIsNotALaterProcess() throws {
+        var watch = InputMethodWatch(app: app)
+        let overrun = try #require(Overrun(footprint: 3 << 29, ceiling: 1 << 30))
+        _ = watch.told(.running(pid: 7, opening: 1))
+        _ = watch.told(.ended(pid: 7, launched: nil))
+        _ = watch.told(.running(pid: 8, opening: 2))
+        _ = watch.heard(.overMemoryCeiling(pid: 7, overrun))
+        #expect(watch.standing == .running(pid: 8, build: .notYetSaid))
+        #expect(watch.lastOverrun == overrun)
+        _ = watch.told(.ended(pid: 8, launched: nil))
+        _ = watch.told(.running(pid: 7, opening: 3))
+        #expect(watch.standing == .running(pid: 7, build: .notYetSaid))
     }
 
     @Test func noOverrunIsSaidWhileNoneHasBeenHeard() {
