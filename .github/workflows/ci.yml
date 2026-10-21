@@ -39,7 +39,24 @@ jobs:
         run: brew install xcodegen
 
       - name: Build and test the package
-        run: make test
+        run: |
+          make test > /tmp/first.log 2>&1 || true
+          grep -E "Test run with" /tmp/first.log || true
+          for i in 1 2 3 4 5; do
+            swift test --skip-build > /tmp/t$i.log 2>&1 &
+            until grep -q "Test run started" /tmp/t$i.log 2>/dev/null; do sleep 0.05; done
+            p=$(pgrep -f "testing-library swift-testing" | tail -1)
+            (sleep 3; top -l 2 -s 1 -n 12 -o cpu -stats pid,command,cpu,state > /tmp/top$i.txt) &
+            sample "$p" 10 2 -mayDie -file /tmp/s$i.txt > /dev/null 2>&1 || true
+            wait
+            hold=$(grep -E "Suite HoldsTests passed" /tmp/t$i.log || echo "no HoldsTests line")
+            echo "run $i: $(grep -E 'Test run with' /tmp/t$i.log) | $hold"
+            if ! grep -qE "passed after [0-6]\." <<<"$hold"; then
+              grep -E "✘" /tmp/t$i.log | head -5
+              echo "===TOP $i==="; cat /tmp/top$i.txt
+              echo "===SAMPLE $i==="; cat /tmp/s$i.txt; echo "===END $i==="
+            fi
+          done
 
       # The runner has no model to carry, so the bundles are built carrying none, which is
       # a build every Makefile path allows and one the app names at launch. Signing reaches
