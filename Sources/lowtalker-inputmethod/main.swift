@@ -57,7 +57,6 @@ let server: IMKServer = {
 /// saying that someone holds it - the name is what the log line needs, since the fix is in
 /// that app's own menu. A holder whose process has no name is still a holder, and is named
 /// by its pid rather than read as none. [LAW:no-silent-failure]
-@MainActor
 func secureInputHolder() -> String? {
     // A session that cannot be read says nothing about secure input, which is not the same
     // as saying nobody holds it: said by name, and the insert goes ahead, since the client's
@@ -72,7 +71,6 @@ func secureInputHolder() -> String? {
 
 /// Whether this input method's source is the one in use, read from the text input system.
 /// No current source, or one that names no identifier, is not this one.
-@MainActor
 func isTheSelectedSource() -> Bool {
     let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
     let identifier = current.flatMap { TISGetInputSourceProperty($0, kTISPropertyInputSourceID) }

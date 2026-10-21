@@ -54,4 +54,15 @@ private let repository = URL(fileURLWithPath: #filePath)
             #expect(settings["INPUT_METHOD_NAME"] == AppIdentity.displayName)
         }
     }
+
+    /// IMK rule 3: the process the bundle launches is compiled on the main actor unless it says
+    /// otherwise, as `swift build` compiles it. Xcode compiles the target's sources itself, so
+    /// without this the bundle would be built under the other default.
+    @Test func theBundleIsCompiledOnTheMainActorByDefault() throws {
+        let configurations = try Self.inputMethodConfigurations()
+        try #require(!configurations.isEmpty, "the project builds no input method")
+        for settings in configurations {
+            #expect(settings["SWIFT_DEFAULT_ACTOR_ISOLATION"] == "MainActor", "\(settings["INPUT_SOURCE_ID"] ?? "an input method") is compiled under \(settings["SWIFT_DEFAULT_ACTOR_ISOLATION"] ?? "no default isolation")")
+        }
+    }
 }

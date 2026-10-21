@@ -361,6 +361,9 @@ targets:
         # string can be written from the same names the plist above uses.
         INPUT_SOURCE_ID: ai.promptctl.low-talker.inputmethod.dictation.text
         INPUT_METHOD_NAME: LowTalker
+        # IMK rule 3 (CLAUDE.md). Xcode compiles this target's sources itself, so the
+        # package's setting for `lowtalker-inputmethod` does not reach the bundle; this does.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     # The name a person reads in the Input Sources list and the Input menu. macOS takes it
     # from the bundle's localized strings, keyed by the source identifier, and NOT from
     # `CFBundleName` alone: measured, a bundle without this file shows the raw identifier

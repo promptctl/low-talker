@@ -4,6 +4,7 @@ import Foundation
 @testable import Insertion
 import DarwinCalls
 import Security
+import TestProbes
 import Testing
 
 /// The real port, answering as the input method would and admitting this process, on a
@@ -183,19 +184,6 @@ final class Told: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return told
-    }
-}
-
-/// Runs `body` on a thread of the test's own and awaits what it returned or threw.
-///
-/// For the cases that send or wait by hand rather than through `Inserter`'s awaited
-/// overload: a test body runs on the cooperative pool, and a blocking call there holds one
-/// of its threads for the whole wait. Measured: four blocking calls held every thread of a
-/// three-core runner and no other test ran.
-/// [LAW:no-ambient-temporal-coupling]
-func onAThreadOfItsOwn<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
-    try await withCheckedThrowingContinuation { continuation in
-        Thread { continuation.resume(with: Result { try body() }) }.start()
     }
 }
 

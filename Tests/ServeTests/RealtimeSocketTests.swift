@@ -2,6 +2,7 @@ import Foundation
 import LowTalkerCore
 @testable import Serve
 import Synchronization
+import TestProbes
 import Testing
 
 private func update(_ input: [String: Any]) -> [String: Any] {
@@ -312,9 +313,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         let port = running.server.port.rawValue
         let batch = Data((0..<1_000).flatMap { _ in masked(0x1, Data(#"{"type":"x"}"#.utf8)) })
         // Blocking socket calls, so off the cooperative pool the server runs on.
-        let sent = try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async { continuation.resume(with: Result { try NonReadingClient.flood(port: port, with: batch) }) }
-        }
+        let sent = try await onAThreadOfItsOwn { try NonReadingClient.flood(port: port, with: batch) }
         try #require(sent < NonReadingClient.most, "the server read \(sent) bytes from a client that read nothing")
         let event = try await running.nextEvent()
         let realtime = try #require(event.realtime)

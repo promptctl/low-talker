@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 @testable import Insertion
 import DarwinCalls
+import TestProbes
 import Testing
 
 /// What goes onto the wire comes back off it.
@@ -482,9 +483,13 @@ private let anEditor = "com.example.editor"
     @Test func anAnswerThatDoesNotArriveIsSaidByName() async throws {
         let name = aPortNobodyElseUses()
         // Told nothing, because the answer this port finally sends goes to a sender that
-        // stopped listening long before, and is reported after this case has ended.
+        // stopped listening long before, and is reported after this case has ended. Held at a
+        // gate this case opens as it ends, not for a duration: the wait holds a worker of the
+        // port's queue, and no longer than the case needs it. [LAW:no-ambient-temporal-coupling]
+        let done = DispatchSemaphore(value: 0)
+        defer { done.signal() }
         let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: DispatchQueue(label: name), told: { _ in }) { request in
-            Thread.sleep(forTimeInterval: 30)
+            done.wait()
             return .inserted(characters: request.text.count, into: anEditor)
         }
 
@@ -505,8 +510,11 @@ private let anEditor = "com.example.editor"
     /// that they may have landed.
     @Test func aGreetingThatIsNotAnsweredIsSaidByName() async throws {
         let name = aPortNobodyElseUses()
+        // Held at a gate this case opens as it ends, as in `anAnswerThatDoesNotArriveIsSaidByName`.
+        let done = DispatchSemaphore(value: 0)
+        defer { done.signal() }
         let port = try InsertionPort(portName: name, queue: DispatchQueue(label: name), told: { _ in }) { _ in
-            Thread.sleep(forTimeInterval: 30)
+            done.wait()
             return Data()
         }
 

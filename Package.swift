@@ -1,5 +1,8 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
+
+// IMK rule 3 (CLAUDE.md), which also says why Insertion and Identity keep the default.
+let inputMethodIsolation: [SwiftSetting] = [.defaultIsolation(MainActor.self)]
 
 let package = Package(
     name: "low-talker",
@@ -114,8 +117,8 @@ let package = Package(
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
-        .target(name: "InputMethod", dependencies: ["Insertion"]),
-        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "Insertion", "Identity"]),
+        .target(name: "InputMethod", dependencies: ["Insertion", "Identity"], swiftSettings: inputMethodIsolation),
+        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "Insertion", "Identity", "TestProbes"]),
         // The two calls that cross between the app and the input method - words one way, the
         // modifier keys the other - and both ends of each port. It links Identity for the
         // ports' names and the Darwin calls beneath them, and nothing else - in particular no
@@ -138,10 +141,10 @@ let package = Package(
         // A sender that is not the test process, so the insert port's refusal is held by a
         // request that really crossed from another process. In no product: nothing ships it.
         .executableTarget(name: "insertion-probe", dependencies: ["Insertion", "Identity"], path: "Tests/InsertionProbe"),
-        .testTarget(name: "InsertionTests", dependencies: ["Insertion", "Identity", "DarwinCalls", "insertion-probe"]),
+        .testTarget(name: "InsertionTests", dependencies: ["Insertion", "Identity", "DarwinCalls", "insertion-probe", "TestProbes"]),
         // The process macOS launches out of the input method bundle. It holds the effects -
         // reading the bundle, opening the port, running the loop - and nothing else.
-        .executableTarget(name: "lowtalker-inputmethod", dependencies: ["InputMethod", "Insertion", "Identity"]),
+        .executableTarget(name: "lowtalker-inputmethod", dependencies: ["InputMethod", "Insertion", "Identity"], swiftSettings: inputMethodIsolation),
         // The bench: its options, flags, table, the folders a person picked for it, and the
         // one run at a time the app's window and `LowTalker --bench` start. Beneath the app;
         // the engine it loads is the core's, read in place, never installed.

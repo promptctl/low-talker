@@ -1,6 +1,7 @@
 import Foundation
 import LowTalkerCore
 import Synchronization
+import TestProbes
 import Testing
 
 /// A bench directory built on the fly: a clip the pipeline wrote beside the text
@@ -28,24 +29,34 @@ private final class BenchDirectory {
 
 /// A case-sensitive volume, the only place `foo.wav` and `foo.WAV` can both exist:
 /// APFS as shipped stores them as one file, so the temp directory cannot host them.
-private final class CaseSensitiveVolume {
-    let mountPoint: URL
-    private let image: URL
-
-    init() throws {
-        let base = FileManager.default.temporaryDirectory.appending(path: "lowtalker-cs-\(UUID().uuidString)")
-        image = base.appendingPathExtension("dmg")
-        mountPoint = base
-        try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
-        try Self.hdiutil("create", "-size", "8m", "-fs", "Case-sensitive APFS", "-volname", "lowtalker-cs", "-quiet", image.path)
-        try Self.hdiutil("attach", image.path, "-mountpoint", mountPoint.path, "-nobrowse", "-quiet")
+///
+/// Made and ejected on a thread of its own: hdiutil ran past 14 s on the macos-26 runner (run
+/// 39503764240), and a test body waiting on it there holds a thread of the cooperative pool.
+private enum CaseSensitiveVolume {
+    /// Runs `body` with the mount point of a fresh volume, ejected and removed once the volume
+    /// fails to mount or `body` returns or throws.
+    static func with<T>(_ body: (URL) throws -> T) async throws -> T {
+        let mountPoint = FileManager.default.temporaryDirectory.appending(path: "lowtalker-cs-\(UUID().uuidString)")
+        let image = mountPoint.appendingPathExtension("dmg")
+        let result: Result<T, any Error>
+        do {
+            try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+            try await onAThreadOfItsOwn {
+                try hdiutil("create", "-size", "8m", "-fs", "Case-sensitive APFS", "-volname", "lowtalker-cs", "-quiet", image.path)
+                try hdiutil("attach", image.path, "-mountpoint", mountPoint.path, "-nobrowse", "-quiet")
+            }
+            result = Result { try body(mountPoint) }
+        } catch {
+            result = .failure(error)
+        }
+        await onAThreadOfItsOwn {
+            try? hdiutil("detach", mountPoint.path, "-quiet")
+            try? FileManager.default.removeItem(at: mountPoint)
+            try? FileManager.default.removeItem(at: image)
+        }
+        return try result.get()
     }
 
-    deinit {
-        try? Self.hdiutil("detach", mountPoint.path, "-quiet")
-        try? FileManager.default.removeItem(at: mountPoint)
-        try? FileManager.default.removeItem(at: image)
-    }
 
     private static func hdiutil(_ arguments: String...) throws {
         let process = Process()
@@ -87,10 +98,9 @@ private final class CaseSensitiveVolume {
         #expect(fixtures[0].reference.words == ["loud"])
     }
 
-    @Test func twoSpellingsOfOneClipAreRefused() throws {
-        let volume = try CaseSensitiveVolume()
-        try withExtendedLifetime(volume) {
-            let bench = try BenchDirectory(under: volume.mountPoint)
+    @Test func twoSpellingsOfOneClipAreRefused() async throws {
+        try await CaseSensitiveVolume.with { mountPoint in
+            let bench = try BenchDirectory(under: mountPoint)
             try bench.add("echo", text: "Echo.")
             try BenchDirectory.tone.write(to: bench.url.appending(path: "echo.WAV"))
             do {
