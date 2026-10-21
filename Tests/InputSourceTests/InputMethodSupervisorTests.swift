@@ -34,10 +34,19 @@ import Testing
         private(set) var events: [InputMethodSupervisor.Event] = []
         func tell(_ event: InputMethodSupervisor.Event) { events.append(event) }
 
+        /// Throws once 10 s pass short of `count`, so no test reads on past events never told.
         func until(_ count: Int) async throws -> [InputMethodSupervisor.Event] {
             let giveUp = ContinuousClock.now + .seconds(10)
-            while events.count < count, ContinuousClock.now < giveUp { try await Task.sleep(for: .milliseconds(5)) }
+            while events.count < count {
+                guard ContinuousClock.now < giveUp else { throw TooFew(wanted: count, told: events) }
+                try await Task.sleep(for: .milliseconds(5))
+            }
             return events
+        }
+
+        struct TooFew: Error {
+            let wanted: Int
+            let told: [InputMethodSupervisor.Event]
         }
     }
 
