@@ -71,7 +71,7 @@ import Testing
     /// A cursor given focus is told to the app, which offers it words no cursor took.
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsTold() async {
         Notices.shared.cursorArrived(in: "com.apple.TextEdit")
-        #expect(await Notices.shared.arrivals.first { @Sendable _ in true } != nil)
+        #expect(await Notices.shared.notices.first { @Sendable _ in true } == .cursorArrived)
     }
 
     /// A call carrying no event, which IMK makes, is handed back rather than trapping and

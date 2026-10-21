@@ -128,19 +128,16 @@ let insertions: InsertionPort? = {
     }
 }()
 
-/// Every cursor that arrives, told to this installation's app. Off the main thread, and
-/// waiting on nothing: an arrival the app did not take costs only the wait for the next.
+/// Every notice, told to this installation's app. Off the main thread, and waiting on
+/// nothing: an arrival the app did not take costs only the wait for the next.
 ///
-/// Said in the log when how the telling fares changes, and not on every arrival: the app not
-/// listening is the ordinary state of an app that is not running. [LAW:no-silent-failure]
+/// An overrun of the memory ceiling is told before the process ends (IMK rule 7), so the app
+/// can say why its input method went away; the stream's order is what puts the one before the
+/// other. Ended as a failure, since nobody asked it to end, and on the main queue, so it comes
+/// between two turns there and never in the middle of a commit.
 let tellingTheApp = Task.detached {
     let sender = NoticeSender(build: build)
-    var fared: NoticeSender.Told?
-    for await _ in Notices.shared.arrivals {
-        let told = sender.tellCursorArrived()
-        if told != fared { logger.log(level: told.isFault ? .error : .default, "\(told.description, privacy: .public)") }
-        fared = told
-    }
+    await Notices.relay(Notices.shared.notices, tell: sender.tell, end: { DispatchQueue.main.async { exit(EXIT_FAILURE) } })
 }
 
 /// A cursor outlives its app unless someone says otherwise, and the text input system does
