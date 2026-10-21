@@ -385,9 +385,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let notices = installed.flatMap {
             Result { () throws(PortNotHosted) in
                 try InputMethodNotices(
-                    cursorArrived: { [unowned self] arrival in
-                        inputMethod.arrived(arrival).map(showInputMethod)
-                        listening?.dictation.cursorArrived()
+                    heard: { [unowned self] notice in
+                        inputMethod.heard(notice).map(showInputMethod)
+                        if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
                     },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
             }.mapError { LoopRefusal(stringLiteral: "\($0)") }
@@ -429,6 +429,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .running: .listening(listeningStatus)
         case .otherBuild(_, let mismatch): .off("\(mismatch.facts); \(BuildMismatch.fix)")
         case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
+        case .overMemoryCeiling(_, let overrun):
+            .off("the input method ended itself \(overrun); \(AppIdentity.displayName) is starting it again")
         case .notOpened(let reason):
             .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
         }

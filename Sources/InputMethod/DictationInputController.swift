@@ -60,6 +60,9 @@ public final class DictationInputController: IMKInputController {
         // The client is read here, and every later call on it, the commits included, is made
         // on this same actor (IMK rule 4).
         onMainActor("activateServer", sender) { sender in
+            // IMK rule 7, read first so a process past its ceiling ends before it takes on
+            // another client.
+            ownFootprint().map(Notices.shared.activated(holding:))
             // A sender no cursor can be made of - no client at all, or a client that will
             // not name its app - changes nothing here. Not reported, because a sender THIS
             // controller cannot understand is no reason to take the cursor away from another

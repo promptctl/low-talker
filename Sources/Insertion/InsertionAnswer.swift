@@ -302,6 +302,7 @@ enum Wire {
     // 3 was the modifier keys, which the app now hears itself. Not reused, so an input method
     // from before still running past an install is told as not understood, not misread.
     static let cursorArrived: mach_msg_id_t = 4
+    static let overMemoryCeiling: mach_msg_id_t = 5
 
     /// The first byte of every request, and one no UTF-8 text contains. An input method built
     /// when a request was its bare text, still running past an install, reads this as bytes
@@ -354,9 +355,16 @@ enum Wire {
         try? JSONDecoder().decode(InsertionAnswer.self, from: data)
     }
 
-    /// [LAW:parse-dont-validate] The build a cursor arrival said, nothing when it said none,
-    /// or nil when the message is no cursor arrival.
-    static func arrival(id: mach_msg_id_t, payload: Data?) -> Build?? {
-        id == cursorArrived ? build(of: payload ?? Data()) : nil
+    static func overrun(_ overrun: Overrun) -> Data { try! JSONEncoder().encode(overrun) }
+
+    /// [LAW:parse-dont-validate] The notice the input method process `pid` sent, or nil when
+    /// the message is none, or its payload is not what its id says. A cursor arrival carries
+    /// the build it said, or nothing when it said none.
+    static func notice(id: mach_msg_id_t, payload: Data?, from pid: pid_t) -> InputMethodNotice? {
+        switch id {
+        case cursorArrived: build(of: payload ?? Data()).map { .cursorArrived(CursorArrival(pid: pid, build: $0)) }
+        case overMemoryCeiling: payload.flatMap { try? JSONDecoder().decode(Overrun.self, from: $0) }.map { .overMemoryCeiling(pid: pid, $0) }
+        default: nil
+        }
     }
 }

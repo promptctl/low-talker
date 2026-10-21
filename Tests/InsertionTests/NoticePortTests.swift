@@ -6,7 +6,7 @@ import Testing
 
 /// What the hotkey port did, in the order it did it, for a case to wait on.
 private enum Arrival: Equatable {
-    case cursorArrived(CursorArrival)
+    case heard(InputMethodNotice)
     case told(String)
 }
 
@@ -16,7 +16,7 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
     let (arrivals, continuation) = AsyncStream<Arrival>.makeStream()
     let port = try NoticePort(
         portName: name, senders: senders, queue: DispatchQueue(label: name),
-        told: { continuation.yield(.told($0.description)) }, cursorArrived: { continuation.yield(.cursorArrived($0)) })
+        told: { continuation.yield(.told($0.description)) }, heard: { continuation.yield(.heard($0)) })
     return (port, arrivals)
 }
 
@@ -33,7 +33,7 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
         #expect((0..<3).map { _ in sender.tellCursorArrived() } == Array(repeating: .told, count: 3))
         var arrived: [Arrival] = []
         for await arrival in arrivals.prefix(3) { arrived.append(arrival) }
-        #expect(arrived == Array(repeating: .cursorArrived(CursorArrival(pid: getpid(), build: aBuild)), count: 3))
+        #expect(arrived == Array(repeating: .heard(.cursorArrived(CursorArrival(pid: getpid(), build: aBuild))), count: 3))
         withExtendedLifetime(port) {}
     }
 
@@ -43,17 +43,47 @@ private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: N
         let name = aPortNobodyElseUses()
         let (port, arrivals) = try hostNotices(name: name, senders: try OwnProcess.identity())
         #expect(NoticeSender(portName: name, build: nil).tellCursorArrived() == .told)
-        #expect(await arrivals.first(where: { _ in true }) == .cursorArrived(CursorArrival(pid: getpid(), build: nil)))
+        #expect(await arrivals.first(where: { _ in true }) == .heard(.cursorArrived(CursorArrival(pid: getpid(), build: nil))))
         withExtendedLifetime(port) {}
     }
 
     /// A cursor arrival carries a build or nothing, so one carrying other bytes is not one.
     @Test func aCursorArrivalCarryingBytesThatAreNoBuildIsNotOne() {
-        #expect(Wire.arrival(id: Wire.cursorArrived, payload: nil) == .some(nil))
-        #expect(Wire.arrival(id: Wire.cursorArrived, payload: Data()) == .some(nil))
-        #expect(Wire.arrival(id: Wire.cursorArrived, payload: Wire.said(aBuild)) == .some(aBuild))
-        #expect(Wire.arrival(id: Wire.cursorArrived, payload: Data([1])) == nil)
-        #expect(Wire.arrival(id: Wire.greeting, payload: Wire.said(aBuild)) == nil)
+        let arrival = { (build: Build?) in InputMethodNotice.cursorArrived(CursorArrival(pid: 7, build: build)) }
+        #expect(Wire.notice(id: Wire.cursorArrived, payload: nil, from: 7) == arrival(nil))
+        #expect(Wire.notice(id: Wire.cursorArrived, payload: Data(), from: 7) == arrival(nil))
+        #expect(Wire.notice(id: Wire.cursorArrived, payload: Wire.said(aBuild), from: 7) == arrival(aBuild))
+        #expect(Wire.notice(id: Wire.cursorArrived, payload: Data([1]), from: 7) == nil)
+        #expect(Wire.notice(id: Wire.greeting, payload: Wire.said(aBuild), from: 7) == nil)
+    }
+
+    /// The input method ending itself over its memory ceiling is heard with what it held and
+    /// the ceiling it held it over, so the app can say both.
+    @Test(.timeLimit(.minutes(1))) func anOverrunIsHeardWithWhatItHeld() async throws {
+        let name = aPortNobodyElseUses()
+        let (port, arrivals) = try hostNotices(name: name, senders: try OwnProcess.identity())
+        let overrun = try #require(Overrun(footprint: 1_500_000_000, ceiling: 1 << 30))
+        #expect(NoticeSender(portName: name, build: aBuild).tellOverMemoryCeiling(overrun) == .told)
+        #expect(await arrivals.first(where: { _ in true }) == .heard(.overMemoryCeiling(pid: getpid(), overrun)))
+        withExtendedLifetime(port) {}
+    }
+
+    /// An overrun is only ever over: one at or under its ceiling cannot be made, nor read off
+    /// the wire from a sender that wrote one.
+    @Test func anOverrunAtOrUnderItsCeilingIsNone() throws {
+        #expect(Overrun(footprint: 1 << 30, ceiling: 1 << 30) == nil)
+        #expect(Overrun(footprint: 1, ceiling: 1 << 30) == nil)
+        let under = Data(#"{"footprint":1,"ceiling":1073741824}"#.utf8)
+        #expect(Wire.notice(id: Wire.overMemoryCeiling, payload: under, from: 7) == nil)
+        #expect(Wire.notice(id: Wire.overMemoryCeiling, payload: nil, from: 7) == nil)
+        let over = try #require(Overrun(footprint: (1 << 30) + 1, ceiling: 1 << 30))
+        #expect(Wire.notice(id: Wire.overMemoryCeiling, payload: Wire.overrun(over), from: 7) == .overMemoryCeiling(pid: 7, over))
+    }
+
+    /// Said in the units Activity Monitor uses, so a person can hold it to what they see there.
+    @Test func anOverrunSaysWhatItHeldInMemoryUnits() throws {
+        let overrun = try #require(Overrun(footprint: 3 << 29, ceiling: 1 << 30))
+        #expect(overrun.description == "holding 1.5 GB, over its 1 GB ceiling")
     }
 
     /// The name is one anyone can compute, and an arrival heard from anyone would offer held

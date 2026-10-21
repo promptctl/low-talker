@@ -4,7 +4,8 @@ import Identity
 import Foundation
 
 /// The app's end of the hotkey port: the named port the input method tells each cursor it is
-/// given focus in to, which is the moment words no cursor took can be offered again. Named
+/// given focus in to, which is the moment words no cursor took can be offered again, and its
+/// ending itself over its memory ceiling, which is why it went away. Named
 /// for the hotkey because that is the one name the input method's sandbox lets it look up.
 ///
 /// **Only this installation's input method is heard.** The name is one anyone can compute,
@@ -27,8 +28,8 @@ public final class NoticePort {
     public enum Event: CustomStringConvertible {
         /// A message from a process `senders` does not admit.
         case turnedAway(pid: pid_t, because: PeerIdentity.NotAdmitted, required: PeerIdentity)
-        /// A message from the input method that is not a cursor arrival, or an arrival whose
-        /// build is not one.
+        /// A message from the input method that is no notice this app knows, or one whose
+        /// payload is not what its id says.
         case notUnderstood(id: mach_msg_id_t, bytes: Int?)
         /// Taking a message off the port failed for a reason of the kernel's.
         case receiveFailed(kern_return_t)
@@ -38,7 +39,7 @@ public final class NoticePort {
             case let .turnedAway(pid, because, required):
                 "ignored a notice told by pid \(pid): \(because), and only \(required) is heard"
             case let .notUnderstood(id, bytes):
-                "the input method sent message \(id) of \(bytes.map { "\($0) bytes" } ?? "an unreadable shape"), which is not a cursor arrival"
+                "the input method sent message \(id) of \(bytes.map { "\($0) bytes" } ?? "an unreadable shape"), which is no notice this app knows"
             case .receiveFailed(let status):
                 "a message could not be taken off the hotkey port: \(Mach.describe(status))"
             }
@@ -46,23 +47,23 @@ public final class NoticePort {
     }
 
     /// Hosts the hotkey port, hearing the input method and nobody else.
-    /// `cursorArrived` and `told` run on `queue`, one message at a time, in the order they were sent.
+    /// `heard` and `told` run on `queue`, one message at a time, in the order they were sent.
     public convenience init(
         queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, cursorArrived: @escaping @Sendable (CursorArrival) -> Void
+        told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void
     ) throws(PortNotHosted) {
         let senders: PeerIdentity
         do throws(PeerIdentity.Unreadable) {
             senders = try .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier)
         } catch { throw .noRequirement(error) }
-        try self.init(portName: AppIdentity.hotkeyPortName, senders: senders, queue: queue, told: told, cursorArrived: cursorArrived)
+        try self.init(portName: AppIdentity.hotkeyPortName, senders: senders, queue: queue, told: told, heard: heard)
     }
 
     /// Under a name and a requirement someone else chose, which is how a test hosts one
     /// without being the app. [LAW:decomposition]
     init(
         portName: String, senders: PeerIdentity, queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, cursorArrived: @escaping @Sendable (CursorArrival) -> Void
+        told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void
     ) throws(PortNotHosted) {
         port = try NamedPort(name: portName, queue: queue, received: { message in
             message.discardReply()
@@ -72,15 +73,55 @@ public final class NoticePort {
                 told(.turnedAway(pid: message.sender.pid, because: error, required: senders))
                 return
             }
-            // [LAW:parse-dont-validate] The border: past it there is a cursor arrival, and
-            // anything else is said by name rather than dropped. [LAW:no-silent-failure]
-            guard let build = Wire.arrival(id: message.id, payload: message.payload) else {
+            // [LAW:parse-dont-validate] The border: past it there is a notice, and anything
+            // else is said by name rather than dropped. [LAW:no-silent-failure]
+            guard let notice = Wire.notice(id: message.id, payload: message.payload, from: message.sender.pid) else {
                 told(.notUnderstood(id: message.id, bytes: message.payload?.count))
                 return
             }
-            cursorArrived(CursorArrival(pid: message.sender.pid, build: build))
+            heard(notice)
         }, failed: { told(.receiveFailed($0)) })
     }
+}
+
+/// What the input method tells the app, from the process `pid` in each case. Who told it was
+/// checked off the audit token before this was made.
+public enum InputMethodNotice: Equatable, Sendable {
+    case cursorArrived(CursorArrival)
+    /// The input method is ending itself, holding more memory than its ceiling (IMK rule 7).
+    case overMemoryCeiling(pid: pid_t, Overrun)
+}
+
+/// An input method's memory footprint over its ceiling, in bytes. One under or at the ceiling
+/// cannot be made, here or off the wire. [LAW:parse-dont-validate]
+public struct Overrun: Equatable, Sendable, Codable, CustomStringConvertible {
+    public let footprint: UInt64
+    public let ceiling: UInt64
+
+    public init?(footprint: UInt64, ceiling: UInt64) {
+        guard footprint > ceiling else { return nil }
+        self.footprint = footprint
+        self.ceiling = ceiling
+    }
+
+    private enum CodingKeys: CodingKey { case footprint, ceiling }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let footprint = try container.decode(UInt64.self, forKey: .footprint)
+        let ceiling = try container.decode(UInt64.self, forKey: .ceiling)
+        guard let overrun = Overrun(footprint: footprint, ceiling: ceiling) else {
+            throw DecodingError.dataCorruptedError(forKey: .footprint, in: container, debugDescription: "\(footprint) is not over \(ceiling)")
+        }
+        self = overrun
+    }
+
+    public var description: String {
+        "holding \(Self.said(footprint)), over its \(Self.said(ceiling)) ceiling"
+    }
+
+    /// In the units Activity Monitor's Memory column uses.
+    private static func said(_ bytes: UInt64) -> String { Int64(bytes).formatted(.byteCount(style: .memory)) }
 }
 
 /// A cursor the input method was given focus in, told by the input method process `pid`,
@@ -148,12 +189,17 @@ public struct NoticeSender: Sendable {
     }
 
     /// Tells the app a cursor arrived, and which build says so.
-    public func tellCursorArrived() -> Told {
+    public func tellCursorArrived() -> Told { tell(Wire.said(build), id: Wire.cursorArrived) }
+
+    /// Tells the app this input method is ending itself over its memory ceiling.
+    public func tellOverMemoryCeiling(_ overrun: Overrun) -> Told { tell(Wire.overrun(overrun), id: Wire.overMemoryCeiling) }
+
+    private func tell(_ payload: Data, id: mach_msg_id_t) -> Told {
         var remote = mach_port_t()
         guard lt_bootstrap_look_up(portName, &remote) == KERN_SUCCESS else { return .nobodyIsListening(port: portName) }
         defer { mach_port_deallocate(mach_task_self_, remote) }
         let sent = Mach.send(
-            Wire.said(build), id: Wire.cursorArrived, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
+            payload, id: id, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
             replyTo: Mach.noPort, timeout: .zero)
         return switch sent {
         case MACH_MSG_SUCCESS: .told
