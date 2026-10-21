@@ -102,9 +102,13 @@ let committer = Committer { ended in logger.notice("\(ended.description, privacy
 /// The fault names the `PortNotHosted` case that stopped it - most often the name
 /// already held by another instance of this input method, whose own cursor then answers the
 /// app. [LAW:no-silent-failure]
-let insertions: InsertionPort? = {
+///
+/// Opened off the main thread while the server above already answers, since opening it
+/// verifies this process's own signature. The task holds the port for the life of the
+/// process.
+let insertions = Task.detached { () -> InsertionPort? in
     do {
-        return try InsertionPort(build: build, queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
+        let port = try await InsertionPort(build: build, queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
             logger.error("\(String(describing: event), privacy: .public)")
         }) { request in
             // Read on the main actor, where the effects are, and handed to the decision as
@@ -119,6 +123,8 @@ let insertions: InsertionPort? = {
             logger.notice("\(placed.description, privacy: .public)")
             return placed.answer
         }
+        logger.notice("answering inserts on \(AppIdentity.inputMethodPortName, privacy: .public)")
+        return port
     } catch {
         logger.fault("""
             no insert port on \(AppIdentity.inputMethodPortName, privacy: .public): \
@@ -126,16 +132,21 @@ let insertions: InsertionPort? = {
             """)
         return nil
     }
-}()
+}
 
 /// Every notice, told to this installation's app. Off the main thread, and waiting on
 /// nothing: an arrival the app did not take costs only the wait for the next.
+///
+/// Told only once the insert port is open or has failed to, because an arrival is what sends
+/// the app to that port with the words it holds. The stream keeps what arrives meanwhile.
+/// [LAW:no-ambient-temporal-coupling]
 ///
 /// An overrun of the memory ceiling is told before the process ends (IMK rule 7), so the app
 /// can say why its input method went away; the stream's order is what puts the one before the
 /// other. Ended as a failure, since nobody asked it to end, and on the main queue, so it comes
 /// between two turns there and never in the middle of a commit.
 let tellingTheApp = Task.detached {
+    _ = await insertions.value
     let sender = NoticeSender(build: build)
     await Notices.relay(Notices.shared.notices, tell: sender.tell, end: { DispatchQueue.main.async { exit(EXIT_FAILURE) } })
 }
@@ -150,12 +161,9 @@ let quits = NSWorkspace.shared.notificationCenter.addObserver(
     MainActor.assumeIsolated { quit.map(FocusedClient.shared.applicationQuit) }
 }
 
-// What this process opened, rather than what it set out to open: the startup line is where
-// a reader looks first, and one that named the insert port whether or not it exists would
-// send them looking for a fault that is already in the log above. [LAW:no-silent-failure]
-let inserts = insertions.map { _ in "answering inserts on \(AppIdentity.inputMethodPortName)" } ?? "answering no inserts"
+// The insert port is said by the task opening it, once it is open or has failed to.
 logger.notice("""
-    serving \(AppIdentity.inputMethodConnectionName, privacy: .public), \
-    \(inserts, privacy: .public), as \(build.map(\.description) ?? "no build", privacy: .public)
+    serving \(AppIdentity.inputMethodConnectionName, privacy: .public) \
+    as \(build.map(\.description) ?? "no build", privacy: .public)
     """)
 NSApplication.shared.run()
