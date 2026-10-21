@@ -27,4 +27,4 @@ Brandon adopted vChewing's "macOS Input Method Development Guidelines for 2026" 
 8. **No windows.** Every NSWindow costs memory macOS 26 never reclaims. The input method has none. If it ever needs one, one NSPanel serves every purpose.
 9. **No IMKCandidates.**
 
-The code does not yet follow 5 and 7. Epic `low-imk-rules-w3g` holds one ticket for each, and the ticket that brings a rule into line deletes its number from that list. Until then, treat the code that breaks a rule as an exception to fix. Do not copy it as precedent.
+The code does not yet follow 7, and 5 waits on macOS 26. Epic `low-imk-rules-w3g` holds one ticket for each, and the ticket that brings a rule into line deletes its number from that list. Until then, treat the code that breaks a rule as an exception to fix. Do not copy it as precedent.
