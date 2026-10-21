@@ -31,7 +31,7 @@ public enum PortNotHosted: Error, CustomStringConvertible {
 /// withdrawn once the queue is out of any message it was handling. `close()` does the same
 /// and returns only when the name is free, for a host that hosts the name again at once -
 /// the app does that each time it rebuilds its hotkey. [LAW:no-ambient-temporal-coupling]
-final class NamedPort {
+final class NamedPort: Sendable {
     private let source: DispatchSourceMachReceive
     private let queue: DispatchQueue
     /// Signalled once the receive right is gone, which is what withdraws the name.

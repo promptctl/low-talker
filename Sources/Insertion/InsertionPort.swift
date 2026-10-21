@@ -27,7 +27,7 @@ import DarwinCalls
 /// Held for the life of the process by whoever makes it. Released, the port closes and the
 /// app's next request finds nothing listening; a request already being answered finishes
 /// first, because the port is only taken down once the queue is out of it.
-public final class InsertionPort {
+public final class InsertionPort: Sendable {
     private let port: NamedPort
 
     /// Something the port did that nobody asked it for, said so the log can say it.
@@ -54,10 +54,14 @@ public final class InsertionPort {
 
     /// Hosts the insert port, admitting the app and nobody else, and answering each greeting
     /// with `build`, this input method's own, or with none when its bundle carries none.
-    public convenience init(
+    ///
+    /// Never on the caller's actor. Knowing who to admit means verifying this process's own
+    /// signature, a trust evaluation Security faults when it runs on the main thread, eleven
+    /// times over a Developer ID signature. [LAW:types-are-the-program]
+    @concurrent public convenience init(
         build: Build?, queue: DispatchQueue,
         told: @escaping @Sendable (Event) -> Void, answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
-    ) throws(PortNotHosted) {
+    ) async throws(PortNotHosted) {
         let senders: PeerIdentity
         do throws(PeerIdentity.Unreadable) { senders = try .signedLikeThisProcess(identifier: AppIdentity.bundleIdentifier) } catch { throw .noRequirement(error) }
         try self.init(portName: AppIdentity.inputMethodPortName, senders: senders, build: build, queue: queue, told: told, answer: answer)
