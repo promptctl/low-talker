@@ -106,7 +106,7 @@ let committer = Committer { ended in logger.notice("\(ended.description, privacy
 /// Opened off the main thread while the server above already answers, since opening it
 /// verifies this process's own signature. The task holds the port for the life of the
 /// process.
-let insertions = Task { () -> InsertionPort? in
+let insertions = Task.detached { () -> InsertionPort? in
     do {
         let port = try await InsertionPort(build: build, queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
             logger.error("\(String(describing: event), privacy: .public)")
