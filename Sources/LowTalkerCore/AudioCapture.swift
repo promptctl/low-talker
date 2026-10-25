@@ -521,16 +521,19 @@ public final class AudioCapture {
         // that lateness is about its head, so it is the same reading rather than one of its
         // own. [LAW:one-source-of-truth] A session still open that nothing has reached yet
         // has missed nothing yet: what it is waiting for may still come in time.
-        let openedLate = stream.arrivals.first
-            .map { session.unheard(since: $0) > .seconds(warmUpAllowance) } ?? ended
+        // One reason, read in precedence order: a microphone that is not open now stopped,
+        // whatever it did earlier; an open one that never delivered is silent once the press
+        // ended, and is still waiting while it is not; otherwise it opened late or on time.
+        // [LAW:no-silent-failure] Each reason is a different fact, so each is reported.
+        let unopened: CapturedAudio.Loss.Unopened? = {
+            if !open { return .stopped }
+            guard let firstSample = stream.arrivals.first else { return ended ? .noAudio : nil }
+            return session.unheard(since: firstSample) > .seconds(warmUpAllowance) ? .startedLate : nil
+        }()
         return CapturedAudio.Loss(
             scrolledOff: scrolledOff,
             interrupted: began < stream.continuousSince,
-            // Two readings of one fact - the microphone was not open for part of this
-            // session. It opened so long after the key went down that the stretch in
-            // between is speech rather than warm-up, which takes the head; or it was gone
-            // by the time the key came up, or is gone now, which takes the tail.
-            unopened: openedLate || !open
+            unopened: unopened
         )
     }
 
