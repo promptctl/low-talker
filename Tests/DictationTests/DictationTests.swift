@@ -492,11 +492,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2] })
         rig.keyUp()
         let press = try #require(await rig.report().failure as? SpeechLost)
-        #expect(press.lost.unopened)
+        #expect(press.lost.unopened == .startedLate)
         #expect(press.landed == 0)
         #expect(press.held == 1)
         #expect(rig.inputMethod.inserted.isEmpty)
-        #expect(rig.hold.held == .unplaced(part("there", "WARNING: Your microphone was not open for the whole of your dictation.")))
+        #expect(rig.hold.held == .unplaced(part("there", "WARNING: Your microphone took more than 2 s to start after you pressed the key, so the first part of what you said was not recorded.")))
     }
 
     /// A press that lapses after some of its words were committed keeps them, commits
@@ -824,8 +824,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.keyUp()
 
         let press = try #require(await rig.report().failure as? SpeechLost)
-        #expect(press.lost.unopened)
-        #expect("\(press)" == "WARNING: Your microphone was not open for the whole of your dictation. Its 1 words are held.")
+        #expect(press.lost.unopened == .startedLate)
+        #expect("\(press)" == "WARNING: Your microphone took more than 2 s to start after you pressed the key, so the first part of what you said was not recorded. Its 1 words are held.")
         #expect(!press.lost.interrupted)
         #expect(press.lost.scrolledOff == 0)
         #expect(rig.inputMethod.inserted.isEmpty)
@@ -1835,7 +1835,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
         let press = try #require(await rig.report().failure as? SpeechLost)
         #expect(press.lost.interrupted)
-        #expect(!press.lost.unopened)
+        #expect(press.lost.unopened == nil)
         #expect(press.lost.scrolledOff == 0)
         #expect(press.lost.description == "Your microphone restarted while you were dictating")
     }
@@ -1885,7 +1885,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.refusedHold()
         let report = await rig.pressReport()
         let lost = try #require(report.outcome.failure as? SpeechLost)
-        #expect(lost.lost.unopened)
+        #expect(lost.lost.unopened == .noAudio)
         #expect(report.opened?.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 0, peak: 0, firstSample: nil))
         #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel) delivered nothing after the key went down")
     }
@@ -1937,7 +1937,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.keyUp()
 
         let press = try #require(await rig.report().failure as? SpeechLost)
-        #expect(press.lost.unopened)
+        #expect(press.lost.unopened == .stopped)
         #expect(!press.lost.interrupted)
         #expect(press.held == 1)
         #expect(rig.inputMethod.inserted.isEmpty)
