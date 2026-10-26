@@ -1378,8 +1378,8 @@ private struct Authorized: MicrophoneAuthority {
                 }
                 said.append("rest \(move.to.rawValue): \(outcome)")
                 waits.append(move.waited)
-            case .failed(let error):
-                said.append("failed: \(error)")
+            case .failed(let failure):
+                said.append("failed: \(failure)")
             }
         }
     }
@@ -1562,7 +1562,8 @@ private struct Authorized: MicrophoneAuthority {
         try await capture.start(grant, atRest: .open)
         _ = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].onFailure(NoDevice())
-        #expect(reports.said.contains("failed: \(NoDevice())"))
+        #expect(reports.said.contains { $0.hasPrefix("failed: \(NoDevice()) on") })
+        #expect(reports.said.contains { $0.contains("(device 1, 48000 Hz, 1 ch)") && $0.contains("the default input") })
     }
 
     /// The key-up hands the microphone back to its resting state, and under `open` that
