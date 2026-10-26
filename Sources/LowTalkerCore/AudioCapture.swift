@@ -1009,6 +1009,7 @@ public final class AudioCapture {
         dispose(live)
         started.engine = .failed(error, since: .now, on: preparations)
         phase = .started(started)
+        reporting(.failed(error))
     }
 }
 
@@ -1017,11 +1018,15 @@ public final class AudioCapture {
 public enum CaptureReport: CustomStringConvertible {
     case device(DeviceReport)
     case resting(RestingMove)
+    /// The running engine stopped on its own - a fault from the delivery thread or a device
+    /// that stopped - and the press that held it has no microphone. [LAW:nothing-unseen]
+    case failed(any Error)
 
     public var description: String {
         switch self {
         case .device(let report): "device: \(report)"
         case .resting(let move): "resting mode: \(move)"
+        case .failed(let error): "engine failed: \(error)"
         }
     }
 }
