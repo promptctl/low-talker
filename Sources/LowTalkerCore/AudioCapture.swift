@@ -1009,6 +1009,7 @@ public final class AudioCapture {
         dispose(live)
         started.engine = .failed(error, since: .now, on: preparations)
         phase = .started(started)
+        reporting(.failed(EngineFailure(error: error, input: live.input, stillOnTheDefaultInput: started.prepared.isOnTheDefaultInput)))
     }
 }
 
@@ -1017,12 +1018,32 @@ public final class AudioCapture {
 public enum CaptureReport: CustomStringConvertible {
     case device(DeviceReport)
     case resting(RestingMove)
+    /// The running engine stopped on its own - a fault from the delivery thread or a device
+    /// that stopped - and the press that held it has no microphone. [LAW:nothing-unseen]
+    case failed(EngineFailure)
 
     public var description: String {
         switch self {
         case .device(let report): "device: \(report)"
         case .resting(let move): "resting mode: \(move)"
+        case .failed(let failure): "engine failed: \(failure)"
         }
+    }
+}
+
+/// An engine that stopped while it was running, with the device it was running on and whether
+/// that device is still the one a new press would open. A stale device is the difference the
+/// log has to show, and an error alone does not show it. [LAW:nothing-unseen]
+public struct EngineFailure: CustomStringConvertible {
+    public let error: any Error
+    public let input: MicrophoneInput
+    public let stillOnTheDefaultInput: Bool
+
+    public var description: String {
+        let name = (try? input.name.get()) ?? "unnamed"
+        let rate = "\(Int(input.sampleRate)) Hz, \(input.channels) ch"
+        let standing = stillOnTheDefaultInput ? "still the default input" : "no longer the default input"
+        return "\(error) on \"\(name)\" (device \(input.device), \(rate)), \(standing)"
     }
 }
 
