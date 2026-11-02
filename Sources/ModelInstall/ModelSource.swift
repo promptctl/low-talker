@@ -129,12 +129,21 @@ enum Archive {
         process.executableURL = URL(filePath: "/usr/bin/ditto")
         process.arguments = arguments
         process.standardError = try FileHandle(forWritingTo: errors)
-        let status = try await withCheckedThrowingContinuation { (exited: CheckedContinuation<Int32, any Error>) in
-            process.terminationHandler = { exited.resume(returning: $0.terminationStatus) }
-            do { try process.run() } catch { exited.resume(throwing: error) }
+        // A cancelled install stops the unpack rather than waiting it out.
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (exited: CheckedContinuation<Void, any Error>) in
+                process.terminationHandler = { _ in exited.resume() }
+                do { try process.run() } catch { exited.resume(throwing: error) }
+            }
+        } onCancel: {
+            process.terminate()
         }
+        // Read off the process after the wait, which is also what holds it alive through it.
+        let status = process.terminationStatus
         guard status == 0 else {
-            throw ModelInstallError.dittoFailed(arguments: arguments, status: status, message: String(decoding: try Data(contentsOf: errors), as: UTF8.self))
+            // The exit is the failure; a stderr that cannot be read must not replace it.
+            let message = (try? Data(contentsOf: errors)).map { String(decoding: $0, as: UTF8.self) } ?? "its stderr could not be read"
+            throw ModelInstallError.dittoFailed(arguments: arguments, status: status, message: message)
         }
     }
 

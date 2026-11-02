@@ -1,16 +1,17 @@
 import CoreAudio
 import Foundation
 @testable import LowTalkerCore
+import TestProbes
 import Testing
 
 /// Each change here is a private aggregate device made or destroyed, which moves the
 /// system's device list without touching any device the Mac uses: no microphone is needed,
 /// and nothing is left changed.
 ///
-/// Every CoreAudio call here is made off the main thread. The first one a process makes
-/// starts the HAL, which loads every plug-in bundle, and on the 3-core CI runner that held
-/// the main thread for seconds - long enough to fail every timed wait in the suites running
-/// beside it (low-unfiled-50ff.cis). Only the listeners' deliveries reach the main actor.
+/// The CoreAudio calls here that can be a process's first are made on a thread of their own.
+/// The first starts the HAL, which loads every plug-in bundle, and on the 3-core CI runner that
+/// held the main thread for seconds - long enough to fail every timed wait in the suites running
+/// beside it (low-unfiled-50ff.cis) - and would hold a cooperative-pool thread as long.
 @MainActor @Suite struct PropertyListenerTests {
     /// No status can show a removal happened, since one that matched nothing answers `noErr`
     /// too. So the test is a change a removed and a live listener could both hear, and only
@@ -22,22 +23,23 @@ import Testing
     /// so the two changes cannot arrive as one.
     @Test(.timeLimit(.minutes(1))) func aRemovedListenerHearsNoLaterChange() async throws {
         let heard = Count()
-        let remove = try await offMain { try listen(to: Self.devices, on: Self.system, refused: AudioHardwareError.deviceWatchFailed) { heard.value += 1 } }
-        #expect(await offMain { remove() } == noErr)
+        let remove = try await onAThreadOfItsOwn { try listen(to: Self.devices, on: Self.system, refused: AudioHardwareError.deviceWatchFailed) { heard.value += 1 } }
+        #expect(await onAThreadOfItsOwn { remove() } == noErr)
         // A change CoreAudio delivered before the removal can still land after it, and by the
         // end of this turn of the main queue it has.
         await withCheckedContinuation { turned in DispatchQueue.main.async { turned.resume() } }
         let heardBeforeRemoval = heard.value
 
         let (changes, change) = AsyncStream.makeStream(of: Void.self)
-        let removeLive = try await offMain { try listen(to: Self.devices, on: Self.system, refused: AudioHardwareError.deviceWatchFailed) { change.yield() } }
+        let removeLive = try await onAThreadOfItsOwn { try listen(to: Self.devices, on: Self.system, refused: AudioHardwareError.deviceWatchFailed) { change.yield() } }
+        // The HAL is started by now, so a removal on the main thread costs it nothing.
+        defer { _ = removeLive() }
         var heardLive = changes.makeAsyncIterator()
 
-        let aggregate = try await offMain { try Self.makeAggregate() }
+        let aggregate = try await onAThreadOfItsOwn { try Self.makeAggregate() }
         _ = await heardLive.next()
-        try #require(await offMain { AudioHardwareDestroyAggregateDevice(aggregate) } == noErr)
+        try #require(await onAThreadOfItsOwn { AudioHardwareDestroyAggregateDevice(aggregate) } == noErr)
         _ = await heardLive.next()
-        _ = await offMain { removeLive() }
         #expect(heard.value == heardBeforeRemoval)
     }
 
@@ -47,13 +49,13 @@ import Testing
     /// readying queue for an input that queue is letting go of. Delivered on the main queue,
     /// this removal never returned.
     @Test func aRemovalWaitsOnNothingTheMainThreadDoes() async throws {
-        let aggregate = try await offMain { try Self.makeAggregate() }
+        let aggregate = try await onAThreadOfItsOwn { try Self.makeAggregate() }
         let alive = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceIsAlive,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        let remove = try await offMain { try listen(to: alive, on: aggregate, refused: AudioHardwareError.deviceWatchFailed) {} }
+        let remove = try await onAThreadOfItsOwn { try listen(to: alive, on: aggregate, refused: AudioHardwareError.deviceWatchFailed) {} }
         try Self.destroyAndRemoveHoldingMain(aggregate, remove)
     }
 
@@ -95,13 +97,4 @@ import Testing
         try #require(AudioHardwareCreateAggregateDevice(description, &aggregate) == noErr)
         return aggregate
     }
-}
-
-/// Runs a CoreAudio call on the cooperative pool rather than the main thread.
-private func offMain<T: Sendable>(_ call: @escaping @Sendable () throws -> T) async throws -> T {
-    try await Task.detached { try call() }.value
-}
-
-private func offMain<T: Sendable>(_ call: @escaping @Sendable () -> T) async -> T {
-    await Task.detached { call() }.value
 }

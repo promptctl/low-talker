@@ -20,7 +20,9 @@ public struct AudioRing: Sendable, Equatable {
         // ever read, and zeroing a minute of samples cost every capture made on the main
         // actor its first ~100 ms - seconds across a test suite on a 3-core runner
         // (low-unfiled-50ff.cis).
+        // Reserved, not filled: allocated once, so the ring never copies itself as it grows.
         storage = []
+        storage.reserveCapacity(capacity)
     }
 
     public init(retaining duration: Double) {
