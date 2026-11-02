@@ -1113,6 +1113,21 @@ private struct Authorized: MicrophoneAuthority {
         #expect(hardware.engines[1].input === hardware.inputs[1])
     }
 
+    /// A stop from the last press that lands after the next press opened on the same input
+    /// is about an engine already let go: the input under the press recording now stays.
+    @Test func aStopFromAnEarlierPressLeavesTheNextPressRecording() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        _ = capture.endSession(try capture.beginSession(at: origin, preRoll: 0))
+        let session = try capture.beginSession(at: after(1), preRoll: 0)
+        hardware.engines[0].onFailure(BadBuffer())
+        #expect(hardware.prepared == 1)
+
+        hardware.engines[1].appending([1, 2], after(1))
+        #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
+    }
+
     /// Under `open` the failure is kept for the next press to retry, and the retry opens the
     /// input readied when the engine stopped rather than readying yet another.
     @Test func aHeldMicrophoneThatStoppedMidPressRetriesOnTheInputReadiedAtTheFailure() async throws {
