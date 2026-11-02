@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 
 /// The pipeline's audio currency: 16 kHz mono Float32 samples.
@@ -32,8 +33,10 @@ public struct AudioClip: Sendable, Equatable {
     }
 
     /// Largest absolute sample value; zero for silence.
+    /// Read by vDSP: a generic reduce over a long clip held a thread for seconds in a debug
+    /// build, which starved the CI runner's cooperative pool (low-unfiled-50ff.cis).
     public var peak: Float {
-        samples.reduce(0) { max($0, abs($1)) }
+        samples.isEmpty ? 0 : vDSP.maximumMagnitude(samples)
     }
 
     /// The clip cut into consecutive clips `duration` long, the last holding
