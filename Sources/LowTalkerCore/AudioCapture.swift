@@ -762,6 +762,11 @@ public final class AudioCapture {
                 started.engine = .shut
             }
             ready(&started)
+        } else if case .failed(_, _, let failedOn) = started.engine, failedOn == preparations {
+            // The input the press's engine stopped on is not one to open again, whatever the
+            // default says: `shut` below drops the failure, and with it `retry`'s readying, so
+            // keeping it would open every later press on an input that stops as it starts.
+            ready(&started)
         }
         switch started.atRest {
         case .shut:

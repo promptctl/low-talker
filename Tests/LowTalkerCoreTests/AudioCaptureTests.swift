@@ -1074,6 +1074,27 @@ private struct Authorized: MicrophoneAuthority {
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
     }
 
+    /// The same for a microphone that opened and then stopped mid-press. Its key-up shuts the
+    /// engine and drops the failure, so a key-up that kept the input would open every press
+    /// after it on an input that stops the moment it starts, on a device that is still the
+    /// default and so draws no device report to replace it. Seen on studious: -10876 at every
+    /// press for hours, until the app was restarted.
+    @Test func aShutMicrophoneThatStoppedMidPressIsReadiedAgainForTheNext() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        let failed = try capture.beginSession(at: origin, preRoll: 0)
+        hardware.engines[0].onFailure(BadBuffer())
+        _ = capture.endSession(failed)
+        #expect(hardware.prepared == 2)
+        #expect(isListening(capture))
+
+        let session = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.engines[1].input === hardware.inputs[1])
+        hardware.engines[1].appending([1, 2], after(1))
+        #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
+    }
+
     /// Under `open` the engine runs while nobody is dictating, and a default input that
     /// changes then is a device the run should follow. A HAL unit bound to one device hears
     /// nothing of a switch to a different one that is still alive - neither its liveness nor
