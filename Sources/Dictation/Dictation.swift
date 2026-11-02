@@ -422,7 +422,8 @@ public final class Dictation {
     private var press: Press = .up
     /// What `showing` last heard.
     private var shown: Activity = .idle
-    /// Presses ended and not yet reported.
+    /// Presses heard, ended, and not yet reported. A press nothing heard has nothing to
+    /// transcribe, so it is not counted and shows no panel on its way out.
     private var unreported = 0
     /// When a cursor last arrived while the open press was down, for the offer queued behind it.
     private var arrivedDuringPress: ContinuousClock.Instant?
@@ -468,8 +469,10 @@ public final class Dictation {
         switch press {
         case .down(_, let open): .listening(heard: open.streaming.heard)
         case .refused(_, let failed): .refused(why: failed.failure.account.facts)
-        case .blocked(_, let blocked): .refused(why: blocked.account.facts)
-        case .up: unreported > 0 ? .transcribing : .idle
+        // A chord pressed over another held modifier is usually that modifier's own use,
+        // Shift and Right Option for a special character, so it shows nothing; once up, the
+        // menu tells it if no key was typed under it.
+        case .up, .blocked: unreported > 0 ? .transcribing : .idle
         }
     }
 
@@ -483,10 +486,10 @@ public final class Dictation {
         showing(now)
     }
 
-    /// Reports a press, and then shows that it is no longer on its way.
-    private func settle(_ press: Report) {
+    /// Reports a press, and then shows that a heard one is no longer on its way.
+    private func settle(_ press: Report, heard: Bool) {
         report(press)
-        unreported -= 1
+        if heard { unreported -= 1 }
         show()
     }
 
@@ -549,7 +552,7 @@ public final class Dictation {
             }
             let open = press
             press = .up
-            unreported += 1
+            if case .down = open { unreported += 1 }
             show()
             // What there is to hear, or what came of a press nothing heard. One value, so a
             // press that was refused at key-down and one that was heard leave here by
@@ -619,14 +622,14 @@ public final class Dictation {
                         do throws(Failed) { outcome = try await self.hear(heard) } catch { outcome = .failed(error) }
                     case .unheard(let unheard): outcome = unheard
                     }
-                    await self.settle(Report(mode: mode, outcome: outcome, opened: opening?.opened))
+                    await self.settle(Report(mode: mode, outcome: outcome, opened: opening?.opened), heard: opening != nil)
                 }
             } catch {
                 // The operation reports its own outcome; only the queue's own refusal
                 // to accept it reaches here, and then nothing will ever read the decode, so
                 // it is stopped and lets go of the engine as it does. [LAW:no-silent-failure]
                 if case .heard(let heard) = pending { heard.decode.cancel() }
-                settle(Report(mode: mode, outcome: .failed(Failed(error)), opened: opening?.opened))
+                settle(Report(mode: mode, outcome: .failed(Failed(error)), opened: opening?.opened), heard: opening != nil)
             }
             arrivedDuringPress.map { offer(since: .cursorArrived($0)) }
             arrivedDuringPress = nil

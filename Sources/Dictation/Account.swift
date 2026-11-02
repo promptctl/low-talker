@@ -41,7 +41,7 @@ public struct ChordBlocked: WordFree {
         self.others = others
     }
 
-    /// True while the chord is down, on the panel, and once it is up, in the menu.
+    /// Told in the menu once the chord is up.
     public var description: String {
         let pressed = Hotkey.named(chord)
         return "WARNING: \(pressed) pressed with \(Hotkey.named(others)) held begins no dictation. Press \(pressed) alone."

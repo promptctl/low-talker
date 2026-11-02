@@ -60,8 +60,7 @@ extension KeyChord {
 /// hold change nothing, and the press ends when any key of its chord comes up. A key typed
 /// while the chord was down makes it neither: the chord was that key's modifier, and the
 /// press ends as the chord comes up, however long it was down. A chord pressed with other
-/// modifiers already held begins no press, and is told as blocked, so the person learns it at
-/// the chord rather than after speaking into it; it never latches, since nothing listens.
+/// modifiers already held begins no press, and is told as blocked; it never latches, since nothing listens.
 ///
 /// [LAW:effects-at-boundaries] A value with no clock and no feed. Time comes in on
 /// each event, so a test drives it with timestamps of its choosing.
