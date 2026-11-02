@@ -16,7 +16,11 @@ public struct AudioRing: Sendable, Equatable {
     public init(capacity: Int) {
         precondition(capacity > 0, "a ring must retain at least one sample")
         self.capacity = capacity
-        storage = Array(repeating: 0, count: capacity)
+        // Grown as samples land rather than filled up front: no position before `end` is
+        // ever read, and zeroing a minute of samples cost every capture made on the main
+        // actor its first ~100 ms - seconds across a test suite on a 3-core runner
+        // (low-unfiled-50ff.cis).
+        storage = []
     }
 
     public init(retaining duration: Double) {
@@ -32,7 +36,15 @@ public struct AudioRing: Sendable, Equatable {
         let kept = samples.suffix(capacity)
         var position = end + samples.count - kept.count
         for sample in kept {
-            storage[position % capacity] = sample
+            let slot = position % capacity
+            if slot < storage.count {
+                storage[slot] = sample
+            } else {
+                // A burst past the capacity skips positions the ring never held; their slots
+                // are filled before the one written, and overwritten before they are read.
+                storage.append(contentsOf: repeatElement(0, count: slot - storage.count))
+                storage.append(sample)
+            }
             position += 1
         }
         end += samples.count

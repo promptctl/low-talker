@@ -72,7 +72,7 @@ enum OpenSource {
             try Task.checkCancellation()
             phase(.unpacking)
             let unpacked = scratch.appending(path: "store")
-            try Archive.unpack(archive, into: unpacked)
+            try await Archive.unpack(archive, into: unpacked)
             return try await body(.store(ModelStore(directory: unpacked)))
         }
     }
@@ -104,27 +104,37 @@ enum Archive {
         return archive
     }
 
-    static func unpack(_ archive: URL, into directory: URL) throws {
-        try ditto(["-x", "-k", archive.path, directory.path])
+    static func unpack(_ archive: URL, into directory: URL) async throws {
+        try await ditto(["-x", "-k", archive.path, directory.path])
     }
 
     /// Zips the contents of `directory`, not the directory itself, so the archive
     /// unpacks into a store wherever it is put.
-    static func pack(_ directory: URL, to archive: URL) throws {
-        try ditto(["-c", "-k", "--norsrc", "--noextattr", "--noqtn", directory.path, archive.path])
+    static func pack(_ directory: URL, to archive: URL) async throws {
+        try await ditto(["-c", "-k", "--norsrc", "--noextattr", "--noqtn", directory.path, archive.path])
     }
 
-    private static func ditto(_ arguments: [String]) throws {
+    /// Awaits `ditto`'s exit rather than blocking on it: a caller is an async install, and
+    /// a thread of the cooperative pool held for the whole of an unpack is one no other task
+    /// can run on. Stderr goes to a file, so nothing has to drain a pipe while it waits.
+    private static func ditto(_ arguments: [String]) async throws {
+        let errors = FileManager.default.temporaryDirectory.appending(path: "ditto-\(UUID().uuidString).stderr")
+        guard FileManager.default.createFile(atPath: errors.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: errors.path])
+        }
+        // [LAW:no-silent-failure] exception: a defer cannot throw, and a stray stderr file
+        // costs disk, not correctness.
+        defer { try? FileManager.default.removeItem(at: errors) }
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/ditto")
         process.arguments = arguments
-        let errors = Pipe()
-        process.standardError = errors
-        try process.run()
-        let message = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw ModelInstallError.dittoFailed(arguments: arguments, status: process.terminationStatus, message: String(decoding: message, as: UTF8.self))
+        process.standardError = try FileHandle(forWritingTo: errors)
+        let status = try await withCheckedThrowingContinuation { (exited: CheckedContinuation<Int32, any Error>) in
+            process.terminationHandler = { exited.resume(returning: $0.terminationStatus) }
+            do { try process.run() } catch { exited.resume(throwing: error) }
+        }
+        guard status == 0 else {
+            throw ModelInstallError.dittoFailed(arguments: arguments, status: status, message: String(decoding: try Data(contentsOf: errors), as: UTF8.self))
         }
     }
 

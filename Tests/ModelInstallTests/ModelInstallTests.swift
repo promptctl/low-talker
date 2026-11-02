@@ -167,9 +167,13 @@ import Testing
         let archive = try await ModelStore(directory: source.root).pack("test", into: out.root) { _ in }
         #expect(archive.lastPathComponent == "test.zip")
         let unpacked = out.root.appending(path: "unpacked")
-        let ditto = try Process.run(URL(filePath: "/usr/bin/ditto"), arguments: ["-x", "-k", archive.path, unpacked.path])
-        ditto.waitUntilExit()
-        try #require(ditto.terminationStatus == 0)
+        // Waited on from a thread of its own, so the cooperative pool keeps its thread.
+        let status = try await onAThreadOfItsOwn { () throws -> Int32 in
+            let ditto = try Process.run(URL(filePath: "/usr/bin/ditto"), arguments: ["-x", "-k", archive.path, unpacked.path])
+            ditto.waitUntilExit()
+            return ditto.terminationStatus
+        }
+        try #require(status == 0)
         guard case .installed = try ModelStore(directory: unpacked).presence(of: "test") else {
             Issue.record("a packed archive must unpack into an installed store")
             return

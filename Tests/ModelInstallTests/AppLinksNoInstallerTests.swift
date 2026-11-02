@@ -1,4 +1,5 @@
 import Foundation
+import TestProbes
 import Testing
 
 private let repository = URL(fileURLWithPath: #filePath)
@@ -27,10 +28,10 @@ private let repository = URL(fileURLWithPath: #filePath)
     /// Package.swift as SwiftPM reads it: each product to the targets it bundles, and each
     /// target to the package targets it depends on. Dumped into a scratch path of its own,
     /// so it neither waits on nor disturbs the build running this suite.
-    static func package() throws -> (products: [String: [String]], targets: [String: Set<String>]) {
+    static func package() async throws -> (products: [String: [String]], targets: [String: Set<String>]) {
         let scratch = FileManager.default.temporaryDirectory.appending(path: "AppLinksNoInstallerTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: scratch) }
-        let dump = try run("/usr/bin/swift", ["package", "dump-package", "--package-path", repository.path, "--scratch-path", scratch.path])
+        let dump = try await run("/usr/bin/swift", ["package", "dump-package", "--package-path", repository.path, "--scratch-path", scratch.path])
         let json = try JSONSerialization.jsonObject(with: dump)
         let manifest = try #require(json as? [String: Any])
         let targets = try #require(manifest["targets"] as? [[String: Any]])
@@ -55,11 +56,11 @@ private let repository = URL(fileURLWithPath: #filePath)
 
     /// What Xcode links into each target it builds, off the project xcodegen wrote: the
     /// package products of every native target.
-    static func project() throws -> [String: Set<String>] {
+    static func project() async throws -> [String: Set<String>] {
         let pbxproj = repository.appending(path: "LowTalker.xcodeproj/project.pbxproj")
         try #require(FileManager.default.fileExists(atPath: pbxproj.path),
                      "\(pbxproj.lastPathComponent) has not been generated; run `make test`, which runs xcodegen - `swift test` alone does not")
-        let json = try JSONSerialization.jsonObject(with: try run("/usr/bin/plutil", ["-convert", "json", "-o", "-", pbxproj.path]))
+        let json = try JSONSerialization.jsonObject(with: try await run("/usr/bin/plutil", ["-convert", "json", "-o", "-", pbxproj.path]))
         let project = try #require(json as? [String: Any])
         let objects = try #require(project["objects"] as? [String: [String: Any]])
         let targets = try objects.values.filter { $0["isa"] as? String == "PBXNativeTarget" }.map { target in
@@ -98,30 +99,37 @@ private let repository = URL(fileURLWithPath: #filePath)
 
     /// Runs `tool` and hands back its stdout, or fails with its stderr: a tool that could
     /// not run must not read as a graph with nothing in it. [LAW:no-silent-failure]
-    static func run(_ tool: String, _ arguments: [String]) throws -> Data {
-        let process = Process()
-        process.executableURL = URL(filePath: tool)
-        process.arguments = arguments
-        let output = Pipe()
-        process.standardOutput = output
-        // Stderr goes to a file rather than a second pipe, so reading stdout to its end
-        // cannot wait on a stderr nobody is draining.
+    ///
+    /// Waited on from a thread of its own: `swift package dump-package` runs for seconds, and
+    /// a test blocked on it holds one of the three threads the CI runner's cooperative pool
+    /// has, which starved the timed waits of every suite beside it (low-unfiled-50ff.cis).
+    static func run(_ tool: String, _ arguments: [String]) async throws -> Data {
         let errors = FileManager.default.temporaryDirectory.appending(path: "AppLinksNoInstallerTests-\(UUID().uuidString).stderr")
         try #require(FileManager.default.createFile(atPath: errors.path, contents: nil))
         defer { try? FileManager.default.removeItem(at: errors) }
-        process.standardError = try FileHandle(forWritingTo: errors)
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let (data, status) = try await onAThreadOfItsOwn { () throws -> (Data, Int32) in
+            let process = Process()
+            process.executableURL = URL(filePath: tool)
+            process.arguments = arguments
+            let output = Pipe()
+            process.standardOutput = output
+            // Stderr goes to a file rather than a second pipe, so reading stdout to its end
+            // cannot wait on a stderr nobody is draining.
+            process.standardError = try FileHandle(forWritingTo: errors)
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (data, process.terminationStatus)
+        }
         let message = String(decoding: try Data(contentsOf: errors), as: UTF8.self)
-        try #require(process.terminationStatus == 0, "\(tool) \(arguments.joined(separator: " ")) exited \(process.terminationStatus): \(message)")
+        try #require(status == 0, "\(tool) \(arguments.joined(separator: " ")) exited \(status): \(message)")
         return data
     }
 
-    @Test func nothingTheProjectBuildsReachesTheInstaller() throws {
-        let package = try Self.package()
+    @Test func nothingTheProjectBuildsReachesTheInstaller() async throws {
+        let package = try await Self.package()
         try #require(package.targets[Self.installer] != nil, "Package.swift declares no \(Self.installer) target")
-        for (target, products) in try Self.project().sorted(by: { $0.key < $1.key }) {
+        for (target, products) in try await Self.project().sorted(by: { $0.key < $1.key }) {
             let reached = Self.reach(try Self.roots(of: target, linking: products, in: package.products), in: package.targets)
             #expect(!reached.contains(Self.installer), "\(target) reaches \(Self.installer) through \(reached.sorted())")
         }
@@ -129,8 +137,8 @@ private let repository = URL(fileURLWithPath: #filePath)
 
     /// The same package read finds the installer beneath `model-tool`, so the read above is
     /// not blind.
-    @Test func theModelToolReachesIt() throws {
-        let package = try Self.package()
+    @Test func theModelToolReachesIt() async throws {
+        let package = try await Self.package()
         try #require(package.targets[Self.modelTool] != nil, "Package.swift declares no \(Self.modelTool) target")
         #expect(Self.reach([Self.modelTool], in: package.targets).contains(Self.installer))
     }
