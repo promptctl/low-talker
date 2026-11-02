@@ -134,6 +134,13 @@ public final class AudioCapture {
         /// inferred from a microphone that is now open for two different reasons.
         /// [FRAMING:representation]
         var sessionIsOpen = false
+        /// The engine this run launched last: its generation and the input it opened. A stop
+        /// reported by it after a key-up under `shut` let it go is still news about that input.
+        var newest: (generation: Int, preparation: Int, input: MicrophoneInput)?
+        /// The engine on `prepared` stopped on its own, and nothing has readied another since.
+        /// What `shut` asks the next press to ready before it opens, because a failure it drops
+        /// at the key-up leaves no `retry` to do it. Cleared by every readying.
+        var preparedStopped = false
     }
 
     private enum Phase {
@@ -232,14 +239,6 @@ public final class AudioCapture {
     /// session's `CapturedAudio` says and this count does not.
     public private(set) var deviceChanges = 0
     public private(set) var outages = Outages()
-    /// The engine launched last, and the input it opened. Only its failure is news: every
-    /// other engine was replaced or let go, and the one a press is recording on is this one.
-    private var newest: Launch?
-    private struct Launch {
-        let generation: Int
-        let preparation: Int
-        let input: MicrophoneInput
-    }
 
     nonisolated public static let defaultRetention: TimeInterval = 60
 
@@ -396,8 +395,9 @@ public final class AudioCapture {
             break
         // Opened for this press.
         case .shut:
+            if started.preparedStopped { ready(&started) }
             do {
-                started.engine = .running(try launch(on: started.prepared))
+                started.engine = .running(try launch(&started))
             } catch {
                 // What failed may have been the device going away, and the input prepared
                 // against it cannot open the one that replaced it. Readying another costs
@@ -717,6 +717,7 @@ public final class AudioCapture {
     /// Readies a microphone against whatever the default input is now.
     private func ready(_ started: inout Started) {
         started.prepared = readiedInput()
+        started.preparedStopped = false
     }
 
     /// A microphone readied against whatever the default input is now, wired so that the
@@ -774,6 +775,10 @@ public final class AudioCapture {
         switch started.atRest {
         case .shut:
             if case .running(let live) = started.engine { dispose(live) }
+            // The failure is dropped here, and `retry`'s readying with it.
+            if case .failed(_, _, let failedOn) = started.engine, failedOn == preparations {
+                started.preparedStopped = true
+            }
             started.engine = .shut
         case .open:
             switch started.engine {
@@ -783,7 +788,7 @@ public final class AudioCapture {
             case .running, .failed:
                 break
             case .shut:
-                do { started.engine = .running(try launch(on: started.prepared)) }
+                do { started.engine = .running(try launch(&started)) }
                 catch { started.engine = .failed(error, since: .now, on: preparations) }
                 answer = .launched(Self.outcome(of: started.engine))
             }
@@ -801,7 +806,7 @@ public final class AudioCapture {
         outages.total += .now - since
     }
 
-    private func launch(on prepared: any PreparedInput) throws -> Live {
+    private func launch(_ started: inout Started) throws -> Live {
         let shared = shared
         generation += 1
         let generation = generation
@@ -818,7 +823,7 @@ public final class AudioCapture {
             return previous
         }
         do {
-            let opened = try prepared.open(
+            let opened = try started.prepared.open(
                 appending: { samples, time in
                     shared.stream.withLock {
                         // Resolved by generation rather than trusted by arrival, as the
@@ -837,8 +842,8 @@ public final class AudioCapture {
                 onFailure: { [weak self] error in self?.fail(error, from: generation) }
             )
             shared.stream.withLock { $0.arrivals.inputs.append(opened.input) }
-            // Every launch opens the input readied last.
-            newest = Launch(generation: generation, preparation: preparations, input: opened.input)
+            // `prepared` is always the input readied last.
+            started.newest = (generation, preparations, opened.input)
             return Live(dispose: opened.dispose, generation: generation, input: opened.input)
         } catch {
             // Nothing took over, so nothing resumed: no input opened and no buffer
@@ -864,7 +869,7 @@ public final class AudioCapture {
             // The device this was prepared against is not the one to open any more: it went
             // away, or it stopped being the default while nothing was recording it.
             ready(&started)
-            started.engine = .running(try launch(on: started.prepared))
+            started.engine = .running(try launch(&started))
             deviceChanges += 1
         } catch {
             started.engine = .failed(error, since: .now, on: preparations)
@@ -997,7 +1002,7 @@ public final class AudioCapture {
             if preparation == preparations || !started.prepared.isOnTheDefaultInput {
                 ready(&started)
             }
-            started.engine = .running(try launch(on: started.prepared))
+            started.engine = .running(try launch(&started))
             closeOutage(since: since)
         } catch {
             started.engine = .failed(error, since: since, on: preparations)
@@ -1005,35 +1010,34 @@ public final class AudioCapture {
         }
     }
 
-    /// An engine stopped on its own. The input it stopped on is not one to open again, so
-    /// a fresh one is readied here, at the moment that is known, rather than by whichever of
-    /// the key-up, a press, or the device watch comes next. [LAW:single-enforcer] Seen on
-    /// studious: an input that stopped at every press (-10876) on a device that stayed the
-    /// default, so no device report ever replaced it.
+    /// An engine stopped on its own.
     ///
     /// [LAW:no-ambient-temporal-coupling] The failure arrives asynchronously, so what it is
-    /// about is resolved by generation rather than trusted by arrival. Only the newest
-    /// engine's failure counts: an older one's would fail, or take the input from under, the
-    /// engine a later press opened - on that same input, when the key-up between kept it.
-    /// The newest can already be shut, by a key-up under `shut` that got here first, and the
-    /// input it stopped on is no better for that, so it is readied again all the same unless
-    /// a device report already did.
+    /// about is resolved by generation rather than trusted by arrival: a replaced engine's
+    /// late failure would otherwise fail the one that took over from it, and an earlier
+    /// press's would fail the next press opened on the same input.
+    ///
+    /// The engine can already be gone, let go by a key-up under `shut` that got here first.
+    /// The input it stopped on is no better for that, so it is marked for the next press to
+    /// ready again - at the press rather than now, because a device that is changing can
+    /// stop the engine before the change has settled, and readying now could bind to it as
+    /// it was. Seen on studious: -10876 at every press for hours, on a device that stayed
+    /// the default and so drew no report that would have replaced the input.
     private func fail(_ error: any Error, from generation: Int) {
-        guard case .started(var started) = phase, let newest, newest.generation == generation else { return }
-        let stillOnTheDefaultInput = started.prepared.isOnTheDefaultInput
+        guard case .started(var started) = phase, let newest = started.newest, newest.generation == generation else { return }
         switch started.engine {
-        case .running(let live):
+        case .running(let live) where live.generation == generation:
             dispose(live)
-            ready(&started)
-            // Failed on the input let go above, so `retry` keeps the one readied in its place.
-            started.engine = .failed(error, since: .now, on: newest.preparation)
-        case .shut where newest.preparation == preparations:
-            ready(&started)
-        case .shut, .failed:
+            started.engine = .failed(error, since: .now, on: preparations)
+        // Only while the input it stopped on is still the one held and not yet marked: later
+        // faults from the same engine are the same stop.
+        case .shut where !started.preparedStopped && newest.preparation == preparations:
+            started.preparedStopped = true
+        case .running, .shut, .failed:
             return
         }
         phase = .started(started)
-        reporting(.failed(EngineFailure(error: error, input: newest.input, stillOnTheDefaultInput: stillOnTheDefaultInput)))
+        reporting(.failed(EngineFailure(error: error, input: newest.input, stillOnTheDefaultInput: started.prepared.isOnTheDefaultInput)))
     }
 }
 

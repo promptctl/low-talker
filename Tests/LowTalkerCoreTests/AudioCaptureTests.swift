@@ -1030,18 +1030,16 @@ private struct Authorized: MicrophoneAuthority {
         try await capture.start(grant, atRest: .open)
         hardware.engines[0].onFailure(BadBuffer())
         #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
-        // The failure readied an input in place of the one it stopped on, and that is the
-        // input whose device changes shape here.
-        #expect(hardware.prepared == 2)
+        #expect(hardware.prepared == 1)
 
-        hardware.inputs[1].onStale()
+        hardware.inputs[0].onStale()
         // Still failed, and with the error it already had: a device changing shape under an
         // engine that is already dead is not news that the device is well.
         #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
         // The gap is still open, so it is still uncounted - an outage is booked where it ends.
         #expect(capture.outages.count == 0)
         // A microphone readied against the device as it is now, and nothing opened to do it.
-        #expect(hardware.prepared == 3)
+        #expect(hardware.prepared == 2)
         #expect(hardware.engines.count == 1)
 
         // What that readying was for: the press that ends the outage opens on the device as it
@@ -1077,10 +1075,9 @@ private struct Authorized: MicrophoneAuthority {
     }
 
     /// The same for a microphone that opened and then stopped mid-press. Its key-up shuts the
-    /// engine and drops the failure, so a key-up that kept the input would open every press
-    /// after it on an input that stops the moment it starts, on a device that is still the
-    /// default and so draws no device report to replace it. Seen on studious: -10876 at every
-    /// press for hours, until the app was restarted.
+    /// engine and drops the failure, so a press that kept the input would open on one that
+    /// stops the moment it starts, on a device that is still the default and so draws no
+    /// device report to replace it. Seen on studious: -10876 at every press for hours.
     @Test func aShutMicrophoneThatStoppedMidPressIsReadiedAgainForTheNext() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
@@ -1088,33 +1085,46 @@ private struct Authorized: MicrophoneAuthority {
         let failed = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].onFailure(BadBuffer())
         _ = capture.endSession(failed)
-        #expect(hardware.prepared == 2)
         #expect(isListening(capture))
 
         let session = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.prepared == 2)
         #expect(hardware.engines[1].input === hardware.inputs[1])
         hardware.engines[1].appending([1, 2], after(1))
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
     }
 
     /// The engine's stop arrives on its own schedule, and can land after the key-up has
-    /// already disposed the engine. The input it stopped on is no better for that.
+    /// already let the engine go. The input it stopped on is no better for that.
     @Test func aShutMicrophoneWhoseStopLandedAfterTheKeyUpIsReadiedAgainForTheNext() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
         try await capture.start(grant, atRest: .shut)
-        let failed = try capture.beginSession(at: origin, preRoll: 0)
-        _ = capture.endSession(failed)
-        #expect(hardware.prepared == 1)
+        _ = capture.endSession(try capture.beginSession(at: origin, preRoll: 0))
         hardware.engines[0].onFailure(BadBuffer())
-        #expect(hardware.prepared == 2)
 
         _ = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.prepared == 2)
+        #expect(hardware.engines[1].input === hardware.inputs[1])
+    }
+
+    /// A late stop whose input a device report already replaced owes nothing more: readying
+    /// a third would make the next press wait on it.
+    @Test func aLateStopOnAnInputAlreadyReplacedReadiesNothingMore() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        _ = capture.endSession(try capture.beginSession(at: origin, preRoll: 0))
+        hardware.inputs[0].onStale()
+        hardware.engines[0].onFailure(BadBuffer())
+
+        _ = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.prepared == 2)
         #expect(hardware.engines[1].input === hardware.inputs[1])
     }
 
     /// A stop from the last press that lands after the next press opened on the same input
-    /// is about an engine already let go: the input under the press recording now stays.
+    /// is about an engine already let go: the press recording now keeps its microphone.
     @Test func aStopFromAnEarlierPressLeavesTheNextPressRecording() async throws {
         let hardware = FakeHardware()
         let capture = AudioCapture(hardware: hardware, startingAt: origin)
@@ -1122,27 +1132,11 @@ private struct Authorized: MicrophoneAuthority {
         _ = capture.endSession(try capture.beginSession(at: origin, preRoll: 0))
         let session = try capture.beginSession(at: after(1), preRoll: 0)
         hardware.engines[0].onFailure(BadBuffer())
-        #expect(hardware.prepared == 1)
 
         hardware.engines[1].appending([1, 2], after(1))
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
-    }
-
-    /// Under `open` the failure is kept for the next press to retry, and the retry opens the
-    /// input readied when the engine stopped rather than readying yet another.
-    @Test func aHeldMicrophoneThatStoppedMidPressRetriesOnTheInputReadiedAtTheFailure() async throws {
-        let hardware = FakeHardware()
-        let capture = AudioCapture(hardware: hardware, startingAt: origin)
-        try await capture.start(grant, atRest: .open)
-        let failed = try capture.beginSession(at: origin, preRoll: 0)
-        hardware.engines[0].onFailure(BadBuffer())
-        #expect(hardware.prepared == 2)
-        _ = capture.endSession(failed)
-        #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
-
-        _ = try capture.beginSession(at: after(1), preRoll: 0)
-        #expect(hardware.prepared == 2)
-        #expect(hardware.engines[1].input === hardware.inputs[1])
+        _ = try capture.beginSession(at: after(2), preRoll: 0)
+        #expect(hardware.prepared == 1)
     }
 
     /// Under `open` the engine runs while nobody is dictating, and a default input that
@@ -1613,9 +1607,9 @@ private struct Authorized: MicrophoneAuthority {
         try hardware.changeDefaultInput()
         #expect(isListening(capture))
         #expect(hardware.engines.count == 2)
-        // The default input is what changed, so the input the failure readied against the old
-        // one is stale and the relaunch happens on another.
-        #expect(hardware.prepared == 3)
+        // The default input is what changed, so the input readied against the old one is
+        // stale and the relaunch happens on another.
+        #expect(hardware.prepared == 2)
         #expect(capture.outages.count == 1)
         #expect(capture.outages.total > .zero)
         #expect(capture.deviceChanges == 0)
