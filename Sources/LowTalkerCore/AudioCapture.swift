@@ -762,11 +762,6 @@ public final class AudioCapture {
                 started.engine = .shut
             }
             ready(&started)
-        } else if case .failed(_, _, let failedOn) = started.engine, failedOn == preparations {
-            // The input the press's engine stopped on is not one to open again, whatever the
-            // default says: `shut` below drops the failure, and with it `retry`'s readying, so
-            // keeping it would open every later press on an input that stops as it starts.
-            ready(&started)
         }
         switch started.atRest {
         case .shut:
@@ -802,6 +797,8 @@ public final class AudioCapture {
         let shared = shared
         generation += 1
         let generation = generation
+        // Every launch opens the input readied last, so this is the one it opens.
+        let preparation = preparations
         // Everything the engine about to launch captures lands from here on, and
         // everything already in the ring came from one that stopped. Marked before the
         // launch rather than after it: the new engine delivers on its own thread, and a
@@ -831,7 +828,7 @@ public final class AudioCapture {
                         $0.feed?.yield(AudioClip(samples: samples))
                     }
                 },
-                onFailure: { [weak self] error in self?.fail(error, from: generation) }
+                onFailure: { [weak self] error in self?.fail(error, from: generation, on: preparation) }
             )
             shared.stream.withLock { $0.arrivals.inputs.append(opened.input) }
             return Live(dispose: opened.dispose, generation: generation, input: opened.input)
@@ -1000,21 +997,31 @@ public final class AudioCapture {
         }
     }
 
-    /// A failure from an engine a device change has since replaced is stale: the
-    /// engine it came from is gone and the one running is healthy.
+    /// An engine stopped on its own. The input it stopped on is not one to open again, so
+    /// a fresh one is readied here, at the moment that is known, rather than by whichever of
+    /// the key-up, a press, or the device watch comes next. [LAW:single-enforcer] Seen on
+    /// studious: an input that stopped at every press (-10876) on a device that stayed the
+    /// default, so no device report ever replaced it.
     ///
-    /// [LAW:no-ambient-temporal-coupling] The render callback's failure arrives
-    /// asynchronously, so the engine it is about is resolved by generation rather than
-    /// trusted by arrival - a replaced engine's late failure would otherwise fail the one
-    /// that took over from it.
-    private func fail(_ error: any Error, from generation: Int) {
-        guard case .started(var started) = phase,
-              case .running(let live) = started.engine,
-              live.generation == generation else { return }
-        dispose(live)
-        started.engine = .failed(error, since: .now, on: preparations)
-        phase = .started(started)
-        reporting(.failed(EngineFailure(error: error, input: live.input, stillOnTheDefaultInput: started.prepared.isOnTheDefaultInput)))
+    /// [LAW:no-ambient-temporal-coupling] The failure arrives asynchronously, so what it is
+    /// about is resolved by generation and preparation rather than trusted by arrival. Only
+    /// the engine running now is failed: a replaced engine's late failure would otherwise
+    /// fail the one that took over from it. The input is readied whatever the engine is
+    /// now, as long as it is still the one held: a key-up under `shut` can dispose the
+    /// engine before its failure lands, and the input it stopped on is no better for that.
+    private func fail(_ error: any Error, from generation: Int, on preparation: Int) {
+        guard case .started(var started) = phase, preparation == preparations else { return }
+        let failedInput = started.prepared.isOnTheDefaultInput
+        ready(&started)
+        if case .running(let live) = started.engine, live.generation == generation {
+            dispose(live)
+            // Failed on the input let go above, so `retry` keeps the one readied in its place.
+            started.engine = .failed(error, since: .now, on: preparation)
+            phase = .started(started)
+            reporting(.failed(EngineFailure(error: error, input: live.input, stillOnTheDefaultInput: failedInput)))
+        } else {
+            phase = .started(started)
+        }
     }
 }
 

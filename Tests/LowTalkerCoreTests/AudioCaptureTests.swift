@@ -1030,16 +1030,18 @@ private struct Authorized: MicrophoneAuthority {
         try await capture.start(grant, atRest: .open)
         hardware.engines[0].onFailure(BadBuffer())
         #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
-        #expect(hardware.prepared == 1)
+        // The failure readied an input in place of the one it stopped on, and that is the
+        // input whose device changes shape here.
+        #expect(hardware.prepared == 2)
 
-        hardware.inputs[0].onStale()
+        hardware.inputs[1].onStale()
         // Still failed, and with the error it already had: a device changing shape under an
         // engine that is already dead is not news that the device is well.
         #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
         // The gap is still open, so it is still uncounted - an outage is booked where it ends.
         #expect(capture.outages.count == 0)
         // A microphone readied against the device as it is now, and nothing opened to do it.
-        #expect(hardware.prepared == 2)
+        #expect(hardware.prepared == 3)
         #expect(hardware.engines.count == 1)
 
         // What that readying was for: the press that ends the outage opens on the device as it
@@ -1093,6 +1095,39 @@ private struct Authorized: MicrophoneAuthority {
         #expect(hardware.engines[1].input === hardware.inputs[1])
         hardware.engines[1].appending([1, 2], after(1))
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
+    }
+
+    /// The engine's stop arrives on its own schedule, and can land after the key-up has
+    /// already disposed the engine. The input it stopped on is no better for that.
+    @Test func aShutMicrophoneWhoseStopLandedAfterTheKeyUpIsReadiedAgainForTheNext() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        let failed = try capture.beginSession(at: origin, preRoll: 0)
+        _ = capture.endSession(failed)
+        #expect(hardware.prepared == 1)
+        hardware.engines[0].onFailure(BadBuffer())
+        #expect(hardware.prepared == 2)
+
+        _ = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.engines[1].input === hardware.inputs[1])
+    }
+
+    /// Under `open` the failure is kept for the next press to retry, and the retry opens the
+    /// input readied when the engine stopped rather than readying yet another.
+    @Test func aHeldMicrophoneThatStoppedMidPressRetriesOnTheInputReadiedAtTheFailure() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .open)
+        let failed = try capture.beginSession(at: origin, preRoll: 0)
+        hardware.engines[0].onFailure(BadBuffer())
+        #expect(hardware.prepared == 2)
+        _ = capture.endSession(failed)
+        #expect(failure(of: capture, as: BadBuffer.self) == BadBuffer())
+
+        _ = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.prepared == 2)
+        #expect(hardware.engines[1].input === hardware.inputs[1])
     }
 
     /// Under `open` the engine runs while nobody is dictating, and a default input that
@@ -1563,9 +1598,9 @@ private struct Authorized: MicrophoneAuthority {
         try hardware.changeDefaultInput()
         #expect(isListening(capture))
         #expect(hardware.engines.count == 2)
-        // The default input is what changed, so the input readied against the old one is
-        // stale and the relaunch happens on another.
-        #expect(hardware.prepared == 2)
+        // The default input is what changed, so the input the failure readied against the old
+        // one is stale and the relaunch happens on another.
+        #expect(hardware.prepared == 3)
         #expect(capture.outages.count == 1)
         #expect(capture.outages.total > .zero)
         #expect(capture.deviceChanges == 0)
