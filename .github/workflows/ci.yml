@@ -38,8 +38,9 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
+      # `make test`, under a watchdog that samples and stops a test process that hangs.
       - name: Build and test the package
-        run: make test
+        run: scripts/test-with-watchdog
 
       # The runner has no model to carry, so the bundles are built carrying none, which is
       # a build every Makefile path allows and one the app names at launch. Signing reaches

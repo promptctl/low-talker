@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# `make test`, failing in minutes rather than at the job's timeout if the test process hangs,
+# and leaving the hung process's stacks in the log.
+#
+#   scripts/test-with-watchdog [seconds]   # default 300, counted from the test process's start
+#
+# A CI run of the suite once froze 3 s in and sat until the 30-minute job timeout killed it,
+# with nothing in the log to say what held it (low-unfiled-50ff.cis). The suite takes under a
+# minute on the runner, so a test process still alive at the limit has hung: it is sampled,
+# then stopped, and the step fails. [LAW:no-silent-failure]
+set -uo pipefail
+
+limit=${1:-300}
+make test &
+build=$!
+
+# The build comes first and may take minutes; the limit counts only the tests.
+until test_pid=$(pgrep -f swiftpm-testing-helper | head -1) && [ -n "$test_pid" ]; do
+  kill -0 "$build" 2>/dev/null || { wait "$build"; exit $?; }
+  sleep 1
+done
+
+waited=0
+while kill -0 "$test_pid" 2>/dev/null; do
+  if [ "$waited" -ge "$limit" ]; then
+    echo "test-with-watchdog: the test process ($test_pid) is still running after ${limit} s; sampling it" >&2
+    sample "$test_pid" 3 -file /tmp/hung-tests.txt > /dev/null 2>&1
+    cat /tmp/hung-tests.txt >&2
+    kill "$test_pid" 2>/dev/null
+    wait "$build"
+    echo "test-with-watchdog: the test process hung; its stacks are above" >&2
+    exit 1
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+wait "$build"

@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import Synchronization
 @testable import LowTalkerCore
 import TestProbes
 import Testing
@@ -8,11 +9,13 @@ import Testing
 /// system's device list without touching any device the Mac uses: no microphone is needed,
 /// and nothing is left changed.
 ///
-/// The CoreAudio calls here that can be a process's first are made on a thread of their own.
-/// The first starts the HAL, which loads every plug-in bundle, and on the 3-core CI runner that
-/// held the main thread for seconds - long enough to fail every timed wait in the suites running
-/// beside it (low-unfiled-50ff.cis) - and would hold a cooperative-pool thread as long.
-@MainActor @Suite struct PropertyListenerTests {
+/// Every CoreAudio call here is made on a thread of its own, never on the main thread. The
+/// first starts the HAL, which loads every plug-in bundle, and on the 3-core CI runner that held
+/// the main thread for seconds - long enough to fail every timed wait in the suites running
+/// beside it (low-unfiled-50ff.cis). And a main thread inside CoreAudio while another thread is
+/// in it too is the one arrangement here that can wait on itself: a CI run of this suite froze
+/// with both tests under way. Serialized, so the two never call CoreAudio at once.
+@MainActor @Suite(.serialized) struct PropertyListenerTests {
     /// No status can show a removal happened, since one that matched nothing answers `noErr`
     /// too. So the test is a change a removed and a live listener could both hear, and only
     /// the live one does.
@@ -32,14 +35,18 @@ import Testing
 
         let (changes, change) = AsyncStream.makeStream(of: Void.self)
         let removeLive = try await onAThreadOfItsOwn { try listen(to: Self.devices, on: Self.system, refused: AudioHardwareError.deviceWatchFailed) { change.yield() } }
-        // The HAL is started by now, so a removal on the main thread costs it nothing.
-        defer { _ = removeLive() }
         var heardLive = changes.makeAsyncIterator()
-
-        let aggregate = try await onAThreadOfItsOwn { try Self.makeAggregate() }
-        _ = await heardLive.next()
-        try #require(await onAThreadOfItsOwn { AudioHardwareDestroyAggregateDevice(aggregate) } == noErr)
-        _ = await heardLive.next()
+        do {
+            let aggregate = try await onAThreadOfItsOwn { try Self.makeAggregate() }
+            _ = await heardLive.next()
+            try #require(await onAThreadOfItsOwn { AudioHardwareDestroyAggregateDevice(aggregate) } == noErr)
+            _ = await heardLive.next()
+        } catch {
+            // Removed on the way out too, so a failure leaves no listener behind.
+            _ = await onAThreadOfItsOwn { removeLive() }
+            throw error
+        }
+        _ = await onAThreadOfItsOwn { removeLive() }
         #expect(heard.value == heardBeforeRemoval)
     }
 
@@ -59,10 +66,17 @@ import Testing
         try Self.destroyAndRemoveHoldingMain(aggregate, remove)
     }
 
-    /// The part that holds the main thread, and only that: the HAL is already started by the
-    /// time it runs.
+    /// The part that holds the main thread. The main thread serves nothing here, which is what
+    /// is measured, but it is never inside CoreAudio: it waits while threads of their own call it.
     private static func destroyAndRemoveHoldingMain(_ aggregate: AudioObjectID, _ remove: @escaping @Sendable () -> OSStatus) throws {
-        try #require(AudioHardwareDestroyAggregateDevice(aggregate) == noErr)
+        let destroyed = DispatchSemaphore(value: 0)
+        let status = Mutex(noErr)
+        Thread.detachNewThread {
+            status.withLock { $0 = AudioHardwareDestroyAggregateDevice(aggregate) }
+            destroyed.signal()
+        }
+        try #require(destroyed.wait(timeout: .now() + 5) == .success)
+        try #require(status.withLock { $0 } == noErr)
         Thread.sleep(forTimeInterval: 0.5)
 
         // On a thread of its own: with the main thread held, a global queue's block waited 8.3 s
