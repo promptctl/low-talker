@@ -95,36 +95,42 @@ public final class TranscriptionServer: Sendable {
             Task { await answering.serve(connection) }
         }
         let (ended, end) = AsyncThrowingStream<Never, any Error>.makeStream()
+        // The first ready, failure or cancel decides the listen, and a state after it ends the
+        // server, which `finished` tells. A cancel decides it without waiting for the listener to
+        // say `.cancelled`: one cancelled just after `start` may never say it, and a listen that
+        // waited for it once held a CI run until its timeout. [LAW:no-ambient-temporal-coupling]
+        let listen = Mutex(Listen.starting)
+        listener.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                listen.withLock { $0.decide() }?.resume(returning: listener.port!)
+            case .failed(let error):
+                ServedRequest.logger.error("listener failed: \(error, privacy: .public)")
+                listener.cancel()
+                listen.withLock { $0.decide() }?.resume(throwing: error)
+                end.finish(throwing: error)
+            case .cancelled:
+                listen.withLock { $0.decide() }?.resume(throwing: CancellationError())
+                end.finish()
+            case .waiting(let error):
+                // An address no interface holds yet waits for one to, and says so.
+                ServedRequest.logger.notice("listener waiting: \(error, privacy: .public)")
+            case .setup:
+                break
+            @unknown default:
+                break
+            }
+        }
         let bound = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NWEndpoint.Port, any Error>) in
-                // The state handler runs for every change; the first ready, failure or cancel
-                // decides the listen, and one after it ends the server, which `finished` tells.
-                let waiting = Mutex<CheckedContinuation<NWEndpoint.Port, any Error>?>(continuation)
-                listener.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        waiting.withLock { $0.take() }?.resume(returning: listener.port!)
-                    case .failed(let error):
-                        ServedRequest.logger.error("listener failed: \(error, privacy: .public)")
-                        listener.cancel()
-                        waiting.withLock { $0.take() }?.resume(throwing: error)
-                        end.finish(throwing: error)
-                    case .cancelled:
-                        waiting.withLock { $0.take() }?.resume(throwing: CancellationError())
-                        end.finish()
-                    case .waiting(let error):
-                        // An address no interface holds yet waits for one to, and says so.
-                        ServedRequest.logger.notice("listener waiting: \(error, privacy: .public)")
-                    case .setup:
-                        break
-                    @unknown default:
-                        break
-                    }
-                }
+                let cancelledFirst = listen.withLock { $0.wait(continuation) }
+                guard !cancelledFirst else { return continuation.resume(throwing: CancellationError()) }
                 listener.start(queue: queue)
             }
         } onCancel: {
             listener.cancel()
+            // On the listener's queue, so the listen ends behind the cancel it asked for.
+            queue.async { listen.withLock { $0.decide() }?.resume(throwing: CancellationError()) }
         }
         return TranscriptionServer(
             address: ListenAddress(binding: address.binding, port: bound),
@@ -142,6 +148,29 @@ public final class TranscriptionServer: Sendable {
     /// was not `stop`.
     public func finished() async throws {
         try await ended.value
+    }
+}
+
+/// Where a listen is before its listener has decided it.
+private enum Listen {
+    /// Not started yet.
+    case starting
+    case waiting(CheckedContinuation<NWEndpoint.Port, any Error>)
+    /// Ready, failed or cancelled; or cancelled before it started, which leaves it unstarted.
+    case decided
+
+    /// Waits on `continuation`, unless a cancel has decided the listen first, and says which.
+    mutating func wait(_ continuation: CheckedContinuation<NWEndpoint.Port, any Error>) -> Bool {
+        guard case .starting = self else { return true }
+        self = .waiting(continuation)
+        return false
+    }
+
+    /// Decides the listen, handing back the continuation that waits on it, if one does yet.
+    mutating func decide() -> CheckedContinuation<NWEndpoint.Port, any Error>? {
+        defer { self = .decided }
+        guard case .waiting(let continuation) = self else { return nil }
+        return continuation
     }
 }
 
