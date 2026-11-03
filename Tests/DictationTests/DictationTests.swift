@@ -882,11 +882,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted == [sentence, "b"])
     }
 
-    /// A press refused at its chord has nothing to hear, so it is the one outcome that could
+    /// A blocked chord has nothing to hear, so it is the one outcome that could
     /// be ready before an earlier press's.
     /// It waits its turn all the same: outcomes are reported in the order the presses
     /// came, whatever each one costs.
-    @Test func aRefusedPressIsReportedAfterAnEarlierPressStillBeingHeard() async throws {
+    @Test func aBlockedChordIsReportedAfterAnEarlierPressStillBeingHeard() async throws {
         let gate = Gate()
         let rig = try await Rig(transcriber: {
             FakeTranscriber { _ in
@@ -901,7 +901,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let first = await rig.report()
         let second = await rig.report()
         #expect(try first.get().transcription.transcript.text == "a")
-        #expect(second.failure is ChordBlocked)
+        guard case .usedAsModifier(landed: 0, held: 0) = second else { Issue.record("a blocked chord is never dictation, so it is reported as neither a session nor a failure"); return }
     }
 
     /// What the app awaits before it quits. A surface that went while a session was still in
@@ -1998,10 +1998,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.shown.activities == [refused, .idle])
     }
 
-    /// The chord pressed with Fn held begins no press: it shows no panel, down or up,
-    /// opens no microphone, takes no turn of the engine, and is reported refused once it
-    /// comes up.
-    @Test func aChordBlockedByAnotherKeyShowsNoPanel() async throws {
+    /// The chord pressed with Fn held and let go without a key typed under it begins no press:
+    /// it shows no panel, down or up, opens no microphone, takes no turn of the engine, and
+    /// surfaces nothing once it comes up. A chord over a held modifier was never dictation, so
+    /// its outcome is neither a session nor a failure, and nothing reaches the menu to name it.
+    @Test func aChordBlockedByAnotherKeySurfacesNothing() async throws {
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.blocked(Rig.dictation, by: [.function]))
@@ -2009,7 +2010,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.turns.reading.holds == 0)
         rig.keyUp()
         let report = await rig.pressReport()
-        #expect(report.outcome.failure is ChordBlocked)
+        guard case .usedAsModifier(landed: 0, held: 0) = report.outcome else { Issue.record("a blocked chord is never dictation, so its outcome is neither a session nor a failure"); return }
         #expect(report.opened == nil)
         #expect(rig.hardware.engines.isEmpty)
         #expect(engine.clips.isEmpty)
@@ -2040,12 +2041,6 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.dictation.press(.ended(.usedAsModifier))
         #expect(await rig.report().failure is NoMicrophone)
-    }
-
-    /// The refusal names the chord and the keys held with it, in the menu once the chord is up.
-    @Test func aBlockedChordSaysWhichKeysWereHeld() {
-        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.leftShift]))" == "WARNING: Right Option pressed with Left Shift held begins no dictation. Press Right Option alone.")
-        #expect("\(ChordBlocked(chord: KeyChord(modifiers: .rightOption), others: [.function, .leftCommand]))" == "WARNING: Right Option pressed with Left Command+Function held begins no dictation. Press Right Option alone.")
     }
 
     /// A press made while an earlier one is still on its way is shown listening, and the

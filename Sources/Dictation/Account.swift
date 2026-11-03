@@ -28,22 +28,3 @@ public struct EngineUnavailable: WordFree {
 
     public var description: String { "\(cause)" }
 }
-
-/// A chord pressed with other modifiers already held with it, which begins no press.
-///
-/// Word-free: it is told at the chord, before anything is said.
-public struct ChordBlocked: WordFree {
-    public let chord: KeyChord
-    public let others: Set<Modifier>
-
-    public init(chord: KeyChord, others: Set<Modifier>) {
-        self.chord = chord
-        self.others = others
-    }
-
-    /// Told in the menu once the chord is up.
-    public var description: String {
-        let pressed = Hotkey.named(chord)
-        return "WARNING: \(pressed) pressed with \(Hotkey.named(others)) held begins no dictation. Press \(pressed) alone."
-    }
-}

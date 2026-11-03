@@ -71,8 +71,10 @@ public struct HotkeyDetector: Sendable {
         /// event was delivered.
         case began(Mode, at: HostTime)
         /// The chord went down with these other modifiers already held, so no listening
-        /// begins. [LAW:no-silent-failure] It is told rather than ignored, and ended like a
-        /// press, so whatever shows it is shown while the chord is down and no longer.
+        /// begins. [LAW:no-silent-failure] It is told rather than ignored, so the log records
+        /// the chord that began no press, and it is ended like a press so the loop accounts
+        /// for the key-up that follows. Nothing in the app displays it: a chord over a held
+        /// modifier is that modifier's own use, not dictation.
         case blocked(Mode, by: Set<Modifier>)
         /// Listening ends, and why. Only one press is ever open, so this ends that one.
         case ended(Ending)

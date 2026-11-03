@@ -340,7 +340,7 @@ public final class Dictation {
         case up
         case down(Mode, Open)
         case refused(Mode, Failed)
-        case blocked(Mode, ChordBlocked)
+        case blocked(Mode)
     }
 
     private struct Open {
@@ -469,9 +469,9 @@ public final class Dictation {
         switch press {
         case .down(_, let open): .listening(heard: open.streaming.heard)
         case .refused(_, let failed): .refused(why: failed.failure.account.facts)
-        // A chord pressed over another held modifier is usually that modifier's own use,
-        // Shift and Right Option for a special character, so it shows nothing; once up, the
-        // menu tells it if no key was typed under it.
+        // A chord pressed over another held modifier is that modifier's own use, Shift and
+        // Right Option for a special character, not dictation: it shows no panel, and once up
+        // it names nothing in the menu either. [LAW:comments-carry-meaning]
         case .up, .blocked: unreported > 0 ? .transcribing : .idle
         }
     }
@@ -534,11 +534,12 @@ public final class Dictation {
                 press = .refused(mode, error)
             }
             show()
-        case .blocked(let mode, let others):
+        case .blocked(let mode, _):
             guard case .up = press else { preconditionFailure("a chord was blocked while a press was open; the detector pairs every began with an ended") }
             // No microphone and no turn of the engine: nothing is listening, so nothing is
-            // taken from a served caller for it.
-            press = .blocked(mode, ChordBlocked(chord: mode.chord, others: others))
+            // taken from a served caller for it. The detector logs the blocked chord; nothing
+            // in the app shows it. [LAW:no-silent-failure]
+            press = .blocked(mode)
             show()
         case .ended(let ending):
             let told = ContinuousClock.now
@@ -570,11 +571,15 @@ public final class Dictation {
                 mode = began
                 pending = .unheard(.failed(error))
                 opening = nil
-            case .blocked(let began, let blocked):
-                // A blocked chord that was a typed key's modifier, Shift and Right Option for
-                // a special character, was never dictation, so it turned nothing away.
+            case .blocked(let began):
+                // A chord pressed over another held modifier was the modifier's own use, Shift
+                // and Right Option for a special character, not dictation: it opened no
+                // microphone and heard nothing, so it is never a failure, whether or not a key
+                // was typed under it. [LAW:types-are-the-program] A press that was never
+                // dictation is neither a session nor a failure. [LAW:dataflow-not-control-flow]
+                // One outcome, not a fork on whether a key landed.
                 mode = began
-                pending = .unheard(ending == .usedAsModifier ? .usedAsModifier(landed: 0, held: 0) : .failed(Failed(blocked)))
+                pending = .unheard(.usedAsModifier(landed: 0, held: 0))
                 opening = nil
             case .down(let began, let down):
                 mode = began
