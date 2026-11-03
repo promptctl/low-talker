@@ -60,8 +60,7 @@ extension KeyChord {
 /// hold change nothing, and the press ends when any key of its chord comes up. A key typed
 /// while the chord was down makes it neither: the chord was that key's modifier, and the
 /// press ends as the chord comes up, however long it was down. A chord pressed with other
-/// modifiers already held begins no press, and is told as blocked, so the person learns it at
-/// the chord rather than after speaking into it; it never latches, since nothing listens.
+/// modifiers already held begins no press, and is told as blocked; it never latches, since nothing listens.
 ///
 /// [LAW:effects-at-boundaries] A value with no clock and no feed. Time comes in on
 /// each event, so a test drives it with timestamps of its choosing.
@@ -72,8 +71,10 @@ public struct HotkeyDetector: Sendable {
         /// event was delivered.
         case began(Mode, at: HostTime)
         /// The chord went down with these other modifiers already held, so no listening
-        /// begins. [LAW:no-silent-failure] It is told rather than ignored, and ended like a
-        /// press, so whatever shows it is shown while the chord is down and no longer.
+        /// begins. [LAW:no-silent-failure] It is told rather than ignored, so the log records
+        /// the chord that began no press, and it is ended like a press so the loop accounts
+        /// for the key-up that follows. Nothing in the app displays it: a chord over a held
+        /// modifier is that modifier's own use, not dictation.
         case blocked(Mode, by: Set<Modifier>)
         /// Listening ends, and why. Only one press is ever open, so this ends that one.
         case ended(Ending)
