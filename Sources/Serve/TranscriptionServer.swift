@@ -100,7 +100,9 @@ public final class TranscriptionServer: Sendable {
         // say `.cancelled`: one cancelled just after `start` may never say it, and a listen that
         // waited for it once held a CI run until its timeout. [LAW:no-ambient-temporal-coupling]
         let listen = Mutex(Listen.starting)
-        listener.stateUpdateHandler = { state in
+        // Weak, so a listener that never says a last state does not hold itself through this.
+        listener.stateUpdateHandler = { [weak listener] state in
+            guard let listener else { return }
             switch state {
             case .ready:
                 listen.withLock { $0.decide() }?.resume(returning: listener.port!)
@@ -123,14 +125,15 @@ public final class TranscriptionServer: Sendable {
         }
         let bound = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NWEndpoint.Port, any Error>) in
-                let cancelledFirst = listen.withLock { $0.wait(continuation) }
-                guard !cancelledFirst else { return continuation.resume(throwing: CancellationError()) }
+                guard listen.withLock({ $0.wait(continuation) }) else { return continuation.resume(throwing: CancellationError()) }
                 listener.start(queue: queue)
             }
         } onCancel: {
+            // Decided here, so neither a `start` nor a `.ready` still queued can follow the cancel;
+            // resumed on the listener's queue, so the listen ends behind the cancel it asked for.
+            let waiting = listen.withLock { $0.decide() }
             listener.cancel()
-            // On the listener's queue, so the listen ends behind the cancel it asked for.
-            queue.async { listen.withLock { $0.decide() }?.resume(throwing: CancellationError()) }
+            queue.async { waiting?.resume(throwing: CancellationError()) }
         }
         return TranscriptionServer(
             address: ListenAddress(binding: address.binding, port: bound),
@@ -159,11 +162,11 @@ private enum Listen {
     /// Ready, failed or cancelled; or cancelled before it started, which leaves it unstarted.
     case decided
 
-    /// Waits on `continuation`, unless a cancel has decided the listen first, and says which.
+    /// Waits on `continuation` and says so, unless a cancel has decided the listen first.
     mutating func wait(_ continuation: CheckedContinuation<NWEndpoint.Port, any Error>) -> Bool {
-        guard case .starting = self else { return true }
+        guard case .starting = self else { return false }
         self = .waiting(continuation)
-        return false
+        return true
     }
 
     /// Decides the listen, handing back the continuation that waits on it, if one does yet.

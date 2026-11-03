@@ -22,7 +22,6 @@ import TestProbes
         }
     }
 
-    /// The server is on loopback at the app's port unless told otherwise.
     /// A listen cancelled at any moment of its start ends: one cancelled just after its listener
     /// started once waited forever for a `.cancelled` the listener never said, and held a CI run
     /// until its timeout. Before the fix, about half the runs of this hung.
@@ -37,6 +36,7 @@ import TestProbes
         }
     }
 
+    /// The server is on loopback at the app's port unless told otherwise.
     @Test func theServerIsOnLoopbackAtTheAppsPort() {
         #expect("\(ListenAddress())" == "127.0.0.1:\(AppIdentity.serverPort)")
     }
