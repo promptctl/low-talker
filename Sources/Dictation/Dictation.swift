@@ -486,10 +486,13 @@ public final class Dictation {
         showing(now)
     }
 
-    /// Reports a press, and then shows that a heard one is no longer on its way.
-    private func settle(_ press: Report, heard: Bool) {
+    /// Reports a press, and then shows that a heard one is no longer on its way. Whether a
+    /// microphone opened is the report's own to say — `opened` is nil for a press that heard
+    /// nothing — so the count still on its way is read from the report, not passed beside it.
+    /// [LAW:one-source-of-truth]
+    private func settle(_ press: Report) {
         report(press)
-        if heard { unreported -= 1 }
+        if press.opened != nil { unreported -= 1 }
         show()
     }
 
@@ -627,14 +630,14 @@ public final class Dictation {
                         do throws(Failed) { outcome = try await self.hear(heard) } catch { outcome = .failed(error) }
                     case .unheard(let unheard): outcome = unheard
                     }
-                    await self.settle(Report(mode: mode, outcome: outcome, opened: opening?.opened), heard: opening != nil)
+                    await self.settle(Report(mode: mode, outcome: outcome, opened: opening?.opened))
                 }
             } catch {
                 // The operation reports its own outcome; only the queue's own refusal
                 // to accept it reaches here, and then nothing will ever read the decode, so
                 // it is stopped and lets go of the engine as it does. [LAW:no-silent-failure]
                 if case .heard(let heard) = pending { heard.decode.cancel() }
-                settle(Report(mode: mode, outcome: .failed(Failed(error)), opened: opening?.opened), heard: opening != nil)
+                settle(Report(mode: mode, outcome: .failed(Failed(error)), opened: opening?.opened))
             }
             arrivedDuringPress.map { offer(since: .cursorArrived($0)) }
             arrivedDuringPress = nil
