@@ -31,6 +31,9 @@ private final class App {
     var watching = false
     /// How many fresh readings the lifecycle took, which is how an owed reading is seen paid.
     private(set) var readings = 0
+    /// How many times the come-up offered the guided setup, which the real effect shows only
+    /// when a requirement is unmet. A quit during the come-up offers none.
+    private(set) var setUpsOffered = 0
     private(set) var events: [LoopLifecycle.Event] = []
 
     /// Weak, because a test may end while the lifecycle's last task finishes behind it.
@@ -46,6 +49,7 @@ private final class App {
             return requirementsMet
         },
         watching: { [weak self] in self?.watching ?? false },
+        offerSetUp: { [weak self] in self?.setUpsOffered += 1 },
         told: { [weak self] in self?.events.append($0) })
 
     /// The events with the capture's wait set to zero, so a test can compare them whole.
@@ -142,17 +146,20 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         app.adopt.release(())
         await first.value
         #expect(app.capture.begun == 1)
+        #expect(app.setUpsOffered == 1)
         #expect(app.untimed == [.joined, .capture(.started, waited: .zero)])
     }
 
-    /// A capture that did not start builds no loop over it.
-    @Test func aCaptureThatDidNotStartBuildsNoLoop() async throws {
+    /// A capture that did not start builds no loop over it, and the come-up still offers the
+    /// guided setup at its end, where the unmet microphone is granted.
+    @Test func aCaptureThatDidNotStartBuildsNoLoopAndOffersSetUp() async throws {
         let app = App()
         let up = app.lifecycle.comeUp()
         try await untilItHolds { app.capture.waiters == 1 }
         app.capture.release(.notStarted)
         await up.value
         #expect(app.adopt.begun == 0)
+        #expect(app.setUpsOffered == 1)
         #expect(app.untimed == [.capture(.notStarted, waited: .zero)])
     }
 
@@ -167,6 +174,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         app.adopt.release(())
         await up.value
         #expect(app.watching)
+        #expect(app.setUpsOffered == 1)
         #expect(app.untimed == [.capture(.running, waited: .zero)])
     }
 
@@ -187,8 +195,9 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
     }
 
     /// A quit while capture is starting lets the come-up end without building a loop: the
-    /// rebuild it asks for afterwards is refused, puts no hotkey up, and says so.
-    @Test func aQuitDuringTheCaptureWaitBuildsNoLoop() async throws {
+    /// rebuild it asks for afterwards is refused, puts no hotkey up, and the setup it would offer
+    /// at its end is refused too, so no window opens while the quit drains. Both say so.
+    @Test func aQuitDuringTheCaptureWaitBuildsNoLoopAndOffersNoSetUp() async throws {
         let app = App()
         let up = app.lifecycle.comeUp()
         try await untilItHolds { app.capture.waiters == 1 }
@@ -197,7 +206,8 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         await up.value
         #expect(app.adopt.begun == 0)
         #expect(!app.watching)
-        #expect(app.untimed == [.capture(.started, waited: .zero), .refused(.rebuild)])
+        #expect(app.setUpsOffered == 0)
+        #expect(app.untimed == [.capture(.started, waited: .zero), .refused(.rebuild), .refused(.setUp)])
     }
 
     /// After a quit, a come-up starts no capture, which could open the microphone the quit let
@@ -210,6 +220,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         for _ in 0..<10 { await Task.yield() }
         #expect(app.capture.begun == 0)
         #expect(app.adopt.begun == 0)
+        #expect(app.setUpsOffered == 0)
         #expect(app.untimed == [.refused(.comeUp), .settled(.quitting)])
     }
 

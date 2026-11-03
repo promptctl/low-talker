@@ -316,6 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         adopt: { [unowned self] in await adopt() },
         requirementsMet: { [unowned self] in readReadiness().ready },
         watching: { [unowned self] in listening?.hotkey.isWatching == true },
+        offerSetUp: { [unowned self] in offerGuidedSetUp() },
         told: { [unowned self] in log.notice("\($0, privacy: .public)") })
 
     /// Why the last press's words reached no cursor, while no press has begun since.
@@ -704,7 +705,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // start now.
         serving?.resume(at: serveBinding)
         showHotkeyStatus(.starting(step: nil))
-        Task { await listen() }
+        listen()
         // Once the config is read, each save is a reload of the config the server and the
         // loop started on.
         reloading = Task {
@@ -715,12 +716,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The loop as far as what is already granted allows, then the guided setup when
     /// something is left: every requirement stops dictation, so an app missing one can do
-    /// nothing until the person has seen why.
+    /// nothing until the person has seen why. The come-up offers the setup at its end, so a quit
+    /// asked for while it is suspended opens no window; see `offerSetUp`.
     ///
     /// A launch asks for no grant. Every grant is asked for from its own step in setup,
     /// after that step has said why; see `ask(_:)`.
-    private func listen() async {
-        await lifecycle.comeUp().value
+    private func listen() {
+        lifecycle.comeUp()
+    }
+
+    /// Shows the guided setup when a requirement is left unmet, so a person sees why nothing is
+    /// heard. The come-up offers this at its end (through `offerSetUp`), and refuses it once a
+    /// quit is asked for, so a quit during the come-up opens no window. A method, not the closure
+    /// inline, so `lifecycle`'s initializer does not reference `setUp` and tangle the two lazy
+    /// vars into a cycle (`setUp` already reads back into `lifecycle`).
+    private func offerGuidedSetUp() {
         if !readReadiness().unmet.isEmpty { setUp.show() }
     }
 
