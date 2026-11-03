@@ -54,7 +54,7 @@ APP := $(PRODUCTS)/LowTalker.app
 INPUT_METHOD := $(PRODUCTS)/LowTalker Input Method.app
 XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 
-.PHONY: app package install run variants test model-tool sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure gate-classifier
+.PHONY: app package install run variants test test-watchdog model-tool sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure gate-classifier
 
 # Regeneration is unconditional: xcodegen is idempotent and sub-second, and a
 # timestamp rule cannot see removed sources or in-place rewrites of the project.
@@ -142,6 +142,10 @@ test: signing-identity
 	xcodegen generate
 	swift test
 	$(MAKE) check-licenses
+
+# `test`, sampled and killed if its test process hangs: what CI runs.
+test-watchdog:
+	scripts/test-with-watchdog
 
 # The model store, for the build: the default model's name, the commits `main` names for it,
 # and fetching, checking and packing it. Nothing in it loads a model, so it needs no signing

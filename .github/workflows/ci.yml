@@ -40,7 +40,7 @@ jobs:
 
       # `make test`, under a watchdog that samples and stops a test process that hangs.
       - name: Build and test the package
-        run: scripts/test-with-watchdog
+        run: make test-watchdog
 
       # The runner has no model to carry, so the bundles are built carrying none, which is
       # a build every Makefile path allows and one the app names at launch. Signing reaches
