@@ -54,7 +54,7 @@ settings:
     # the third. scripts/release refuses a build number no higher than the count of release
     # tags on other commits.
     MARKETING_VERSION: 0.1.0
-    CURRENT_PROJECT_VERSION: "9"
+    CURRENT_PROJECT_VERSION: "10"
 
 packages:
   # [LAW:one-way-deps] The app links the SwiftPM package at the repo root; the
