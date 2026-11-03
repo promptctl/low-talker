@@ -126,7 +126,7 @@ actor Utterance {
             next.through = end
             for start in stride(from: 0, to: clip.samples.count, by: Utterance.envelope) {
                 let window = clip.samples[start..<min(start + Utterance.envelope, clip.samples.count)]
-                let peak = window.reduce(0) { max($0, abs($1)) }
+                let peak = AudioClip.peak(of: window)
                 next.run = peak >= gate ? next.run + window.count : 0
                 next.runPeak = peak >= gate ? max(next.runPeak, verdict.reference(peak)) : 0
                 next.longest = max(next.longest, next.run)
@@ -359,8 +359,13 @@ struct Lookahead {
         while audio.count - taken >= least {
             let from = taken + discriminator.lookbehind
             let count = min(Utterance.frameCount, audio.count - from)
-            let read = Array(audio[taken..<min(taken + window, audio.count)]) + Array(repeating: 0, count: max(0, taken + window - audio.count))
-            frames.append((AudioClip(samples: Array(audio[from..<from + count])), try discriminator.verdict(read[...])))
+            // Read in place, and padded with silence only for a frame read past the end: a copy
+            // and a padding array made for every frame held the CI runner's cooperative pool in
+            // a debug build (low-unfiled-50ff.cis).
+            let end = taken + window
+            var read = audio[taken..<min(end, audio.count)]
+            if end > audio.count { read.append(contentsOf: repeatElement(0, count: end - audio.count)) }
+            frames.append((AudioClip(samples: Array(audio[from..<from + count])), try discriminator.verdict(read)))
             taken += count
         }
         return frames

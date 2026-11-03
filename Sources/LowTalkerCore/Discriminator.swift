@@ -13,7 +13,9 @@ protocol Discriminator: Sendable {
     /// Samples after a frame its verdict reads: zeros past the end of an utterance that has ended.
     var lookahead: Int { get }
     /// The verdict on the frame inside `window`: `lookbehind` samples, the frame, then
-    /// `lookahead` samples, `Utterance.frame` long in all but the frame.
+    /// `lookahead` samples, `Utterance.frame` long in all but the frame. The window is a slice of
+    /// the gate's own buffer, so its indices start wherever the frame lies: read it as a
+    /// sequence, or from its `startIndex`, never from 0.
     func verdict(_ window: ArraySlice<Float>) throws -> Verdict
 }
 

@@ -1074,6 +1074,71 @@ private struct Authorized: MicrophoneAuthority {
         #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
     }
 
+    /// The same for a microphone that opened and then stopped mid-press. Its key-up shuts the
+    /// engine and drops the failure, so a press that kept the input would open on one that
+    /// stops the moment it starts, on a device that is still the default and so draws no
+    /// device report to replace it. Seen on studious: -10876 at every press for hours.
+    @Test func aShutMicrophoneThatStoppedMidPressIsReadiedAgainForTheNext() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        let failed = try capture.beginSession(at: origin, preRoll: 0)
+        hardware.engines[0].onFailure(BadBuffer())
+        _ = capture.endSession(failed)
+        #expect(isListening(capture))
+
+        let session = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.prepared == 2)
+        #expect(hardware.engines[1].input === hardware.inputs[1])
+        hardware.engines[1].appending([1, 2], after(1))
+        #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
+    }
+
+    /// The engine's stop arrives on its own schedule, and can land after the key-up has
+    /// already let the engine go. The input it stopped on is no better for that.
+    @Test func aShutMicrophoneWhoseStopLandedAfterTheKeyUpIsReadiedAgainForTheNext() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        _ = capture.endSession(try capture.beginSession(at: origin, preRoll: 0))
+        hardware.engines[0].onFailure(BadBuffer())
+
+        _ = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.prepared == 2)
+        #expect(hardware.engines[1].input === hardware.inputs[1])
+    }
+
+    /// A late stop whose input a device report already replaced owes nothing more: readying
+    /// a third would make the next press wait on it.
+    @Test func aLateStopOnAnInputAlreadyReplacedReadiesNothingMore() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        _ = capture.endSession(try capture.beginSession(at: origin, preRoll: 0))
+        hardware.inputs[0].onStale()
+        hardware.engines[0].onFailure(BadBuffer())
+
+        _ = try capture.beginSession(at: after(1), preRoll: 0)
+        #expect(hardware.prepared == 2)
+        #expect(hardware.engines[1].input === hardware.inputs[1])
+    }
+
+    /// A stop from the last press that lands after the next press opened on the same input
+    /// is about an engine already let go: the press recording now keeps its microphone.
+    @Test func aStopFromAnEarlierPressLeavesTheNextPressRecording() async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        try await capture.start(grant, atRest: .shut)
+        _ = capture.endSession(try capture.beginSession(at: origin, preRoll: 0))
+        let session = try capture.beginSession(at: after(1), preRoll: 0)
+        hardware.engines[0].onFailure(BadBuffer())
+
+        hardware.engines[1].appending([1, 2], after(1))
+        #expect(capture.endSession(session) == .whole(AudioClip(samples: [1, 2])))
+        _ = try capture.beginSession(at: after(2), preRoll: 0)
+        #expect(hardware.prepared == 1)
+    }
+
     /// Under `open` the engine runs while nobody is dictating, and a default input that
     /// changes then is a device the run should follow. A HAL unit bound to one device hears
     /// nothing of a switch to a different one that is still alive - neither its liveness nor

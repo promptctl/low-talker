@@ -89,9 +89,15 @@ enum WebSocket {
         let start = maskAt + 4
         let end = start + Int(length)
         guard data.count >= end else { return nil }
-        let mask = bytes[maskAt..<start]
-        let payload = data[data.startIndex + start..<data.startIndex + end].enumerated().map { $0.element ^ mask[maskAt + $0.offset % 4] }
-        return (Frame(final: final, opcode: opcode, payload: Data(payload)), end)
+        let mask = Array(bytes[maskAt..<start])
+        // Unmasked in place through a buffer: a generic map over the payload's bytes held a
+        // thread for seconds per streamed second of audio in a debug build, which starved the
+        // CI runner's cooperative pool (low-unfiled-50ff.cis).
+        var payload = Data(data[data.startIndex + start..<data.startIndex + end])
+        payload.withUnsafeMutableBytes { (buffer: UnsafeMutableRawBufferPointer) in
+            for offset in 0..<buffer.count { buffer[offset] ^= mask[offset & 3] }
+        }
+        return (Frame(final: final, opcode: opcode, payload: payload), end)
     }
 
     /// What a client said: a data message whole, however many frames carried it, or a

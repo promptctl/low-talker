@@ -28,6 +28,18 @@ import Testing
         #expect(ring.clip(in: 7..<10).samples == [8, 9, 10])
     }
 
+    /// The ring grows as samples land, so a burst into one not yet full skips slots it never
+    /// held - and still keeps exactly its tail.
+    @Test func burstIntoAPartlyFilledRingKeepsItsTail() {
+        var ring = AudioRing(capacity: 4)
+        ring.append([1])
+        ring.append((2...7).map(Float.init))
+        #expect(ring.retained == 3..<7)
+        #expect(ring.clip(in: 0..<7).samples == [4, 5, 6, 7])
+        ring.append([8])
+        #expect(ring.clip(in: 0..<8).samples == [5, 6, 7, 8])
+    }
+
     /// Pre-roll before the first sample and positions that scrolled off both yield
     /// what exists, not an error.
     @Test func clipIsClampedToWhatIsRetained() {

@@ -22,6 +22,20 @@ import TestProbes
         }
     }
 
+    /// A listen cancelled at any moment of its start ends: one cancelled just after its listener
+    /// started once waited forever for a `.cancelled` the listener never said, and held a CI run
+    /// until its timeout. Before the fix, about half the runs of this hung.
+    @Test(.timeLimit(.minutes(1))) func aListenCancelledWhileStartingEnds() async throws {
+        for i in 0..<2000 {
+            let listen = Task {
+                try await TranscriptionServer.listen(at: ListenAddress(port: .any), engine: { .ready(Stub()) }, record: { _ in })
+            }
+            try await Task.sleep(for: .microseconds(i % 400))
+            listen.cancel()
+            if let server = try? await listen.value { server.stop(); try? await server.finished() }
+        }
+    }
+
     /// The server is on loopback at the app's port unless told otherwise.
     @Test func theServerIsOnLoopbackAtTheAppsPort() {
         #expect("\(ListenAddress())" == "127.0.0.1:\(AppIdentity.serverPort)")

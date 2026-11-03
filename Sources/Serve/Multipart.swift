@@ -18,7 +18,7 @@ struct FormField: Sendable, Equatable {
         // Every delimiter but the first follows a line break, so one is put before the
         // first too and the body splits on a single separator.
         let delimiter = Data("\r\n--\(boundary)".utf8)
-        let pieces = (Data("\r\n".utf8) + body).split(separator: delimiter, omittingEmptySubsequences: false)
+        let pieces = split(Data("\r\n".utf8) + body, on: delimiter)
         // The piece before the first delimiter is the preamble, and the piece that opens
         // with "--" follows the closing one; everything between is a field.
         guard let closing = pieces.firstIndex(where: { $0.starts(with: Data("--".utf8)) }), closing > 0 else {
@@ -27,10 +27,25 @@ struct FormField: Sendable, Equatable {
         return try pieces[1..<closing].map { piece throws(APIError) in try field(piece) }
     }
 
+    /// `data` cut at every `separator`, empty pieces kept. Searched with Foundation's
+    /// `range(of:)` rather than the generic `split(separator:)`, which compared an upload
+    /// byte by byte through generic code and held a thread for seconds in a debug build -
+    /// enough to starve the CI runner's cooperative pool (low-unfiled-50ff.cis).
+    private static func split(_ data: Data, on separator: Data) -> [Data] {
+        var pieces: [Data] = []
+        var start = data.startIndex
+        while let found = data.range(of: separator, in: start..<data.endIndex) {
+            pieces.append(data[start..<found.lowerBound])
+            start = found.upperBound
+        }
+        pieces.append(data[start..<data.endIndex])
+        return pieces
+    }
+
     private static func field(_ piece: Data) throws(APIError) -> FormField {
         let blank = Data("\r\n\r\n".utf8)
         // A field opens with the line break that ends its delimiter line.
-        guard piece.starts(with: Data("\r\n".utf8)), let split = piece.firstRange(of: blank) else {
+        guard piece.starts(with: Data("\r\n".utf8)), let split = piece.range(of: blank) else {
             throw .malformed("a multipart field has no header block")
         }
         let head = try RequestHead.fields(piece[piece.startIndex + 2..<split.lowerBound])

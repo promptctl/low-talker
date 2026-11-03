@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# `make test`, failing in minutes rather than at the job's timeout if the test process hangs,
+# and leaving the hung process's stacks in the log. Run it as `make test-watchdog`.
+#
+#   scripts/test-with-watchdog [seconds]   # default 300, counted from the test process's start
+#
+# A CI run of the suite once froze 3 s in and sat until the 30-minute job timeout killed it,
+# with nothing in the log to say what held it (low-unfiled-50ff.cis). The suite takes under a
+# minute on the runner, so a test process still alive at the limit has hung: it is sampled,
+# then killed, and the step fails. [LAW:no-silent-failure]
+set -uo pipefail
+
+limit=${1:-300}
+make test &
+build=$!
+
+# Every process under `make test`, so an exit or a hang takes none of them with it alive.
+descendants() {
+  local child
+  for child in $(pgrep -P "$1"); do
+    echo "$child"
+    descendants "$child"
+  done
+}
+trap 'kill $(descendants "$build") "$build" 2>/dev/null' EXIT
+
+# The test process is this run's own: a descendant of `make test`, never another run's.
+test_process() {
+  local pid
+  for pid in $(descendants "$build"); do
+    [[ $(ps -o comm= -p "$pid") == *swiftpm-testing-helper ]] && { echo "$pid"; return; }
+  done
+}
+
+# The build comes first and may take minutes; the limit counts only the tests.
+until test_pid=$(test_process) && [ -n "$test_pid" ]; do
+  kill -0 "$build" 2>/dev/null || { wait "$build"; exit $?; }
+  sleep 1
+done
+
+waited=0
+while kill -0 "$test_pid" 2>/dev/null; do
+  if [ "$waited" -ge "$limit" ]; then
+    echo "test-with-watchdog: the test process ($test_pid) is still running after ${limit} s; sampling it" >&2
+    stacks=$(mktemp)
+    sample "$test_pid" 3 -file "$stacks" > /dev/null \
+      || echo "test-with-watchdog: sample failed on $test_pid; no stacks were taken" >&2
+    cat "$stacks" >&2
+    kill -KILL "$test_pid"
+    wait "$build"
+    echo "test-with-watchdog: the test process hung; its stacks are above" >&2
+    exit 1
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+wait "$build"

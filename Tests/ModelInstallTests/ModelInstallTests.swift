@@ -1,6 +1,6 @@
 import Foundation
 import LowTalkerCore
-import ModelInstall
+@testable import ModelInstall
 import Synchronization
 import TestProbes
 import Testing
@@ -157,6 +157,19 @@ import Testing
         }
     }
 
+    /// An install cancelled before its unpack starts is told so, and launches no `ditto`:
+    /// stopping one never launched would raise rather than throw.
+    @Test func anUnpackCancelledBeforeItStartsThrowsCancellation() async throws {
+        let out = try ScratchStore(files: [:], tokenizer: [:])
+        let unpacked = out.root.appending(path: "unpacked")
+        let unpacking = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await Archive.unpack(out.root.appending(path: "absent.zip"), into: unpacked)
+        }
+        await #expect(throws: CancellationError.self) { try await unpacking.value }
+        #expect(!FileManager.default.fileExists(atPath: unpacked.path))
+    }
+
     /// The archive a published base serves unpacks into a store that holds the model
     /// installed, and holds nothing the source's manifests do not list.
     @Test func packedArchiveUnpacksIntoAStoreHoldingTheModel() async throws {
@@ -167,9 +180,7 @@ import Testing
         let archive = try await ModelStore(directory: source.root).pack("test", into: out.root) { _ in }
         #expect(archive.lastPathComponent == "test.zip")
         let unpacked = out.root.appending(path: "unpacked")
-        let ditto = try Process.run(URL(filePath: "/usr/bin/ditto"), arguments: ["-x", "-k", archive.path, unpacked.path])
-        ditto.waitUntilExit()
-        try #require(ditto.terminationStatus == 0)
+        try await Archive.unpack(archive, into: unpacked)
         guard case .installed = try ModelStore(directory: unpacked).presence(of: "test") else {
             Issue.record("a packed archive must unpack into an installed store")
             return

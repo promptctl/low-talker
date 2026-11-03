@@ -38,6 +38,14 @@ private func fixture(_ name: String) throws -> URL {
         #expect(clip.peak == 0)
     }
 
+    /// The peak is the largest magnitude, and a sample that is not a number has none.
+    @Test func thePeakIsTheLargestMagnitudeAndANaNHasNone() {
+        #expect(AudioClip(samples: [0.1, -0.6, 0.3]).peak == 0.6)
+        #expect(AudioClip(samples: [0.1, .nan, -0.4]).peak == 0.4)
+        #expect(AudioClip.peak(of: [0.2, -0.9, 0.5][1...]) == 0.9)
+        #expect(AudioClip(samples: []).peak == 0)
+    }
+
     /// The same tone in the left channel only and in the right channel only. A
     /// downmix that dropped or favored either channel could not produce equal peaks.
     @Test func downmixHearsBothChannelsEqually() throws {

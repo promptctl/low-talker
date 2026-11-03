@@ -79,7 +79,7 @@ extension ModelStore {
         let staging = ModelStore(directory: scratch.appending(path: "store"))
         _ = try await staging.install(model, from: .store(self), phase: phase)
         let archive = directory.appending(path: ModelSource.archiveName(of: model))
-        try Archive.pack(staging.directory, to: archive)
+        try await Archive.pack(staging.directory, to: archive)
         return archive
     }
 
