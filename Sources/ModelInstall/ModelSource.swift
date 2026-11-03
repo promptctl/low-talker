@@ -136,11 +136,15 @@ enum Archive {
                 // Terminating a process never launched raises, so a task already cancelled
                 // launches nothing, and the handler below stops only a running one.
                 guard !Task.isCancelled else { return exited.resume(throwing: CancellationError()) }
-                do { try process.run() } catch { exited.resume(throwing: error) }
+                do { try process.run() } catch { return exited.resume(throwing: error) }
+                // A cancel that landed between the check and the launch found nothing running.
+                if Task.isCancelled { process.terminate() }
             }
         } onCancel: {
             if process.isRunning { process.terminate() }
         }
+        // A ditto stopped by a cancel exits failed, and the install was cancelled, not failed.
+        try Task.checkCancellation()
         // Read off the process after the wait, which is also what holds it alive through it.
         let status = process.terminationStatus
         guard status == 0 else {
