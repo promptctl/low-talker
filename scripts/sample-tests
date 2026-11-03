@@ -1,0 +1,46 @@
+#!/bin/bash
+# Diagnostic for low-unfiled-50ff.cis: samples the test process every 2 s while `make test`
+# runs and prints, per sample, the threads whose deepest frames were in this package's code.
+# Not for merging.
+set -u
+make test &
+build=$!
+until p=$(pgrep -f swiftpm-testing-helper | head -1) && [ -n "$p" ]; do
+  kill -0 "$build" 2>/dev/null || break
+  sleep 0.2
+done
+for at in 2 4 6 8 10 12 14 16 18 20; do
+  sleep 2
+  [ -n "${p:-}" ] && kill -0 "$p" 2>/dev/null || break
+  sample "$p" 1 -file "/tmp/sample-$at.txt" > /dev/null 2>&1 &
+done
+wait "$build"
+status=$?
+for at in 2 4 6 8 10 12 14 16 18 20; do
+  f="/tmp/sample-$at.txt"
+  [ -f "$f" ] || continue
+  echo "===== $f"
+  python3 - "$f" <<'EOF'
+import re, sys, collections
+L = open(sys.argv[1]).read().split('\n')
+heads = [i for i, l in enumerate(L) if re.match(r'\s+\d+ Thread_', l)]
+for a, b in zip(heads, heads[1:] + [len(L)]):
+    rows = []
+    for x in L[a + 1:b]:
+        m = re.match(r'^([\s+!:|]*)(\d+) (.*?)  \(in ([^)]*)\)', x)
+        if m:
+            rows.append((len(m.group(1)), int(m.group(2)), m.group(3), m.group(4)))
+    c = collections.Counter()
+    for i, (d, n, f, lib) in enumerate(rows):
+        if (rows[i + 1][0] if i + 1 < len(rows) else -1) <= d:
+            anc = next((rows[j][2][:90] for j in range(i, -1, -1) if rows[j][0] <= d and rows[j][3] == 'low-talkerPackageTests'), '')
+            c[(f[:45], anc)] += n
+    title = L[a].strip()[:90]
+    busy = [(v, k) for k, v in c.most_common(3) if not any(w in k[0] for w in ('mach_msg', 'semaphore_wait', 'workq_kernreturn', '__psynch_cvwait', 'kevent'))]
+    if busy:
+        print('--', title)
+        for v, k in busy:
+            print('    ', v, k[0], '<-', k[1])
+EOF
+done
+exit $status
