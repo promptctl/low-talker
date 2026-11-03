@@ -363,15 +363,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // a config that was read, and a save the file refused keeps the one that ran.
         guard case .success(let config)? = config else { preconditionFailure("a loop is adopted only once the config has been read") }
         let hotkey = Hotkey(listeningFor: config)
+        // The words cross to the input method, which commits them at the cursor through the
+        // text input system. Awaited because the inserter reads this process's own signature
+        // off the main actor to know who may answer; see `signedLikeThisProcess`.
+        let inserter = await InputMethodInserter(build: build)
         let dictation = Dictation(
             capture: capture,
             // Asked at key-down, so a press after a failed load is refused before the person
             // speaks into it.
             engine: { [unowned self] () throws(EngineUnavailable) in try engine.forPress() },
             turns: turns,
-            // The words cross to the input method, which commits them at the
-            // cursor through the text input system.
-            executor: Executor(insertingThrough: InputMethodInserter(build: build)),
+            executor: Executor(insertingThrough: inserter),
             hold: hold,
             report: { [unowned self] in report($0) },
             showing: { [unowned self] in show($0) }
@@ -383,15 +385,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // And only over notices that were hosted. The input method tells each cursor it is
         // given focus in, and the loop listening then offers it what is held. The port's name
         // is one per login session, so a second copy of the app stops here and hears nothing.
-        let notices = installed.flatMap {
-            Result { () throws(PortNotHosted) in
-                try InputMethodNotices(
+        // Awaited rather than the sibling gates' synchronous `Result {}` because hosting the
+        // port reads this process's own signature off the main actor.
+        let notices: Result<InputMethodNotices, LoopRefusal>
+        if case .failure(let refusal) = installed {
+            notices = .failure(refusal)
+        } else {
+            do throws(PortNotHosted) {
+                notices = .success(try await InputMethodNotices(
                     heard: { [unowned self] notice in
                         inputMethod.heard(notice).map(showInputMethod)
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
                     },
-                    superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop })
-            }.mapError { LoopRefusal(stringLiteral: "\($0)") }
+                    superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
+            } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }
         }
         // Notices whose hotkey did not go up are stopped with it, so their supervision says
         // nothing that would put a listening line over the refusal.

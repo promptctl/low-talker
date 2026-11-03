@@ -24,8 +24,8 @@ public final class InputMethodNotices {
     /// Throws when the port cannot be hosted, most often because another copy of the app
     /// already hears on it.
     public init(heard: @escaping @MainActor (InputMethodNotice) -> Void,
-                superviseInputMethod: @MainActor () -> Disposal) throws(PortNotHosted) {
-        let port = try NoticePort(
+                superviseInputMethod: @MainActor () -> Disposal) async throws(PortNotHosted) {
+        let port = try await NoticePort(
             queue: DispatchQueue(label: AppIdentity.hotkeyPortName),
             told: { event in Logger.hotkey.error("\(event.description, privacy: .public)") },
             heard: { [weak self] notice in

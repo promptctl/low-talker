@@ -20,7 +20,7 @@ func build(_ json: String) -> Build? { try? JSONDecoder().decode(Build.self, fro
 let inserter: InputMethodInserter
 let text: String
 if arguments.count == 2, let build = build(arguments[0]) {
-    inserter = InputMethodInserter(build: build)
+    inserter = await InputMethodInserter(build: build)
     text = arguments[1]
 } else if arguments.count == 4, let answerer = try? JSONDecoder().decode(PeerIdentity.self, from: Data(arguments[1].utf8)), let build = build(arguments[2]) {
     inserter = InputMethodInserter(portName: arguments[0], timeout: .seconds(20), answerer: .success(answerer), build: build)

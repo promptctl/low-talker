@@ -90,12 +90,15 @@ public struct InputMethodInserter: Inserter {
 
     /// Onto the input method's own insert port, answered only by a process signed like this
     /// one under the input method's identifier, and of `build`.
-    public init(build: Build, timeout: Duration = standardTimeout) {
-        self.init(
-            portName: AppIdentity.inputMethodPortName, timeout: timeout,
-            answerer: Result { () throws(PeerIdentity.Unreadable) in
-                try .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier)
-            }, build: build)
+    public init(build: Build, timeout: Duration = standardTimeout) async {
+        // The identity is read once here and kept; a failure to read it is kept too and thrown
+        // by every insert (see `answerer`). `signedLikeThisProcess` runs the read off the
+        // caller's actor, which is why this init is async. [LAW:single-enforcer]
+        let answerer: Result<PeerIdentity, PeerIdentity.Unreadable>
+        do throws(PeerIdentity.Unreadable) {
+            answerer = .success(try await .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier))
+        } catch { answerer = .failure(error) }
+        self.init(portName: AppIdentity.inputMethodPortName, timeout: timeout, answerer: answerer, build: build)
     }
 
     /// Onto a port and an answerer someone else named, which is how a test puts its own port

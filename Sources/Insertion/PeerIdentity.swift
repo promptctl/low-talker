@@ -124,13 +124,19 @@ public enum PeerIdentity: Equatable, Codable, Sendable, CustomStringConvertible 
 
     /// `identifier`, signed by the certificate that signed this process.
     ///
+    /// **Off the caller's actor**, always. Reading this process's own signature runs a trust
+    /// evaluation (`Signature.signer`) that Security faults - "should not be called on the main
+    /// thread" - when it runs on an app's main thread over a Developer ID signature, a dozen
+    /// times a launch. `@concurrent` moves it onto the concurrent executor so no caller has to
+    /// remember to; this is the one place that obligation lives. [LAW:single-enforcer]
+    ///
     /// [LAW:one-source-of-truth] The certificate is read off this process's own signature
     /// rather than compiled in. The app and its input method are signed together - by the
     /// dev identity `make signing-identity` makes, or by the Developer ID that ships them -
     /// so "whoever signed me" is true of every build without anyone writing it down, and a
     /// copy left over from a build signed by another certificate is refused rather than
     /// believed.
-    public static func signedLikeThisProcess(identifier: String) throws(Unreadable) -> PeerIdentity {
+    @concurrent public static func signedLikeThisProcess(identifier: String) async throws(Unreadable) -> PeerIdentity {
         guard case .signed(_, let certificate) = try ofThisProcess() else { throw .noCertificate }
         return .signed(identifier: identifier, certificate: certificate)
     }
