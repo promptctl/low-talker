@@ -157,6 +157,19 @@ import Testing
         }
     }
 
+    /// An install cancelled before its unpack starts is told so, and launches no `ditto`:
+    /// stopping one never launched would raise rather than throw.
+    @Test func anUnpackCancelledBeforeItStartsThrowsCancellation() async throws {
+        let out = try ScratchStore(files: [:], tokenizer: [:])
+        let unpacked = out.root.appending(path: "unpacked")
+        let unpacking = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await Archive.unpack(out.root.appending(path: "absent.zip"), into: unpacked)
+        }
+        await #expect(throws: CancellationError.self) { try await unpacking.value }
+        #expect(!FileManager.default.fileExists(atPath: unpacked.path))
+    }
+
     /// The archive a published base serves unpacks into a store that holds the model
     /// installed, and holds nothing the source's manifests do not list.
     @Test func packedArchiveUnpacksIntoAStoreHoldingTheModel() async throws {

@@ -133,10 +133,13 @@ enum Archive {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (exited: CheckedContinuation<Void, any Error>) in
                 process.terminationHandler = { _ in exited.resume() }
+                // Terminating a process never launched raises, so a task already cancelled
+                // launches nothing, and the handler below stops only a running one.
+                guard !Task.isCancelled else { return exited.resume(throwing: CancellationError()) }
                 do { try process.run() } catch { exited.resume(throwing: error) }
             }
         } onCancel: {
-            process.terminate()
+            if process.isRunning { process.terminate() }
         }
         // Read off the process after the wait, which is also what holds it alive through it.
         let status = process.terminationStatus
