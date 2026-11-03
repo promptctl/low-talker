@@ -126,7 +126,7 @@ actor Utterance {
             next.through = end
             for start in stride(from: 0, to: clip.samples.count, by: Utterance.envelope) {
                 let window = clip.samples[start..<min(start + Utterance.envelope, clip.samples.count)]
-                let peak = window.reduce(0) { max($0, abs($1)) }
+                let peak = AudioClip.peak(of: window)
                 next.run = peak >= gate ? next.run + window.count : 0
                 next.runPeak = peak >= gate ? max(next.runPeak, verdict.reference(peak)) : 0
                 next.longest = max(next.longest, next.run)

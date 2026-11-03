@@ -33,10 +33,19 @@ public struct AudioClip: Sendable, Equatable {
     }
 
     /// Largest absolute sample value; zero for silence.
+    public var peak: Float { Self.peak(of: samples[...]) }
+
+    /// The largest magnitude among `samples`, 0 for none. [LAW:one-source-of-truth] The one
+    /// peak reader, for a clip and for a window of one alike.
+    ///
     /// Read by vDSP: a generic reduce over a long clip held a thread for seconds in a debug
-    /// build, which starved the CI runner's cooperative pool (low-unfiled-50ff.cis).
-    public var peak: Float {
-        samples.isEmpty ? 0 : vDSP.maximumMagnitude(samples)
+    /// build, which starved the CI runner's cooperative pool (low-unfiled-50ff.cis). vDSP can
+    /// answer NaN for a clip holding one, where a sample that is not a number has no
+    /// magnitude, so that rare clip is read again without it.
+    public static func peak(of samples: ArraySlice<Float>) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let peak = vDSP.maximumMagnitude(samples)
+        return peak.isNaN ? samples.reduce(0) { $1.isNaN ? $0 : max($0, abs($1)) } : peak
     }
 
     /// The clip cut into consecutive clips `duration` long, the last holding

@@ -45,7 +45,7 @@ struct FormField: Sendable, Equatable {
     private static func field(_ piece: Data) throws(APIError) -> FormField {
         let blank = Data("\r\n\r\n".utf8)
         // A field opens with the line break that ends its delimiter line.
-        guard piece.starts(with: Data("\r\n".utf8)), let split = piece.firstRange(of: blank) else {
+        guard piece.starts(with: Data("\r\n".utf8)), let split = piece.range(of: blank) else {
             throw .malformed("a multipart field has no header block")
         }
         let head = try RequestHead.fields(piece[piece.startIndex + 2..<split.lowerBound])

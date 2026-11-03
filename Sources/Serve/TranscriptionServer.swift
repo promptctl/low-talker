@@ -479,7 +479,7 @@ struct Reader {
 
     mutating func head() async throws -> RequestHead {
         try await next { buffer in
-            guard let end = buffer.firstRange(of: Self.endOfHead) else {
+            guard let end = buffer.range(of: Self.endOfHead) else {
                 guard buffer.count < Self.headLimit else { throw APIError.malformed("the request head is over \(Self.headLimit) bytes") }
                 return nil
             }
