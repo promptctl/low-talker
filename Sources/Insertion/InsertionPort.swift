@@ -55,15 +55,14 @@ public final class InsertionPort: Sendable {
     /// Hosts the insert port, admitting the app and nobody else, and answering each greeting
     /// with `build`, this input method's own, or with none when its bundle carries none.
     ///
-    /// Never on the caller's actor. Knowing who to admit means verifying this process's own
-    /// signature, a trust evaluation Security faults when it runs on the main thread, eleven
-    /// times over a Developer ID signature. [LAW:types-are-the-program]
-    @concurrent public convenience init(
+    /// `async` because admitting means verifying this process's own signature, which
+    /// `signedLikeThisProcess` runs off the caller's actor; see there for why.
+    public convenience init(
         build: Build?, queue: DispatchQueue,
         told: @escaping @Sendable (Event) -> Void, answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
     ) async throws(PortNotHosted) {
         let senders: PeerIdentity
-        do throws(PeerIdentity.Unreadable) { senders = try .signedLikeThisProcess(identifier: AppIdentity.bundleIdentifier) } catch { throw .noRequirement(error) }
+        do throws(PeerIdentity.Unreadable) { senders = try await .signedLikeThisProcess(identifier: AppIdentity.bundleIdentifier) } catch { throw .noRequirement(error) }
         try self.init(portName: AppIdentity.inputMethodPortName, senders: senders, build: build, queue: queue, told: told, answer: answer)
     }
 

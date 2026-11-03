@@ -51,10 +51,10 @@ public final class NoticePort {
     public convenience init(
         queue: DispatchQueue,
         told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void
-    ) throws(PortNotHosted) {
+    ) async throws(PortNotHosted) {
         let senders: PeerIdentity
         do throws(PeerIdentity.Unreadable) {
-            senders = try .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier)
+            senders = try await .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier)
         } catch { throw .noRequirement(error) }
         try self.init(portName: AppIdentity.hotkeyPortName, senders: senders, queue: queue, told: told, heard: heard)
     }
