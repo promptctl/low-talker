@@ -359,8 +359,14 @@ struct Lookahead {
         while audio.count - taken >= least {
             let from = taken + discriminator.lookbehind
             let count = min(Utterance.frameCount, audio.count - from)
-            let read = Array(audio[taken..<min(taken + window, audio.count)]) + Array(repeating: 0, count: max(0, taken + window - audio.count))
-            frames.append((AudioClip(samples: Array(audio[from..<from + count])), try discriminator.verdict(read[...])))
+            // Read in place, and padded with silence only for a frame read past the end: a copy
+            // and a padding array made for every frame held the CI runner's cooperative pool in
+            // a debug build (low-unfiled-50ff.cis).
+            let end = taken + window
+            let read = end <= audio.count
+                ? audio[taken..<end]
+                : (Array(audio[taken...]) + Array(repeating: 0, count: end - audio.count))[...]
+            frames.append((AudioClip(samples: Array(audio[from..<from + count])), try discriminator.verdict(read)))
             taken += count
         }
         return frames

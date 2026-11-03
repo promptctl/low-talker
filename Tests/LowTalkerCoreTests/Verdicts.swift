@@ -16,13 +16,17 @@ struct Verdicts: Discriminator {
 
     /// Any frame peaking under `level` called something other than speech, as the gate classifier
     /// calls a room, breathing or a fan, and every other frame speech.
+    ///
+    /// The frame's peak is read by `AudioClip.peak(of:)`: a per-sample closure over every frame
+    /// held all three of the CI runner's cooperative-pool threads in a debug build
+    /// (low-unfiled-50ff.cis).
     static func speech(atOrAbove level: Float) -> Verdicts {
-        Verdicts(lookbehind: 0, lookahead: 0) { frame in frame.contains { abs($0) >= level } ? .speech : .other }
+        Verdicts(lookbehind: 0, lookahead: 0) { frame in AudioClip.peak(of: frame) >= level ? .speech : .other }
     }
 
     /// Any frame peaking at or above `level` called something other than speech: a cough the
     /// test makes louder than its speaker.
     static func other(atOrAbove level: Float, lookahead: Int = 0) -> Verdicts {
-        Verdicts(lookbehind: 0, lookahead: lookahead) { frame in frame.contains { abs($0) >= level } ? .other : .speech }
+        Verdicts(lookbehind: 0, lookahead: lookahead) { frame in AudioClip.peak(of: frame) >= level ? .other : .speech }
     }
 }
