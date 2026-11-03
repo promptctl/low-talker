@@ -363,9 +363,8 @@ struct Lookahead {
             // and a padding array made for every frame held the CI runner's cooperative pool in
             // a debug build (low-unfiled-50ff.cis).
             let end = taken + window
-            let read = end <= audio.count
-                ? audio[taken..<end]
-                : (Array(audio[taken...]) + Array(repeating: 0, count: end - audio.count))[...]
+            var read = audio[taken..<min(end, audio.count)]
+            if end > audio.count { read.append(contentsOf: repeatElement(0, count: end - audio.count)) }
             frames.append((AudioClip(samples: Array(audio[from..<from + count])), try discriminator.verdict(read)))
             taken += count
         }
