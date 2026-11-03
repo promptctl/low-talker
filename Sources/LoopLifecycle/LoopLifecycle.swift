@@ -69,16 +69,19 @@ public final class LoopLifecycle {
         case notStarted
     }
 
-    /// The two kinds of work a reading can start.
+    /// What a quit refuses once it is asked for: the loop work a reading starts - a come-up or a
+    /// rebuild - and the guided setup the come-up offers at its end.
     public enum Work: String, Sendable {
         case comeUp = "come-up"
         case rebuild
+        case setUp = "set-up"
     }
 
     private let startCapture: @MainActor () async -> Capture
     private let adopt: @MainActor () async -> Void
     private let requirementsMet: @MainActor () -> Bool
     private let watching: @MainActor () -> Bool
+    private let offerSetUp: @MainActor () -> Void
     private let told: @MainActor (Event) -> Void
 
     /// - Parameters:
@@ -88,18 +91,23 @@ public final class LoopLifecycle {
     ///   - requirementsMet: a fresh reading: whether every requirement is met. Read when an owed reading
     ///     is paid.
     ///   - watching: whether a hotkey is watching now.
+    ///   - offerSetUp: shows the guided setup when a requirement is unmet, so a person sees why
+    ///     nothing is heard. The come-up offers it at its end; whether a requirement is unmet is
+    ///     the effect's to read. [LAW:effects-at-boundaries]
     ///   - told: every event, as it happens.
     public init(
         startCapture: @escaping @MainActor () async -> Capture,
         adopt: @escaping @MainActor () async -> Void,
         requirementsMet: @escaping @MainActor () -> Bool,
         watching: @escaping @MainActor () -> Bool,
+        offerSetUp: @escaping @MainActor () -> Void,
         told: @escaping @MainActor (Event) -> Void
     ) {
         self.startCapture = startCapture
         self.adopt = adopt
         self.requirementsMet = requirementsMet
         self.watching = watching
+        self.offerSetUp = offerSetUp
         self.told = told
     }
 
@@ -194,10 +202,14 @@ public final class LoopLifecycle {
             let reaching = ContinuousClock.now
             let capture = await startCapture()
             told(.capture(capture, waited: reaching.duration(to: .now)))
-            guard capture != .notStarted else { return }
-            // A quit during the capture wait is refused by `rebuild`, the one place that refuses
-            // it. [LAW:single-enforcer]
-            await rebuild()?.value
+            // A loop is rebuilt only when capture brought a microphone up; either way the come-up
+            // ends by offering setup. [LAW:dataflow-not-control-flow]
+            if capture != .notStarted {
+                // A quit during the capture wait is refused by `rebuild`, the one place that
+                // refuses it. [LAW:single-enforcer]
+                await rebuild()?.value
+            }
+            offerSetUpUnlessQuitting()
         }
         comingUp = this
         return this
@@ -225,6 +237,18 @@ public final class LoopLifecycle {
         }
         rebuilding = this
         return this
+    }
+
+    /// The come-up's last step: the loop is up as far as the grants allow, so a requirement left
+    /// unmet is offered the guided setup where it is met. Refused once a quit is asked for, the one
+    /// place the come-up's setup step is refused, so a come-up that suspended before the quit needs
+    /// no check of its own. [LAW:single-enforcer]
+    private func offerSetUpUnlessQuitting() {
+        guard !quitting else {
+            told(.refused(.setUp))
+            return
+        }
+        offerSetUp()
     }
 
     /// The one place an owed reading is paid: once nothing is bringing up or rebuilding the loop.
