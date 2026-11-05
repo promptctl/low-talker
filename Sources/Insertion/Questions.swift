@@ -4,9 +4,10 @@ import Foundation
 import Identity
 import os
 
-/// What the app owes the keyboard when the input method is holding a Return: the answer to its
-/// first question. [LAW:types-are-the-program] Two values and no third: an app that said
-/// nothing has admitted nothing, and that is the asker's to read, not a case here.
+/// What the app owes the keyboard when the input method is holding a Return or an Escape: the
+/// answer to its first question, which both keys ask. [LAW:types-are-the-program] Two values and
+/// no third: an app that said nothing has admitted nothing, and that is the asker's to read, not
+/// a case here.
 public enum Owing: String, Codable, Sendable {
     /// No press is open and no word is on its way to a cursor.
     case nothing
@@ -21,21 +22,34 @@ public enum Settlement: String, Codable, Sendable {
     case notLanded
 }
 
-/// What the input method asks the app about a Return key it is holding, stamped with the
+/// What an Escape did, the answer to the question it asks once a debt is admitted: the app threw
+/// away the dictation that was open, or there was none for it to throw away.
+public enum Cancellation: String, Codable, Sendable {
+    /// No press was open, so the Escape was not for dictation and goes to the app as typed.
+    case nothing
+    /// A press was open and is cancelled, so the Escape was spent on it.
+    case dictation
+}
+
+/// What the input method asks the app about a steering key it is holding, stamped with the
 /// moment the key went down on the clock every key event is stamped by, so the audio is cut
 /// where the key was typed and not where the question arrived.
 public enum Question: Equatable, Sendable {
-    /// Is anything owed? Answered at once, from the port's own queue.
-    case returnTyped(at: TimeInterval)
-    /// Say when everything owed has settled. Answered later, from the main actor.
+    /// Is anything owed? Answered at once, from the port's own queue. Both keys ask it first.
+    case owed(at: TimeInterval)
+    /// Return: say when everything owed has settled. Answered later, from the main actor.
     case settled(at: TimeInterval)
+    /// Escape: throw away the dictation that is open. Carries the effect, so it is asked only once
+    /// a debt is admitted, and answered when it is known, from the main actor.
+    case cancel(at: TimeInterval)
 }
 
-/// Whatever can answer the two questions: the right a question came with, or a test's stand-in,
+/// Whatever can answer the questions: the right a question came with, or a test's stand-in,
 /// so what the app decides is held without a Mach port. [LAW:decomposition]
 public protocol Answering: Sendable {
     func send(_ owing: Owing) -> Reply.Delivery
     func send(_ settlement: Settlement) -> Reply.Delivery
+    func send(_ cancellation: Cancellation) -> Reply.Delivery
 }
 
 /// The one right to answer a question, owned by whoever holds this. Answering consumes it, and
@@ -43,7 +57,7 @@ public protocol Answering: Sendable {
 /// abandoned rather than waiting out its bound. [LAW:no-silent-failure]
 public final class Reply: Answering {
     /// How an answer fared. Whether the asker was still waiting is not here: the kernel accepts
-    /// a message to a send-once right whose receive end is gone (measured in `ReturnQuestionsTests`),
+    /// a message to a send-once right whose receive end is gone (measured in `QuestionsTests`),
     /// so a late answer cannot be told from a timely one at the sender.
     public enum Delivery: Equatable, Sendable {
         case delivered
@@ -57,6 +71,7 @@ public final class Reply: Answering {
 
     public func send(_ owing: Owing) -> Delivery { send(Wire.owing(owing)) }
     public func send(_ settlement: Settlement) -> Delivery { send(Wire.settlement(settlement)) }
+    public func send(_ cancellation: Cancellation) -> Delivery { send(Wire.cancellation(cancellation)) }
 
     private func send(_ payload: Data) -> Delivery {
         let first = answered.withLock { answered in
@@ -132,8 +147,13 @@ public struct Asker: Sendable {
     }
 
     /// Whether the app owes anything, within `bound`.
-    public func returnTyped(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered> {
-        ask(Wire.returnTyped, Wire.stamp(timestamp), within: bound, read: Wire.owing(of:))
+    public func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered> {
+        ask(Wire.owed, Wire.stamp(timestamp), within: bound, read: Wire.owing(of:))
+    }
+
+    /// Whether the app threw away a dictation that was open for an Escape, within `bound`.
+    public func cancel(at timestamp: TimeInterval, within bound: Duration) -> Result<Cancellation, NotAnswered> {
+        ask(Wire.cancel, Wire.stamp(timestamp), within: bound, read: Wire.cancellation(of:))
     }
 
     /// Whether what the app owes landed, within `bound`.

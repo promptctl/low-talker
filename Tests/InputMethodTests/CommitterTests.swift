@@ -17,6 +17,10 @@ import Testing
     @MainActor private final class Cursor: TextCursor {
         let application: String
         var committed: [String] = []
+        /// What each commit asked to take the place of, in step with `committed`.
+        var replaced: [String] = []
+        /// What the client says to every commit: nil takes it, a refusal changes nothing.
+        var refusing: Refusal?
         var during: () -> Void = {}
 
         nonisolated init(in application: String = "com.example.editor") { self.application = application }
@@ -25,9 +29,11 @@ import Testing
         // what that decided is handed to the committer as an `InFront`.
         var field: FieldAnswer { .documentAccess(caretLine: nil) }
 
-        func commit(_ text: String) {
+        func commit(_ text: String, replacing: String) -> Refusal? {
             during()
             committed.append(text)
+            replaced.append(replacing)
+            return refusing
         }
     }
 
@@ -54,6 +60,30 @@ import Testing
         #expect(cursor.committed == ["🫠 hello"])
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 7, into: cursor.application), seen: Self.seenLine))
         guard case .committed(7, cursor.application, _, _, late: false) = did else { Issue.record("\(did)"); return }
+    }
+
+    /// What the request names to replace reaches the client, and an ordinary insert names nothing.
+    @MainActor
+    @Test func theTextAnInsertReplacesReachesTheClient() {
+        let cursor = Cursor()
+        _ = Committer.place(Self.request, turn: Turn(), inFront: { Self.seen(.success(cursor)) })
+        _ = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "🫠 hello"), turn: Turn(), inFront: { Self.seen(.success(cursor)) })
+
+        #expect(cursor.replaced == ["", "🫠 hello"])
+    }
+
+    /// A client that finds the words are not there to take back changes nothing, and the answer
+    /// says so as the refusal it is, not as an insert.
+    @MainActor
+    @Test func aTakeBackTheClientRefusesIsAnsweredRefused() {
+        let cursor = Cursor()
+        cursor.refusing = .wordsCannotBeTakenBack
+        let turn = Turn()
+
+        let did = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "hello"), turn: turn, inFront: { Self.seen(.success(cursor)) })
+
+        #expect(turn.wait(.zero) == .answered(.refused(.wordsCannotBeTakenBack), seen: Self.seenLine))
+        guard case .refused(.wordsCannotBeTakenBack, _, late: false) = did else { Issue.record("\(did)"); return }
     }
 
     @MainActor

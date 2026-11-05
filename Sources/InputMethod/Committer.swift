@@ -97,7 +97,14 @@ public nonisolated final class Committer: Sendable {
             guard turn.begin(characters: characters, into: cursor.application, seen: line) else {
                 return .letGoAfterDeciding(deciding: deciding, seen: line)
             }
-            let committing = clock.measure { cursor.commit(request.text) }
+            let committed = clock.now
+            let refusal = cursor.commit(request.text, replacing: request.replacing)
+            let committing = clock.now - committed
+            // A commit the client's own checks refused changed nothing, said as the refusal it is.
+            if let refusal {
+                let late = turn.answer(.refused(refusal), seen: line)
+                return .refused(refusal, deciding: deciding + committing, late: late)
+            }
             let late = turn.answer(.inserted(characters: characters, into: cursor.application), seen: line)
             return .committed(characters: characters, into: cursor.application, deciding: deciding, committing: committing, late: late)
         }

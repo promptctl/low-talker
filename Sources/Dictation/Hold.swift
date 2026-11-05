@@ -198,7 +198,8 @@ public enum HeldUnkept: Error, Equatable, Sendable, CustomStringConvertible {
 
 /// The words no cursor has taken, kept until one does, and the words the person dismissed last,
 /// kept until one step brings them back or a later dismissal replaces them. Brandon, 2026-10-15:
-/// a dictation's words are never thrown away.
+/// a dictation's words are never thrown away. The one exception is the person's own Escape, which
+/// throws a dictation away on purpose: `forget` lets go of the words it left held.
 ///
 /// [LAW:no-shared-mutable-globals] One for the life of the app, so a loop rebuilt over a new
 /// config keeps what the old one held. Written by the loop as it places words and by the
@@ -356,6 +357,23 @@ public final class Hold {
         }
         standingGeneration += 1
         move(to: HoldState(held: Held(unplaced: nil, unaccounted: Held.Part(words: unanswered, warning: warning)), dismissed: dismissed), carrying: nil)
+    }
+
+    /// A cancelled press's own words that no cursor took are let go: what the hold offers is cut
+    /// back to `keeping`, the earlier part it held when the press's turn began and still holds, or
+    /// to nothing. `own` is the press's count of the offered words that are its own, and the
+    /// cut is made only when the offered part is exactly `keeping` and those: a dismissal or a
+    /// landing since removes the whole part, never a piece, so any other length is words the
+    /// person already moved, which stay where they put them. Says whether it cut.
+    ///
+    /// Words that may have landed stand and are never touched, and neither are the dismissed.
+    /// Standing words are unchanged, so `standingGeneration` is too.
+    @discardableResult
+    func forget(own: Int, keeping: Held.Part?) -> Bool {
+        guard own > 0, let held, let offered = held.offered,
+              offered.words.words.count == (keeping?.words.words.count ?? 0) + own else { return false }
+        move(to: HoldState(held: Held(unplaced: keeping, unaccounted: held.standing), dismissed: dismissed), carrying: carried)
+        return true
     }
 
     /// What is held and then `words` are at no cursor, for the reason `warning` gives the

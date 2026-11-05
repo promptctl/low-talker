@@ -85,7 +85,7 @@ func isTheSelectedSource() -> Bool {
 ///
 /// Its turns wait on the same queue a held Return runs while it waits for words to land, so the
 /// words a Return waits for can be committed by the thread that is waiting.
-let committer = Committer(turns: ReturnGate.shared.turns) { ended in logger.notice("\(ended.description, privacy: .public)") }
+let committer = Committer(turns: SteeringGate.shared.turns) { ended in logger.notice("\(ended.description, privacy: .public)") }
 
 /// The app's door, beside the text input system's. Held for the life of the process for
 /// the same reason the server is: released, the app's next request finds nothing listening.
@@ -167,7 +167,7 @@ let askingTheApp = Task.detached {
         logger.fault("no Return will be held for the app's words: this installation's app cannot be recognised: \(String(describing: error), privacy: .public)")
         answerer = .failure(error)
     }
-    ReturnGate.shared.connect(Asker(answerer: answerer))
+    SteeringGate.shared.connect(Asker(answerer: answerer))
 }
 
 /// A cursor outlives its app unless someone says otherwise, and the text input system does

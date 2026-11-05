@@ -2,8 +2,8 @@ import AppKit
 import InputMethodKit
 
 /// The controller macOS gives each client to while this input method is the selected source,
-/// which declines every key it is offered but a bare Return, and holds that one only against
-/// words the app owes.
+/// which declines every key it is offered but a bare Return and an Escape, and holds those only
+/// against words the app owes.
 ///
 /// An input method sits between the keyboard and whatever the person is typing into, so the
 /// keys it does not hand back are keys that never arrive anywhere. Declining the keys is what
@@ -11,10 +11,12 @@ import InputMethodKit
 /// have seen under the person's own layout, dead keys and shortcuts included, because the text
 /// input system delivers them itself once the controller says it did not.
 ///
-/// The one key it looks at is a Return typed bare. Dictation is words on their way to the cursor,
-/// and a Return typed meanwhile would reach the app ahead of them and send the message without
-/// them; the only grant-free way for it to arrive after is this process declining it once the
-/// words are committed, so `ReturnGate` holds it here until the app says they have landed. The
+/// The keys it looks at are a Return typed bare and an Escape. Dictation is words on their way to
+/// the cursor, and a Return typed meanwhile would reach the app ahead of them and send the message
+/// without them; the only grant-free way for it to arrive after is this process declining it once
+/// the words are committed, so `SteeringGate` holds it here until the app says they have landed. An
+/// Escape is for the dictation when one is open: the gate asks the app to throw it away and keeps
+/// the Escape when it did, and the app takes the words already at the cursor back afterwards. The
 /// verdict is the gate's, and this answers with it, so there is no key whose answer is a decision
 /// made here. [LAW:dataflow-not-control-flow] A swallowed key is invisible - the person sees a
 /// Return that did nothing - so the gate says every one it keeps in the log. [LAW:no-silent-failure]
@@ -34,10 +36,11 @@ public final class DictationInputController: IMKInputController {
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
     /// studious, 2026-09-27), which is every key typed. The app hears the modifier keys itself,
-    /// and a Return is the one key anything here answers differently.
+    /// and a Return and an Escape are the keys anything here answers differently.
     nonisolated override public func recognizedEvents(_: Any!) -> Int { Int(NSEvent.EventTypeMask.keyDown.rawValue) }
 
-    /// Declines every key but a bare Return, which is held for the words the app owes.
+    /// Declines every key but a bare Return, which is held for the words the app owes, and an
+    /// Escape, which is kept when the app cancels an open dictation with it.
     ///
     /// Overridden with an optional event because IMK also calls this with no event at all
     /// (low-input-method-8vv: the call after an activate trapped on the implicitly unwrapped
@@ -48,14 +51,13 @@ public final class DictationInputController: IMKInputController {
         onMainActor("handle", event, level: .debug) { event in
             guard let event, event.type == .keyDown,
                   let key = SteeringKey(keyCode: event.keyCode, flags: event.modifierFlags) else { return false }
-            switch key {
-            case .return:
-                let kept = ReturnGate.shared.verdict(forReturnAt: event.timestamp) == .keep
-                // The system's own answer to a key that did nothing, so a kept Return is heard
-                // at the moment it was typed and not only found in a log. [LAW:no-silent-failure]
-                if kept { NSSound.beep() }
-                return kept
-            }
+            let kept = SteeringGate.shared.verdict(for: key, at: event.timestamp) == .keep
+            // The system's own answer to a Return that did nothing, so a kept one is heard at the
+            // moment it was typed and not only found in a log. An Escape that was kept did
+            // something, it threw the dictation away, and a take-back the field refused is the
+            // app's notice to give. [LAW:no-silent-failure]
+            if kept, key == .return { NSSound.beep() }
+            return kept
         }
     }
 

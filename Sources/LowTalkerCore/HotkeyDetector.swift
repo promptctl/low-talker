@@ -101,6 +101,9 @@ public struct HotkeyDetector: Sendable {
         /// modifier - Option for a special character, Meta in a terminal - and the press was
         /// never dictation.
         case usedAsModifier
+        /// A key typed while the press was open threw it away: Escape. Held or latched, the press
+        /// ends at once, and the chord's own release after it ends nothing.
+        case cancelled
 
         /// An ending in a person's words. A case added here has to say what it is before
         /// it compiles, so nothing prints an ending it has no word for.
@@ -109,6 +112,7 @@ public struct HotkeyDetector: Sendable {
             case .released(let kind, _): kind.rawValue
             case .lapsed: "lapsed"
             case .usedAsModifier: "used as a modifier"
+            case .cancelled: "cancelled"
             }
         }
     }
@@ -122,6 +126,9 @@ public struct HotkeyDetector: Sendable {
         /// A tap left listening on in this mode; the next press of its chord, or of any chord
         /// listened for, ends it.
         case latched(Mode)
+        /// Escape threw a held press away while its chord was still down: nothing is listening
+        /// until a key of the chord comes up, and its release ends nothing.
+        case cancelled(KeyChord)
     }
 
     public private(set) var modes: Modes
@@ -178,7 +185,7 @@ public struct HotkeyDetector: Sendable {
         case (.latched(let latched), nil, _) where latched.chord.isCompleted(by: event.key, holding: event.modifiers) || latched.chord.isBlocked(by: event.key, holding: event.modifiers):
             phase = .idle
             return [.ended(.released(.tap, at: event.time))]
-        case (.held, _, _), (.blocked, _, _), (.latched, nil, _), (.idle, nil, nil):
+        case (.held, _, _), (.blocked, _, _), (.cancelled, _, _), (.latched, nil, _), (.idle, nil, nil):
             return []
         }
     }
@@ -204,15 +211,27 @@ public struct HotkeyDetector: Sendable {
         case .blocked(let chord, let since) where chord.modifiers.contains(event.key):
             phase = .idle
             return [.ended(typedUnder(since: since) ? .usedAsModifier : .released(kind(since: since), at: event.time))]
-        case .held, .blocked, .latched, .idle:
+        case .cancelled(let chord) where chord.modifiers.contains(event.key):
+            phase = .idle
+            return []
+        case .held, .blocked, .cancelled, .latched, .idle:
             return []
         }
     }
 
+    /// What a typed key does to dictation: Return sends what was said, Escape throws it away.
+    public enum Steering: Equatable, Sendable {
+        /// Return, typed at this moment: a latched press ends there, and one still held is left
+        /// to end as the chord comes up.
+        case send(at: HostTime)
+        /// Escape: a held or latched press is thrown away where it stands.
+        case cancel
+    }
+
     /// What a typed key that steers dictation did to the press, as the detector reads it.
     public enum Steered: Equatable, Sendable {
-        /// A latched press ended where the key was typed, which is this transition. The next
-        /// chord press begins a fresh one.
+        /// The press ended where the key was typed, which is this transition. The next chord
+        /// press begins a fresh one.
         case ended(Transition)
         /// The chord is still down as far as the detector has heard: a key typed in the moment
         /// before the chord's release is heard. The press is open and ends as the chord comes
@@ -222,21 +241,28 @@ public struct HotkeyDetector: Sendable {
         case nothingOpen
     }
 
-    /// A key that steers dictation was typed at `time` with the chord up. A latched press ends
-    /// there, as a tap does when the chord is pressed again; the audio is cut at the key, not at
-    /// the moment the app learned of it.
+    /// A key that steers dictation was typed. A latched press ends where Return was typed, as a
+    /// tap does when the chord is pressed again, and the audio is cut at the key, not at the
+    /// moment the app learned of it; Escape ends a held or latched press as cancelled, and the
+    /// chord's release after it ends nothing.
     ///
     /// [LAW:single-enforcer] Only the detector ends a press, so `Dictation.press` still sees every
     /// `began` paired with one `ended`, and a latched press left latched cannot have the next chord
     /// press end one that no longer exists.
-    public mutating func steer(at time: HostTime) -> Steered {
-        switch phase {
-        case .latched:
+    public mutating func steer(_ steering: Steering) -> Steered {
+        switch (steering, phase) {
+        case (.send(let time), .latched):
             phase = .idle
             return .ended(.ended(.released(.tap, at: time)))
-        case .held:
+        case (.send, .held):
             return .chordDown
-        case .blocked, .idle:
+        case (.cancel, .latched):
+            phase = .idle
+            return .ended(.ended(.cancelled))
+        case (.cancel, .held(let mode, _)):
+            phase = .cancelled(mode.chord)
+            return .ended(.ended(.cancelled))
+        case (_, .blocked), (_, .cancelled), (_, .idle):
             return .nothingOpen
         }
     }
@@ -257,7 +283,7 @@ public struct HotkeyDetector: Sendable {
     /// was the invention this ending exists to stop.
     public mutating func lapse() -> Transition? {
         let transition: Transition? = switch phase {
-        case .idle: nil
+        case .idle, .cancelled: nil
         case .held, .blocked, .latched: .ended(.lapsed)
         }
         phase = .idle

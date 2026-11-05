@@ -1,6 +1,8 @@
 import Foundation
+import Identity
 import InputMethodKit
 import Insertion
+import os
 
 /// Somewhere words can be put: what this process actually needs of the thing in front of
 /// it, which is one thing out of the three dozen `IMKTextInput` offers.
@@ -30,8 +32,10 @@ public protocol TextCursor: AnyObject {
     /// Read from the client each time it is asked and never kept, because focus moves
     /// between fields and page bodies in ways the text input system does not always report.
     var field: FieldAnswer { get }
-    /// Commits `text` at the insertion point, taking nothing away.
-    func commit(_ text: String)
+    /// Commits `text` at the insertion point in place of `replacing`, the text immediately before
+    /// it, which is nothing for every ordinary commit. Refuses, changing nothing, when the
+    /// words to take back are not there.
+    func commit(_ text: String, replacing: String) -> Refusal?
 }
 
 /// What a client answers about the text field words committed into it would go to.
@@ -263,7 +267,19 @@ final class Client: TextCursor {
         return .documentAccess(caretLine: line == .zero ? nil : line)
     }
 
-    func commit(_ text: String) {
-        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    /// [LAW:no-silent-failure] A take-back that cannot be proved is refused with what was found,
+    /// said in the log beside the refusal the app is told.
+    func commit(_ text: String, replacing: String) -> Refusal? {
+        let range: NSRange
+        do throws(Replacement.Unfound) {
+            range = try Replacement.range(of: replacing, selection: { client.selectedRange() }, text: { client.attributedSubstring(from: $0)?.string }).get()
+        } catch {
+            Self.log.notice("words could not be taken back from \(self.application, privacy: .public): \(error.description, privacy: .public)")
+            return .wordsCannotBeTakenBack
+        }
+        client.insertText(text, replacementRange: range)
+        return nil
     }
+
+    private static let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "insert")
 }

@@ -39,9 +39,9 @@ import Testing
             lock.withLock { asked.map(\.destination) }
         }
 
-        func insert(_ text: String, into destination: Destination) throws(InsertFailure) -> Inserted {
-            lock.withLock { asked.append((text, destination)) }
-            return try answering(text)
+        func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
+            lock.withLock { asked.append((request.text, request.destination)) }
+            return try answering(request.text)
         }
     }
 

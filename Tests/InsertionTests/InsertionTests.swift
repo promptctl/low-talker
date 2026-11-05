@@ -36,6 +36,14 @@ import Testing
         #expect(Wire.request(of: Wire.request(request)) == request)
     }
 
+    /// What a request takes the place of is the words a cancelled dictation put at the caret, so
+    /// it crosses exactly as they were, an emoji's two UTF-16 units included.
+    @Test(arguments: ["", "hello there", "🫠 hello", "cafe\u{301}"])
+    func theTextARequestReplacesSurvivesTheCrossing(replacing: String) {
+        let request = InsertRequest("", into: .app("com.example.editor"), replacing: replacing)
+        #expect(Wire.request(of: Wire.request(request)) == request)
+    }
+
     @Test(arguments: [Destination.cursorInFront, .app("com.example.editor")])
     func everyDestinationSurvivesTheCrossing(destination: Destination) {
         let request = InsertRequest("hello", into: destination)

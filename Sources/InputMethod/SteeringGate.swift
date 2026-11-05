@@ -1,0 +1,177 @@
+import Foundation
+import Identity
+import Insertion
+import os
+import Synchronization
+
+private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "steering")
+
+/// What happens to a steering key the input method has been handed: it reaches the app, or it is
+/// swallowed. [LAW:types-are-the-program] `handle` answers from this and nothing else.
+public nonisolated enum SteeringVerdict: Equatable, Sendable {
+    /// Declined, so the text input system delivers the key to the app: after any words committed
+    /// while it was held, since `handle` has not returned until they were.
+    case pass
+    /// Taken, so the app never sees it.
+    case keep
+}
+
+/// The questions a held steering key asks the app, as the gate asks them: `Asker` is the real one,
+/// a test's is a fake with no port and no app. [LAW:decomposition]
+public nonisolated protocol SteeringAsking: Sendable {
+    func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
+    func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
+    func cancel(at timestamp: TimeInterval, within bound: Duration) -> Result<Cancellation, NotAnswered>
+}
+
+extension Asker: SteeringAsking {}
+
+/// Holds a Return or an Escape in `handle` while the app is asked what it means for the dictation.
+///
+/// **A Return** is held until the words the app owes have landed, then let through.
+///
+/// A genuine Return reaches the app grant-free in one way only: this process declines the key
+/// and the text input system delivers it. Declining after the words are committed puts them
+/// first, so the gate waits on the main thread inside `handle`, and what it waits for is the
+/// app's to say. The app is asked whether it owes anything; when it does not, or does not
+/// answer that, the Return passes at once as it would with no LowTalker: **a Return is held
+/// only against a debt the app has admitted to**. When it does owe, the gate waits for the app to
+/// say the debt landed, and a debt that did not land, or is not settled within `ceiling`, keeps
+/// the Return: one sent ahead of its words sends the message without them, and one that did
+/// nothing costs a keystroke. [LAW:no-silent-failure] Every verdict is in the log.
+///
+/// **An Escape** asks the same first question, and is held only against a debt the app admits to.
+/// Then the app is asked to throw the open dictation away, which it does on its main actor and
+/// answers when it has: a dictation thrown away spends the Escape, which is kept, and an Escape the
+/// app says had no dictation to cancel (the debt was only a tail finishing) goes to the app as
+/// typed. The words the cancelled dictation already put at the cursor are taken back by the app
+/// afterwards, through the insert port, so the keyboard is never held on that.
+///
+/// While it waits the main thread commits what the app's inserts ask of it (`MainTurns`), since
+/// those are the words it is waiting for. The ceiling protects the keyboard, which the held thread
+/// is every app's: the longest the app itself waits on any one insert, and not a guess at how fast
+/// the engine decodes.
+///
+/// [LAW:no-shared-mutable-globals] Shared because `IMKServer` builds controllers out of a class
+/// name, so there is no constructor of ours to hand one to; its one mutable fact is the app asker,
+/// connected once by the process's entry point once the app's signature has been read.
+public nonisolated final class SteeringGate: Sendable {
+    public static let shared = SteeringGate()
+
+    /// The longest a key is held: what the app itself waits on an insert.
+    /// `SteeringGateTests` holds it equal to that.
+    public static let standardCeiling = InputMethodInserter.standardTimeout
+    /// How long the app has to say whether it owes anything. An app that does not say in this
+    /// time has admitted nothing, and the key passes.
+    public static let standardQuestion = Duration.milliseconds(100)
+
+    /// Where the words the app owes are committed while a Return waits for them.
+    public let turns: MainTurns
+    private let ceiling: Duration
+    private let question: Duration
+    private let asker: Mutex<any SteeringAsking>
+
+    public init(turns: MainTurns = MainTurns(), ceiling: Duration = standardCeiling, question: Duration = standardQuestion,
+                asking asker: any SteeringAsking = Unconnected()) {
+        self.turns = turns
+        self.ceiling = ceiling
+        self.question = question
+        self.asker = Mutex(asker)
+    }
+
+    /// Asks `asker` from now on. The entry point connects it once this installation's app can be
+    /// recognised; until then nobody admits anything, and every key passes.
+    public func connect(_ asker: any SteeringAsking) {
+        self.asker.withLock { $0 = asker }
+    }
+
+    /// The gate before it is connected: nobody is listening.
+    public struct Unconnected: SteeringAsking {
+        public init() {}
+        public func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> {
+            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+        }
+        public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> {
+            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+        }
+        public func cancel(at _: TimeInterval, within _: Duration) -> Result<Cancellation, NotAnswered> {
+            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+        }
+    }
+
+    /// A verdict and the reason for it, which is the line the log says.
+    private struct Decided: Sendable {
+        let verdict: SteeringVerdict
+        let because: String
+        /// A key typed with nothing owed, which is nearly every Return and Escape: said at debug
+        /// level so the log is not a record of when a person pressed them.
+        var routine = false
+    }
+
+    /// One key's verdict, set once by its thread and read by `verdict`. Made for that key
+    /// alone, so what it holds is never another's.
+    private final class Slot: Sendable {
+        let decided = Mutex<Decided?>(nil)
+    }
+
+    /// What the gate does with `key` typed at `timestamp`, on the main thread, where
+    /// `handle` is called. Returns once the key passes or is kept, and in between runs the
+    /// commits the app's inserts ask for.
+    ///
+    /// The questions are asked on a thread made for this one key, with its own reply port and
+    /// its own slot for the verdict. A late answer to an earlier key lands in that key's
+    /// abandoned slot and is read by nobody, and a key typed while an earlier one's thread is
+    /// still blocked is not queued behind it. [LAW:no-ambient-temporal-coupling]
+    @MainActor
+    public func verdict(for key: SteeringKey, at timestamp: TimeInterval) -> SteeringVerdict {
+        let asking = asker.withLock { $0 }
+        let slot = Slot()
+        let (turns, question, ceiling) = (self.turns, self.question, self.ceiling)
+        let started = ContinuousClock.now
+        Thread {
+            let decided = Self.decide(key, asking, at: timestamp, question: question, ceiling: ceiling)
+            slot.decided.withLock { $0 = decided }
+            turns.poke()
+        }.start()
+        turns.hold(until: started + ceiling, while: { slot.decided.withLock { $0 } == nil })
+        let decided = slot.decided.withLock { $0 }
+            ?? Decided(verdict: .keep, because: "the app had not answered after \(ceiling)")
+        let waited = ContinuousClock.now - started
+        if decided.routine {
+            log.debug("a \(key.description, privacy: .public) passes: \(decided.because, privacy: .public)")
+        } else {
+            log.notice("a \(key.description, privacy: .public) \(decided.verdict == .pass ? "passes" : "is kept", privacy: .public) after \(waited, privacy: .public): \(decided.because, privacy: .public)")
+        }
+        return decided.verdict
+    }
+
+    /// Whether an app that is not there, which is how an app that is not running looks from here
+    /// and is as ordinary as a key typed with it off.
+    private static func isAbsence(_ why: NotAnswered) -> Bool {
+        if case .nobodyIsListening = why { true } else { false }
+    }
+
+    private static func decide(_ key: SteeringKey, _ asker: any SteeringAsking, at timestamp: TimeInterval, question: Duration, ceiling: Duration) -> Decided {
+        switch asker.owed(at: timestamp, within: question) {
+        case .success(.nothing):
+            return Decided(verdict: .pass, because: "the app owes nothing", routine: true)
+        case .failure(let why):
+            return Decided(verdict: .pass, because: "the app admitted no debt: \(why)", routine: isAbsence(why))
+        case .success(.words):
+            switch key {
+            case .return:
+                switch asker.settled(at: timestamp, within: ceiling) {
+                case .success(.landed): return Decided(verdict: .pass, because: "the words landed")
+                case .success(.notLanded): return Decided(verdict: .keep, because: "the words did not all reach a cursor")
+                case .failure(let why): return Decided(verdict: .keep, because: "the debt was admitted and not settled: \(why)")
+                }
+            case .escape:
+                switch asker.cancel(at: timestamp, within: ceiling) {
+                case .success(.dictation): return Decided(verdict: .keep, because: "the dictation was cancelled, which spent the Escape")
+                case .success(.nothing): return Decided(verdict: .pass, because: "the debt was a dictation already over, so there was none to cancel")
+                case .failure(let why): return Decided(verdict: .keep, because: "the debt was admitted and the cancel was not answered: \(why)")
+                }
+            }
+        }
+    }
+}
