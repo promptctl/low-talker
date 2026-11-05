@@ -17,7 +17,9 @@ nonisolated enum Hop: Sendable, CustomStringConvertible {
     }
 }
 
-private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "imk")
+/// The `imk` channel: what IMK handed this process, one line per callback here and one per
+/// controller event in `DictationInputController`, read together by `log show`.
+nonisolated let imkLog = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "imk")
 
 /// Runs an IMK callback's `body` on the main actor with the callback's `argument`, and says how
 /// it got there.
@@ -46,6 +48,6 @@ nonisolated func onMainActor<Argument, Answer: Sendable>(_ callback: StaticStrin
         }
     }
     // [LAW:nothing-unseen] Which way every callback came, at the level `log show` keeps.
-    log.log(level: level, "\(callback, privacy: .public) reached the main actor \(hop.description, privacy: .public)")
+    imkLog.log(level: level, "\(callback, privacy: .public) reached the main actor \(hop.description, privacy: .public)")
     return result
 }

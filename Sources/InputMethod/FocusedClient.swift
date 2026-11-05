@@ -225,6 +225,19 @@ public struct InFront: CustomStringConvertible {
     }
 }
 
+/// How a client is said in the log: the identifier the text input system calls it by, and its
+/// app, so two windows of one app are two names.
+///
+/// Only said, never compared or kept as a key: whether the identifier is stable per client or
+/// minted anew per read is a fact about macOS that has to be measured before anything can rely
+/// on it (low-reliability-z2z.vh4). [LAW:nothing-unseen]
+nonisolated struct ClientName: CustomStringConvertible {
+    let identifier: String?
+    let application: String
+
+    var description: String { "client \(identifier ?? "with no identifier") of \(application)" }
+}
+
 /// The text input system's client, as the one thing this process asks of it.
 ///
 /// `NSNotFound` as the replacement range is how the text input system is told "at the
@@ -238,9 +251,12 @@ public struct InFront: CustomStringConvertible {
 /// client now runs on the main actor, so a reactivation and a commit never overlap: the same
 /// stress rerun on studious (low-imk-rules-w3g.3ky), with 11,162 reactivations landing inside
 /// an accepted insert's round trip, lost, doubled and reordered no word.
-final class Client: TextCursor {
+final class Client: TextCursor, CustomStringConvertible {
     private let client: IMKTextInput
     let application: String
+    /// How this client is said in the log, read once here and only ever said: nothing is
+    /// decided from it (`ClientName`).
+    private let name: ClientName
 
     /// Nothing at all when the client will not name its app. [LAW:parse-dont-validate] The
     /// one place the question is asked, and past it there is a cursor whose app is known
@@ -263,7 +279,10 @@ final class Client: TextCursor {
         }
         self.client = client
         self.application = application
+        name = ClientName(identifier: client.uniqueClientIdentifierString(), application: application)
     }
+
+    var description: String { name.description }
 
     /// The line is asked for only once document access is given, so a client with no field
     /// costs the one call. Index 0 with no marked text asks for the current selection's line
