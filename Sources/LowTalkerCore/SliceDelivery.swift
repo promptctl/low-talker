@@ -35,7 +35,8 @@ final class SliceDelivery: @unchecked Sendable {
     /// The IO thread's alone, like `framesPushed` in the ring: whether a buffer list of the
     /// layout has been pushed this press, and whether a fault has. Either fault ends the press
     /// (a shape change replaces the input, an overlong slice fails it), so it is reported
-    /// once, however many renders follow it.
+    /// once, however many renders follow it - and tried again while the ring is too full to
+    /// take it, because a fault that was dropped reports nothing.
     nonisolated(unsafe) private var matched = false
     nonisolated(unsafe) private var faulted = false
     /// How many of the ring's drops have been reported. The delivery thread's alone.
@@ -81,11 +82,9 @@ final class SliceDelivery: @unchecked Sendable {
         case .empty:
             return
         case .overlong(let frames):
-            faulted = true
-            ring.push(.overlongSlice(frames: frames, capacity: capacity))
+            faulted = ring.push(.overlongSlice(frames: frames, capacity: capacity))
         case .shape(let mismatch):
-            faulted = true
-            ring.push(matched ? .inputShapeChanged(mismatch) : .shapeNeverMatched(mismatch))
+            faulted = ring.push(matched ? .inputShapeChanged(mismatch) : .shapeNeverMatched(mismatch))
         case .frames(let frames):
             matched = true
             ring.push(list, layout: layout, frames: frames, stamp: stamp)

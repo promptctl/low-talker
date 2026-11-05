@@ -82,7 +82,8 @@ import Testing
         Self.push(ring, from: 60, frames: 60, at: 2)  // 120 frames will not fit in 100.
         Self.push(ring, from: 120, frames: 40, at: 3)
         Self.push(ring, from: 160, frames: 1, at: 4)  // Both entries are taken.
-        ring.push(.overlongSlice(frames: 1, capacity: 1))
+        // A fault the ring had no room for says so, which is what lets a delivery try it again.
+        #expect(ring.push(.overlongSlice(frames: 1, capacity: 1)) == false)
         #expect(ring.dropped == 3)
         let first = try #require(Self.popSlice(ring, into: popped))
         #expect(first.ticks == 1)

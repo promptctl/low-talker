@@ -76,6 +76,12 @@ import Testing
         #expect(InputLayout.parse([Self.stream(channels: 1, packed: false)]) == .failure(.notPacked))
     }
 
+    @Test func aBigEndianStreamIsRefused() {
+        var stream = Self.stream(channels: 1)
+        stream.mFormatFlags |= kAudioFormatFlagIsBigEndian
+        #expect(InputLayout.parse([stream]) == .failure(.bigEndian))
+    }
+
     @Test func streamsAtDifferentRatesAreRefused() {
         #expect(InputLayout.parse([Self.stream(channels: 1, rate: 48_000), Self.stream(channels: 1, rate: 44_100)]) == .failure(.mixedSampleRates(48_000, 44_100)))
     }

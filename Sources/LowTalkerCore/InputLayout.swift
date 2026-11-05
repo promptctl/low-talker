@@ -46,6 +46,7 @@ struct InputLayout: Sendable, Equatable {
                 return .failure(.notFloat32(bits: stream.mBitsPerChannel))
             }
             guard stream.mFormatFlags & kAudioFormatFlagIsPacked != 0 else { return .failure(.notPacked) }
+            guard stream.mFormatFlags & kAudioFormatFlagIsBigEndian == 0 else { return .failure(.bigEndian) }
             guard stream.mSampleRate == first.mSampleRate else { return .failure(.mixedSampleRates(first.mSampleRate, stream.mSampleRate)) }
             let channels = Int(stream.mChannelsPerFrame)
             if stream.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0 {
@@ -146,6 +147,7 @@ public enum InputRefusal: Error, Equatable, Sendable, CustomStringConvertible {
     case notLinearPCM(formatID: UInt32)
     case notFloat32(bits: UInt32)
     case notPacked
+    case bigEndian
     case mixedSampleRates(Double, Double)
     case noChannels
 
@@ -155,6 +157,7 @@ public enum InputRefusal: Error, Equatable, Sendable, CustomStringConvertible {
         case .notLinearPCM(let id): "its input is not linear PCM (format \(id))"
         case .notFloat32(let bits): "its input is not 32-bit float (\(bits) bits)"
         case .notPacked: "its input samples are not packed"
+        case .bigEndian: "its input samples are big-endian"
         case .mixedSampleRates(let a, let b): "its input streams run at different sample rates (\(a) and \(b) Hz)"
         case .noChannels: "its input carries no channels"
         }

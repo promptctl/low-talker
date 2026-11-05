@@ -100,10 +100,17 @@ final class SliceRing: @unchecked Sendable {
         publish(.slice(frames: frames, stamp: stamp), at: slot)
     }
 
-    /// Producer end: a render that had nothing to hand over.
-    func push(_ fault: AudioHardwareError) {
-        guard let slot = claim() else { return drop() }
+    /// Producer end: a render that had nothing to hand over. Answers whether the fault was
+    /// handed over, so a caller that reports a fault once can keep trying while the ring is
+    /// full rather than count a fault nobody will read as reported.
+    @discardableResult
+    func push(_ fault: AudioHardwareError) -> Bool {
+        guard let slot = claim() else {
+            drop()
+            return false
+        }
         publish(.fault(fault), at: slot)
+        return true
     }
 
     /// Consumer end: the oldest entry, or nil when there is none. A slice's frames are

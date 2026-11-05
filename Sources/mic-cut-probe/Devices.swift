@@ -118,9 +118,11 @@ enum Devices {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
         process.arguments = ["-a", "\(loopback)", text]
-        try process.run()
-        await withCheckedContinuation { continuation in
+        // The handler is set before the process runs: one that exits at once would otherwise be
+        // gone before anything was waiting for it.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             process.terminationHandler = { _ in continuation.resume() }
+            do { try process.run() } catch { continuation.resume(throwing: error) }
         }
     }
 }
