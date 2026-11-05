@@ -2,7 +2,9 @@ import AppKit
 import InputMethod
 import Testing
 
-/// The controller hands back every key it is offered.
+/// The controller hands back every key it is offered, a bare Return aside, which is held for
+/// words the app owes: with no app connected, as here, nothing is owed and it is handed back too.
+/// What a connected gate does with a Return is `ReturnGateTests`'s.
 ///
 /// [LAW:behavior-not-structure] Asked by offering real events and reading the answer, not by
 /// checking which methods the class overrides: a later ticket may answer keys through a
@@ -51,11 +53,11 @@ import Testing
         .init(description: "Return", characters: "\r", keyCode: 36, modifiers: 0),
     ]
 
-    /// Asked for nothing: the app hears the modifier keys itself, and a key typed is none of
-    /// this process's business.
-    @Test func noEventIsAskedFor() throws {
+    /// Key-downs are asked for, which is the one door a Return reaches this process by; the app
+    /// hears the modifier keys itself. 0x400 is what the text input system offers when nobody says.
+    @Test func keyDownsAreAskedFor() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        #expect(controller.recognizedEvents(nil) == 0)
+        #expect(controller.recognizedEvents(nil) == 0x400)
     }
 
     /// A change of the modifier keys, offered anyway, is handed back like every key.

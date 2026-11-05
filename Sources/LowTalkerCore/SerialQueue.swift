@@ -19,6 +19,13 @@ import Synchronization
 public final class SerialQueue: Sendable {
     /// The latest submission, whatever its outcome. The next one awaits it.
     private let tail = Mutex<Task<Void, Never>?>(nil)
+    /// Operations submitted and not yet finished, whatever their outcome.
+    private let unfinished = Mutex(0)
+
+    /// Whether any operation submitted has yet to finish, readable from any thread. The
+    /// queue's own fact, so a caller that must know whether work is owed asks here and keeps no
+    /// second count that could disagree. [LAW:one-source-of-truth]
+    public var isBusy: Bool { unfinished.withLock { $0 > 0 } }
 
     /// Every queue whose operation encloses the current task.
     @TaskLocal private static var enclosing: Set<ObjectIdentifier> = []
@@ -45,12 +52,15 @@ public final class SerialQueue: Sendable {
         guard !Self.enclosing.contains(id) else { throw .reentrantWait }
         return tail.withLock { tail in
             let earlier = tail
+            unfinished.withLock { $0 += 1 }
             let task = Task {
                 // Named rather than captured in a list, so the task is isolated to that actor
                 // and ends there, which is where a task lets go of its closure.
                 _ = isolation
                 await earlier?.value
-                return await Self.$enclosing.withValue(Self.enclosing.union([id])) { await operation() }
+                let outcome = await Self.$enclosing.withValue(Self.enclosing.union([id])) { await operation() }
+                unfinished.withLock { $0 -= 1 }
+                return outcome
             }
             // Only the order matters to the next submission; this one's outcome goes to
             // whoever holds the task.

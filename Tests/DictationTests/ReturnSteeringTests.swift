@@ -1,0 +1,168 @@
+import Dictation
+import Dispatch
+import Foundation
+import Insertion
+import LowTalkerCore
+import TestProbes
+import Testing
+
+/// How the app answers the input method about a Return it is holding, over the real loop, the
+/// real hotkey and a keyboard the test types on, with the answers read off a stand-in for the
+/// port. [LAW:behavior-not-structure] What is held is what the input method would be told, and
+/// that the words are at the cursor by the time it is told they landed.
+@MainActor
+@Suite struct ReturnSteeringTests {
+    private enum Said: Equatable {
+        case owing(Owing)
+        case settlement(Settlement)
+    }
+
+    /// The answers the input method would hear, in order.
+    private final class Answers: Answering {
+        private let stream: AsyncStream<Said>
+        private let continuation: AsyncStream<Said>.Continuation
+
+        init() { (stream, continuation) = AsyncStream.makeStream() }
+
+        func send(_ owing: Owing) -> Reply.Delivery {
+            continuation.yield(.owing(owing))
+            return .delivered
+        }
+
+        func send(_ settlement: Settlement) -> Reply.Delivery {
+            continuation.yield(.settlement(settlement))
+            return .delivered
+        }
+
+        func next() async -> Said {
+            for await said in stream { return said }
+            preconditionFailure("the answers ended while a test was still reading them")
+        }
+    }
+
+    /// A feed the test types the chord on.
+    private final class Feed: ModifierFeed {
+        var handle: (@MainActor (KeyEvent) -> Void)?
+
+        func install(handling handle: @escaping @MainActor (KeyEvent) -> Void) throws -> Disposal {
+            self.handle = handle
+            return {}
+        }
+    }
+
+    /// The loop and the hotkey that feeds it, with a keyboard.
+    @MainActor private struct Loop {
+        let rig: Rig
+        let hotkey: Hotkey
+        let feed: Feed
+        let steering: ReturnSteering
+
+        init(refusing refusal: InsertFailure? = nil) async throws {
+            rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+            rig.inputMethod.refusing(refusal)
+            feed = Feed()
+            hotkey = Hotkey(modes: Config.default.modes, feed: feed)
+            let dictation = rig.dictation
+            try hotkey.start { dictation.press($0) }
+            steering = ReturnSteering(dictation: dictation, hotkey: hotkey)
+        }
+
+        /// Right Option going down or up, `held` milliseconds into the press, stamped on the
+        /// clock the loop's marks are on.
+        func chord(_ direction: KeyEvent.Direction, atMilliseconds ms: Int64) {
+            feed.handle?(KeyEvent(
+                key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [],
+                time: HostTime(uptime: rig.now.uptime + .milliseconds(ms)), lastTyped: HostTime(uptime: .seconds(-60))))
+        }
+
+        func delivered() async {
+            await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        }
+
+        /// A tap, which latches the press open, with words spoken into it.
+        func latchedPress() async {
+            chord(.down, atMilliseconds: 0)
+            await delivered()
+            rig.speak([1, 2, 3])
+            chord(.up, atMilliseconds: 100)
+            await delivered()
+        }
+
+        /// Now, as a Return's stamp: on the host clock the press is ended against.
+        var typedNow: TimeInterval { HostTime.now.uptime / .seconds(1) }
+    }
+
+    /// The case this exists for: a Return typed into a latched press ends it, and the app says
+    /// the words landed only once they are at the cursor.
+    @Test(.timeLimit(.minutes(1))) func aReturnTypedIntoALatchedPressSettlesOnceItsWordsHaveLanded() async throws {
+        let loop = try await Loop()
+        await loop.latchedPress()
+        let answers = Answers()
+
+        loop.steering.answer(.returnTyped(at: loop.typedNow), through: answers)
+        #expect(await answers.next() == .owing(.words))
+        loop.steering.answer(.settled(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .settlement(.landed))
+        #expect(loop.rig.inputMethod.inserted == ["a"])
+        #expect(loop.hotkey.phase == .idle)
+        #expect(!loop.rig.dictation.owes)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func nothingIsOwedWhenNoPressIsOpen() async throws {
+        let loop = try await Loop()
+        let answers = Answers()
+
+        loop.steering.answer(.returnTyped(at: loop.typedNow), through: answers)
+        loop.steering.answer(.settled(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .owing(.nothing))
+        #expect(await answers.next() == .settlement(.landed))
+    }
+
+    /// A press that ended on its own and is still decoding is owed too, though no key steered it.
+    @Test(.timeLimit(.minutes(1))) func aPressThatEndedAndIsStillBeingHeardOwesWords() async throws {
+        let gate = Gate()
+        let rig = try await Rig(transcriber: { FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") } })
+        rig.hold()
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        #expect(rig.dictation.owes)
+
+        gate.open()
+        try await rig.dictation.finish()
+        #expect(!rig.dictation.owes)
+    }
+
+    /// Words that reached no cursor are held, so they did not land, and the input method keeps its
+    /// Return rather than send a message without them.
+    @Test(.timeLimit(.minutes(1))) func wordsThatReachedNoCursorDidNotLand() async throws {
+        let loop = try await Loop(refusing: .refused(.noTextFieldHasFocus))
+        await loop.latchedPress()
+        let answers = Answers()
+
+        loop.steering.answer(.settled(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .settlement(.notLanded))
+        #expect(loop.rig.inputMethod.inserted.isEmpty)
+    }
+
+    /// A press whose chord the app still reads as down ends as the chord comes up, so there is
+    /// nothing to wait for and nothing is waited for: not landed, at once, the press left open.
+    @Test(.timeLimit(.minutes(1))) func aChordStillDownIsNotLandedAtOnceAndLeavesThePressOpen() async throws {
+        let loop = try await Loop()
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+        loop.rig.speak([1, 2, 3])
+        let answers = Answers()
+
+        loop.steering.answer(.settled(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .settlement(.notLanded))
+        #expect(loop.rig.dictation.owes)
+        // The chord coming up ends the press as it always did.
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+        try await loop.rig.dictation.finish()
+        #expect(loop.rig.inputMethod.inserted == ["a"])
+    }
+}

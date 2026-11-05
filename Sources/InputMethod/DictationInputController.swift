@@ -2,20 +2,22 @@ import AppKit
 import InputMethodKit
 
 /// The controller macOS gives each client to while this input method is the selected source,
-/// which declines every key it could be offered.
+/// which declines every key it is offered but a bare Return, and holds that one only against
+/// words the app owes.
 ///
 /// An input method sits between the keyboard and whatever the person is typing into, so the
-/// keys it does not hand back are keys that never arrive anywhere. Declining all of them is
-/// what makes selecting this source cost nothing: the app in front sees exactly the keys it
-/// would have seen under the person's own layout, dead keys and shortcuts included, because
-/// the text input system delivers them itself once the controller says it did not.
+/// keys it does not hand back are keys that never arrive anywhere. Declining the keys is what
+/// makes selecting this source cost nothing: the app in front sees exactly the keys it would
+/// have seen under the person's own layout, dead keys and shortcuts included, because the text
+/// input system delivers them itself once the controller says it did not.
 ///
-/// [LAW:dataflow-not-control-flow] There is no key this looks at, and the cursor it records
-/// for `FocusedClient` is never consulted to answer one, so there is no key for which the
-/// answer differs - it is a constant, not a decision. What low-input-method-s71.31s adds is insertion the *app* asks for, which
-/// arrives by a different door entirely; a key claimed here would be a broken keyboard, and
-/// the swallowed key is invisible - the person sees a letter that did not appear.
-/// [LAW:no-silent-failure]
+/// The one key it looks at is a Return typed bare. Dictation is words on their way to the cursor,
+/// and a Return typed meanwhile would reach the app ahead of them and send the message without
+/// them; the only grant-free way for it to arrive after is this process declining it once the
+/// words are committed, so `ReturnGate` holds it here until the app says they have landed. The
+/// verdict is the gate's, and this answers with it, so there is no key whose answer is a decision
+/// made here. [LAW:dataflow-not-control-flow] A swallowed key is invisible - the person sees a
+/// Return that did nothing - so the gate says every one it keeps in the log. [LAW:no-silent-failure]
 ///
 /// `@objc` with an explicit name because `InputMethodServerControllerClass` in the bundle's
 /// `Info.plist` names this class as a string, and the Objective-C runtime is what resolves
@@ -30,19 +32,32 @@ public final class DictationInputController: IMKInputController {
 
     nonisolated override public init() { super.init() }
 
-    /// The events this controller is handed: none. What the text input system offers when
-    /// nobody says is key-downs alone (0x400, read off `super` on studious, 2026-09-27), which
-    /// is every key typed; the app hears the modifier keys itself, so this asks for nothing,
-    /// and no key a person types or holds reaches this process.
-    nonisolated override public func recognizedEvents(_: Any!) -> Int { 0 }
+    /// The events this controller is handed: key-downs (0x400, the value `super` returned on
+    /// studious, 2026-09-27), which is every key typed. The app hears the modifier keys itself,
+    /// and a Return is the one key anything here answers differently.
+    nonisolated override public func recognizedEvents(_: Any!) -> Int { Int(NSEvent.EventTypeMask.keyDown.rawValue) }
 
-    /// Every event declined: returning false is how the signature says "not mine", which is
-    /// the whole behaviour this controller has toward keys.
+    /// Declines every key but a bare Return, which is held for the words the app owes.
     ///
-    /// Overridden, though no event is asked for, because IMK also calls this with no event at
-    /// all (low-input-method-8vv: the call after an activate trapped on the implicitly
-    /// unwrapped event the inherited signature has).
-    nonisolated override public func handle(_: NSEvent?, client _: Any!) -> Bool { false }
+    /// Overridden with an optional event because IMK also calls this with no event at all
+    /// (low-input-method-8vv: the call after an activate trapped on the implicitly unwrapped
+    /// event the inherited signature has), and with events that are not keys, whose key code is
+    /// not to be read.
+    nonisolated override public func handle(_ event: NSEvent?, client _: Any!) -> Bool {
+        // Debug level: this is made once per key typed anywhere.
+        onMainActor("handle", event, level: .debug) { event in
+            guard let event, event.type == .keyDown,
+                  let key = SteeringKey(keyCode: event.keyCode, flags: event.modifierFlags) else { return false }
+            switch key {
+            case .return:
+                let kept = ReturnGate.shared.verdict(forReturnAt: event.timestamp) == .keep
+                // The system's own answer to a key that did nothing, so a kept Return is heard
+                // at the moment it was typed and not only found in a log. [LAW:no-silent-failure]
+                if kept { NSSound.beep() }
+                return kept
+            }
+        }
+    }
 
     /// The text input system gave this controller's client focus, which is the only way
     /// this process learns where words can go.

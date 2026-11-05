@@ -209,6 +209,38 @@ public struct HotkeyDetector: Sendable {
         }
     }
 
+    /// What a typed key that steers dictation did to the press, as the detector reads it.
+    public enum Steered: Equatable, Sendable {
+        /// A latched press ended where the key was typed, which is this transition. The next
+        /// chord press begins a fresh one.
+        case ended(Transition)
+        /// The chord is still down as far as the detector has heard: a key typed in the moment
+        /// before the chord's release is heard. The press is open and ends as the chord comes
+        /// up, so nothing was ended here.
+        case chordDown
+        /// No press is open for a key to steer, or the one that was is not dictation.
+        case nothingOpen
+    }
+
+    /// A key that steers dictation was typed at `time` with the chord up. A latched press ends
+    /// there, as a tap does when the chord is pressed again; the audio is cut at the key, not at
+    /// the moment the app learned of it.
+    ///
+    /// [LAW:single-enforcer] Only the detector ends a press, so `Dictation.press` still sees every
+    /// `began` paired with one `ended`, and a latched press left latched cannot have the next chord
+    /// press end one that no longer exists.
+    public mutating func steer(at time: HostTime) -> Steered {
+        switch phase {
+        case .latched:
+            phase = .idle
+            return .ended(.ended(.released(.tap, at: time)))
+        case .held:
+            return .chordDown
+        case .blocked, .idle:
+            return .nothingOpen
+        }
+    }
+
     /// Listens for `modes` from the next press on. A press already open is left open: it
     /// belongs to the chord that began it, and ends the way it would have, when a key of that
     /// chord comes up or, latched, when that chord or its mode's chord now goes down; any

@@ -284,10 +284,11 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
 
 /// The wire, which is the one place either half turns a value into bytes or back.
 ///
-/// Three messages cross it, told apart by their Mach id: the greeting, empty, which the input
+/// Messages cross it told apart by their Mach id: the greeting, empty, which the input
 /// method answers with its build once it has admitted the sender; the words; and, the other
 /// way, a cursor the input method was just given focus in, carrying its build, which nobody
-/// answers. [LAW:single-enforcer]
+/// answers, and the two questions it asks about a Return it holds, which the app does.
+/// [LAW:single-enforcer]
 ///
 /// A build crosses as JSON, and none crosses as nothing at all, which is how every input
 /// method from before builds were compared answers a greeting and tells an arrival.
@@ -303,6 +304,9 @@ enum Wire {
     // from before still running past an install is told as not understood, not misread.
     static let cursorArrived: mach_msg_id_t = 4
     static let overMemoryCeiling: mach_msg_id_t = 5
+    /// The two questions the input method asks the app about a Return it holds, each answered.
+    static let returnTyped: mach_msg_id_t = 6
+    static let settled: mach_msg_id_t = 7
 
     /// The first byte of every request, and one no UTF-8 text contains. An input method built
     /// when a request was its bare text, still running past an install, reads this as bytes
@@ -356,6 +360,25 @@ enum Wire {
     }
 
     static func overrun(_ overrun: Overrun) -> Data { try! JSONEncoder().encode(overrun) }
+
+    /// A question's payload: the moment the Return went down.
+    private struct Stamp: Codable { let timestamp: TimeInterval }
+
+    static func stamp(_ timestamp: TimeInterval) -> Data { try! JSONEncoder().encode(Stamp(timestamp: timestamp)) }
+
+    /// [LAW:parse-dont-validate] The question a message asks, or nil when it asks none this
+    /// app knows. A stamp that is not a finite moment on the clock is no question.
+    static func question(id: mach_msg_id_t, payload: Data?) -> Question? {
+        guard id == returnTyped || id == settled else { return nil }
+        guard let stamp = payload.flatMap({ try? JSONDecoder().decode(Stamp.self, from: $0) }),
+              stamp.timestamp.isFinite, stamp.timestamp >= 0 else { return nil }
+        return id == returnTyped ? .returnTyped(at: stamp.timestamp) : .settled(at: stamp.timestamp)
+    }
+
+    static func owing(_ owing: Owing) -> Data { try! JSONEncoder().encode(owing) }
+    static func owing(of data: Data) -> Owing? { try? JSONDecoder().decode(Owing.self, from: data) }
+    static func settlement(_ settlement: Settlement) -> Data { try! JSONEncoder().encode(settlement) }
+    static func settlement(of data: Data) -> Settlement? { try? JSONDecoder().decode(Settlement.self, from: data) }
 
     /// [LAW:parse-dont-validate] The notice the input method process `pid` sent, or nil when
     /// the message is none, or its payload is not what its id says. A cursor arrival carries

@@ -82,7 +82,10 @@ func isTheSelectedSource() -> Bool {
 /// a bounded time. Each insert's turn there is said in the log once it has run, so a commit
 /// that outlasted its answer is still accounted for. Held for the life of the process like
 /// everything else opened here.
-let committer = Committer { ended in logger.notice("\(ended.description, privacy: .public)") }
+///
+/// Its turns wait on the same queue a held Return runs while it waits for words to land, so the
+/// words a Return waits for can be committed by the thread that is waiting.
+let committer = Committer(turns: ReturnGate.shared.turns) { ended in logger.notice("\(ended.description, privacy: .public)") }
 
 /// The app's door, beside the text input system's. Held for the life of the process for
 /// the same reason the server is: released, the app's next request finds nothing listening.
@@ -97,8 +100,9 @@ let committer = Committer { ended in logger.notice("\(ended.description, privacy
 /// before its words are read, and the refusal is logged here with what was required.
 ///
 /// A door that will not open is not the end of this process, unlike the server above it.
-/// The controller's whole promise is that every key passes through untouched, so a person
-/// with this source selected keeps a working keyboard even when nothing here can insert.
+/// The controller's whole promise is that every key passes through untouched, a Return held
+/// for the app's words aside, and a Return is held only for an app that said it owes some, so a
+/// person with this source selected keeps a working keyboard even when nothing here can insert.
 /// The fault names the `PortNotHosted` case that stopped it - most often the name
 /// already held by another instance of this input method, whose own cursor then answers the
 /// app. [LAW:no-silent-failure]
@@ -149,6 +153,21 @@ let tellingTheApp = Task.detached {
     _ = await insertions.value
     let sender = NoticeSender(build: build)
     await Notices.relay(Notices.shared.notices, tell: sender.tell, end: { DispatchQueue.main.async { exit(EXIT_FAILURE) } })
+}
+
+/// What a held Return asks the app, and whom it believes: this installation's app, by its
+/// signature, which is read off the main thread for the reason the insert port's is. Until it is
+/// read, and for good if it cannot be, nobody admits anything and every Return passes, said in
+/// the log. [LAW:no-silent-failure]
+let askingTheApp = Task.detached {
+    let answerer: Result<PeerIdentity, PeerIdentity.Unreadable>
+    do throws(PeerIdentity.Unreadable) {
+        answerer = .success(try await .signedLikeThisProcess(identifier: AppIdentity.bundleIdentifier))
+    } catch {
+        logger.fault("no Return will be held for the app's words: this installation's app cannot be recognised: \(String(describing: error), privacy: .public)")
+        answerer = .failure(error)
+    }
+    ReturnGate.shared.connect(Asker(answerer: answerer))
 }
 
 /// A cursor outlives its app unless someone says otherwise, and the text input system does

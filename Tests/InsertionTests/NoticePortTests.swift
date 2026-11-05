@@ -5,19 +5,34 @@ import Foundation
 import Testing
 
 /// What the hotkey port did, in the order it did it, for a case to wait on.
-private enum Arrival: Equatable {
+enum Arrival: Equatable {
     case heard(InputMethodNotice)
     case told(String)
+}
+
+/// What a question was asked and the right to answer it, handed on as the port gives it.
+struct Asked: Sendable {
+    let question: Question
+    let reply: Reply
 }
 
 /// The app's end of the hotkey port on `name`, hearing `senders`, with everything it does
 /// arriving on the stream it hands back.
 private func hostNotices(name: String, senders: PeerIdentity) throws -> (port: NoticePort, arrivals: AsyncStream<Arrival>) {
+    let (port, arrivals, _) = try hostNoticesAndQuestions(name: name, senders: senders)
+    return (port, arrivals)
+}
+
+/// The same port, with the questions it is asked arriving on a stream of their own, each with
+/// the right to answer it.
+func hostNoticesAndQuestions(name: String, senders: PeerIdentity) throws -> (port: NoticePort, arrivals: AsyncStream<Arrival>, questions: AsyncStream<Asked>) {
     let (arrivals, continuation) = AsyncStream<Arrival>.makeStream()
+    let (questions, asking) = AsyncStream<Asked>.makeStream()
     let port = try NoticePort(
         portName: name, senders: senders, queue: DispatchQueue(label: name),
-        told: { continuation.yield(.told($0.description)) }, heard: { continuation.yield(.heard($0)) })
-    return (port, arrivals)
+        told: { continuation.yield(.told($0.description)) }, heard: { continuation.yield(.heard($0)) },
+        asked: { asking.yield(Asked(question: $0, reply: $1)) })
+    return (port, arrivals, questions)
 }
 
 /// Cursor arrivals cross from the input method to the app, from the input method alone.
