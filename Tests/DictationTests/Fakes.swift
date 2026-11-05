@@ -214,12 +214,28 @@ final class FakeInputMethod: Inserter, Sendable {
         var gate: DispatchSemaphore?
         var holding = 0
         var asked = 0
+        /// What the app's document holds: every insert's text in order, less the text a take-back
+        /// replaced, so what a cancel leaves in the field is read off it.
+        var field = ""
+        var takeBacks: [String] = []
+        var takeBackRefusal: InsertFailure?
+        /// An insert that fails as the app not answering, whose words landed anyway.
+        var landingDespiteFailure = false
     }
 
     private let state = Mutex(State())
 
     /// Every text put at the cursor, in order. A held insert is not in it until it is let go.
     var inserted: [String] { state.withLock { $0.inserted } }
+    /// The document the inserts went into, as it stands: what a cancel is read against.
+    var field: String { state.withLock { $0.field } }
+    /// The texts every request to take words back named, answered or refused.
+    var takeBacks: [String] { state.withLock { $0.takeBacks } }
+    /// Every take-back from now on is refused with `refusal`, or none is when it is nil.
+    func refusingTakeBack(_ refusal: InsertFailure?) { state.withLock { $0.takeBackRefusal = refusal } }
+    /// An insert refused with a failure that may have landed lands in the document anyway, which is
+    /// what the failure means: the words are somewhere nobody was told.
+    func landingDespiteFailure(_ lands: Bool = true) { state.withLock { $0.landingDespiteFailure = lands } }
     /// How many inserts are held at the gate now.
     var holding: Int { state.withLock { $0.holding } }
     /// How many inserts it was asked for, answered or refused.
@@ -241,7 +257,8 @@ final class FakeInputMethod: Inserter, Sendable {
         gate?.signal()
     }
 
-    func insert(_ text: String, into destination: Destination) throws(InsertFailure) -> Inserted {
+    func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
+        let (text, destination) = (request.text, request.destination)
         state.withLock { $0.asked += 1 }
         if let gate = state.withLock({ $0.gate }) {
             state.withLock { $0.holding += 1 }
@@ -249,9 +266,24 @@ final class FakeInputMethod: Inserter, Sendable {
             state.withLock { $0.holding -= 1 }
         }
         return try state.withLock { state throws(InsertFailure) in
-            if let refusal = state.refusal { throw refusal }
+            // A request that replaces text is a take-back: refused unless the document ends in
+            // exactly those words, as the real input method reads the field before it changes it.
+            if !request.replacing.isEmpty {
+                state.takeBacks.append(request.replacing)
+                if let refusal = state.takeBackRefusal { throw refusal }
+                guard destination.admits(state.into) else { throw .refused(.dictationIsInAnotherApp) }
+                guard state.field.utf16.count >= request.replacing.utf16.count,
+                      state.field.utf16.suffix(request.replacing.utf16.count).elementsEqual(request.replacing.utf16) else { throw .refused(.wordsCannotBeTakenBack) }
+                state.field = String(decoding: Array(state.field.utf16.dropLast(request.replacing.utf16.count)), as: UTF16.self)
+                return Inserted(characters: 0, into: state.into)
+            }
+            if let refusal = state.refusal {
+                if state.landingDespiteFailure, refusal.wordsMayHaveLanded { state.field += text }
+                throw refusal
+            }
             guard destination.admits(state.into) else { throw .refused(.dictationIsInAnotherApp) }
             state.inserted.append(text)
+            state.field += text
             return Inserted(characters: text.count, into: state.into)
         }
     }

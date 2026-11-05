@@ -31,14 +31,34 @@ import Testing
         .init(description: "keypad Enter with Option", keyCode: 76, flags: [.numericPad, .option], steers: false),
         // What is not Return at all.
         .init(description: "the letter e", keyCode: 14, flags: [], steers: false),
-        .init(description: "Escape", keyCode: 53, flags: [], steers: false),
         .init(description: "Tab", keyCode: 48, flags: [], steers: false),
         .init(description: "Delete", keyCode: 51, flags: [], steers: false),
         .init(description: "the space bar", keyCode: 49, flags: [], steers: false),
     ]
 
     @Test(arguments: keys)
-    func aKeyIsASteeringKeyOnlyIfItIsABareReturn(typed: Typed) {
+    func aKeyOtherThanEscapeIsASteeringKeyOnlyIfItIsABareReturn(typed: Typed) {
         #expect((SteeringKey(keyCode: typed.keyCode, flags: typed.flags) != nil) == typed.steers, "\(typed)")
+    }
+
+    /// Escape steers whatever is held with it: a held chord is a modifier on it, this process cannot
+    /// tell the chord from another modifier, and the app answers whether a dictation is open to cancel.
+    @Test(arguments: [
+        NSEvent.ModifierFlags([]),
+        [.option],
+        NSEvent.ModifierFlags(rawValue: 0x80140),
+        [.function],
+        [.shift],
+        [.command],
+        [.control, .option, .command, .shift],
+        [.capsLock],
+    ])
+    func escapeSteersWhateverIsHeldWithIt(flags: NSEvent.ModifierFlags) {
+        #expect(SteeringKey(keyCode: 53, flags: flags) == .escape)
+    }
+
+    @Test func returnIsReturn() {
+        #expect(SteeringKey(keyCode: 36, flags: []) == .return)
+        #expect(SteeringKey(keyCode: 76, flags: [.numericPad]) == .return)
     }
 }

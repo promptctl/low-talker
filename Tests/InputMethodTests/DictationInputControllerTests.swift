@@ -4,7 +4,7 @@ import Testing
 
 /// The controller hands back every key it is offered, a bare Return aside, which is held for
 /// words the app owes: with no app connected, as here, nothing is owed and it is handed back too.
-/// What a connected gate does with a Return is `ReturnGateTests`'s.
+/// What a connected gate does with a Return is `SteeringGateTests`'s.
 ///
 /// [LAW:behavior-not-structure] Asked by offering real events and reading the answer, not by
 /// checking which methods the class overrides: a later ticket may answer keys through a

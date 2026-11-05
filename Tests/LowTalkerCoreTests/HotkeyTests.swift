@@ -206,7 +206,7 @@ extension HotkeyTests {
         installation.handle(rightOption(.down, at: 0))
         installation.handle(rightOption(.up, at: 100))
 
-        let steered = hotkey.steer(at: at(5000))
+        let steered = hotkey.steer(.send(at: at(5000)))
         await settle()
 
         #expect(steered == .ended(.ended(.released(.tap, at: at(5000)))))
@@ -216,6 +216,6 @@ extension HotkeyTests {
 
     @Test func aSteeringKeyBeforeTheHotkeyStartedEndsNothing() {
         let hotkey = Hotkey(modes: Config.default.modes, feed: FakeFeed())
-        #expect(hotkey.steer(at: at(0)) == .nothingOpen)
+        #expect(hotkey.steer(.send(at: at(0))) == .nothingOpen)
     }
 }

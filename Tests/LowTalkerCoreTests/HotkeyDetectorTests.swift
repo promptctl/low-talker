@@ -388,7 +388,7 @@ extension HotkeyDetectorTests {
         _ = keyboard.release(.rightOption, at: 100)
         #expect(keyboard.detector.phase == .latched(rightOption))
 
-        #expect(keyboard.detector.steer(at: at(5000)) == .ended(.ended(.released(.tap, at: at(5000)))))
+        #expect(keyboard.detector.steer(.send(at: at(5000))) == .ended(.ended(.released(.tap, at: at(5000)))))
         #expect(keyboard.detector.phase == .idle)
     }
 
@@ -398,7 +398,7 @@ extension HotkeyDetectorTests {
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
         _ = keyboard.release(.rightOption, at: 100)
-        _ = keyboard.detector.steer(at: at(5000))
+        _ = keyboard.detector.steer(.send(at: at(5000)))
 
         #expect(keyboard.press(.rightOption, at: 6000) == began(rightOption, at: 6000))
     }
@@ -409,18 +409,58 @@ extension HotkeyDetectorTests {
         var keyboard = Keyboard()
         _ = keyboard.press(.rightOption, at: 0)
 
-        #expect(keyboard.detector.steer(at: at(300)) == .chordDown)
+        #expect(keyboard.detector.steer(.send(at: at(300))) == .chordDown)
         #expect(keyboard.detector.phase == .held(rightOption, since: at(0)))
         #expect(keyboard.release(.rightOption, at: 400) == ended(.hold, at: 400))
     }
 
-    @Test func aSteeringKeyEndsNothingWhenNoPressIsOpen() {
+    /// Escape throws a press away wherever the chord is: held, as the person speaks, or latched.
+    @Test func escapeCancelsAHeldPress() {
         var keyboard = Keyboard()
-        #expect(keyboard.detector.steer(at: at(0)) == .nothingOpen)
+        _ = keyboard.press(.rightOption, at: 0)
+
+        #expect(keyboard.detector.steer(.cancel) == .ended(.ended(.cancelled)))
+        #expect(keyboard.detector.phase == .idle)
+    }
+
+    @Test func escapeCancelsALatchedPress() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+
+        #expect(keyboard.detector.steer(.cancel) == .ended(.ended(.cancelled)))
+        #expect(keyboard.detector.phase == .idle)
+    }
+
+    /// The chord is still physically down after a held press was cancelled: its release ends
+    /// nothing, since the press it would have ended is over, and `Dictation.press` traps on an
+    /// end it never began.
+    @Test func theChordComingUpAfterACancelEndsNothing() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.detector.steer(.cancel)
+
+        #expect(keyboard.release(.rightOption, at: 400) == [])
+        #expect(keyboard.press(.rightOption, at: 1000) == began(rightOption, at: 1000))
+    }
+
+    @Test func escapeCancelsNothingWhenNoPressIsOpen() {
+        var keyboard = Keyboard()
+        #expect(keyboard.detector.steer(.cancel) == .nothingOpen)
 
         _ = keyboard.press(.leftShift, at: 10)
         _ = keyboard.press(.rightOption, at: 20)
         guard case .blocked = keyboard.detector.phase else { Issue.record("the chord was not blocked: \(keyboard.detector.phase)"); return }
-        #expect(keyboard.detector.steer(at: at(30)) == .nothingOpen)
+        #expect(keyboard.detector.steer(.cancel) == .nothingOpen)
+    }
+
+    @Test func aSteeringKeyEndsNothingWhenNoPressIsOpen() {
+        var keyboard = Keyboard()
+        #expect(keyboard.detector.steer(.send(at: at(0))) == .nothingOpen)
+
+        _ = keyboard.press(.leftShift, at: 10)
+        _ = keyboard.press(.rightOption, at: 20)
+        guard case .blocked = keyboard.detector.phase else { Issue.record("the chord was not blocked: \(keyboard.detector.phase)"); return }
+        #expect(keyboard.detector.steer(.send(at: at(30))) == .nothingOpen)
     }
 }

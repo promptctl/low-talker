@@ -11,10 +11,11 @@ import Testing
 /// port. [LAW:behavior-not-structure] What is held is what the input method would be told, and
 /// that the words are at the cursor by the time it is told they landed.
 @MainActor
-@Suite struct ReturnSteeringTests {
+@Suite struct KeySteeringTests {
     private enum Said: Equatable {
         case owing(Owing)
         case settlement(Settlement)
+        case cancellation(Cancellation)
     }
 
     /// The answers the input method would hear, in order.
@@ -31,6 +32,11 @@ import Testing
 
         func send(_ settlement: Settlement) -> Reply.Delivery {
             continuation.yield(.settlement(settlement))
+            return .delivered
+        }
+
+        func send(_ cancellation: Cancellation) -> Reply.Delivery {
+            continuation.yield(.cancellation(cancellation))
             return .delivered
         }
 
@@ -55,7 +61,7 @@ import Testing
         let rig: Rig
         let hotkey: Hotkey
         let feed: Feed
-        let steering: ReturnSteering
+        let steering: KeySteering
 
         init(refusing refusal: InsertFailure? = nil) async throws {
             rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
@@ -64,7 +70,7 @@ import Testing
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             let dictation = rig.dictation
             try hotkey.start { dictation.press($0) }
-            steering = ReturnSteering(dictation: dictation, hotkey: hotkey)
+            steering = KeySteering(dictation: dictation, hotkey: hotkey)
         }
 
         /// Right Option going down or up, `held` milliseconds into the press, stamped on the
@@ -99,7 +105,7 @@ import Testing
         await loop.latchedPress()
         let answers = Answers()
 
-        loop.steering.answer(.returnTyped(at: loop.typedNow), through: answers)
+        loop.steering.answer(.owed(at: loop.typedNow), through: answers)
         #expect(await answers.next() == .owing(.words))
         loop.steering.answer(.settled(at: loop.typedNow), through: answers)
 
@@ -109,11 +115,56 @@ import Testing
         #expect(!loop.rig.dictation.owes)
     }
 
+    /// Escape typed into a latched press throws it away: the app says it cancelled one, the words
+    /// that landed are taken back, and the next press begins fresh.
+    @Test(.timeLimit(.minutes(1))) func anEscapeTypedIntoALatchedPressCancelsIt() async throws {
+        let loop = try await Loop()
+        await loop.latchedPress()
+        let answers = Answers()
+
+        loop.steering.answer(.owed(at: loop.typedNow), through: answers)
+        #expect(await answers.next() == .owing(.words))
+        loop.steering.answer(.cancel(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .cancellation(.dictation))
+        #expect(loop.hotkey.phase == .idle)
+        let cancelled = try #require(await loop.rig.report().cancelled)
+        #expect(cancelled.takenBack == 0)
+        #expect(loop.rig.hold.held == nil)
+    }
+
+    /// And into a held one, the chord still down: the same answer, and the chord's release after
+    /// it ends nothing.
+    @Test(.timeLimit(.minutes(1))) func anEscapeTypedIntoAHeldPressCancelsIt() async throws {
+        let loop = try await Loop()
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+        loop.rig.speak([1, 2, 3])
+        let answers = Answers()
+
+        loop.steering.answer(.cancel(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .cancellation(.dictation))
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.hotkey.phase == .idle)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func anEscapeWithNoPressOpenCancelsNothing() async throws {
+        let loop = try await Loop()
+        let answers = Answers()
+
+        loop.steering.answer(.cancel(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .cancellation(.nothing))
+    }
+
     @Test(.timeLimit(.minutes(1))) func nothingIsOwedWhenNoPressIsOpen() async throws {
         let loop = try await Loop()
         let answers = Answers()
 
-        loop.steering.answer(.returnTyped(at: loop.typedNow), through: answers)
+        loop.steering.answer(.owed(at: loop.typedNow), through: answers)
         loop.steering.answer(.settled(at: loop.typedNow), through: answers)
 
         #expect(await answers.next() == .owing(.nothing))

@@ -208,8 +208,14 @@ extension Dictation.Report.Outcome {
         switch self {
         case .session(let session): return session
         case .failed(let failed): throw failed
-        case .usedAsModifier: throw NotASession(outcome: self)
+        case .usedAsModifier, .cancelled: throw NotASession(outcome: self)
         }
+    }
+
+    /// What a cancelled press came to, or nothing when it was not one.
+    var cancelled: Cancelled? {
+        if case .cancelled(let cancelled) = self { return cancelled }
+        return nil
     }
 
     /// What failed, when the press did.

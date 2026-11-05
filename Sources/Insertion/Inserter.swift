@@ -11,9 +11,10 @@ import DarwinCalls
 /// methods or macOS - the caller's question is "did these words land", and that question
 /// outlives whatever carries it.
 public protocol Inserter: Sendable {
-    /// Inserts `text` at the cursor `destination` admits, or throws why it did not: refused
-    /// when the input method looked and would not, not yet taken when the app has not taken
-    /// them, and otherwise whatever stopped the question reaching it.
+    /// Commits `request`: its `text` at the cursor its `destination` admits, in place of its
+    /// `replacing`, or throws why it did not: refused when the input method looked and would
+    /// not, not yet taken when the app has not taken them, and otherwise whatever stopped the
+    /// question reaching it.
     ///
     /// **Blocking, and not to be called on the main actor or from a task.** The one that
     /// crosses to the input method holds its thread in the kernel for up to its timeout, so
@@ -22,10 +23,15 @@ public protocol Inserter: Sendable {
     /// Said here rather than at the one implementation because this is the seam
     /// low-input-method-s71.b26's executor consumes, and the obligation belongs to whatever
     /// satisfies it. [LAW:no-ambient-temporal-coupling]
-    func insert(_ text: String, into destination: Destination) throws(InsertFailure) -> Inserted
+    func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted
 }
 
 public extension Inserter {
+    /// Inserts `text` where `destination` admits, replacing nothing.
+    func insert(_ text: String, into destination: Destination) throws(InsertFailure) -> Inserted {
+        try insert(InsertRequest(text, into: destination))
+    }
+
     /// The same round trip asked for from inside a task, which is where the app asks from.
     ///
     /// The blocking call goes onto a thread of its own and the caller suspends, so nothing
@@ -34,7 +40,7 @@ public extension Inserter {
     /// remember it. [LAW:single-enforcer]
     ///
     /// The `insert` inside is the blocking one: that closure is not async, so the overload
-    /// it names is the protocol's own. An async caller writing `try await insert(text, into:)` gets
+    /// it names is the protocol's own. An async caller writing `try await insert(request)` gets
     /// this; there is no spelling of the call that is both awaited and blocking.
     /// [LAW:no-ambient-temporal-coupling]
     ///
@@ -43,10 +49,14 @@ public extension Inserter {
     /// words did not land when they may have - the one conflation this module exists to
     /// prevent. What bounds the wait is the timeout, which is also the bound the answer
     /// names. [LAW:no-silent-failure]
-    func insert(_ text: String, into destination: Destination) async throws(InsertFailure) -> Inserted {
+    func insert(_ request: InsertRequest) async throws(InsertFailure) -> Inserted {
         try await withCheckedContinuation { continuation in
-            Thread { continuation.resume(returning: Result { () throws(InsertFailure) in try insert(text, into: destination) }) }.start()
+            Thread { continuation.resume(returning: Result { () throws(InsertFailure) in try insert(request) }) }.start()
         }.get()
+    }
+
+    func insert(_ text: String, into destination: Destination) async throws(InsertFailure) -> Inserted {
+        try await insert(InsertRequest(text, into: destination))
     }
 }
 
@@ -110,7 +120,7 @@ public struct InputMethodInserter: Inserter {
         self.build = build
     }
 
-    public func insert(_ text: String, into destination: Destination) throws(InsertFailure) -> Inserted {
+    public func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
         let answerer: PeerIdentity
         do throws(PeerIdentity.Unreadable) { answerer = try self.answerer.get() } catch { throw .answererUnreadable(error) }
         var remote = mach_port_t()
@@ -150,7 +160,7 @@ public struct InputMethodInserter: Inserter {
         let received: Mach.Received
         do throws(Unreachable) {
             received = try roundTrip(
-                Wire.request(InsertRequest(text, into: destination)), id: Wire.insert, to: remote, answeredOn: reply, by: answerer, within: phase, once: .mayHaveLanded,
+                Wire.request(request), id: Wire.insert, to: remote, answeredOn: reply, by: answerer, within: phase, once: .mayHaveLanded,
                 unanswered: .answerDidNotArrive(port: portName, after: phase),
                 abandoned: .answerWasAbandoned(port: portName))
         } catch { throw .unreachable(error) }

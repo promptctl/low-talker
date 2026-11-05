@@ -8,7 +8,7 @@ import Testing
 /// The two questions a held Return asks the app, over real Mach ports: the input method's
 /// `Asker` on one end, the app's `NoticePort` on the other, both in this process, which each
 /// believes. [LAW:behavior-not-structure] What is held is what each end is told and when.
-@Suite struct ReturnQuestionsTests {
+@Suite struct QuestionsTests {
     private static let bound = aBudgetTheRunnerCannotSpend
 
     private static func asker(_ name: String, believing answerer: PeerIdentity? = nil) throws -> Asker {
@@ -20,9 +20,9 @@ import Testing
         let (port, _, questions) = try hostNoticesAndQuestions(name: name, senders: try OwnProcess.identity())
         let asker = try Self.asker(name)
 
-        async let asking = onAThreadOfItsOwn { asker.returnTyped(at: 12.5, within: Self.bound) }
+        async let asking = onAThreadOfItsOwn { asker.owed(at: 12.5, within: Self.bound) }
         let asked = await questions.first { @Sendable _ in true }
-        #expect(asked?.question == .returnTyped(at: 12.5))
+        #expect(asked?.question == .owed(at: 12.5))
         #expect(asked?.reply.send(Owing.words) == .delivered)
 
         #expect(await asking == .success(.words))
@@ -50,7 +50,7 @@ import Testing
     @Test func nobodyListeningIsSaidSo() {
         let name = aPortNobodyElseUses()
         let asker = Asker(portName: name, answerer: .success(.adHoc(cdhash: "00")))
-        #expect(asker.returnTyped(at: 1, within: Self.bound) == .failure(.nobodyIsListening(port: name)))
+        #expect(asker.owed(at: 1, within: Self.bound) == .failure(.nobodyIsListening(port: name)))
     }
 
     /// A question the app drops is an app that has let go of the Return, and the asker hears that
@@ -91,7 +91,7 @@ import Testing
         let (port, arrivals, _) = try hostNoticesAndQuestions(name: name, senders: someoneElse)
         let asker = try Self.asker(name)
 
-        #expect(await onAThreadOfItsOwn { asker.returnTyped(at: 1, within: Self.bound) } == .failure(.abandoned))
+        #expect(await onAThreadOfItsOwn { asker.owed(at: 1, within: Self.bound) } == .failure(.abandoned))
         guard case .told(let said)? = await arrivals.first(where: { @Sendable _ in true }) else {
             Issue.record("the port heard a sender it was not told to hear")
             return
@@ -108,7 +108,7 @@ import Testing
         let stranger = PeerIdentity.signed(identifier: "ai.promptctl.low-talker.test.app", certificate: String(repeating: "1", count: 40))
         let asker = try Self.asker(name, believing: stranger)
 
-        async let asking = onAThreadOfItsOwn { asker.returnTyped(at: 1, within: Self.bound) }
+        async let asking = onAThreadOfItsOwn { asker.owed(at: 1, within: Self.bound) }
         let asked = try #require(await questions.first { @Sendable _ in true })
         #expect(asked.reply.send(Owing.nothing) == .delivered)
 
@@ -122,7 +122,7 @@ import Testing
     /// An asker that cannot say who the app is believes nobody and asks nobody.
     @Test func anAskerThatCannotSayWhoTheAppIsAsksNobody() {
         let asker = Asker(portName: aPortNobodyElseUses(), answerer: .failure(.notValid))
-        #expect(asker.returnTyped(at: 1, within: Self.bound) == .failure(.unverifiable(.notValid)))
+        #expect(asker.owed(at: 1, within: Self.bound) == .failure(.unverifiable(.notValid)))
         #expect(asker.settled(at: 1, within: Self.bound) == .failure(.unverifiable(.notValid)))
     }
 
@@ -137,27 +137,48 @@ import Testing
         let junk = Data("not a stamp".utf8)
 
         let sent = Mach.send(
-            junk, id: Wire.returnTyped, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
+            junk, id: Wire.owed, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
             replyTo: Mach.noPort, timeout: Self.bound)
         try #require(sent == MACH_MSG_SUCCESS)
 
-        #expect(await arrivals.first { @Sendable _ in true } == .told(NoticePort.Event.notUnderstood(id: Wire.returnTyped, bytes: junk.count).description))
+        #expect(await arrivals.first { @Sendable _ in true } == .told(NoticePort.Event.notUnderstood(id: Wire.owed, bytes: junk.count).description))
         withExtendedLifetime(port) {}
     }
 
     @Test func aStampIsAFiniteMomentOnTheClock() {
-        #expect(Wire.question(id: Wire.returnTyped, payload: Wire.stamp(7.25)) == .returnTyped(at: 7.25))
+        #expect(Wire.question(id: Wire.owed, payload: Wire.stamp(7.25)) == .owed(at: 7.25))
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(0)) == .settled(at: 0))
+        #expect(Wire.question(id: Wire.cancel, payload: Wire.stamp(4.5)) == .cancel(at: 4.5))
+        #expect(Wire.question(id: Wire.cancel, payload: Wire.stamp(1e12)) == nil)
+        #expect(Wire.question(id: Wire.cancel, payload: nil) == nil)
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(-1)) == nil)
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(1e12)) == nil)
-        #expect(Wire.question(id: Wire.returnTyped, payload: nil) == nil)
-        #expect(Wire.question(id: Wire.returnTyped, payload: Data("{}".utf8)) == nil)
+        #expect(Wire.question(id: Wire.owed, payload: nil) == nil)
+        #expect(Wire.question(id: Wire.owed, payload: Data("{}".utf8)) == nil)
         #expect(Wire.question(id: Wire.cursorArrived, payload: Wire.stamp(1)) == nil)
     }
 
     @Test func theAnswersCrossAsTheValuesThatWereSent() {
         for owing in [Owing.nothing, .words] { #expect(Wire.owing(of: Wire.owing(owing)) == owing) }
         for settlement in [Settlement.landed, .notLanded] { #expect(Wire.settlement(of: Wire.settlement(settlement)) == settlement) }
+        for cancellation in [Cancellation.nothing, .dictation] { #expect(Wire.cancellation(of: Wire.cancellation(cancellation)) == cancellation) }
         #expect(Wire.owing(of: Wire.settlement(.landed)) == nil)
+        #expect(Wire.cancellation(of: Wire.settlement(.landed)) == nil)
+    }
+
+    /// The question an Escape asks once a debt is admitted carries the effect on the app's side and
+    /// is answered when it is known, over the real port.
+    @Test(.timeLimit(.minutes(1))) func theCancelQuestionIsAnsweredWithWhatBecameOfTheDictation() async throws {
+        let name = aPortNobodyElseUses()
+        let (port, _, questions) = try hostNoticesAndQuestions(name: name, senders: try OwnProcess.identity())
+        let asker = try Self.asker(name)
+
+        async let asking = onAThreadOfItsOwn { asker.cancel(at: 8, within: Self.bound) }
+        let asked = try #require(await questions.first { @Sendable _ in true })
+        #expect(asked.question == .cancel(at: 8))
+        #expect(asked.reply.send(Cancellation.dictation) == .delivered)
+
+        #expect(await asking == .success(.dictation))
+        withExtendedLifetime(port) {}
     }
 }

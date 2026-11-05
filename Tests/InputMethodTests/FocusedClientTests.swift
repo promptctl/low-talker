@@ -37,7 +37,10 @@ import Testing
             return answer
         }
 
-        func commit(_ text: String) { Issue.record("the decision committed \(text.debugDescription)") }
+        func commit(_ text: String, replacing _: String) -> Refusal? {
+            Issue.record("the decision committed \(text.debugDescription)")
+            return nil
+        }
     }
 
     /// The app in front, for the cases where it is simply whoever holds the cursor.

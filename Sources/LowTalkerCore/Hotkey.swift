@@ -80,11 +80,11 @@ public final class Hotkey {
         detector.listen(for: modes)
     }
 
-    /// A key that steers dictation was typed at `time`, the moment on the clock key events are
-    /// stamped by, with the chord up. A latched press ends there, delivered like every other
-    /// transition, so `Dictation.press` still sees it in order.
-    public func steer(at time: HostTime) -> HotkeyDetector.Steered {
-        let steered = detector.steer(at: time)
+    /// A key that steers dictation was typed, Return at a moment on the clock key events are
+    /// stamped by, with the chord up, or Escape. A press that ends does so delivered like every
+    /// other transition, so `Dictation.press` still sees it in order.
+    public func steer(_ steering: HotkeyDetector.Steering) -> HotkeyDetector.Steered {
+        let steered = detector.steer(steering)
         if case .ended(let transition) = steered, let installation = installed {
             deliver(transition, to: installation.onTransition)
         }

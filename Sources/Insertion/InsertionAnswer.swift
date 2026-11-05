@@ -30,14 +30,21 @@ public enum Destination: Codable, Equatable, Sendable, CustomStringConvertible {
     }
 }
 
-/// An insert as the input method is asked it: the words, and where they may go.
+/// An insert as the input method is asked it: the words, where they may go, and what they
+/// replace.
 public struct InsertRequest: Codable, Equatable, Sendable {
     public let text: String
     public let destination: Destination
+    /// The text immediately before the caret that this commit takes the place of: empty for
+    /// every ordinary insert, and a cancelled dictation's own words when it takes them back
+    /// with `text` empty. [LAW:dataflow-not-control-flow] One request whose value says what it
+    /// replaces, nothing for an insert, rather than a second kind of request.
+    public let replacing: String
 
-    public init(_ text: String, into destination: Destination) {
+    public init(_ text: String, into destination: Destination, replacing: String = "") {
         self.text = text
         self.destination = destination
+        self.replacing = replacing
     }
 }
 
@@ -49,7 +56,8 @@ public struct InsertRequest: Codable, Equatable, Sendable {
 /// words are not at the cursor now, and nothing here puts them anywhere else.
 /// [LAW:types-are-the-program]
 public enum InsertionAnswer: Codable, Equatable, Sendable {
-    /// Committed into the client in front, replacing nothing.
+    /// Committed into the client in front, replacing what the request named: nothing, for an
+    /// ordinary insert.
     ///
     /// `into` is the app whose client took it, which only this end knows: the app asked
     /// seconds earlier, while the person was still speaking, and by the time the words are
@@ -151,6 +159,10 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// 3 s (measured on low-imk-rules-w3g.3ky) - so an insert into one app is refused this way
     /// while another app's commit holds the main thread.
     case inputMethodIsBusy
+    /// A request to take dictated words back, which the client in front would not do or that
+    /// would not be right to do: it reports no caret, the caret is not where the words ended, or
+    /// the text before it is not the words. Nothing was changed, so the words are still there.
+    case wordsCannotBeTakenBack
 
     public var description: String {
         switch self {
@@ -165,6 +177,8 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
             "WARNING: The input method takes words only from the app, signed by the certificate that signed it, and this process is not that app. Your dictation was not inserted."
         case .inputMethodIsBusy:
             "WARNING: An app is not answering, and it held the input method up past its time limit. Your dictation was not inserted."
+        case .wordsCannotBeTakenBack:
+            "WARNING: The app in front would not give the dictated words back, or they are no longer where they were left. Nothing was changed."
         }
     }
 }
@@ -304,9 +318,12 @@ enum Wire {
     // from before still running past an install is told as not understood, not misread.
     static let cursorArrived: mach_msg_id_t = 4
     static let overMemoryCeiling: mach_msg_id_t = 5
-    /// The two questions the input method asks the app about a Return it holds, each answered.
-    static let returnTyped: mach_msg_id_t = 6
+    /// The questions the input method asks the app about a Return or an Escape it holds, each
+    /// answered: whether anything is owed, which both ask; then, for a Return, whether it settled,
+    /// and for an Escape, to throw the open dictation away.
+    static let owed: mach_msg_id_t = 6
     static let settled: mach_msg_id_t = 7
+    static let cancel: mach_msg_id_t = 8
 
     /// The first byte of every request, and one no UTF-8 text contains. An input method built
     /// when a request was its bare text, still running past an install, reads this as bytes
@@ -374,16 +391,22 @@ enum Wire {
     /// [LAW:parse-dont-validate] The question a message asks, or nil when it asks none this
     /// app knows. A stamp that is not a moment on the clock is no question.
     static func question(id: mach_msg_id_t, payload: Data?) -> Question? {
-        guard id == returnTyped || id == settled else { return nil }
         guard let stamp = payload.flatMap({ try? JSONDecoder().decode(Stamp.self, from: $0) }),
               (0...latestStamp).contains(stamp.timestamp) else { return nil }
-        return id == returnTyped ? .returnTyped(at: stamp.timestamp) : .settled(at: stamp.timestamp)
+        return switch id {
+        case owed: .owed(at: stamp.timestamp)
+        case settled: .settled(at: stamp.timestamp)
+        case cancel: .cancel(at: stamp.timestamp)
+        default: nil
+        }
     }
 
     static func owing(_ owing: Owing) -> Data { try! JSONEncoder().encode(owing) }
     static func owing(of data: Data) -> Owing? { try? JSONDecoder().decode(Owing.self, from: data) }
     static func settlement(_ settlement: Settlement) -> Data { try! JSONEncoder().encode(settlement) }
     static func settlement(of data: Data) -> Settlement? { try? JSONDecoder().decode(Settlement.self, from: data) }
+    static func cancellation(_ cancellation: Cancellation) -> Data { try! JSONEncoder().encode(cancellation) }
+    static func cancellation(of data: Data) -> Cancellation? { try? JSONDecoder().decode(Cancellation.self, from: data) }
 
     /// [LAW:parse-dont-validate] The notice the input method process `pid` sent, or nil when
     /// the message is none, or its payload is not what its id says. A cursor arrival carries
