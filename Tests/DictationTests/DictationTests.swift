@@ -629,6 +629,26 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing.")))
     }
 
+    /// A press whose speech gate fails holds the words the last pass read, and says the audio
+    /// after the failure was not heard, not that the engine failed a pass: released and cut
+    /// alike, the hold's warning is the failure's (low-reliability-z2z.u8q).
+    @Test func aPressWhoseGateFailsHoldsWhatWasReadAndSaysTheRestWasNotHeard() async throws {
+        struct Gone: Error {}
+        let gate = "WARNING: The speech gate failed during your dictation, so audio after the failure was not heard and words said after it are missing."
+        for cut in [false, true] {
+            let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ throws(TranscriptionFailure) in throw .gate(Gone()) }
+            let rig = try await Rig(hearing: engine)
+            rig.dictation.press(.began(Rig.dictation, at: rig.now))
+            rig.speak([1, 2])
+            await rig.until { rig.inputMethod.inserted == ["hello"] }
+            if cut { rig.dictation.press(.ended(.lapsed)) } else { rig.keyUp() }
+            let stopped = try #require(await rig.report().failure as? PressStopped)
+            #expect(stopped.landed == 1)
+            guard case .gate? = stopped.cause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.cause)"); return }
+            #expect(rig.hold.held == .unplaced(part(" there friend", cut ? "WARNING: The hotkey stopped listening during your dictation. \(gate)" : gate)))
+        }
+    }
+
     /// The engine hears a press while it is still going on: the audio reaches it as it is
     /// captured, and what it reads comes back before the key does. The press's line carries
     /// the passes run by key-up, how many re-punctuated a settled word, how many the engine
