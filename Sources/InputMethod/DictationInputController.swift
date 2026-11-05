@@ -88,7 +88,10 @@ public final class DictationInputController: IMKInputController {
             // `FocusedClient` holding a client nobody can retract. One rule, and it lives in
             // `Client.init`: a cursor that exists is a cursor `took` accepts.
             // [LAW:single-enforcer]
-            let arriving = (sender as? IMKTextInput).flatMap(Client.init)
+            // The app in front is read here, where the workspace is, and handed to the cursor
+            // as a value. [LAW:effects-at-boundaries]
+            let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            let arriving = (sender as? IMKTextInput).flatMap { Client($0, inFront: frontmost) }
             self.cursor = arriving ?? self.cursor
             arriving.map(FocusedClient.shared.took)
             // Told after it is taken, so words the app offers in answer find it in front.

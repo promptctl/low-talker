@@ -17,7 +17,9 @@ import os
 /// how an insert reaches it.
 public protocol TextCursor: AnyObject {
     /// The app this cursor belongs to, which is how a cursor left over from an app the
-    /// person has since switched away from is told from the one in front of them.
+    /// person has since switched away from is told from the one in front of them. The app
+    /// the person is using, which for the client of an Open or Save panel is the app that put
+    /// it up and not the service that draws it (`CursorApplication`).
     ///
     /// A cursor has one, always. It is read when the cursor is made, while the client is
     /// certainly alive, and never again: [FRAMING:representation] asking a client for its
@@ -245,12 +247,20 @@ final class Client: TextCursor {
     /// rather than one every later reader has to keep asking about - which is also what
     /// makes `activateServer` able to keep the cursor it last reported: a cursor that exists
     /// is one `FocusedClient` will take.
-    init?(_ client: IMKTextInput) {
-        // Empty counts as unnamed: an app the answer names as "" would be printed by the
-        // caller as a line ending in nothing at all, which is worse than a line naming no
-        // app - and a cursor whose app cannot be compared against the one in front could
-        // never be refused for being somewhere else. [LAW:parse-dont-validate]
-        guard let application = client.bundleIdentifier(), !application.isEmpty else { return nil }
+    ///
+    /// `frontmost` is the app in front now, read by the caller where the workspace is read:
+    /// `CursorApplication` says when it is the app this cursor belongs to rather than the
+    /// client's own name. An empty name counts as unnamed, as it would be printed by the
+    /// caller as a line ending in nothing at all, and a cursor whose app cannot be compared
+    /// against the one in front could never be refused for being somewhere else.
+    init?(_ client: IMKTextInput, inFront frontmost: String?) {
+        let named = client.bundleIdentifier()
+        guard let application = CursorApplication.named(by: named, inFront: frontmost) else { return nil }
+        // [LAW:nothing-unseen] Every later line names the app, and only this one says it is
+        // the client of a panel that was taken for it.
+        if application != named {
+            Self.log.notice("\(named ?? "", privacy: .public) is the panel of \(application, privacy: .public), taken as its cursor")
+        }
         self.client = client
         self.application = application
     }
