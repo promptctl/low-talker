@@ -61,6 +61,7 @@ extension KeyChord {
 /// while the chord was down makes it neither: the chord was that key's modifier, and the
 /// press ends as the chord comes up, however long it was down. A chord pressed with other
 /// modifiers already held begins no press, and is told as blocked; it never latches, since nothing listens.
+/// Nor does a press the loop refuses at key-down and tells `refuse`.
 ///
 /// [LAW:effects-at-boundaries] A value with no clock and no feed. Time comes in on
 /// each event, so a test drives it with timestamps of its choosing.
@@ -121,11 +122,13 @@ public struct HotkeyDetector: Sendable {
         case idle
         /// The chord is down and the press is not yet known to be a hold or a tap.
         case held(Mode, since: HostTime)
-        /// The chord is down with other modifiers held with it, so nothing is listening.
-        case blocked(KeyChord, since: HostTime)
-        /// A tap left listening on in this mode; the next press of its chord, or of any chord
-        /// listened for, ends it.
-        case latched(Mode)
+        /// The chord is down and nothing listens under it: other modifiers are held with it, or
+        /// the press it began was refused (`refuse`). It ends as the chord comes up, a tap
+        /// included, and latches nothing.
+        case unheard(KeyChord, since: HostTime)
+        /// A tap left listening on in this mode, begun at `since`; the next press of its chord,
+        /// or of any chord listened for, ends it.
+        case latched(Mode, since: HostTime)
         /// Escape threw a held press away while its chord was still down: nothing is listening
         /// until a key of the chord comes up, and its release ends nothing.
         case cancelled(KeyChord)
@@ -166,7 +169,7 @@ public struct HotkeyDetector: Sendable {
             phase = .held(mode, since: event.time)
             return [.began(mode, at: event.time)]
         case (.idle, nil, let mode?):
-            phase = .blocked(mode.chord, since: event.time)
+            phase = .unheard(mode.chord, since: event.time)
             return [.blocked(mode, by: event.modifiers.subtracting(mode.chord.modifiers))]
         // A chord a mode is listened for under decides what it does to a latched tap, as it
         // decides a press from rest: its own mode's chord, moved by `listen(for:)` or not, ends
@@ -174,7 +177,7 @@ public struct HotkeyDetector: Sendable {
         // mode among them), since the person tapped them to start and taps them to stop.
         // Another mode's chord ends it and begins that mode's press, since the person
         // switched modes and is speaking into the one they pressed.
-        case (.latched(let latched), let mode?, _) where mode.name == latched.name || mode.chord == latched.chord:
+        case (.latched(let latched, _), let mode?, _) where mode.name == latched.name || mode.chord == latched.chord:
             phase = .idle
             return [.ended(.released(.tap, at: event.time))]
         case (.latched, let mode?, _):
@@ -182,10 +185,10 @@ public struct HotkeyDetector: Sendable {
             return [.ended(.released(.tap, at: event.time)), .began(mode, at: event.time)]
         // The chord that began it ends it even when no mode is listened for under it now, and
         // pressed with other modifiers held, since the person was reaching for it to stop.
-        case (.latched(let latched), nil, _) where latched.chord.isCompleted(by: event.key, holding: event.modifiers) || latched.chord.isBlocked(by: event.key, holding: event.modifiers):
+        case (.latched(let latched, _), nil, _) where latched.chord.isCompleted(by: event.key, holding: event.modifiers) || latched.chord.isBlocked(by: event.key, holding: event.modifiers):
             phase = .idle
             return [.ended(.released(.tap, at: event.time))]
-        case (.held, _, _), (.blocked, _, _), (.cancelled, _, _), (.latched, nil, _), (.idle, nil, nil):
+        case (.held, _, _), (.unheard, _, _), (.cancelled, _, _), (.latched, nil, _), (.idle, nil, nil):
             return []
         }
     }
@@ -202,19 +205,19 @@ public struct HotkeyDetector: Sendable {
                 phase = .idle
                 return [.ended(.usedAsModifier)]
             case (false, .tap):
-                phase = .latched(mode)
+                phase = .latched(mode, since: since)
                 return []
             case (false, .hold):
                 phase = .idle
                 return [.ended(.released(.hold, at: event.time))]
             }
-        case .blocked(let chord, let since) where chord.modifiers.contains(event.key):
+        case .unheard(let chord, let since) where chord.modifiers.contains(event.key):
             phase = .idle
             return [.ended(typedUnder(since: since) ? .usedAsModifier : .released(kind(since: since), at: event.time))]
         case .cancelled(let chord) where chord.modifiers.contains(event.key):
             phase = .idle
             return []
-        case .held, .blocked, .cancelled, .latched, .idle:
+        case .held, .unheard, .cancelled, .latched, .idle:
             return []
         }
     }
@@ -262,8 +265,29 @@ public struct HotkeyDetector: Sendable {
         case (.cancel, .held(let mode, _)):
             phase = .cancelled(mode.chord)
             return .ended(.ended(.cancelled))
-        case (_, .blocked), (_, .cancelled), (_, .idle):
+        case (_, .unheard), (_, .cancelled), (_, .idle):
             return .nothingOpen
+        }
+    }
+
+    /// The press that began at `began` was refused, which only the loop that hears it can know:
+    /// nothing listens, so it must not latch as a tap. Still down, it becomes `.unheard` and ends
+    /// as the chord comes up; already latched (the chord's release was read before the refusal
+    /// reached here), it ends now as the tap it was, at `now`. A press that is not the one
+    /// refused, or none open, is left as it is: a refusal told late never ends another press.
+    ///
+    /// [LAW:single-enforcer] Only the detector ends a press, so `Dictation.press` still sees every
+    /// `began` paired with one `ended`.
+    public mutating func refuse(pressBegunAt began: HostTime, at now: HostTime) -> Transition? {
+        switch phase {
+        case .held(let mode, let since) where since == began:
+            phase = .unheard(mode.chord, since: since)
+            return nil
+        case .latched(_, let since) where since == began:
+            phase = .idle
+            return .ended(.released(.tap, at: now))
+        case .idle, .held, .unheard, .latched, .cancelled:
+            return nil
         }
     }
 
@@ -284,7 +308,7 @@ public struct HotkeyDetector: Sendable {
     public mutating func lapse() -> Transition? {
         let transition: Transition? = switch phase {
         case .idle, .cancelled: nil
-        case .held, .blocked, .latched: .ended(.lapsed)
+        case .held, .unheard, .latched: .ended(.lapsed)
         }
         phase = .idle
         return transition

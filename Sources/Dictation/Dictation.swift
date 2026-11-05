@@ -561,7 +561,7 @@ public final class Dictation {
     }
 
     /// [LAW:one-source-of-truth] Read off the open press, so a refused one is shown for as long
-    /// as it is open, a tapped one until its chord is pressed again, and the person learns it before speaking into it.
+    /// as it is open, which a tap ends as its chord comes up, and the person learns it before speaking into it.
     private var activity: Activity {
         switch press {
         case .down(_, let open): .listening(heard: open.streaming.heard)
@@ -596,7 +596,12 @@ public final class Dictation {
     /// The hotkey's handler. The detector pairs every `began` or `blocked` with one `ended`, a
     /// lapse included, and this loop counts on that pairing rather than repairing it: a
     /// press out of order is a broken detector, not a session.
-    public func press(_ transition: HotkeyDetector.Transition) {
+    ///
+    /// Answers a refusal when the press that began was refused at key-down, so the hotkey does
+    /// not latch a tap that nothing listens to. Every other transition answers nil.
+    @discardableResult
+    public func press(_ transition: HotkeyDetector.Transition) -> PressRefusal? {
+        var refusal: PressRefusal?
         switch transition {
         case .began(let mode, let moment):
             guard case .up = press else { preconditionFailure("a press began while one was open; the detector pairs every began with an ended") }
@@ -632,6 +637,7 @@ public final class Dictation {
                 streaming.stop()
                 hold.release()
                 press = .refused(mode, error)
+                refusal = PressRefusal()
             }
             show()
         case .blocked(let mode, _):
@@ -743,6 +749,7 @@ public final class Dictation {
             if broughtBackDuringPress { bringBack() }
             broughtBackDuringPress = false
         }
+        return refusal
     }
 
     /// Returns once every session already begun has been inserted and reported.
