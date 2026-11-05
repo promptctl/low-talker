@@ -41,21 +41,27 @@ public final class InputMethodSupervisor {
     /// Where events go until `stop`, after which nothing is told: a watch stopped while an
     /// open or an end was on its way says nothing about a loop that is gone.
     private var told: (@MainActor (Event) -> Void)?
-    private var watching: Task<Void, Never>?
+    /// The watch loop. Internal so a test can `await watching?.value` for its wind-down - the
+    /// loop actually finishing - instead of sleeping a wall-clock guess. [LAW:no-ambient-temporal-coupling]
+    private(set) var watching: Task<Void, Never>?
 
-    /// Starts watching at once, opening with `open` and telling each event to `told`.
+    /// Starts watching at once, opening with `open`, timing the throttle on `clock`, and telling
+    /// each event to `told`.
     public init(
         throttleInterval: Duration = InputMethodSupervisor.throttleInterval,
+        // [LAW:effects-at-boundaries] The throttle's clock is an effect the watch takes as a
+        // parameter, not the global one it reaches for, so a test drives it on controllable time.
+        clock: any MonotonicClock = SystemMonotonicClock(),
         open: @escaping @MainActor () async throws -> InputMethodProcess = { try await .open(InstalledInputMethod().bundle()) },
         told: @escaping @MainActor (Event) -> Void
     ) {
         self.told = told
         watching = Task { [weak self] in
-            var nextOpen = ContinuousClock.now
+            var nextOpen = clock.now
             for opening in 1... {
                 // Cancelled is the only way the sleep throws, and it ends the watch.
-                do { try await Task.sleep(until: nextOpen) } catch { return }
-                nextOpen = .now.advanced(by: throttleInterval)
+                do { try await clock.sleep(until: nextOpen) } catch { return }
+                nextOpen = clock.now.advanced(by: throttleInterval)
                 do {
                     let process = try await open()
                     self?.tell(.running(pid: process.pid, opening: opening))
@@ -80,6 +86,24 @@ public final class InputMethodSupervisor {
     // Released without a stop, it stops: a watch nobody holds would open the input method
     // forever. Only main-actor code holds this class, so its last release is there.
     deinit { MainActor.assumeIsolated { watching?.cancel() } }
+}
+
+/// The monotonic clock the watch throttles on: what `now` is, and a sleep until an instant of
+/// it. A narrow port with a concrete `Instant` so `any MonotonicClock` stays usable - stdlib
+/// `Clock` pins only its `Duration`, leaving `Instant` abstract and `now`/`sleep(until:)`
+/// uncallable through the existential. [LAW:effects-at-boundaries] [LAW:no-ambient-temporal-coupling]
+public protocol MonotonicClock: Sendable {
+    var now: ContinuousClock.Instant { get }
+    func sleep(until deadline: ContinuousClock.Instant) async throws
+}
+
+/// The real monotonic clock: `ContinuousClock`, which counts on past sleep and is never set back.
+public struct SystemMonotonicClock: MonotonicClock {
+    public init() {}
+    public var now: ContinuousClock.Instant { ContinuousClock.now }
+    public func sleep(until deadline: ContinuousClock.Instant) async throws {
+        try await Task.sleep(until: deadline)
+    }
 }
 
 /// One process of the input method, as LaunchServices answered for it.
