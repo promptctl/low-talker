@@ -69,7 +69,7 @@ import Testing
             feed = Feed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             let dictation = rig.dictation
-            try hotkey.start { dictation.press($0) }
+            try hotkey.start(feeding: dictation)
             steering = KeySteering(dictation: dictation, hotkey: hotkey)
         }
 

@@ -407,11 +407,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // nothing that would put a listening line over the refusal.
         let hearing = notices.flatMap { notices in
             Result {
-                try hotkey.start { [unowned self] transition in
-                    // A blocked chord is no press, so the last press's failure stands.
-                    if case .began = transition { lastFailure = nil }
-                    dictation.press(transition)
-                }
+                // A blocked chord is no press, so the last press's failure stands.
+                try hotkey.start(feeding: dictation) { [unowned self] in lastFailure = nil }
                 return notices
             }.mapError { error in
                 notices.stop()

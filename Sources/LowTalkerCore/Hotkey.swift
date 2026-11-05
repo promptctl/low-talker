@@ -8,6 +8,12 @@ extension Logger {
     static let hotkey = Logger(subsystem: AppIdentity.bundleIdentifier, category: "hotkey")
 }
 
+/// What the loop that heard a press's `began` says back when it refused the press: nothing will
+/// listen, so the hotkey must not latch it as a tap. A handler that took a transition says nil.
+public struct PressRefusal: Sendable {
+    public init() {}
+}
+
 /// The hotkey for the life of the app: the modifier keys as the window server's events tell
 /// them, a detector reading them, and the presses it finds handed on by the main queue.
 @MainActor
@@ -43,7 +49,10 @@ public final class Hotkey {
     private var detector: HotkeyDetector
     /// The feed that is running, and the handler its presses go to - kept together because a
     /// press still open when the feed stops is ended at that same handler.
-    private var installed: (dispose: Disposal, onTransition: @MainActor (HotkeyDetector.Transition) -> Void)?
+    private var installed: (dispose: Disposal, onTransition: Handler)?
+
+    /// Hears each transition and answers whether it refused the press that began.
+    public typealias Handler = @MainActor (HotkeyDetector.Transition) -> PressRefusal?
 
     public init(modes: Modes, tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed) {
         self.feed = feed
@@ -67,8 +76,11 @@ public final class Hotkey {
     public var isWatching: Bool { installed != nil }
 
     /// Starts watching. Each press begins and ends at `onTransition`, on the main actor and
-    /// on the main queue.
-    public func start(_ onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) throws {
+    /// on the main queue, and a press its handler refuses at `began` is not a tap that latches.
+    /// [LAW:single-enforcer] The detector applies the refusal, here, for every handler, and a
+    /// handler must answer one: there is no start whose handler can leave the answer out.
+    /// `start(feeding:)` is the one handler the app starts with.
+    public func start(_ onTransition: @escaping Handler) throws {
         stop()
         let dispose = try feed.install { [weak self] event in self?.handle(event, onTransition) }
         installed = (dispose, onTransition)
@@ -139,13 +151,24 @@ public final class Hotkey {
     /// first-in-first-out, which is what keeps a `began` ahead of the `ended` that
     /// follows it: `Dictation.press` traps on a pair out of order rather than repairing
     /// one, so the order is a correctness property and not a preference.
-    private func deliver(_ transition: HotkeyDetector.Transition,
-                         to onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) {
+    private func deliver(_ transition: HotkeyDetector.Transition, to onTransition: @escaping Handler) {
         Logger.hotkey.notice("\(transition, privacy: .public)")
-        DispatchQueue.main.async { MainActor.assumeIsolated { onTransition(transition) } }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                let refusal = onTransition(transition)
+                if case .began(_, let moment) = transition, refusal != nil { self?.refuse(pressBegunAt: moment, to: onTransition) }
+            }
+        }
     }
 
-    private func handle(_ event: KeyEvent, _ onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) {
+    /// The press begun at `moment` was refused by the loop. [LAW:nothing-unseen] The log says so
+    /// whether the detector ends the press now or leaves it to end as the chord comes up.
+    private func refuse(pressBegunAt moment: HostTime, to onTransition: @escaping Handler) {
+        Logger.hotkey.notice("the press begun at \(moment.uptime / .milliseconds(1)) ms of uptime was refused")
+        detector.refuse(pressBegunAt: moment, at: .now).map { deliver($0, to: onTransition) }
+    }
+
+    private func handle(_ event: KeyEvent, _ onTransition: @escaping Handler) {
         for transition in detector.handle(event) { deliver(transition, to: onTransition) }
     }
 }

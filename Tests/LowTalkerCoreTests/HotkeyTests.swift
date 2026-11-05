@@ -45,6 +45,13 @@ private func settle() async {
     }
 }
 
+extension Hotkey {
+    /// A handler that only records what it was told: a press it never refuses.
+    fileprivate func start(_ onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) throws {
+        try start { transition in onTransition(transition); return nil }
+    }
+}
+
 private let rightOption = Mode.dictation
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }
@@ -138,6 +145,59 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
         hotkey.stop()
         await settle()
         #expect(transitions.count == 2)
+    }
+
+    /// A handler that refuses the press it was handed at `began`, as `Dictation` does when no
+    /// microphone opens, takes nothing else.
+    private func refusing(_ transitions: Box) -> Hotkey.Handler {
+        { transition in
+            transitions.told.append(transition)
+            if case .began = transition { return PressRefusal() }
+            return nil
+        }
+    }
+
+    private final class Box {
+        var told: [HotkeyDetector.Transition] = []
+    }
+
+    /// The refusal is read while the chord is still down: the tap ends as the chord comes up and
+    /// latches nothing.
+    @Test func aRefusedPressTappedEndsAtTheReleaseAndLatchesNothing() async throws {
+        let feed = FakeFeed()
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
+        let box = Box()
+        try hotkey.start(refusing(box))
+        let installation = try #require(feed.installations.first)
+        installation.handle(rightOption(.down, at: 0))
+        await settle()
+        await settle()
+        installation.handle(rightOption(.up, at: 100))
+        await settle()
+        #expect(box.told == [.began(rightOption, at: at(0)), .ended(.released(.tap, at: at(100)))])
+        #expect(hotkey.phase == .idle)
+    }
+
+    /// The chord's release was read before the refusal was delivered: the press ends then, once,
+    /// after its beginning, so the next press of the chord begins a press.
+    @Test func aRefusalDeliveredAfterTheTapLatchedEndsItOnce() async throws {
+        let feed = FakeFeed()
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
+        let box = Box()
+        try hotkey.start(refusing(box))
+        let installation = try #require(feed.installations.first)
+        installation.handle(rightOption(.down, at: 0))
+        installation.handle(rightOption(.up, at: 100))
+        await settle()
+        await settle()
+        #expect(box.told.count == 2)
+        #expect(box.told.first == .began(rightOption, at: at(0)))
+        guard case .ended(.released(.tap, _)) = try #require(box.told.last) else { Issue.record("the press did not end as a tap: \(box.told)"); return }
+        #expect(hotkey.phase == .idle)
+
+        installation.handle(rightOption(.down, at: 1000))
+        await settle()
+        #expect(box.told.last == .began(rightOption, at: at(1000)))
     }
 
     /// A start puts a fresh feed up and takes the last one down.
