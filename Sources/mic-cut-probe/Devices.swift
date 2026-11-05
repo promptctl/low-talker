@@ -121,7 +121,14 @@ enum Devices {
         // The handler is set before the process runs: one that exits at once would otherwise be
         // gone before anything was waiting for it.
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { _ in continuation.resume() }
+            process.terminationHandler = { finished in
+                // A stimulus that was never played would read as a capture failure.
+                if finished.terminationStatus == 0 {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: Failure(description: "say exited \(finished.terminationStatus) playing into device \(loopback)"))
+                }
+            }
             do { try process.run() } catch { continuation.resume(throwing: error) }
         }
     }

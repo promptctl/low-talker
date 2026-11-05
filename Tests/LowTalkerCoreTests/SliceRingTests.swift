@@ -195,6 +195,52 @@ import Testing
         #expect(collected.appended.withLock { $0 }.isEmpty)
     }
 
+    /// A fault the ring had no room for is not reported, so it is tried again, and once there
+    /// is room it is reported exactly once: a press must not go silent over a fault dropped
+    /// from a full ring.
+    @Test func aFaultTheRingHadNoRoomForIsReportedOnceThereIsRoom() throws {
+        final class Held: Sendable {
+            let heard = Mutex(0)
+            let failures = Mutex<[String]>([])
+            let entered = DispatchSemaphore(value: 0)
+            let release = DispatchSemaphore(value: 0)
+        }
+        let held = Held()
+        let delivery = try SliceDelivery(
+            SliceRing(channels: 1, frames: 1_000, entries: 2),
+            layout: Self.mono,
+            slice: 100,
+            format: Self.format,
+            converter: AudioClip.Converter(from: Self.format),
+            appending: { _, _ in
+                // The first slice holds the delivery thread, so the ring's two entries fill behind it.
+                if held.heard.withLock({ $0 += 1; return $0 }) == 1 {
+                    held.entered.signal()
+                    held.release.wait()
+                }
+            },
+            onFailure: { error in held.failures.withLock { $0.append("\(error)") } }
+        )
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(1))
+        held.entered.wait()
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(2))
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(3))
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(4))
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(5))
+        held.release.signal()
+        // Slices 2 and 3 leave the ring as the thread takes them, which is the room the fault needs.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while held.heard.withLock({ $0 }) < 3, ContinuousClock.now < deadline {
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(6))
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(7))
+        delivery.finish()
+
+        let overlong = "\(AudioHardwareError.overlongSlice(frames: 200, capacity: 100))"
+        #expect(held.failures.withLock { $0 }.filter { $0 == overlong }.count == 1)
+    }
+
     /// A cycle of no frames is a device's to deliver and is neither heard nor a fault.
     @Test func aCycleOfNoFramesIsNotAFault() throws {
         let collected = Collected()
