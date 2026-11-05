@@ -149,6 +149,7 @@ import Testing
         #expect(Wire.question(id: Wire.returnTyped, payload: Wire.stamp(7.25)) == .returnTyped(at: 7.25))
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(0)) == .settled(at: 0))
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(-1)) == nil)
+        #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(1e12)) == nil)
         #expect(Wire.question(id: Wire.returnTyped, payload: nil) == nil)
         #expect(Wire.question(id: Wire.returnTyped, payload: Data("{}".utf8)) == nil)
         #expect(Wire.question(id: Wire.cursorArrived, payload: Wire.stamp(1)) == nil)

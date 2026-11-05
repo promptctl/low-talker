@@ -366,12 +366,17 @@ enum Wire {
 
     static func stamp(_ timestamp: TimeInterval) -> Data { try! JSONEncoder().encode(Stamp(timestamp: timestamp)) }
 
+    /// The latest moment a stamp may name: a machine up for 31 years. `HostTime(seconds:)` counts
+    /// nanoseconds in an Int64 and traps past 292 years, so a stamp beyond this is not a moment
+    /// on the clock whatever its size.
+    private static let latestStamp: TimeInterval = 1e9
+
     /// [LAW:parse-dont-validate] The question a message asks, or nil when it asks none this
-    /// app knows. A stamp that is not a finite moment on the clock is no question.
+    /// app knows. A stamp that is not a moment on the clock is no question.
     static func question(id: mach_msg_id_t, payload: Data?) -> Question? {
         guard id == returnTyped || id == settled else { return nil }
         guard let stamp = payload.flatMap({ try? JSONDecoder().decode(Stamp.self, from: $0) }),
-              stamp.timestamp.isFinite, stamp.timestamp >= 0 else { return nil }
+              (0...latestStamp).contains(stamp.timestamp) else { return nil }
         return id == returnTyped ? .returnTyped(at: stamp.timestamp) : .settled(at: stamp.timestamp)
     }
 
