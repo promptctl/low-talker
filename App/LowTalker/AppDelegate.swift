@@ -1033,7 +1033,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // how much, why it is not yet words, and the person's one discard of it. [LAW:nothing-unseen]
         for line in keptSpeech.lines { menu.addItem(errorRow(line, .keptSpeech)) }
         if !keptSpeech.kept.isEmpty {
-            menu.addItem(withTitle: "Discard Kept Speech (\(Int(keptSpeech.kept.reduce(0) { $0 + $1.seconds }.rounded())) s)", action: #selector(discardKeptSpeech), keyEquivalent: "")
+            menu.addItem(withTitle: "Discard Kept Speech (\(keptSpeech.keptSeconds) s)", action: #selector(discardKeptSpeech), keyEquivalent: "")
         }
         if let running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
         if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: the next press heard stops it")) }

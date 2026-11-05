@@ -50,8 +50,16 @@ public final class Recovery {
     }
 
     /// Keeps speech no engine heard, which is read as soon as an engine has landed, or when one does.
+    ///
+    /// [LAW:nothing-unseen] A speech the store could not keep is lost, and the log says so whatever
+    /// the press's report names first: a refused commit is named ahead of it.
     public func keep(_ speech: UnheardSpeech) throws(UnheardFault) {
-        kept.append(try store.keep(speech))
+        do throws(UnheardFault) {
+            kept.append(try store.keep(speech))
+        } catch {
+            Self.log.fault("\(speech.seconds, privacy: .public) s of speech no engine heard could not be kept, and is lost: \(error.description, privacy: .public)")
+            throw error
+        }
         Self.log.notice("kept \(speech.seconds, privacy: .public) s of speech no engine heard")
         recover()
     }
@@ -79,6 +87,9 @@ public final class Recovery {
         kept = []
         unread = [:]
     }
+
+    /// Whole seconds of speech kept, as the menu counts them.
+    public var keptSeconds: Int { Self.seconds(kept) }
 
     /// What the menu says: how much speech is kept and why it is not yet words, then every
     /// trouble with the store. Never the words, which are not yet words.
