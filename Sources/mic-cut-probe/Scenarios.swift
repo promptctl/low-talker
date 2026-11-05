@@ -65,7 +65,13 @@ final class Probe {
         let session = try capture.beginSession(at: .now, preRoll: 0)
         let streamed = capture.stream(session)
         let began = ContinuousClock.now
-        try await during()
+        do {
+            try await during()
+        } catch {
+            // A scenario that failed mid-press still ends it, so the microphone is not left open.
+            _ = capture.endSession(streamed)
+            throw error
+        }
         let elapsed = Self.seconds(ContinuousClock.now - began)
         let ending = capture.endSession(streamed)
         let reading = ending.reading
@@ -80,7 +86,7 @@ final class Probe {
         return heard
     }
 
-    func speak(seconds: Double = 4) async throws {
+    func speak() async throws {
         try await Devices.say("one two three four five six seven eight nine", into: loopback)
     }
 }
@@ -203,12 +209,13 @@ enum Scenarios {
     static func rate(_ probe: Probe) async throws {
         try Devices.setDefaultInput(probe.loopback)
         try await probe.start()
-        defer { try? Devices.setNominalRate(probe.loopback, to: 48_000) }
+        // Whatever the loopback runs at now, the other of the two common rates; `run` puts it back.
+        let target: Float64 = try Devices.nominalRate(probe.loopback) == 44_100 ? 48_000 : 44_100
         var changedAt = 0.0
-        let heard = try await probe.press("press with the loopback's rate changed to 44.1 kHz") {
+        let heard = try await probe.press("press with the loopback's rate changed to \(Int(target)) Hz") {
             try await Task.sleep(for: .seconds(1))
             changedAt = probe.now()
-            try Devices.setNominalRate(probe.loopback, to: 44_100)
+            try Devices.setNominalRate(probe.loopback, to: target)
             try await probe.speak()
         }
         probe.check(probe.lastRelaunch(after: changedAt) != nil, "capture relaunched after the rate changed")

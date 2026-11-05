@@ -161,23 +161,28 @@ import Testing
             return
         }
         #expect(mismatch.buffer == 1)
+        #expect(mismatch.reason == .unequalFrames(before: 4))
+        // The report says what differed: the channels match, so the frames are what it names.
+        #expect(mismatch.description == "buffer 1 of 2 held 20 bytes, 5 frames where the buffers before it held 4")
     }
 
     @Test func aSizeThatIsNotWholeFramesIsAShapeFault() {
         // Two channels of four bytes make eight-byte frames; twelve is a frame and a half.
         let list = List([(2, 8), (1, 4)], bytes: [0: 12])
-        guard case .shape = Self.stereoAndMono.verdict(of: list.base, capacity: 512) else {
+        guard case .shape(let mismatch) = Self.stereoAndMono.verdict(of: list.base, capacity: 512) else {
             Issue.record("expected a shape fault")
             return
         }
+        #expect(mismatch.reason == .partialFrame)
     }
 
     @Test func aSizeWithNoMemoryBehindItIsAShapeFault() {
         let list = List([(2, 8), (1, 4)], nullData: [1])
-        guard case .shape = Self.stereoAndMono.verdict(of: list.base, capacity: 512) else {
+        guard case .shape(let mismatch) = Self.stereoAndMono.verdict(of: list.base, capacity: 512) else {
             Issue.record("expected a shape fault")
             return
         }
+        #expect(mismatch.reason == .noMemory)
     }
 
     // MARK: how a render becomes the ring's planar samples
@@ -224,12 +229,12 @@ import Testing
     // MARK: what a fault means for the input
 
     @Test func aShapeThatChangedUnderAPressReplacesTheInput() {
-        let shape = ShapeMismatch(expectedBuffers: 1, gotBuffers: 2, buffer: 0, expectedChannels: 0, gotChannels: 0, gotBytes: 0)
+        let shape = ShapeMismatch(reason: .bufferCount, expectedBuffers: 1, gotBuffers: 2, buffer: 0, expectedChannels: 0, gotChannels: 0, gotBytes: 0)
         #expect(HALInput.route(of: AudioHardwareError.inputShapeChanged(shape)) == .replaceInput)
     }
 
     @Test func everyOtherFaultFailsThePress() {
-        let shape = ShapeMismatch(expectedBuffers: 1, gotBuffers: 2, buffer: 0, expectedChannels: 0, gotChannels: 0, gotBytes: 0)
+        let shape = ShapeMismatch(reason: .bufferCount, expectedBuffers: 1, gotBuffers: 2, buffer: 0, expectedChannels: 0, gotChannels: 0, gotBytes: 0)
         // A shape that never matched would be replaced into the same mismatch.
         #expect(HALInput.route(of: AudioHardwareError.shapeNeverMatched(shape)) == .failPress)
         #expect(HALInput.route(of: AudioHardwareError.overlongSlice(frames: 2, capacity: 1)) == .failPress)

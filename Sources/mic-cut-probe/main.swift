@@ -15,7 +15,8 @@ import Foundation
 ///     mic-cut-probe rate       change the loopback's sample rate mid-press
 ///
 /// Needs the terminal's microphone permission, BlackHole 2ch (or another loopback named with
-/// `--loopback`) to say the speech into, and changes the system default input while it runs.
+/// `--loopback`) to say the speech into, and changes the system default input while it runs,
+/// putting it and the loopback's sample rate back when it exits.
 /// Options: `--mic <name>` (default: the built-in microphone), `--loopback <name>`.
 /// Exits nonzero when a check fails.
 @MainActor
@@ -36,6 +37,14 @@ func run() async -> Int32 {
     do {
         let microphone = try microphoneName.map(Devices.named) ?? Devices.builtIn()
         let loopback = try Devices.named(loopbackName)
+        // The scenarios move the default input and the loopback's rate; the Mac is left as it was
+        // found, whichever way a scenario ends.
+        let defaultInput = try Devices.defaultInput()
+        let loopbackRate = try Devices.nominalRate(loopback)
+        defer {
+            try? Devices.setDefaultInput(defaultInput)
+            try? Devices.setNominalRate(loopback, to: loopbackRate)
+        }
         let probe = Probe(microphone: microphone, loopback: loopback)
         probe.log("microphone \"\(Devices.name(microphone))\", loopback \"\(Devices.name(loopback))\"")
         switch mode {

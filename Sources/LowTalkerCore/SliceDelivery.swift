@@ -33,10 +33,11 @@ final class SliceDelivery: @unchecked Sendable {
     /// for.
     private let capacity: Int
     /// The IO thread's alone, like `framesPushed` in the ring: whether a buffer list of the
-    /// layout has been pushed this press, and whether a shape fault has. A shape that stops
-    /// matching is reported once, however many renders follow it.
+    /// layout has been pushed this press, and whether a fault has. Either fault ends the press
+    /// (a shape change replaces the input, an overlong slice fails it), so it is reported
+    /// once, however many renders follow it.
     nonisolated(unsafe) private var matched = false
-    nonisolated(unsafe) private var shapeFaulted = false
+    nonisolated(unsafe) private var faulted = false
     /// How many of the ring's drops have been reported. The delivery thread's alone.
     nonisolated(unsafe) private var reportedDrops = 0
 
@@ -75,14 +76,15 @@ final class SliceDelivery: @unchecked Sendable {
     /// mismatch. [LAW:no-silent-failure] A device is free to deliver a cycle with no frames,
     /// which is not a shape fault.
     func deliver(_ list: UnsafePointer<AudioBufferList>, stamp: AudioTimeStamp) {
-        guard !shapeFaulted else { return }
+        guard !faulted else { return }
         switch layout.verdict(of: list, capacity: capacity) {
         case .empty:
             return
         case .overlong(let frames):
+            faulted = true
             ring.push(.overlongSlice(frames: frames, capacity: capacity))
         case .shape(let mismatch):
-            shapeFaulted = true
+            faulted = true
             ring.push(matched ? .inputShapeChanged(mismatch) : .shapeNeverMatched(mismatch))
         case .frames(let frames):
             matched = true

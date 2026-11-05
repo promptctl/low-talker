@@ -12,13 +12,33 @@ enum Devices {
 
     private static let system = AudioObjectID(kAudioObjectSystemObject)
 
-    static func all() -> [AudioObjectID] {
+    static func all() throws -> [AudioObjectID] {
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
-        AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size)
+        var status = AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size)
+        guard status == noErr else { throw Failure(description: "could not size the device list (status \(status))") }
         var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids)
+        status = AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids)
+        guard status == noErr else { throw Failure(description: "could not read the device list (status \(status))") }
         return ids
+    }
+
+    static func defaultInput() throws -> AudioObjectID {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var value = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(system, &address, 0, nil, &size, &value)
+        guard status == noErr else { throw Failure(description: "could not read the default input (status \(status))") }
+        return value
+    }
+
+    static func nominalRate(_ device: AudioObjectID) throws -> Float64 {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var value = Float64(0)
+        var size = UInt32(MemoryLayout<Float64>.size)
+        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
+        guard status == noErr else { throw Failure(description: "could not read \(name(device))'s rate (status \(status))") }
+        return value
     }
 
     static func string(_ device: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String {
@@ -39,8 +59,9 @@ enum Devices {
     }
 
     static func named(_ wanted: String) throws -> AudioObjectID {
-        guard let found = all().first(where: { name($0) == wanted && hasInput($0) }) else {
-            let have = all().filter(hasInput).map(name).joined(separator: ", ")
+        let devices = try all()
+        guard let found = devices.first(where: { name($0) == wanted && hasInput($0) }) else {
+            let have = devices.filter(hasInput).map(name).joined(separator: ", ")
             throw Failure(description: "no input device named \"\(wanted)\"; the inputs here are: \(have)")
         }
         return found
@@ -48,7 +69,7 @@ enum Devices {
 
     /// The built-in microphone when none is named: the one input a Mac always has.
     static func builtIn() throws -> AudioObjectID {
-        guard let found = all().first(where: { hasInput($0) && uid($0).contains("BuiltIn") }) else {
+        guard let found = try all().first(where: { hasInput($0) && uid($0).contains("BuiltIn") }) else {
             throw Failure(description: "no built-in microphone; name one with --mic")
         }
         return found
@@ -66,7 +87,7 @@ enum Devices {
     /// A public aggregate over `device`, which stays until it is destroyed - a private one
     /// would go with this process, and the scenarios destroy it mid-press on purpose.
     static func makeAggregate(over device: AudioObjectID) throws -> AudioObjectID {
-        for leftover in all() where name(leftover) == aggregateName { AudioHardwareDestroyAggregateDevice(leftover) }
+        for leftover in try all() where name(leftover) == aggregateName { AudioHardwareDestroyAggregateDevice(leftover) }
         let description: [String: Any] = [
             kAudioAggregateDeviceNameKey: aggregateName,
             kAudioAggregateDeviceUIDKey: "\(aggregateName)-uid",

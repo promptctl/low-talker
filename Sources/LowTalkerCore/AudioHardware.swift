@@ -126,8 +126,8 @@ public protocol AudioHardware {
     /// about. [LAW:one-source-of-truth]
     ///
     /// That lifetime is why the callback is asked for here rather than at `open`. A prepared
-    /// input is bound to one device and fixes its format, its render buffer and its
-    /// converter against the shape that device had when it was readied, so it can go stale
+    /// input is bound to one device and fixes its buffer layout and its converter
+    /// against the shape that device had when it was readied, so it can go stale
     /// for exactly as long as it exists - and watching only from `open` to its disposal left
     /// a device that renegotiates its format while the microphone rests heard by nobody, a
     /// headset changing codec being the ordinary way that happens. The next press then opened

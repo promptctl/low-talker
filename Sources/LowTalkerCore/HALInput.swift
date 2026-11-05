@@ -369,7 +369,8 @@ final class HALInput: PreparedInput {
         let asked = Result { try Self.defaultInput() }
         self.asked = asked
         reach = Elsewhere(on: Self.readying) { try Reach(binding: asked.get(), onStale: onStale) }
-        self.onStale = onStale    }
+        self.onStale = onStale
+    }
 
     /// The device this input is bound to, once readying has bound one.
     var device: AudioObjectID {

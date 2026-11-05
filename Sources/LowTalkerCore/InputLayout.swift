@@ -75,24 +75,25 @@ struct InputLayout: Sendable, Equatable {
     /// it, is not a buffer of this shape.
     func verdict(of list: UnsafePointer<AudioBufferList>, capacity: Int) -> Verdict {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
-        guard list.count == buffers.count else {
-            return .shape(ShapeMismatch(expectedBuffers: buffers.count, gotBuffers: list.count, buffer: 0, expectedChannels: 0, gotChannels: 0, gotBytes: 0))
+        func mismatch(_ reason: ShapeMismatch.Reason, at index: Int = 0) -> Verdict {
+            let buffer = index < list.count ? list[index] : AudioBuffer()
+            return .shape(ShapeMismatch(
+                reason: reason, expectedBuffers: buffers.count, gotBuffers: list.count, buffer: index,
+                expectedChannels: index < buffers.count ? buffers[index] : 0,
+                gotChannels: Int(buffer.mNumberChannels), gotBytes: Int(buffer.mDataByteSize)
+            ))
         }
+        guard list.count == buffers.count else { return mismatch(.bufferCount) }
         var frames: Int?
         for index in 0..<buffers.count {
             let buffer = list[index]
             let expected = buffers[index]
             let bytes = Int(buffer.mDataByteSize)
-            guard Int(buffer.mNumberChannels) == expected,
-                  bytes % (MemoryLayout<Float>.size * expected) == 0,
-                  bytes == 0 || buffer.mData != nil
-            else {
-                return .shape(ShapeMismatch(expectedBuffers: buffers.count, gotBuffers: list.count, buffer: index, expectedChannels: expected, gotChannels: Int(buffer.mNumberChannels), gotBytes: bytes))
-            }
+            guard Int(buffer.mNumberChannels) == expected else { return mismatch(.channels, at: index) }
+            guard bytes % (MemoryLayout<Float>.size * expected) == 0 else { return mismatch(.partialFrame, at: index) }
+            guard bytes == 0 || buffer.mData != nil else { return mismatch(.noMemory, at: index) }
             let these = bytes / (MemoryLayout<Float>.size * expected)
-            guard these == (frames ?? these) else {
-                return .shape(ShapeMismatch(expectedBuffers: buffers.count, gotBuffers: list.count, buffer: index, expectedChannels: expected, gotChannels: Int(buffer.mNumberChannels), gotBytes: bytes))
-            }
+            guard these == (frames ?? these) else { return mismatch(.unequalFrames(before: frames ?? these), at: index) }
             frames = these
         }
         guard let frames, frames > 0 else { return .empty }
@@ -103,6 +104,20 @@ struct InputLayout: Sendable, Equatable {
 /// The first buffer of a render that was not of the shape the microphone was readied under,
 /// in integers only, because it is made on the IO thread. [LAW:nothing-unseen]
 public struct ShapeMismatch: Equatable, Sendable, CustomStringConvertible {
+    /// Which check the buffer failed, because the integers alone do not say: two buffers of
+    /// one channel each can differ only in how many frames they hold.
+    enum Reason: Equatable, Sendable {
+        case bufferCount
+        case channels
+        /// A byte size that is not a whole number of frames of the buffer's channels.
+        case partialFrame
+        /// A byte size with no memory behind it.
+        case noMemory
+        /// A different number of frames from the buffers before it.
+        case unequalFrames(before: Int)
+    }
+
+    let reason: Reason
     let expectedBuffers: Int
     let gotBuffers: Int
     let buffer: Int
@@ -111,10 +126,15 @@ public struct ShapeMismatch: Equatable, Sendable, CustomStringConvertible {
     let gotBytes: Int
 
     public var description: String {
-        if expectedBuffers != gotBuffers {
-            return "\(gotBuffers) buffers where \(expectedBuffers) were expected"
+        let held = "buffer \(buffer) of \(gotBuffers) held \(gotBytes) bytes"
+        switch reason {
+        case .bufferCount: return "\(gotBuffers) buffers where \(expectedBuffers) were expected"
+        case .channels: return "\(held) over \(gotChannels) channels where \(expectedChannels) were expected"
+        case .partialFrame: return "\(held), which is not a whole number of frames of \(expectedChannels) channels"
+        case .noMemory: return "\(held) with no memory behind them"
+        case .unequalFrames(let before):
+            return "\(held), \(gotBytes / (MemoryLayout<Float>.size * max(expectedChannels, 1))) frames where the buffers before it held \(before)"
         }
-        return "buffer \(buffer) of \(gotBuffers) held \(gotBytes) bytes over \(gotChannels) channels where \(expectedChannels) were expected"
     }
 }
 

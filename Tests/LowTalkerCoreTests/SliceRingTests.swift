@@ -159,7 +159,7 @@ import Testing
         Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(3))
         delivery.finish()
 
-        let mismatch = ShapeMismatch(expectedBuffers: 1, gotBuffers: 1, buffer: 0, expectedChannels: 1, gotChannels: 2, gotBytes: 80)
+        let mismatch = ShapeMismatch(reason: .channels, expectedBuffers: 1, gotBuffers: 1, buffer: 0, expectedChannels: 1, gotChannels: 2, gotBytes: 80)
         #expect(collected.failures.withLock { $0 } == ["\(AudioHardwareError.shapeNeverMatched(mismatch))"])
         #expect(collected.appended.withLock { $0 }.isEmpty)
     }
@@ -175,9 +175,23 @@ import Testing
         delivery.deliver(wrong.base, stamp: Self.stamp(3))
         delivery.finish()
 
-        let mismatch = ShapeMismatch(expectedBuffers: 1, gotBuffers: 1, buffer: 0, expectedChannels: 1, gotChannels: 2, gotBytes: 80)
+        let mismatch = ShapeMismatch(reason: .channels, expectedBuffers: 1, gotBuffers: 1, buffer: 0, expectedChannels: 1, gotChannels: 2, gotBytes: 80)
         #expect(collected.failures.withLock { $0 } == ["\(AudioHardwareError.inputShapeChanged(mismatch))"])
         #expect(collected.appended.withLock { $0 }.flatMap(\.0) == (0..<10).map(Float.init))
+    }
+
+    /// An oversized render fails the press, and a device whose buffers stay oversized does not
+    /// push a fault, and ring the delivery thread, on every cycle after it.
+    @Test func anOverlongRenderIsReportedOnce() throws {
+        let collected = Collected()
+        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        for index in 0..<5 {
+            Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(UInt64(index + 1)))
+        }
+        delivery.finish()
+
+        #expect(collected.failures.withLock { $0 } == ["\(AudioHardwareError.overlongSlice(frames: 200, capacity: 100))"])
+        #expect(collected.appended.withLock { $0 }.isEmpty)
     }
 
     /// A cycle of no frames is a device's to deliver and is neither heard nor a fault.
@@ -204,8 +218,9 @@ import Testing
         // the thread has got.
         let delivery = try collected.delivery(SliceRing(channels: 1, frames: 50, entries: 8), slice: 100)
         Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(5, valid: false))
-        Self.deliver(delivery, from: 0, frames: 150, at: Self.stamp(6))
-        Self.deliver(delivery, from: 0, frames: 60, at: Self.stamp(7))
+        Self.deliver(delivery, from: 0, frames: 60, at: Self.stamp(6))
+        // Last: an oversized render fails the press, and nothing after it is delivered.
+        Self.deliver(delivery, from: 0, frames: 150, at: Self.stamp(7))
         delivery.finish()
 
         #expect(collected.appended.withLock { $0 }.isEmpty)
