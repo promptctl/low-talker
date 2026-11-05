@@ -530,7 +530,10 @@ public final class Dictation {
     /// The decode of the latest press, which the next press's decode waits out before it
     /// takes the engine. Nil until the first press.
     private var latestDecode: Task<Decoded, Never>?
-    private nonisolated let sessions = SerialQueue()
+    /// The loop's one turn: every commit, insert, offer and bring-back runs on it, and so does
+    /// the hand-off of words read from kept speech, which is why it is given and not made here.
+    private nonisolated let sessions: SerialQueue
+    private let recovery: Recovery
 
     /// `engine` is asked at each key-down, before the microphone opens: it throws when no
     /// engine can hear the press, and the press is refused before anything is said into it.
@@ -541,13 +544,17 @@ public final class Dictation {
     /// speaker for them. [LAW:dataflow-not-control-flow] `report` hears every press's
     /// outcome and what its microphone delivered on the main actor, in the order the presses came. `showing` hears the loop's
     /// activity each time it changes: a press beginning or ending, a pass reading the open
-    /// press, an outcome reported.
+    /// press, an outcome reported. `sessions` is the loop's turn, shared with `recovery`, which
+    /// keeps the speech of a press whose engine failed under it and hands the words it is read
+    /// into to `hold` in that turn.
     public init(
         capture: AudioCapture,
         engine: @escaping @MainActor () throws(EngineUnavailable) -> Engine,
         turns: EngineTurns,
         executor: Executor,
         hold: Hold,
+        sessions: SerialQueue,
+        recovery: Recovery,
         report: @escaping @Sendable @MainActor (Report) -> Void,
         showing: @escaping @Sendable @MainActor (Activity) -> Void
     ) {
@@ -556,6 +563,8 @@ public final class Dictation {
         self.turns = turns
         self.executor = executor
         self.hold = hold
+        self.sessions = sessions
+        self.recovery = recovery
         self.report = report
         self.showing = showing
     }
@@ -804,13 +813,25 @@ public final class Dictation {
     ///
     /// The hold ends with the transcript, whatever became of it: the insert that follows is
     /// not the engine's, and served callers wait for this press and no longer.
+    ///
+    /// [LAW:no-silent-failure] An engine that fails while the press waits on it leaves the press's
+    /// audio unheard, which is all that is left of what was said: it is read to the end of the
+    /// press and handed back in the failure as `PressUnheard`, for `hear` to keep, and not dropped
+    /// with the stream. The hold is let go first, since there is no engine to serve anyone with.
     private func decode(_ audio: AsyncStream<AudioClip>, on hearing: @escaping Engine, expecting vocabulary: Vocabulary, into streaming: Streaming, releasing hold: EngineHold) -> Task<Decoded, Never> {
         let before = latestDecode
         let decode = Task {
             _ = await before?.value
+            let engine: any Transcriber
+            do throws(EngineUnavailable) { engine = try await hearing() } catch {
+                let displaced = hold.release()
+                var samples: [Float] = []
+                for await clip in audio { samples += clip.samples }
+                streaming.decoded()
+                let unheard = PressUnheard(cause: error, speech: UnheardSpeech(said: .now, vocabulary: vocabulary.terms.map(\.text), samples: samples))
+                return Decoded(transcription: .failure(Failed(unheard)), at: .now, displaced: displaced)
+            }
             let transcription = await Result { () async throws(Failed) in
-                let engine: any Transcriber
-                do throws(EngineUnavailable) { engine = try await hearing() } catch { throw Failed(error) }
                 do throws(TranscriptionFailure) {
                     return try await engine.transcribe(audio, expecting: vocabulary) { streaming.heard($0) }
                 } catch { throw Failed(error) }
@@ -981,6 +1002,20 @@ public final class Dictation {
         return .cancelled(cancelled)
     }
 
+    /// A failure that left the press's audio unheard, once that audio is kept, and any other
+    /// failure as it was. What the press says is what became of the audio: kept to be read when
+    /// an engine lands, or lost, with the reason, since a keep that failed is no keep.
+    /// [LAW:no-silent-failure]
+    private func keeping(_ failure: any Accounted) -> any Accounted {
+        guard let unheard = failure as? PressUnheard else { return failure }
+        do throws(UnheardFault) {
+            try recovery.keep(unheard.speech)
+            return AudioKept(cause: unheard.cause, seconds: unheard.speech.seconds, trouble: nil)
+        } catch {
+            return AudioKept(cause: unheard.cause, seconds: unheard.speech.seconds, trouble: error)
+        }
+    }
+
     /// Waits for the press's commits and its decode, then places what was heard and not yet
     /// committed: at the cursor for a press the speaker released, in the hold for one cut
     /// short, and nowhere for a chord that was a typed key's modifier. Every press waits for
@@ -1006,8 +1041,10 @@ public final class Dictation {
                 // read past the commits is held, the words said after them missing.
                 let rest = heard.streaming.rest(of: heard.streaming.reading)
                 if !rest.isBlank { hold.heldBack(rest, warning: PressStopped.readingFailed) }
-                // A refused commit came before the decode's end, so the report names it first.
-                throw stopped(unplaced ?? failed.failure)
+                // A refused commit came before the decode's end, so the report names it first. The
+                // audio is kept whether or not one was refused.
+                let cause = keeping(failed.failure)
+                throw stopped(unplaced ?? cause)
             }
             let placed: Placed
             do throws(InsertFailure) {
@@ -1037,7 +1074,7 @@ public final class Dictation {
             switch decoded.transcription {
             case .success: unread = nil
             case .failure(let failed):
-                if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = failed.failure }
+                if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = keeping(failed.failure) }
             }
             let held = rest.isBlank ? 0 : rest.words.count
             // A cut that heard nothing past the commits leaves the hold's warning on the words
@@ -1153,6 +1190,35 @@ public struct SpeechLost: WordFree {
     static func warning(_ lost: CapturedAudio.Loss) -> String { "WARNING: \(lost)." }
 
     public var description: String { "\(Self.warning(lost)) \(kept(landed: landed, held: held))" }
+}
+
+/// A press the engine failed under while it waited on the model's load, which left its audio
+/// unheard. Carries the speech to `hear`, which keeps it; reported only as `AudioKept`.
+struct PressUnheard: WordFree {
+    let cause: EngineUnavailable
+    let speech: UnheardSpeech
+
+    var description: String { "\(cause), so \(Int(speech.seconds.rounded())) s of speech went unheard" }
+}
+
+/// What became of the audio of a press the engine failed under: kept, to be read into held words
+/// once the model has loaded, or lost because it could not be kept.
+///
+/// Word-free: it is a count of seconds and the load's own reason, and the engine read none of the
+/// audio.
+public struct AudioKept: WordFree {
+    public let cause: EngineUnavailable
+    public let seconds: TimeInterval
+    /// Why it could not be kept, when it could not.
+    public let trouble: UnheardFault?
+
+    public var description: String {
+        let said = "\(Int(seconds.rounded())) s"
+        return switch trouble {
+        case nil: "WARNING: The model failed to load (\(cause)), so nothing could hear what you said. The \(said) of it is kept, and will be held as words once the model has loaded."
+        case let trouble?: "WARNING: The model failed to load (\(cause)), so nothing could hear what you said, and the \(said) of it could not be kept (\(trouble)), so it is lost."
+        }
+    }
 }
 
 /// A press that stopped after it began: an insert refused, the engine failed, or what was

@@ -73,6 +73,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sessions.notice("held: \(state, privacy: .public)")
     }
 
+    /// The loop's one turn: every insert, offer and bring-back runs on it, and so does the hand-off
+    /// of words read from kept speech to `hold`. For the life of the app, so every loop `adopt`
+    /// rebuilds takes the same one. [LAW:single-enforcer]
+    private let loopTurn = SerialQueue()
+
+    /// Speech no engine heard, for the life of the app and past it: a press the model failed to
+    /// load under keeps its audio here, and it is read into held words once a model has loaded, in
+    /// this launch or the next.
+    private lazy var keptSpeech = Recovery(store: UnheardFiles.app, hold: hold, sessions: loopTurn)
+
     /// When this process began, which every readout of the engine's wait counts from.
     private let launched = ContinuousClock.now
 
@@ -375,6 +385,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             turns: turns,
             executor: Executor(insertingThrough: inserter),
             hold: hold,
+            sessions: loopTurn,
+            recovery: keptSpeech,
             report: { [unowned self] in report($0) },
             showing: { [unowned self] in show($0) }
         )
@@ -702,6 +714,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         show(.preparing(nil, since: launched))
         statusItem.isVisible = true
         watchStatusItem()
+        // Before the engine, so speech kept by an earlier run is found at launch and the first
+        // load that lands has it to read. [LAW:no-ambient-temporal-coupling]
+        _ = keptSpeech
         _ = engine
         // What the last run held is shown from launch, not from the first loop, which waits on
         // the microphone grant. [LAW:nothing-unseen] So is a store that could not be read.
@@ -851,6 +866,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let transcriber = try await WhisperKitTranscriber(installed, turns: turns)
             show(.ready(transcriber.model, after: since.duration(to: .now)))
             serving?.answer(with: .ready(transcriber.served))
+            // Reads the speech kept while no engine could hear it, as a served caller: its passes
+            // wait while a press holds the engine. Starts a task and returns, so this load never
+            // waits on a decode that waits on the press that waits on this load.
+            keptSpeech.landed(transcriber.served)
             return transcriber
         } catch {
             // [LAW:no-silent-failure] A model that failed to load is the one thing the
@@ -1010,6 +1029,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let dismissed = hold.dismissed {
             menu.addItem(withTitle: "Bring Back Dismissed Words (\(dismissed.allWords.words.count))", action: #selector(bringBackDismissed), keyEquivalent: "")
         }
+        // Speech a press said before the model had loaded, which is audio until an engine reads it:
+        // how much, why it is not yet words, and the person's one discard of it. [LAW:nothing-unseen]
+        for line in keptSpeech.lines { menu.addItem(errorRow(line, .keptSpeech)) }
+        if !keptSpeech.kept.isEmpty {
+            menu.addItem(withTitle: "Discard Kept Speech (\(keptSpeech.keptSeconds) s)", action: #selector(discardKeptSpeech), keyEquivalent: "")
+        }
         if let running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
         if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: the next press heard stops it")) }
         // Every requirement, met or not, and its step under it as the lines it was
@@ -1044,6 +1069,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "Quit \(AppIdentity.displayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 
+    @objc private func discardKeptSpeech() {
+        keptSpeech.discard()
+    }
+
     @objc private func bringBackDismissed() {
         // [LAW:nothing-unseen] A click with no loop to bring them back through moves nothing, and says so.
         let unheard = listening == nil ? ", with no loop listening to bring them back" : ""
@@ -1059,7 +1088,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Which of the menu's lines failed, as the log names it when that line is copied.
     private enum FailedLine: String {
-        case model, server, microphone, hotkey, lastDictation, heldWords, config
+        case model, server, microphone, hotkey, lastDictation, heldWords, keptSpeech, config
     }
 
     /// A line that says what failed, which a click copies whole to the clipboard.
