@@ -1019,7 +1019,8 @@ public final class Dictation {
             if let unplaced { throw stopped(unplaced) }
             return .usedAsModifier(landed: landed.words, discarded: discarded)
         case .cancelled:
-            preconditionFailure("a cancelled press is heard by `cancel`, before its decode is waited on")
+            // Taken above, before the decode was waited on; this is the same answer, never a trap.
+            return try await cancel(heard)
         case .cut(let cut):
             // What the decode heard past the commits, and what kept it from reading them: a failed
             // decode leaves what the passes during the hold read. Nothing spoken is nothing more
