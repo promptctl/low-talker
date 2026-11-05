@@ -298,6 +298,36 @@ private struct LoadFailed: Error, CustomStringConvertible {
         #expect(rig.unheard.kept.isEmpty)
     }
 
+    /// A press's decode fails inside the loop's turn, which is where `keep` is called from after the
+    /// landing; the read it starts hands its words over through that same turn, and is not part of it.
+    @Test(.timeLimit(.minutes(1))) func speechKeptFromInsideTheLoopsTurnIsReadAfterTheTurnEnds() async throws {
+        let rig = try await Self.rig()
+        rig.recovery.landed(Self.reading(rig.turns).served)
+
+        try await rig.sessions.submit { [recovery = rig.recovery] in await MainActor.run { try? recovery.keep(Self.said(2)) } }.value
+        await rig.recovery.settled()
+
+        #expect(rig.hold.held?.allWords.text == " second")
+        #expect(rig.unheard.kept.isEmpty)
+    }
+
+    /// Speech kept while a discarded read is still winding down is read too: the cancelled run ends
+    /// and the next one starts for it.
+    @Test(.timeLimit(.minutes(1))) func speechKeptWhileADiscardedReadWindsDownIsStillRead() async throws {
+        let rig = try await Self.rig(over: try Self.store(Self.said(1)))
+        let inside = Gate()
+        rig.recovery.landed(Self.reading(rig.turns, inside: inside).served)
+        await inside.changed.settled { inside.waiting == 1 }
+
+        rig.recovery.discard()
+        try rig.recovery.keep(Self.said(2))
+        inside.open()
+        await rig.recovery.settled()
+
+        #expect(rig.hold.held?.allWords.text == " second")
+        #expect(rig.unheard.kept.isEmpty)
+    }
+
     /// A file that could not be removed once its words were held is told, since a launch that
     /// read it again would hold them twice.
     @Test(.timeLimit(.minutes(1))) func aFileThatCannotBeRemovedAfterItsWordsAreHeldIsToldAsATrouble() async throws {

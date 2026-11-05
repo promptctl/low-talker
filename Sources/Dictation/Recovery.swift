@@ -99,20 +99,24 @@ public final class Recovery {
         while let recovering { await recovering.value }
     }
 
+    /// `keep` is called from inside the loop's turn, whose queue refuses a wait from any task that
+    /// inherits it, and the hand-off in `read` is such a wait: so the run is detached.
     private func recover() {
-        guard recovering == nil, let engine else { return }
-        recovering = Task { await run(on: engine) }
+        guard recovering == nil, let engine, kept.contains(where: { unread[$0.id] == nil }) else { return }
+        recovering = Task.detached { [self] in await run(on: engine) }
     }
 
     /// Reads each kept speech not yet tried, oldest first, each either removed or marked unread:
     /// one that fails neither blocks the speech behind it nor is tried again. Ends, and says so,
     /// in the same step as it finds nothing left to read, so a speech kept in between starts
-    /// another run. [LAW:no-ambient-temporal-coupling]
+    /// another run. A run a discard cancelled ends the same way, and speech kept since the
+    /// discard gets the run that follows. [LAW:no-ambient-temporal-coupling]
     private func run(on engine: any Transcriber) async {
         while !Task.isCancelled, let entry = kept.first(where: { unread[$0.id] == nil }) {
             await read(entry, on: engine)
         }
         recovering = nil
+        recover()
     }
 
     private func read(_ entry: UnheardEntry, on engine: any Transcriber) async {
