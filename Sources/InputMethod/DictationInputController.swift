@@ -44,22 +44,30 @@ public final class DictationInputController: IMKInputController {
         super.init(server: server, delegate: delegate, client: inputClient)
         // [LAW:nothing-unseen] A controller's whole life, so an orphaned one (IMK rule 5) is
         // seen to have been made and never to have ended.
-        imkLog.log("\(controllerLine(controller: UInt(bitPattern: ObjectIdentifier(self)), "was made"), privacy: .public)")
-    }
-
-    deinit {
-        imkLog.log("\(controllerLine(controller: UInt(bitPattern: ObjectIdentifier(self)), "ended"), privacy: .public)")
-    }
-
-    /// One of this controller's lines about the client it holds, which says which controller it
-    /// is, and that it holds none when it does not.
-    private func said(_ event: String, about client: Client?) -> String {
-        controllerLine(controller: UInt(bitPattern: ObjectIdentifier(self)), event, client: client?.description ?? "holding no client")
+        logLife("was made")
     }
 
     nonisolated override public init() {
         super.init()
-        imkLog.log("\(controllerLine(controller: UInt(bitPattern: ObjectIdentifier(self)), "was made"), privacy: .public)")
+        logLife("was made")
+    }
+
+    deinit {
+        logLife("ended")
+    }
+
+    nonisolated private var address: UInt { UInt(bitPattern: ObjectIdentifier(self)) }
+
+    /// A line about the controller alone, said on whichever thread IMK builds and frees it.
+    nonisolated private func logLife(_ event: String) {
+        imkLog.log("\(controllerLine(controller: self.address, event), privacy: .public)")
+    }
+
+    /// One of this controller's lines about the client it holds, which says which controller it
+    /// is, and that it holds none when it does not. A client that did not arrive with an
+    /// activation is the one it already held, so the line says "holding" either way.
+    private func said(_ event: String, about client: Client?) -> String {
+        controllerLine(controller: address, event, client: client.map { "holding \($0)" } ?? "holding no client")
     }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
