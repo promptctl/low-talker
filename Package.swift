@@ -45,7 +45,7 @@ let package = Package(
         // input method says, so the app reaches it without the input method process linking
         // anything of the app's. [LAW:one-way-deps]
         .target(name: "InputSource", dependencies: ["Identity", "TextInputSources", "Insertion"]),
-        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion"]),
+        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion", "TestProbes"]),
         // What macOS has let this process do - listen - read without ever prompting, and asked
         // for only when called. Beneath the core and the setup list alike, so both read one
         // reading. [LAW:one-way-deps]
