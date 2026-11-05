@@ -1,5 +1,17 @@
 import AppKit
+import Identity
 import InputMethodKit
+import os
+
+/// A line about one controller: which it is, what happened to it, and what it says of its
+/// client, when there is something to say. Nothing is decided from any of it.
+///
+/// The controller is its address, which the allocator hands to a later controller once this one
+/// has ended: read the lines in order, and "made" minus "ended" at one address is still how many
+/// are live.
+nonisolated func controllerLine(controller: UInt, _ event: String, client: String? = nil) -> String {
+    "controller 0x\(String(controller, radix: 16)) \(event)" + (client.map { ", \($0)" } ?? "")
+}
 
 /// The controller macOS gives each client to while this input method is the selected source,
 /// which declines every key it is offered but a bare Return and an Escape, and holds those only
@@ -30,9 +42,33 @@ public final class DictationInputController: IMKInputController {
     /// are, which a main-actor class does not inherit.
     nonisolated override public init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
+        // [LAW:nothing-unseen] A controller's whole life, so an orphaned one (IMK rule 5) is
+        // seen to have been made and never to have ended.
+        logLife("was made")
     }
 
-    nonisolated override public init() { super.init() }
+    nonisolated override public init() {
+        super.init()
+        logLife("was made")
+    }
+
+    deinit {
+        logLife("ended")
+    }
+
+    nonisolated private var address: UInt { UInt(bitPattern: ObjectIdentifier(self)) }
+
+    /// A line about the controller alone, said on whichever thread IMK builds and frees it.
+    nonisolated private func logLife(_ event: String) {
+        imkLog.log("\(controllerLine(controller: self.address, event), privacy: .public)")
+    }
+
+    /// One of this controller's lines about the client it holds, which says which controller it
+    /// is, and that it holds none when it does not. A client that did not arrive with an
+    /// activation is the one it already held, so the line says "holding" either way.
+    private func said(_ event: String, about client: Client?) -> String {
+        controllerLine(controller: address, event, client: client.map { "holding \($0)" } ?? "holding no client")
+    }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
     /// studious, 2026-09-27), which is every key typed. The app hears the modifier keys itself,
@@ -49,6 +85,9 @@ public final class DictationInputController: IMKInputController {
     nonisolated override public func handle(_ event: NSEvent?, client _: Any!) -> Bool {
         // Debug level: this is made once per key typed anywhere.
         onMainActor("handle", event, level: .debug) { event in
+            // Which controller a key reaches is the one thing in this process that says which
+            // window has the keyboard. [LAW:nothing-unseen] Debug level, like the hop line.
+            imkLog.debug("\(self.said("was handed an event", about: self.cursor), privacy: .public)")
             guard let event, event.type == .keyDown,
                   let key = SteeringKey(keyCode: event.keyCode, flags: event.modifierFlags) else { return false }
             let kept = SteeringGate.shared.verdict(for: key, at: event.timestamp) == .keep
@@ -94,6 +133,10 @@ public final class DictationInputController: IMKInputController {
             let arriving = (sender as? IMKTextInput).flatMap { Client($0, inFront: frontmost) }
             self.cursor = arriving ?? self.cursor
             arriving.map(FocusedClient.shared.took)
+            // [LAW:nothing-unseen] Which controller and which client, so two windows of one app
+            // that activate in the same millisecond are two lines that say so, and a sender that
+            // made no cursor is the controller's own held one, named.
+            imkLog.log("\(self.said(arriving == nil ? "activated without a usable client" : "activated", about: self.cursor), privacy: .public)")
             // Told after it is taken, so words the app offers in answer find it in front.
             arriving.map { Notices.shared.cursorArrived(in: $0.application) }
         }
@@ -106,6 +149,7 @@ public final class DictationInputController: IMKInputController {
     /// client would be a different object and the comparison would always miss.
     nonisolated override public func deactivateServer(_: Any!) {
         onMainActor("deactivateServer", ()) {
+            imkLog.log("\(self.said("deactivated", about: self.cursor), privacy: .public)")
             self.cursor.map(FocusedClient.shared.left)
             self.cursor = nil
         }
