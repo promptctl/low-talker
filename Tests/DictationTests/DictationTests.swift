@@ -28,7 +28,7 @@ final class Rig {
     /// name the moment a key went down in the middle of speech already spoken.
     private(set) var now = Rig.origin
     let inputMethod = FakeInputMethod()
-    let turns = EngineTurns()
+    let turns: EngineTurns
     let dictation: Dictation
     /// Moved whenever any effect a test waits on lands - an insert, audio heard, the hold
     /// changing, an activity shown, a report. A test awaits `until` rather than polling a clock.
@@ -45,13 +45,22 @@ final class Rig {
     let hold: Hold
     /// Where they are kept, which outlives the app.
     let store: FakeHeldStore
+    /// The loop's one turn, shared with `recovery` as the app shares it.
+    let sessions = SerialQueue()
+    /// Where speech no engine heard is kept, which outlives the app.
+    let unheard: FakeUnheardStore
+    /// The consumer of that speech, for the life of the app as the hold is.
+    let recovery: Recovery
 
     init(
         engine: @escaping @MainActor () throws(EngineUnavailable) -> Dictation.Engine,
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
-        keeping store: FakeHeldStore = FakeHeldStore()
+        keeping store: FakeHeldStore = FakeHeldStore(),
+        keepingSpeech unheard: FakeUnheardStore = FakeUnheardStore(),
+        turns: EngineTurns = EngineTurns()
     ) async throws {
+        self.turns = turns
         capture = AudioCapture(retaining: retaining, hardware: hardware, startingAt: Self.origin, reporting: { _ in })
         // Shut between presses unless a test says otherwise, which is the loop the app
         // runs when no config file asks for the microphone to be held.
@@ -68,12 +77,16 @@ final class Rig {
             failedToKeep: { shown.unkept.append($0); changes.note() },
             showing: { shown.states.append($0); changes.note() }
         )
+        self.unheard = unheard
+        recovery = Recovery(store: unheard, hold: hold, sessions: sessions)
         dictation = Dictation(
             capture: capture,
             engine: engine,
             turns: turns,
             executor: Executor(insertingThrough: inputMethod),
             hold: hold,
+            sessions: sessions,
+            recovery: recovery,
             report: { press in
                 reported.raise()
                 feed.yield(press)
@@ -1706,6 +1719,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rebuilt = Dictation(
             capture: rig.capture, engine: { { FakeTranscriber { _ in Transcript(typed: "") } } }, turns: rig.turns,
             executor: Executor(insertingThrough: rig.inputMethod), hold: rig.hold,
+            sessions: rig.sessions, recovery: rig.recovery,
             report: { _ in }, showing: { _ in })
         rig.inputMethod.refusing(nil)
         rebuilt.cursorArrived()
