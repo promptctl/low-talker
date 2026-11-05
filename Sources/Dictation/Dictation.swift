@@ -435,7 +435,7 @@ public final class Dictation {
     /// The decode of the latest press, which the next press's decode waits out before it
     /// takes the engine. Nil until the first press.
     private var latestDecode: Task<Decoded, Never>?
-    private let sessions = SerialQueue()
+    private nonisolated let sessions = SerialQueue()
 
     /// `engine` is asked at each key-down, before the microphone opens: it throws when no
     /// engine can hear the press, and the press is refused before anything is said into it.
@@ -657,6 +657,35 @@ public final class Dictation {
     /// enough to probably cover them.
     public func finish() async throws(SerialQueueError) {
         try await sessions.drain()
+    }
+
+    /// Whether words are owed to a cursor: a press is open, or one that ended has inserts not yet
+    /// acknowledged. A press puts its commits on the sessions queue at key-down and everything
+    /// it inserts after goes behind them, so open, decoding and inserting are one fact, the
+    /// queue's, readable from any thread. [LAW:one-source-of-truth]
+    public nonisolated var owes: Bool { sessions.isBusy }
+
+    /// Says when everything owed has settled, once a Return has `steered` the press: `landed` when
+    /// every word the loop accepted reached a cursor, `notLanded` when some are held for want of
+    /// one, or when the chord is still down and the press with it, so nothing would settle for as
+    /// long as it takes the chord to come up and a keyboard held for that long is held for nothing.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] The hotkey's delivery of a press it just ended is on
+    /// the main queue ahead of this wait, so the wait is queued after the press's tail and not
+    /// before it. The verdict is read off the hold, the one record of words that reached no cursor,
+    /// so it cannot disagree with what the panel shows. [LAW:one-source-of-truth]
+    public func settled(after steered: HotkeyDetector.Steered) async -> Settlement {
+        switch steered {
+        case .chordDown:
+            return .notLanded
+        case .ended, .nothingOpen:
+            await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+            do throws(SerialQueueError) { try await sessions.drain() } catch {
+                // Draining from the main actor, which no operation runs on, cannot be a wait on itself.
+                preconditionFailure("the loop's queue could not be drained from the main actor: \(error)")
+            }
+            return hold.held == nil ? .landed : .notLanded
+        }
     }
 
     /// Hears the press while it is still going on: the session's audio is handed to the

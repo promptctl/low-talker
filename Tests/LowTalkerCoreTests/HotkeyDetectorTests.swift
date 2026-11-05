@@ -378,3 +378,49 @@ private func modes(_ listed: Mode...) -> Modes { try! Modes(listed) }
         #expect(keyboard.press(.rightOption, at: 1000) == ended(.tap, at: 1000))
     }
 }
+
+/// A key that steers dictation, typed with the chord up: it ends a latched press where it was typed,
+/// and nothing else.
+extension HotkeyDetectorTests {
+    @Test func aSteeringKeyEndsALatchedPressWhereItWasTyped() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+        #expect(keyboard.detector.phase == .latched(rightOption))
+
+        #expect(keyboard.detector.steer(at: at(5000)) == .ended(.ended(.released(.tap, at: at(5000)))))
+        #expect(keyboard.detector.phase == .idle)
+    }
+
+    /// A press ended that way is over: the next chord press begins a fresh one, and does not end a
+    /// press that no longer exists, which `Dictation.press` would trap on.
+    @Test func theChordAfterASteeredEndBeginsAFreshPress() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.release(.rightOption, at: 100)
+        _ = keyboard.detector.steer(at: at(5000))
+
+        #expect(keyboard.press(.rightOption, at: 6000) == began(rightOption, at: 6000))
+    }
+
+    /// The chord is still down as far as the detector has heard, so the press ends as it comes up and
+    /// the key ended nothing: a Return that raced the chord's release.
+    @Test func aSteeringKeyEndsNothingWhileTheChordIsDown() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+
+        #expect(keyboard.detector.steer(at: at(300)) == .chordDown)
+        #expect(keyboard.detector.phase == .held(rightOption, since: at(0)))
+        #expect(keyboard.release(.rightOption, at: 400) == ended(.hold, at: 400))
+    }
+
+    @Test func aSteeringKeyEndsNothingWhenNoPressIsOpen() {
+        var keyboard = Keyboard()
+        #expect(keyboard.detector.steer(at: at(0)) == .nothingOpen)
+
+        _ = keyboard.press(.leftShift, at: 10)
+        _ = keyboard.press(.rightOption, at: 20)
+        guard case .blocked = keyboard.detector.phase else { Issue.record("the chord was not blocked: \(keyboard.detector.phase)"); return }
+        #expect(keyboard.detector.steer(at: at(30)) == .nothingOpen)
+    }
+}

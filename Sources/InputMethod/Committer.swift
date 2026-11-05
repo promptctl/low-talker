@@ -10,9 +10,13 @@ import os
 /// macOS's and not this process's to trust. Measured on studious (low-imk-rules-w3g.3ky), an
 /// `insertText` into an app stalled while taking it holds the main actor 3.0 s and then returns
 /// as if nothing were wrong; the words land when the app wakes. Keys typed into another app
-/// meanwhile arrive as fast as when nothing is stalled (median 3.4 ms), because this source asks
-/// for no keys. So a commit still running when `bound` passes is answered `notYetTaken`, and the
-/// bound sits beneath both that 3 s and one phase of the app's own wait.
+/// meanwhile arrived as fast as when nothing was stalled (median 3.4 ms), because this source
+/// asked for no keys. It asks for key-downs now, to hear Return, and IMK hands each to this
+/// process on the same main thread, so they wait behind the stall as the words do: the premise
+/// that a stalled app costs only its own insert is retired, and the live measurement of what a
+/// stall costs the keyboard is low-dictation-keys-652.ogg's. A commit still running
+/// when `bound` passes is answered `notYetTaken`, and the bound sits beneath both that 3 s and
+/// one phase of the app's own wait.
 ///
 /// [LAW:no-ambient-temporal-coupling] The main queue is serial, so words asked for in order
 /// land in order. A commit holding the main actor holds every insert behind it, whichever app
@@ -34,6 +38,9 @@ public nonisolated final class Committer: Sendable {
     public static let standardBound = Duration.seconds(1)
 
     private let bound: Duration
+    /// Where each insert's turn waits for the main actor, which a held Return also runs while
+    /// it waits for the words to land.
+    private let turns: MainTurns
     /// Where each main-actor turn's end is said, once it has run.
     private let told: @Sendable (Ended) -> Void
     /// [LAW:no-shared-mutable-globals] Owned here and advanced only by `insert`. Numbers the
@@ -41,8 +48,9 @@ public nonisolated final class Committer: Sendable {
     /// together.
     private let inserts = OSAllocatedUnfairLock(initialState: 0)
 
-    public init(bound: Duration = standardBound, told: @escaping @Sendable (Ended) -> Void) {
+    public init(bound: Duration = standardBound, turns: MainTurns = MainTurns(), told: @escaping @Sendable (Ended) -> Void) {
         self.bound = bound
+        self.turns = turns
         self.told = told
     }
 
@@ -58,9 +66,9 @@ public nonisolated final class Committer: Sendable {
         }
         let turn = Turn()
         let asked = ContinuousClock.now
-        DispatchQueue.main.async { [told] in
+        turns.push { [told] in
             let waited = ContinuousClock.now - asked
-            let did = MainActor.assumeIsolated { Self.place(request, turn: turn, inFront: inFront) }
+            let did = Self.place(request, turn: turn, inFront: inFront)
             told(Ended(insert: number, waited: waited, did: did))
         }
         return Placed(insert: number, request: request, outcome: turn.wait(bound))

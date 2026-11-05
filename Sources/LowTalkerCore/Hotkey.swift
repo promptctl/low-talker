@@ -80,6 +80,17 @@ public final class Hotkey {
         detector.listen(for: modes)
     }
 
+    /// A key that steers dictation was typed at `time`, the moment on the clock key events are
+    /// stamped by, with the chord up. A latched press ends there, delivered like every other
+    /// transition, so `Dictation.press` still sees it in order.
+    public func steer(at time: HostTime) -> HotkeyDetector.Steered {
+        let steered = detector.steer(at: time)
+        if case .ended(let transition) = steered, let installation = installed {
+            deliver(transition, to: installation.onTransition)
+        }
+        return steered
+    }
+
     /// Stops watching. A press still open is ended here as `.lapsed`, at the handler it
     /// began at: once the feed has stopped its release can never arrive, and a press left open
     /// is a microphone left open with nothing to close it.

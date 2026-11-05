@@ -266,3 +266,25 @@ private struct Boom: Error {}
         #expect(try await queue.run { "still running" } == "still running")
     }
 }
+
+/// Whether work is owed, as the queue says it from any thread.
+extension SerialQueueTests {
+    @Test(.timeLimit(.minutes(1))) func theQueueIsBusyFromSubmitUntilTheLastOperationFinishes() async throws {
+        let queue = SerialQueue()
+        #expect(!queue.isBusy)
+        let (stream, release) = AsyncStream<Void>.makeStream()
+        let first = try queue.submit { for await _ in stream {} }
+        let second = try queue.submit { () async -> Void in }
+        #expect(queue.isBusy)
+
+        release.finish()
+        await first.value
+        await second.value
+
+        #expect(!queue.isBusy)
+    }
+
+    @Test func aQueueNothingWasSubmittedToIsNotBusy() {
+        #expect(!SerialQueue().isBusy)
+    }
+}

@@ -13,8 +13,12 @@ import Foundation
 /// focus. So every message is checked against `senders` before its bytes are read, and one
 /// that fails is told as `turnedAway` and never reaches `cursorArrived`. [LAW:single-enforcer]
 ///
-/// Nothing is answered: the input method sends from a task of its own and waits for
-/// nothing. A message that asked for an answer anyway has its reply right released unanswered.
+/// A notice is not answered: the input method sends it from a task of its own and waits for
+/// nothing, and a notice that asked for an answer anyway has its reply right released
+/// unanswered. The two questions about a Return the input method holds are the exception, and
+/// are handed on with the right to answer them, which whoever holds it answers when the answer
+/// is known: this port's queue is never held for it, so a notice behind a question is heard
+/// at once.
 ///
 /// Held for as long as the app listens. Released, the name is free before the release
 /// returns, because the app hosts it again straight away each time it rebuilds its loop;
@@ -50,29 +54,37 @@ public final class NoticePort {
     /// `heard` and `told` run on `queue`, one message at a time, in the order they were sent.
     public convenience init(
         queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void
+        told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void,
+        asked: @escaping @Sendable (Question, Reply) -> Void
     ) async throws(PortNotHosted) {
         let senders: PeerIdentity
         do throws(PeerIdentity.Unreadable) {
             senders = try await .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier)
         } catch { throw .noRequirement(error) }
-        try self.init(portName: AppIdentity.hotkeyPortName, senders: senders, queue: queue, told: told, heard: heard)
+        try self.init(portName: AppIdentity.hotkeyPortName, senders: senders, queue: queue, told: told, heard: heard, asked: asked)
     }
 
     /// Under a name and a requirement someone else chose, which is how a test hosts one
     /// without being the app. [LAW:decomposition]
     init(
         portName: String, senders: PeerIdentity, queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void
+        told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void,
+        asked: @escaping @Sendable (Question, Reply) -> Void
     ) throws(PortNotHosted) {
         port = try NamedPort(name: portName, queue: queue, received: { message in
-            message.discardReply()
             do throws(PeerIdentity.NotAdmitted) {
                 try senders.admits(message.sender)
             } catch {
+                message.discardReply()
                 told(.turnedAway(pid: message.sender.pid, because: error, required: senders))
                 return
             }
+            // A question owns the reply right from here: its holder answers or lets it go.
+            if let question = Wire.question(id: message.id, payload: message.payload) {
+                asked(question, Reply(message))
+                return
+            }
+            message.discardReply()
             // [LAW:parse-dont-validate] The border: past it there is a notice, and anything
             // else is said by name rather than dropped. [LAW:no-silent-failure]
             guard let notice = Wire.notice(id: message.id, payload: message.payload, from: message.sender.pid) else {

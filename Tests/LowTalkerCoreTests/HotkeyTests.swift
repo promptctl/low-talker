@@ -192,3 +192,30 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
         #expect(Hotkey.named(try #require(KeyChord(modifiers: [.rightCommand, .rightOption]))) == "Right Option+Right Command")
     }
 }
+
+/// A key that steers dictation reaches the loop as the end of the press it ended, through the one
+/// door every transition leaves by.
+@MainActor
+extension HotkeyTests {
+    @Test func aSteeringKeyEndsALatchedPressThroughTheHandlerInOrder() async throws {
+        let feed = FakeFeed()
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
+        var transitions: [HotkeyDetector.Transition] = []
+        try hotkey.start { transitions.append($0) }
+        let installation = try #require(feed.installations.first)
+        installation.handle(rightOption(.down, at: 0))
+        installation.handle(rightOption(.up, at: 100))
+
+        let steered = hotkey.steer(at: at(5000))
+        await settle()
+
+        #expect(steered == .ended(.ended(.released(.tap, at: at(5000)))))
+        #expect(transitions == [.began(rightOption, at: at(0)), .ended(.released(.tap, at: at(5000)))])
+        #expect(hotkey.phase == .idle)
+    }
+
+    @Test func aSteeringKeyBeforeTheHotkeyStartedEndsNothing() {
+        let hotkey = Hotkey(modes: Config.default.modes, feed: FakeFeed())
+        #expect(hotkey.steer(at: at(0)) == .nothingOpen)
+    }
+}

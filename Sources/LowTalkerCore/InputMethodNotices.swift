@@ -3,9 +3,10 @@ import Identity
 import Insertion
 import os
 
-/// What the input method tells the app for as long as the loop listens, on the notice port
-/// the app hosts: each cursor it is given focus in, and its ending itself over its memory
-/// ceiling. Its process is supervised meanwhile,
+/// What the input method tells and asks the app for as long as the loop listens, on the notice
+/// port the app hosts: each cursor it is given focus in, its ending itself over its memory
+/// ceiling, and, asked and answered, whether the app owes words to a Return it holds. Its
+/// process is supervised meanwhile,
 /// since nothing but the app starts it again once it has ended.
 ///
 /// Hosting the port is also what keeps one copy of the app listening: the name is one per
@@ -23,14 +24,19 @@ public final class InputMethodNotices {
 
     /// Throws when the port cannot be hosted, most often because another copy of the app
     /// already hears on it.
+    /// `asked` is handed each question with the one right to answer it, on the port's own
+    /// queue and not the main one: the first question is answered from there, and the second is
+    /// taken to the main actor and answered when it is known.
     public init(heard: @escaping @MainActor (InputMethodNotice) -> Void,
+                asked: @escaping @Sendable (Question, Reply) -> Void,
                 superviseInputMethod: @MainActor () -> Disposal) async throws(PortNotHosted) {
         let port = try await NoticePort(
             queue: DispatchQueue(label: AppIdentity.hotkeyPortName),
             told: { event in Logger.hotkey.error("\(event.description, privacy: .public)") },
             heard: { [weak self] notice in
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.open?.heard(notice) } }
-            })
+            },
+            asked: asked)
         // Supervised only once the port is hosted, so the first notice has somewhere to go.
         open = (port, heard, superviseInputMethod())
     }

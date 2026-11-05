@@ -27,21 +27,25 @@ private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIde
 /// when it did not. [LAW:single-enforcer] The argument crosses unchecked because IMK's
 /// signatures are older than `Sendable`. The crossing is safe because the calling thread is
 /// blocked until `body` returns, so nothing else holds the argument meanwhile.
-nonisolated func onMainActor<Argument>(_ callback: StaticString, _ argument: Argument,
-                                       _ body: @MainActor (Argument) -> Void) {
+///
+/// `level` is the log's, for a callback made once per key typed: said at debug it is not a
+/// record of when a person typed.
+nonisolated func onMainActor<Argument, Answer: Sendable>(_ callback: StaticString, _ argument: Argument, level: OSLogType = .default,
+                                                         _ body: @MainActor (Argument) -> Answer) -> Answer {
     nonisolated(unsafe) let argument = argument
     let hop: Hop
+    let result: Answer
     if Thread.isMainThread {
-        MainActor.assumeIsolated { body(argument) }
+        result = MainActor.assumeIsolated { body(argument) }
         hop = .inline
     } else {
         let asked = ContinuousClock.now
-        hop = DispatchQueue.main.sync {
+        (hop, result) = DispatchQueue.main.sync {
             let started = Hop.waited(ContinuousClock.now - asked)
-            MainActor.assumeIsolated { body(argument) }
-            return started
+            return (started, MainActor.assumeIsolated { body(argument) })
         }
     }
     // [LAW:nothing-unseen] Which way every callback came, at the level `log show` keeps.
-    log.notice("\(callback, privacy: .public) reached the main actor \(hop.description, privacy: .public)")
+    log.log(level: level, "\(callback, privacy: .public) reached the main actor \(hop.description, privacy: .public)")
+    return result
 }
