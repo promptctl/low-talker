@@ -254,9 +254,9 @@ nonisolated struct ClientName: CustomStringConvertible {
 final class Client: TextCursor, CustomStringConvertible {
     private let client: IMKTextInput
     let application: String
-    /// How this client is said in the log, read once here and only ever said: nothing is
-    /// decided from it (`ClientName`).
-    private let name: ClientName
+    /// The identifier the log says this client by, read once here and only ever said: nothing
+    /// is decided from it (`ClientName`).
+    private let identifier: String?
 
     /// Nothing at all when the client will not name its app. [LAW:parse-dont-validate] The
     /// one place the question is asked, and past it there is a cursor whose app is known
@@ -279,10 +279,10 @@ final class Client: TextCursor, CustomStringConvertible {
         }
         self.client = client
         self.application = application
-        name = ClientName(identifier: client.uniqueClientIdentifierString(), application: application)
+        identifier = client.uniqueClientIdentifierString()
     }
 
-    var description: String { name.description }
+    var description: String { ClientName(identifier: identifier, application: application).description }
 
     /// The line is asked for only once document access is given, so a client with no field
     /// costs the one call. Index 0 with no marked text asks for the current selection's line

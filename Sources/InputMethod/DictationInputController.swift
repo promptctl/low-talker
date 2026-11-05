@@ -5,6 +5,10 @@ import os
 
 /// A line about one controller: which it is, what happened to it, and what it says of its
 /// client, when there is something to say. Nothing is decided from any of it.
+///
+/// The controller is its address, which the allocator hands to a later controller once this one
+/// has ended: read the lines in order, and "made" minus "ended" at one address is still how many
+/// are live.
 nonisolated func controllerLine(controller: UInt, _ event: String, client: String? = nil) -> String {
     "controller 0x\(String(controller, radix: 16)) \(event)" + (client.map { ", \($0)" } ?? "")
 }
@@ -53,7 +57,10 @@ public final class DictationInputController: IMKInputController {
         controllerLine(controller: UInt(bitPattern: ObjectIdentifier(self)), event, client: client?.description ?? "holding no client")
     }
 
-    nonisolated override public init() { super.init() }
+    nonisolated override public init() {
+        super.init()
+        imkLog.log("\(controllerLine(controller: UInt(bitPattern: ObjectIdentifier(self)), "was made"), privacy: .public)")
+    }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
     /// studious, 2026-09-27), which is every key typed. The app hears the modifier keys itself,
