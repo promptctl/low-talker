@@ -600,10 +600,10 @@ public final class Dictation {
                 // How the press ended, read once. [LAW:no-silent-failure] A hotkey that
                 // stopped and audio the capture could not stream whole each cut the press
                 // short, and a chord used as a modifier ends it as no dictation at all. Those
-                // are asked first: a press the hotkey
-                // stopped during says so rather than describing the clip it left behind,
-                // which was never the whole utterance anyway. A microphone that was not there
-                // at all was refused at key-down, so it never reaches here.
+                // are asked first: a press the hotkey stopped during says so rather than
+                // describing the clip it left behind, which was never the whole utterance
+                // anyway. A microphone that was not there at all was refused at key-down, so
+                // it never reaches here.
                 let ended: Ending = switch (ending, released, end.lost) {
                 case (.usedAsModifier, _, _): .usedAsModifier
                 case (_, nil, _): .cut(.lapsed)
@@ -811,8 +811,9 @@ public final class Dictation {
 
     /// Waits for the press's commits and its decode, then places what was heard and not yet
     /// committed: at the cursor for a press the speaker released, in the hold for one cut
-    /// short, and nowhere for a chord that was a typed key's modifier. Every press waits for its decode, the model's load included, since what it heard
-    /// is what the hold keeps.
+    /// short, and nowhere for a chord that was a typed key's modifier. Every press waits for
+    /// its decode, the model's load included, rather than cancelling it: the engine's turn
+    /// passes on only when the decode ends, and a modifier press's report counts its words.
     private func hear(_ heard: Heard) async throws(Failed) -> Report.Outcome {
         let unplaced = await heard.committing.value
         let decoded = await heard.decode.value

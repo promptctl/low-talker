@@ -1731,6 +1731,22 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted == [" b"])
     }
 
+    /// Words committed while the chord was down stay where they went in, and are counted; the
+    /// words heard after them are dropped, not held, and nothing is shown for either.
+    @Test func aPressUsedAsAModifierAfterCommitsCountsThemAndDropsTheRest() async throws {
+        let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "hello there" : "") }) { _ in Transcript(typed: "hello there friend") }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
+        rig.dictation.press(.ended(.usedAsModifier))
+        guard case .usedAsModifier(let landed, let discarded) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        #expect(landed == 2)
+        #expect(discarded == 1)
+        #expect(rig.inputMethod.inserted == ["hello there"])
+        #expect(rig.hold.held == nil)
+    }
+
     /// A chord used as a modifier with nothing said into it is a typed key and nothing else:
     /// no failure, and nothing held.
     @Test func aChordUsedAsAModifierWithNothingSaidHoldsNothing() async throws {
