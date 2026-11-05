@@ -76,13 +76,9 @@ public final class Hotkey {
     public var isWatching: Bool { installed != nil }
 
     /// Starts watching. Each press begins and ends at `onTransition`, on the main actor and
-    /// on the main queue.
-    public func start(_ onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) throws {
-        try start { transition in onTransition(transition); return nil }
-    }
-
-    /// Starts watching, hearing a refusal: a press its handler refuses at `began` is not a tap
-    /// that latches. [LAW:single-enforcer] The detector applies it, here, for every handler;
+    /// on the main queue, and a press its handler refuses at `began` is not a tap that latches.
+    /// [LAW:single-enforcer] The detector applies the refusal, here, for every handler, and a
+    /// handler must answer one: there is no start whose handler can leave the answer out.
     /// `start(feeding:)` is the one handler the app starts with.
     public func start(_ onTransition: @escaping Handler) throws {
         stop()

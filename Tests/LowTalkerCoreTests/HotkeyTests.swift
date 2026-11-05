@@ -45,6 +45,13 @@ private func settle() async {
     }
 }
 
+extension Hotkey {
+    /// A handler that only records what it was told: a press it never refuses.
+    fileprivate func start(_ onTransition: @escaping @MainActor (HotkeyDetector.Transition) -> Void) throws {
+        try start { transition in onTransition(transition); return nil }
+    }
+}
+
 private let rightOption = Mode.dictation
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }

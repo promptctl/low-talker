@@ -74,6 +74,28 @@ private struct BadBuffer: Error {}
         #expect(loop.rig.inputMethod.inserted == ["a"])
     }
 
+    /// The release is read before the refusal reaches the hotkey, as a backlog on the main queue
+    /// orders them: the tap has latched by then, and the refusal ends it. The loop is told the
+    /// press began and then ended, in that order, which it traps on rather than repairs.
+    @Test(.timeLimit(.minutes(1))) func aTapReadBeforeItsRefusalIsEndedByIt() async throws {
+        let loop = try await Loop()
+        loop.rig.hardware.failingToLaunch = BadBuffer()
+
+        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.up, atMilliseconds: 100)
+        await loop.delivered()
+        #expect(loop.hotkey.phase == .idle)
+        #expect(await loop.rig.report().failure is NoMicrophone)
+
+        loop.rig.hardware.failingToLaunch = nil
+        loop.chord(.down, atMilliseconds: 1000)
+        await loop.delivered()
+        loop.rig.speak([1, 2, 3])
+        loop.chord(.up, atMilliseconds: 1500)
+        await loop.delivered()
+        #expect(try await loop.rig.session().transcription.transcript.text == "a")
+    }
+
     /// A refused press held to the end of the chord is what it was: the failure is reported and
     /// the next press begins a press.
     @Test(.timeLimit(.minutes(1))) func aRefusedHoldIsReportedAndTheNextPressListens() async throws {
