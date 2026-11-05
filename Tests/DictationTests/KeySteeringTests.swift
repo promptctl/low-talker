@@ -176,7 +176,7 @@ import Testing
         let gate = Gate()
         let rig = try await Rig(transcriber: { FakeTranscriber { _ in await gate.wait(); return Transcript(typed: "a") } })
         rig.hold()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         #expect(rig.dictation.owes)
 
         gate.open()

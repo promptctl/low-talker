@@ -19,7 +19,7 @@ import TestProbes
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
+        await rig.until { rig.inputMethod.inserted == ["hello there"] }
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
 

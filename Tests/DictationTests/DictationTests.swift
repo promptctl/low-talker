@@ -30,6 +30,10 @@ final class Rig {
     let inputMethod = FakeInputMethod()
     let turns = EngineTurns()
     let dictation: Dictation
+    /// Moved whenever any effect a test waits on lands - an insert, audio heard, the hold
+    /// changing, an activity shown, a report. A test awaits `until` rather than polling a clock.
+    /// [LAW:no-ambient-temporal-coupling]
+    let changes = Changes()
     private let reports: AsyncStream<Dictation.Report>
     /// Raised by the first outcome to be reported. The stream says what the next report
     /// is, this says whether one has come at all - the difference a `finish` that
@@ -56,8 +60,14 @@ final class Rig {
         reports = stream
         let reported = reported
         let shown = shown
+        let changes = changes
+        inputMethod.noting(changes)
         self.store = store
-        hold = Hold(store: store, failedToKeep: { shown.unkept.append($0) }, showing: { shown.states.append($0) })
+        hold = Hold(
+            store: store,
+            failedToKeep: { shown.unkept.append($0); changes.note() },
+            showing: { shown.states.append($0); changes.note() }
+        )
         dictation = Dictation(
             capture: capture,
             engine: engine,
@@ -67,9 +77,16 @@ final class Rig {
             report: { press in
                 reported.raise()
                 feed.yield(press)
+                changes.note()
             },
-            showing: { shown.activities.append($0) }
+            showing: { shown.activities.append($0); changes.note() }
         )
+    }
+
+    /// Await until `condition` holds, woken as the loop's effects land, not polled against a
+    /// clock until a deadline. [LAW:no-ambient-temporal-coupling]
+    func until(_ condition: () throws -> Bool) async rethrows {
+        try await changes.settled(condition)
     }
 
     /// A loop whose every press is let in at key-down and waits on `transcriber` for its engine.
@@ -89,6 +106,7 @@ final class Rig {
         keeping store: FakeHeldStore = FakeHeldStore()
     ) async throws {
         try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest, keeping: store)
+        transcriber.noting(changes)
     }
 
     /// Audio captured from `now` on, stamped as the microphone would stamp it, into
@@ -310,14 +328,14 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let keyDown = HostTime.now
         rig.dictation.press(.began(Rig.dictation, at: keyDown))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.speak([3])
         rig.speak([4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello", " there"] })
+        await rig.until { rig.inputMethod.inserted == ["hello", " there"] }
         let landed = HostTime.now
         rig.inputMethod.hold()
         rig.speak([5, 6])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.keyUp()
         rig.inputMethod.letGo()
         let (session, duringPress) = try await rig.pressed()
@@ -343,10 +361,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.inputMethod.refusing(.refused(.cursorIsInAnotherApp))
         rig.speak([3, 4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2, 3, 4] })
+        await rig.until { engine.hearing == [1, 2, 3, 4] }
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
@@ -367,12 +385,12 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         // The move is a cursor arriving in the Finder, which the input method tells the app.
         rig.inputMethod.reaching(BundleID(rawValue: "com.apple.finder"))
         rig.dictation.cursorArrived()
         rig.speak([3, 4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2, 3, 4] })
+        await rig.until { engine.hearing == [1, 2, 3, 4] }
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
@@ -391,7 +409,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.inputMethod.reaching(BundleID(rawValue: "com.apple.finder"))
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
@@ -413,14 +431,14 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held?.words == Transcript(typed: "hello") })
+        await rig.until { rig.hold.held?.words == Transcript(typed: "hello") }
         rig.speak([3, 4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held?.words == Transcript(typed: "hello there") })
+        await rig.until { rig.hold.held?.words == Transcript(typed: "hello there") }
         rig.inputMethod.refusing(nil)
         rig.speak([5, 6])
         // The hold empties on the main actor in the step that counts the words, after the
         // input method has them.
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there my"] && rig.hold.held == nil })
+        await rig.until { rig.inputMethod.inserted == ["hello there my"] && rig.hold.held == nil }
         rig.keyUp()
         let (_, duringPress) = try await rig.pressed()
         #expect(rig.inputMethod.inserted == ["hello there my", " friend"])
@@ -440,10 +458,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held != nil })
+        await rig.until { rig.hold.held != nil }
         rig.inputMethod.refusing(nil)
         rig.speak([3])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing.count == 3 })
+        await rig.until { engine.hearing.count == 3 }
         rig.dictation.press(.ended(ending))
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.cause as? InsertFailure == .refused(.noTextFieldHasFocus))
@@ -461,7 +479,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held != nil })
+        await rig.until { rig.hold.held != nil }
         rig.inputMethod.refusing(nil)
         rig.speak([3])
         rig.keyUp()
@@ -476,7 +494,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
+        await rig.until { rig.inputMethod.inserted == ["hello there"] }
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(engineFailed(stopped.cause, with: NoEngine.self))
@@ -495,7 +513,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.wait(AudioCapture.warmUpAllowance + 0.4)
         rig.dictation.press(.began(Rig.dictation, at: keyWentDown))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2] })
+        await rig.until { engine.hearing == [1, 2] }
         rig.keyUp()
         let press = try #require(await rig.report().failure as? SpeechLost)
         #expect(press.lost.unopened == .startedLate)
@@ -514,7 +532,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
+        await rig.until { rig.inputMethod.inserted == ["hello there"] }
         rig.dictation.press(.ended(.lapsed))
         let lapsed = try #require(await rig.report().failure as? PressLapsed)
         #expect(lapsed.landed == 2)
@@ -535,10 +553,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.changeDevice()
         rig.speak([3, 4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2, 3, 4] })
+        await rig.until { engine.hearing == [1, 2, 3, 4] }
         rig.keyUp()
         let press = try #require(await rig.report().failure as? SpeechLost)
         #expect(press.lost.interrupted)
@@ -567,7 +585,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.dictation.press(.ended(.lapsed))
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
@@ -585,7 +603,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.keyUp()
         let report = await rig.pressReport()
         let stopped = try #require(report.outcome.failure as? PressStopped)
@@ -608,7 +626,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let keyDown = HostTime.now
         rig.dictation.press(.began(Rig.dictation, at: keyDown))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2] })
+        await rig.until { engine.hearing == [1, 2] }
         #expect(engine.clips.isEmpty)
         let read = HostTime.now
         rig.keyUp()
@@ -649,10 +667,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello"] })
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.inputMethod.refusing(.refused(.cursorIsInAnotherApp))
         rig.speak([3, 4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2, 3, 4] })
+        await rig.until { engine.hearing == [1, 2, 3, 4] }
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
@@ -748,7 +766,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let engine = FakeTranscriber { _ in Transcript(typed: "a") }
         let rig = try await Rig { await gate.wait(); return engine }
         rig.hold()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         #expect(rig.inputMethod.inserted.isEmpty)
         gate.open()
         _ = try await rig.session()
@@ -766,10 +784,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.turns.reading.holds == 1)
         rig.speak([1, 2, 3])
         rig.keyUp()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         #expect(rig.turns.reading.holds == 1)
         gate.open()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         #expect(rig.turns.reading.holds == 0)
         rig.inputMethod.letGo()
         let displaced = try await rig.session().displaced
@@ -794,7 +812,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.hold(speaking: [1])
         rig.hold(speaking: [2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         #expect(engine.clips.count == 1)
         #expect(engine.hearing == [1])
         #expect(rig.inputMethod.inserted.isEmpty)
@@ -875,7 +893,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.hold()
 
         rig.hold(speaking: said)
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         #expect(rig.inputMethod.inserted.isEmpty)
 
         rig.hold(speaking: andThen)
@@ -901,7 +919,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             }
         })
         rig.hold()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         rig.blockedHold()
         gate.open()
         let first = await rig.report()
@@ -924,7 +942,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             }
         })
         rig.hold()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         #expect(rig.inputMethod.inserted.isEmpty)
         #expect(!rig.reported.raised)
         gate.open()
@@ -1116,7 +1134,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(nil)
         rig.inputMethod.hold()
         rig.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.dictation.insertHeld()
         #expect(rig.store.kept == .unaccounted(part("a b", "LowTalker ended while inserting held words, so they may have been typed")))
         rig.inputMethod.letGo()
@@ -1162,7 +1180,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         _ = await rig.report()
         rig.inputMethod.hold()
         rig.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.dictation.insertHeld()
         rig.inputMethod.refusing(.notYetTaken(notYetTaken))
         rig.inputMethod.letGo()
@@ -1182,7 +1200,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         _ = await rig.report()
         rig.inputMethod.hold()
         rig.dictation.insertHeld()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.dictation.insertHeld()
         rig.inputMethod.letGo()
         try await rig.dictation.finish()
@@ -1203,7 +1221,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         _ = await rig.report()
         rig.inputMethod.hold()
         rig.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.dictation.insertHeld()
         rig.dictation.insertHeld()
         rig.inputMethod.letGo()
@@ -1223,7 +1241,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(.notYetTaken(NotYetTaken(characters: 1, into: "com.apple.TextEdit")))
         rig.inputMethod.hold()
         rig.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.hold.dismiss()
         rig.inputMethod.letGo()
         try await rig.dictation.finish()
@@ -1347,7 +1365,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(nil)
         rig.inputMethod.hold()
         rig.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         let sent = Held.unaccounted(part("a", "LowTalker ended while inserting held words, so they may have been typed"))
         #expect(rig.store.state == HoldState(held: sent))
         rig.hold.dismiss()
@@ -1372,7 +1390,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(nil)
         rig.inputMethod.hold()
         rig.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.dictation.bringBackDismissed()
         #expect(rig.store.state == HoldState(held: .unaccounted(part(" b", "LowTalker ended while inserting held words, so they may have been typed")), dismissed: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)"))))
         rig.inputMethod.letGo()
@@ -1391,7 +1409,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(nil)
         rig.inputMethod.hold()
         rig.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.hold.dismiss()
         rig.dictation.bringBackDismissed()
         #expect(rig.store.state == HoldState(dismissed: .unaccounted(part("a", "LowTalker ended while inserting held words, so they may have been typed"))))
@@ -1413,7 +1431,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(.notYetTaken(notYetTaken))
         rig.inputMethod.hold()
         rig.hold(speaking: [4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.dictation.bringBackDismissed()
         rig.inputMethod.letGo()
         _ = await rig.report()
@@ -1475,7 +1493,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         _ = await rig.report()
         rig.inputMethod.hold()
         rig.hold(speaking: [4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.hold.dismiss()
         rig.inputMethod.letGo()
         _ = await rig.report()
@@ -1498,7 +1516,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.inputMethod.refusing(.notYetTaken(notYetTaken))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held != nil })
+        await rig.until { rig.hold.held != nil }
         rig.inputMethod.refusing(nil)
         rig.speak([3, 4])
         rig.keyUp()
@@ -1623,7 +1641,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         before.inputMethod.refusing(nil)
         before.inputMethod.hold()
         before.dictation.cursorArrived()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { before.inputMethod.holding == 1 })
+        await before.until { before.inputMethod.holding == 1 }
         let after = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
         #expect(after.hold.held == .unaccounted(part("a", "LowTalker ended while inserting held words, so they may have been typed")))
         after.dictation.cursorArrived()
@@ -1701,7 +1719,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let gate = Gate()
         let rig = try await Rig { await gate.wait(); return FakeTranscriber { _ in Transcript(typed: "a") } }
         rig.lapse()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         #expect(!rig.reported.raised)
         gate.open()
         let lapsed = try #require(await rig.report().failure as? PressLapsed)
@@ -1744,7 +1762,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.inserted == ["hello there"] })
+        await rig.until { rig.inputMethod.inserted == ["hello there"] }
         rig.dictation.press(.ended(.usedAsModifier))
         guard case .usedAsModifier(let landed, let discarded) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
         #expect(landed == 2)
@@ -2000,8 +2018,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.speak([2])
         rig.speak([3])
         rig.speak([4])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { engine.hearing == [1, 2, 3, 4] })
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.shown.activities.last == .listening(heard: Transcript(typed: " hello")) })
+        await rig.until { engine.hearing == [1, 2, 3, 4] }
+        await rig.until { rig.shown.activities.last == .listening(heard: Transcript(typed: " hello")) }
         rig.keyUp()
         _ = try await rig.session()
         #expect(rig.shown.activities == [.listening(heard: Transcript(words: [])), .listening(heard: Transcript(typed: " hello")), .transcribing, .idle])
