@@ -984,11 +984,11 @@ private struct Authorized: MicrophoneAuthority {
     /// - so only something watching the bound device hears it, and under `shut` nothing was:
     /// the watch went up at the press and came down at the key-up.
     ///
-    /// What the stretch cost is the press after it. A readied input fixes its client format,
-    /// its render buffer and its converter against the shape it found, and the unit goes on
-    /// converting whatever the device now delivers into what it was asked for - so the
-    /// utterance was resampled twice rather than captured wrong, which is why this was a
-    /// quality defect and not a corrupt one. Readying opens no device, so answering it costs
+    /// What the stretch cost is the press after it. A readied input fixes its layout and its
+    /// converter against the shape it found, and a press opened on it reads whatever the device
+    /// now hands over as that shape: a changed buffer layout is caught at the first render, but
+    /// a changed sample rate is not visible in a buffer list at all, so the utterance would be
+    /// converted at the wrong rate. Readying opens no device, so answering it costs
     /// the mode nothing: the microphone stays shut and is simply ready against the shape the
     /// device has now.
     @Test func aBoundDeviceThatChangedShapeWhileShutReadiesAnotherAndOpensNothing() async throws {
@@ -1140,7 +1140,7 @@ private struct Authorized: MicrophoneAuthority {
     }
 
     /// Under `open` the engine runs while nobody is dictating, and a default input that
-    /// changes then is a device the run should follow. A HAL unit bound to one device hears
+    /// changes then is a device the run should follow. An input bound to one device hears
     /// nothing of a switch to a different one that is still alive - neither its liveness nor
     /// its format changed - so the system-wide watch is the only thing that can notice, and
     /// with no session open there is no recording to cut.
@@ -1885,7 +1885,7 @@ private struct Authorized: MicrophoneAuthority {
 
     /// A replaced engine's late failure says nothing about the engine now running, and neither
     /// does a let-go input's late staleness. Both watches outlive what they were formed for -
-    /// the render callback's failure arrives asynchronously, and the device listeners behind `onStale` can
+    /// the delivery's failure arrives asynchronously, and the device listeners behind `onStale` can
     /// have posted before their input was let go and arrive after - so each callback carries
     /// the generation it belongs to and is matched rather than trusted. Acting on the second
     /// one here would give up an engine running healthily on the input that took over.

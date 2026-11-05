@@ -2,7 +2,7 @@ import AVFoundation
 import CoreAudio
 import Synchronization
 
-/// The slices a render callback hands over, in a single-producer single-consumer ring buffer:
+/// The slices the IOProc's block hands over, in a single-producer single-consumer ring buffer:
 /// CoreAudio's IO thread pushes, and one thread with no deadline pops.
 ///
 /// Lock-free and allocation-free at the push, because the IO thread renders under a hard
@@ -68,30 +68,49 @@ final class SliceRing: @unchecked Sendable {
     /// Slices and faults that found the ring full and were never handed over.
     var dropped: Int { droppedCount.load(ordering: .relaxed) }
 
-    /// Producer end: copies the first `frames` frames of each of `list`'s buffers in, one
-    /// buffer per channel.
-    func push(_ list: UnsafeMutableAudioBufferListPointer, frames: Int, stamp: AudioTimeStamp) {
+    /// Producer end: copies `frames` frames of `list` in, planar. `layout` says how many
+    /// channels each buffer carries: an interleaved buffer of k channels is de-interleaved to
+    /// k rings, and a buffer of one is copied as it is. The caller has already held `list` to
+    /// `layout` (`InputLayout.verdict`), which is what makes every read here in bounds.
+    func push(_ list: UnsafePointer<AudioBufferList>, layout: InputLayout, frames: Int, stamp: AudioTimeStamp) {
+        precondition(layout.channels == channels, "a ring is made for the channels of the layout it is pushed")
         let start = framesPushed
         guard start + frames - framesPopped.load(ordering: .acquiring) <= capacity else {
             return drop()
         }
         guard let slot = claim() else { return drop() }
-        for (channel, buffer) in zip(0..<channels, list) {
-            let source = buffer.mData!.assumingMemoryBound(to: Float.self)
-            let ring = samples + channel * capacity
-            let at = start % capacity
-            let head = min(frames, capacity - at)
-            (ring + at).update(from: source, count: head)
-            ring.update(from: source + head, count: frames - head)
+        let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
+        let at = start % capacity
+        let head = min(frames, capacity - at)
+        for index in 0..<layout.buffers.count {
+            let width = layout.buffers[index]
+            let source = list[index].mData!.assumingMemoryBound(to: Float.self)
+            for lane in 0..<width {
+                let ring = samples + (layout.offsets[index] + lane) * capacity
+                if width == 1 {
+                    (ring + at).update(from: source, count: head)
+                    ring.update(from: source + head, count: frames - head)
+                } else {
+                    for frame in 0..<head { ring[at + frame] = source[frame * width + lane] }
+                    for frame in 0..<(frames - head) { ring[frame] = source[(head + frame) * width + lane] }
+                }
+            }
         }
         framesPushed = start + frames
         publish(.slice(frames: frames, stamp: stamp), at: slot)
     }
 
-    /// Producer end: a render that had nothing to hand over.
-    func push(_ fault: AudioHardwareError) {
-        guard let slot = claim() else { return drop() }
+    /// Producer end: a render that had nothing to hand over. Answers whether the fault was
+    /// handed over, so a caller that reports a fault once can keep trying while the ring is
+    /// full rather than count a fault nobody will read as reported.
+    @discardableResult
+    func push(_ fault: AudioHardwareError) -> Bool {
+        guard let slot = claim() else {
+            drop()
+            return false
+        }
         publish(.fault(fault), at: slot)
+        return true
     }
 
     /// Consumer end: the oldest entry, or nil when there is none. A slice's frames are

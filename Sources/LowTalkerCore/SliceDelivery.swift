@@ -4,7 +4,8 @@ import Synchronization
 
 /// One press's audio on its way from CoreAudio's IO thread to the pipeline.
 ///
-/// The IO thread pushes each slice into a `SliceRing` and signals; a thread of the press's
+/// The IO thread hands each buffer list here, which holds it to the shape the microphone was
+/// readied under, pushes what passes into a `SliceRing` and signals; a thread of the press's
 /// own pops it, converts it to pipeline samples and hands it over. Everything that can wait
 /// or allocate happens on that thread rather than the IO thread: the converter's arrays, the
 /// boxed errors, and above all the lock on the capture's stream, which the main actor holds
@@ -27,6 +28,17 @@ final class SliceDelivery: @unchecked Sendable {
     nonisolated(unsafe) private let popped: AVAudioPCMBuffer
     private let appending: @Sendable ([Float], HostTime) -> Void
     private let onFailure: @Sendable (any Error) -> Void
+    private let layout: InputLayout
+    /// The most frames one slice can carry, which is what the delivery's buffers were sized
+    /// for.
+    private let capacity: Int
+    /// The IO thread's alone, like `framesPushed` in the ring: whether a buffer list of the
+    /// layout has been pushed this press, and whether a fault has. Either fault ends the press
+    /// (a shape change replaces the input, an overlong slice fails it), so it is reported
+    /// once, however many renders follow it - and tried again while the ring is too full to
+    /// take it, because a fault that was dropped reports nothing.
+    nonisolated(unsafe) private var matched = false
+    nonisolated(unsafe) private var faulted = false
     /// How many of the ring's drops have been reported. The delivery thread's alone.
     nonisolated(unsafe) private var reportedDrops = 0
 
@@ -34,6 +46,7 @@ final class SliceDelivery: @unchecked Sendable {
     /// delivery's until `finish()` returns.
     init(
         _ ring: SliceRing,
+        layout: InputLayout,
         slice: Int,
         format: AVAudioFormat,
         converter: AudioClip.Converter,
@@ -44,6 +57,8 @@ final class SliceDelivery: @unchecked Sendable {
             throw AudioClipError.bufferAllocationFailed
         }
         self.ring = ring
+        self.layout = layout
+        self.capacity = slice
         self.popped = popped
         self.converter = converter
         self.appending = appending
@@ -54,15 +69,26 @@ final class SliceDelivery: @unchecked Sendable {
         thread.start()
     }
 
-    /// IO thread: the first `frames` frames of each buffer of `list`, captured at `stamp`.
-    func deliver(_ list: UnsafeMutableAudioBufferListPointer, frames: Int, stamp: AudioTimeStamp) {
-        ring.push(list, frames: frames, stamp: stamp)
-        doorbell.signal()
-    }
-
-    /// IO thread: a render that had nothing to hand over.
-    func deliver(_ fault: AudioHardwareError) {
-        ring.push(fault)
+    /// IO thread: one render's buffer list, captured at `stamp`.
+    ///
+    /// A shape fault is `shapeNeverMatched` until a list of the layout has been heard and
+    /// `inputShapeChanged` after, because they have different answers: a device that changed
+    /// under a press is replaced, and one that never matched would be replaced into the same
+    /// mismatch. [LAW:no-silent-failure] A device is free to deliver a cycle with no frames,
+    /// which is not a shape fault.
+    func deliver(_ list: UnsafePointer<AudioBufferList>, stamp: AudioTimeStamp) {
+        guard !faulted else { return }
+        switch layout.verdict(of: list, capacity: capacity) {
+        case .empty:
+            return
+        case .overlong(let frames):
+            faulted = ring.push(.overlongSlice(frames: frames, capacity: capacity))
+        case .shape(let mismatch):
+            faulted = ring.push(matched ? .inputShapeChanged(mismatch) : .shapeNeverMatched(mismatch))
+        case .frames(let frames):
+            matched = true
+            ring.push(list, layout: layout, frames: frames, stamp: stamp)
+        }
         doorbell.signal()
     }
 

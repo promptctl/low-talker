@@ -21,6 +21,9 @@ import Testing
         return buffer
     }
 
+    /// One channel, one buffer: what `slice` builds.
+    static let mono = InputLayout(buffers: [1], sampleRate: 16_000)
+
     static func stamp(_ ticks: UInt64, valid: Bool = true) -> AudioTimeStamp {
         var stamp = AudioTimeStamp()
         stamp.mHostTime = ticks
@@ -32,14 +35,14 @@ import Testing
         let buffer = slice(from: first, frames: frames)
         // The list points into the buffer, which ARC may release after its last use.
         withExtendedLifetime(buffer) {
-            ring.push(UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList), frames: frames, stamp: stamp(ticks))
+            ring.push(buffer.audioBufferList, layout: mono, frames: frames, stamp: stamp(ticks))
         }
     }
 
     static func deliver(_ delivery: SliceDelivery, from first: Int, frames: Int, at stamp: AudioTimeStamp) {
         let buffer = slice(from: first, frames: frames)
         withExtendedLifetime(buffer) {
-            delivery.deliver(UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList), frames: frames, stamp: stamp)
+            delivery.deliver(buffer.audioBufferList, stamp: stamp)
         }
     }
 
@@ -79,7 +82,8 @@ import Testing
         Self.push(ring, from: 60, frames: 60, at: 2)  // 120 frames will not fit in 100.
         Self.push(ring, from: 120, frames: 40, at: 3)
         Self.push(ring, from: 160, frames: 1, at: 4)  // Both entries are taken.
-        ring.push(.renderFailed(-1))
+        // A fault the ring had no room for says so, which is what lets a delivery try it again.
+        #expect(ring.push(.overlongSlice(frames: 1, capacity: 1)) == false)
         #expect(ring.dropped == 3)
         let first = try #require(Self.popSlice(ring, into: popped))
         #expect(first.ticks == 1)
@@ -109,9 +113,10 @@ import Testing
         let appended = Mutex<[([Float], HostTime)]>([])
         let failures = Mutex<[String]>([])
 
-        func delivery(_ ring: SliceRing, slice: Int) throws -> SliceDelivery {
+        func delivery(_ ring: SliceRing, slice: Int, layout: InputLayout = SliceRingTests.mono) throws -> SliceDelivery {
             try SliceDelivery(
                 ring,
+                layout: layout,
                 slice: slice,
                 format: SliceRingTests.format,
                 converter: AudioClip.Converter(from: SliceRingTests.format),
@@ -143,16 +148,126 @@ import Testing
         #expect(samples == (0..<50 * 160).map(Float.init))
     }
 
-    /// A slice whose stamp has no host time behind it cannot be placed, and says so; a fault
-    /// the IO thread met is reported as itself; and audio the ring had no room for is reported
-    /// as lost.
+    /// A device whose buffers never were the shape it was readied under says so as such, once,
+    /// whatever follows: replacing its input would read the same properties and mismatch again.
+    @Test func aShapeThatNeverMatchedIsReportedOnceAsThat() throws {
+        let collected = Collected()
+        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        let wrong = InputLayoutTests.List([(2, 20)])
+        delivery.deliver(wrong.base, stamp: Self.stamp(1))
+        delivery.deliver(wrong.base, stamp: Self.stamp(2))
+        // A list of the right shape after the fault is not heard either: the press is failed.
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(3))
+        delivery.finish()
+
+        let mismatch = ShapeMismatch(reason: .channels, expectedBuffers: 1, gotBuffers: 1, buffer: 0, expectedChannels: 1, gotChannels: 2, gotBytes: 80)
+        #expect(collected.failures.withLock { $0 } == ["\(AudioHardwareError.shapeNeverMatched(mismatch))"])
+        #expect(collected.appended.withLock { $0 }.isEmpty)
+    }
+
+    /// A shape that changed after slices of it were heard is the other fault: the device
+    /// renegotiated under the press, and a replacement is the answer.
+    @Test func aShapeThatChangedAfterItMatchedIsReportedOnceAsThat() throws {
+        let collected = Collected()
+        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(1))
+        let wrong = InputLayoutTests.List([(2, 20)])
+        delivery.deliver(wrong.base, stamp: Self.stamp(2))
+        delivery.deliver(wrong.base, stamp: Self.stamp(3))
+        delivery.finish()
+
+        let mismatch = ShapeMismatch(reason: .channels, expectedBuffers: 1, gotBuffers: 1, buffer: 0, expectedChannels: 1, gotChannels: 2, gotBytes: 80)
+        #expect(collected.failures.withLock { $0 } == ["\(AudioHardwareError.inputShapeChanged(mismatch))"])
+        #expect(collected.appended.withLock { $0 }.flatMap(\.0) == (0..<10).map(Float.init))
+    }
+
+    /// An oversized render fails the press, and a device whose buffers stay oversized does not
+    /// push a fault, and ring the delivery thread, on every cycle after it.
+    @Test func anOverlongRenderIsReportedOnce() throws {
+        let collected = Collected()
+        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        for index in 0..<5 {
+            Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(UInt64(index + 1)))
+        }
+        delivery.finish()
+
+        #expect(collected.failures.withLock { $0 } == ["\(AudioHardwareError.overlongSlice(frames: 200, capacity: 100))"])
+        #expect(collected.appended.withLock { $0 }.isEmpty)
+    }
+
+    /// A fault the ring had no room for is not reported, so it is tried again, and once there
+    /// is room it is reported exactly once: a press must not go silent over a fault dropped
+    /// from a full ring.
+    @Test func aFaultTheRingHadNoRoomForIsReportedOnceThereIsRoom() throws {
+        final class Held: Sendable {
+            let heard = Mutex(0)
+            let failures = Mutex<[String]>([])
+            let entered = DispatchSemaphore(value: 0)
+            let release = DispatchSemaphore(value: 0)
+        }
+        let held = Held()
+        let delivery = try SliceDelivery(
+            SliceRing(channels: 1, frames: 1_000, entries: 2),
+            layout: Self.mono,
+            slice: 100,
+            format: Self.format,
+            converter: AudioClip.Converter(from: Self.format),
+            appending: { _, _ in
+                // The first slice holds the delivery thread, so the ring's two entries fill behind it.
+                if held.heard.withLock({ $0 += 1; return $0 }) == 1 {
+                    held.entered.signal()
+                    held.release.wait()
+                }
+            },
+            onFailure: { error in held.failures.withLock { $0.append("\(error)") } }
+        )
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(1))
+        held.entered.wait()
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(2))
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(3))
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(4))
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(5))
+        held.release.signal()
+        // Slices 2 and 3 leave the ring as the thread takes them, which is the room the fault needs.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while held.heard.withLock({ $0 }) < 3, ContinuousClock.now < deadline {
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(6))
+        Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(7))
+        delivery.finish()
+
+        let overlong = "\(AudioHardwareError.overlongSlice(frames: 200, capacity: 100))"
+        #expect(held.failures.withLock { $0 }.filter { $0 == overlong }.count == 1)
+    }
+
+    /// A cycle of no frames is a device's to deliver and is neither heard nor a fault.
+    @Test func aCycleOfNoFramesIsNotAFault() throws {
+        let collected = Collected()
+        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        let empty = InputLayoutTests.List([(1, 0)])
+        delivery.deliver(empty.base, stamp: Self.stamp(1))
+        Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(2))
+        delivery.deliver(empty.base, stamp: Self.stamp(3))
+        delivery.finish()
+
+        #expect(collected.failures.withLock { $0 } == [])
+        #expect(collected.appended.withLock { $0 }.flatMap(\.0) == (0..<10).map(Float.init))
+    }
+
+    /// A slice whose stamp has no host time behind it cannot be placed, and says so; a render
+    /// larger than the delivery was sized for is reported as itself; and audio the ring had no
+    /// room for is reported as lost.
     @Test func deliveryReportsWhatItCouldNotHandOver() throws {
         let collected = Collected()
-        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 100, entries: 8), slice: 100)
+        // A ring of 50 frames under slices of up to 100: a slice of 60 is within what the
+        // delivery was sized for and more than the ring can hold, so it is dropped however far
+        // the thread has got.
+        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 50, entries: 8), slice: 100)
         Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(5, valid: false))
-        delivery.deliver(.renderFailed(-50))
-        // More than the whole ring holds, so it is dropped however far the thread has got.
-        Self.deliver(delivery, from: 0, frames: 150, at: Self.stamp(6))
+        Self.deliver(delivery, from: 0, frames: 60, at: Self.stamp(6))
+        // Last: an oversized render fails the press, and nothing after it is delivered.
+        Self.deliver(delivery, from: 0, frames: 150, at: Self.stamp(7))
         delivery.finish()
 
         #expect(collected.appended.withLock { $0 }.isEmpty)
@@ -162,7 +277,7 @@ import Testing
         #expect(failures.count == 3)
         #expect(Set(failures) == [
             "\(AudioHardwareError.bufferWithoutTime)",
-            "\(AudioHardwareError.renderFailed(-50))",
+            "\(AudioHardwareError.overlongSlice(frames: 150, capacity: 100))",
             "\(AudioHardwareError.deliveryFellBehind(dropped: 1))",
         ])
     }

@@ -88,7 +88,7 @@ public final class AudioCapture {
     }
 
     /// An engine on the input device of its moment. The generation is what this engine's
-    /// render callback carries with a failure, so a failure from a replaced engine is
+    /// failure report carries, so a failure from a replaced engine is
     /// recognized as stale (a counter, because a replaced engine's address can be reused).
     private struct Live {
         let dispose: Disposal
