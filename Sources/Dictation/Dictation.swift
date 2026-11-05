@@ -82,10 +82,10 @@ public final class Dictation {
         /// nor a failure: nothing went wrong, and nobody is told anything went wrong.
         public enum Outcome: Sendable {
             case session(Session)
-            /// The chord was a typed key's modifier, so nothing more of the press went in.
-            /// `landed` is how many of its words were committed while the chord was down, and
-            /// `held` how many heard after them are held.
-            case usedAsModifier(landed: Int, held: Int)
+            /// The chord was a typed key's modifier, so the press was never dictation and
+            /// nothing of it is held or shown. `landed` is how many of its words were committed
+            /// while the chord was down, and `discarded` how many heard after them were dropped.
+            case usedAsModifier(landed: Int, discarded: Int)
             case failed(Failed)
         }
 
@@ -352,29 +352,31 @@ public final class Dictation {
     }
 
     /// How a press that was heard ended. [LAW:types-are-the-program] Where the words past its
-    /// commits go is the one thing an ending decides: the cursor, or the hold.
+    /// commits go is the one thing an ending decides: the cursor, the hold, or nowhere.
     private enum Ending: Sendable {
         /// The key came up at `keyUp`, by its event's stamp, and this loop was told `delivery`
         /// after it.
         case released(PressKind, keyUp: ContinuousClock.Instant, delivery: Duration)
         case cut(Cut)
+        /// A key was typed while the chord was down, so the chord was that key's modifier and
+        /// the person was typing, not dictating. Nothing past the commits is inserted, held, or
+        /// shown: the person is not told anything about a keyboard they are using as intended.
+        case usedAsModifier
     }
 
     /// Why a press's words past its commits are held rather than inserted. Each leaves the
     /// person something to see before the next insert carries the words: a press the hotkey
-    /// stopped during, words said with a key typed into the app partway through, or audio
-    /// with a stretch of the speech missing. [LAW:no-silent-failure] Words inserted at once
-    /// would be in the person's editor before anything could say what they are.
+    /// stopped during, or audio with a stretch of the speech missing. [LAW:no-silent-failure]
+    /// Words inserted at once would be in the person's editor before anything could say what
+    /// they are.
     private enum Cut: Sendable {
         case lapsed
-        case usedAsModifier
         case lost(CapturedAudio.Loss)
 
         /// What the hold tells the person beside the words.
         var warning: String {
             switch self {
             case .lapsed: PressLapsed.warning
-            case .usedAsModifier: "WARNING: You typed a key while holding the dictation chord."
             case .lost(let lost): SpeechLost.warning(lost)
             }
         }
@@ -582,7 +584,7 @@ public final class Dictation {
                 // dictation is neither a session nor a failure. [LAW:dataflow-not-control-flow]
                 // One outcome, not a fork on whether a key landed.
                 mode = began
-                pending = .unheard(.usedAsModifier(landed: 0, held: 0))
+                pending = .unheard(.usedAsModifier(landed: 0, discarded: 0))
                 opening = nil
             case .down(let began, let down):
                 mode = began
@@ -596,13 +598,14 @@ public final class Dictation {
                 let end = capture.endSession(down.session)
                 opening = Opening(duringPress: duringPress, capture: end.reading, streaming: down.streaming)
                 // How the press ended, read once. [LAW:no-silent-failure] A hotkey that
-                // stopped, a chord used as a modifier, and audio the capture could not stream
-                // whole each cut the press short. Those are asked first: a press the hotkey
-                // stopped during says so rather than describing the clip it left behind,
-                // which was never the whole utterance anyway. A microphone that was not there
-                // at all was refused at key-down, so it never reaches here.
+                // stopped and audio the capture could not stream whole each cut the press
+                // short, and a chord used as a modifier ends it as no dictation at all. Those
+                // are asked first: a press the hotkey stopped during says so rather than
+                // describing the clip it left behind, which was never the whole utterance
+                // anyway. A microphone that was not there at all was refused at key-down, so
+                // it never reaches here.
                 let ended: Ending = switch (ending, released, end.lost) {
-                case (.usedAsModifier, _, _): .cut(.usedAsModifier)
+                case (.usedAsModifier, _, _): .usedAsModifier
                 case (_, nil, _): .cut(.lapsed)
                 case (_, let released?, nil): .released(released.kind, keyUp: released.keyUp, delivery: told - released.keyUp)
                 case (_, _?, let lost?): .cut(.lost(lost))
@@ -613,7 +616,7 @@ public final class Dictation {
                 // pass the ended audio lets the engine finish is never committed.
                 switch ended {
                 case .released: break
-                case .cut: down.streaming.stop()
+                case .cut, .usedAsModifier: down.streaming.stop()
                 }
                 pending = .heard(Heard(ending: ended, decode: down.decode, streaming: down.streaming, committing: down.committing))
             }
@@ -797,10 +800,20 @@ public final class Dictation {
         }
     }
 
+    /// What a decode heard past the commits `streaming` made: the transcript's rest, or what the
+    /// passes during the press read when the decode failed.
+    private func words(past streaming: Streaming, in decoded: Decoded) -> Transcript {
+        switch decoded.transcription {
+        case .success(let transcription): streaming.rest(of: transcription.transcript)
+        case .failure: streaming.rest(of: streaming.reading)
+        }
+    }
+
     /// Waits for the press's commits and its decode, then places what was heard and not yet
-    /// committed: at the cursor for a press the speaker released, and in the hold for one cut
-    /// short. Every press waits for its decode, the model's load included, since what it heard
-    /// is what the hold keeps.
+    /// committed: at the cursor for a press the speaker released, in the hold for one cut
+    /// short, and nowhere for a chord that was a typed key's modifier. Every press waits for
+    /// its decode, the model's load included, rather than cancelling it: the engine's turn
+    /// passes on only when the decode ends, and a modifier press's report counts its words.
     private func hear(_ heard: Heard) async throws(Failed) -> Report.Outcome {
         let unplaced = await heard.committing.value
         let decoded = await heard.decode.value
@@ -828,17 +841,24 @@ public final class Dictation {
             // A rest of nothing leaves what the commits could not place where it was.
             if placed.performed == nil, let unplaced { throw stopped(unplaced) }
             return .session(Session(press: press, transcription: transcription, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 }))
+        case .usedAsModifier:
+            // [LAW:types-are-the-program] The person was typing, so what the microphone heard
+            // is not theirs to be shown and not theirs to be warned of: it is dropped, and the
+            // report counts it. [LAW:nothing-unseen] A refused commit still names itself, since
+            // words it carried are at no cursor whatever the chord turned out to be.
+            let dropped = words(past: heard.streaming, in: decoded)
+            let discarded = dropped.isBlank ? 0 : dropped.words.count
+            if let unplaced { throw stopped(unplaced) }
+            return .usedAsModifier(landed: landed.words, discarded: discarded)
         case .cut(let cut):
             // What the decode heard past the commits, and what kept it from reading them: a failed
             // decode leaves what the passes during the hold read. Nothing spoken is nothing more
-            // to hold rather than a failure: a chord used as a modifier with nothing said is a
-            // typed key and nothing else.
-            let rest: Transcript
+            // to hold rather than a failure.
+            let rest = words(past: heard.streaming, in: decoded)
             let unread: (any Accounted)?
             switch decoded.transcription {
-            case .success(let transcription): (rest, unread) = (heard.streaming.rest(of: transcription.transcript), nil)
+            case .success: unread = nil
             case .failure(let failed):
-                rest = heard.streaming.rest(of: heard.streaming.reading)
                 if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = failed.failure }
             }
             let held = rest.isBlank ? 0 : rest.words.count
@@ -852,7 +872,6 @@ public final class Dictation {
             if let cause = unplaced ?? unread { throw stopped(cause) }
             switch cut {
             case .lapsed: throw Failed(PressLapsed(landed: landed.words, held: held))
-            case .usedAsModifier: return .usedAsModifier(landed: landed.words, held: held)
             case .lost(let lost): throw Failed(SpeechLost(lost: lost, landed: landed.words, held: held))
             }
         }
