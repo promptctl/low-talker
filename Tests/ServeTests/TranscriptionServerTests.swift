@@ -196,12 +196,13 @@ import TestProbes
     /// A request that asks while the speaker holds the engine waits for the hold, and its
     /// event says so.
     @Test func aRequestThatWaitedForAHoldSaysSoInItsEvent() async throws {
-        let turns = EngineTurns()
+        let changes = Changes()
+        let turns = EngineTurns(onReadingChanged: { changes.note() })
         let running = try await Running.start(.ready(Turning(turns: turns)))
         defer { running.server.stop() }
         let hold = turns.hold()
         async let answered = running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { turns.reading.waiting == 1 })
+        await changes.settled { turns.reading.waiting == 1 }
         #expect(hold.release().waiting == 1)
         #expect(try await answered.0.statusCode == 200)
         #expect(try await running.nextEvent().turns == EngineTurns.Tally(deferred: 1))
@@ -210,13 +211,14 @@ import TestProbes
     /// Uploads past the limit at once are refused with the 429 Pipecat retries, while the
     /// one taken in waits out the hold and is answered; each event says how many were in.
     @Test func anUploadPastTheLimitIs429WhileTheOneTakenInIsAnswered() async throws {
-        let turns = EngineTurns()
+        let changes = Changes()
+        let turns = EngineTurns(onReadingChanged: { changes.note() })
         let running = try await Running.start(.ready(Turning(turns: turns)), limits: ServedLimits(uploads: 1, sockets: 1, audio: 60))
         defer { running.server.stop() }
         let hold = turns.hold()
         let upload = [("model", nil, Data("m".utf8)), ("file", "audio.mp3", try fixture("hello-16k-mono.mp3"))] as [(name: String, filename: String?, value: Data)]
         async let answered = running.post(upload)
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { turns.reading.waiting == 1 })
+        await changes.settled { turns.reading.waiting == 1 }
         let (refused, body) = try await running.post(upload)
         #expect(refused.statusCode == 429)
         #expect(try error(body)["code"] as? String == "rate_limit_exceeded")

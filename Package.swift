@@ -106,7 +106,7 @@ let package = Package(
         // owed to one under way, and nothing new once a quit is asked for. Every effect is the
         // app's, taken as a closure. Out of the app target so `make test` runs it. [LAW:decomposition]
         .target(name: "LoopLifecycle"),
-        .testTarget(name: "LoopLifecycleTests", dependencies: ["LoopLifecycle"]),
+        .testTarget(name: "LoopLifecycleTests", dependencies: ["LoopLifecycle", "TestProbes"]),
         .testTarget(name: "SignalsTests", dependencies: ["Signals", "LowTalkerCore", "TestProbes"]),
         // The loop from a press to inserted text, with every collaborator taken as a value.
         // Its own target rather than app code so the loop runs under `swift test`; the

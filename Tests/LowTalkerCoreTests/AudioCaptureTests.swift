@@ -1,6 +1,7 @@
 import AVFoundation
 import Grants
 import LowTalkerCore
+import TestProbes
 import Testing
 
 private struct NoDevice: Error, Equatable {}
@@ -55,6 +56,7 @@ private final class FakeHardware: AudioHardware {
             isReadied = true
             waiting.forEach { $0.resume() }
             waiting = []
+            hardware.changed.note()  // [LAW:no-ambient-temporal-coupling] readying finished; waiters let go
         }
 
         func open(
@@ -73,7 +75,9 @@ private final class FakeHardware: AudioHardware {
 
         func waitUntilReadied() async {
             if isReadied { return }
-            await withCheckedContinuation { waiting.append($0) }
+            // [LAW:no-ambient-temporal-coupling] The wait raises `waiters` here, before this
+            // suspends; the note fires now, since this does not return until readying finishes.
+            await withCheckedContinuation { waiting.append($0); hardware.changed.note() }
         }
     }
 
@@ -121,6 +125,11 @@ private final class FakeHardware: AudioHardware {
     /// how a test reaches the stretch a slow input spends being reached.
     let holdsReadying: Bool
 
+    /// Moved whenever what a test awaits on this hardware changes - a microphone readied, a
+    /// wait reaching one, an engine opened or disposed - so a test awaits the change rather
+    /// than polling for it. [LAW:no-ambient-temporal-coupling]
+    let changed = Changes()
+
     init(launches: [(any Error)?] = [], watch: (any Error)? = nil, holdsReadying: Bool = false) {
         self.launches = launches
         self.watch = watch
@@ -130,6 +139,7 @@ private final class FakeHardware: AudioHardware {
     func prepareInput(onStale: @escaping @MainActor () -> Void) -> any PreparedInput {
         let input = Input(self, readying: inputs.count + 1, onStale: onStale)
         inputs.append(input)
+        changed.note()  // [LAW:no-ambient-temporal-coupling] a microphone was readied
         return input
     }
 
@@ -137,7 +147,8 @@ private final class FakeHardware: AudioHardware {
         if let error = launches.isEmpty ? nil : launches.removeFirst() { throw error }
         let engine = Engine(input: input, appending: appending, onFailure: onFailure)
         engines.append(engine)
-        return { engine.disposed = true }
+        changed.note()  // [LAW:no-ambient-temporal-coupling] an engine opened
+        return { [changed = changed] in engine.disposed = true; changed.note() }  // and disposed
     }
 
     func watchDefaultInput(_ onChange: @escaping @MainActor () -> Void) throws -> Disposal {
@@ -202,12 +213,6 @@ private struct Authorized: MicrophoneAuthority {
         return false
     }
 
-    /// Lets what is queued on the main actor run until `holds` is true, and fails if it never is.
-    private func untilItHolds(_ holds: () -> Bool) async throws {
-        for _ in 0..<1000 where !holds() { await Task.yield() }
-        try #require(holds())
-    }
-
     private func isListening(_ capture: AudioCapture) -> Bool {
         if case .listening = capture.state { return true }
         return false
@@ -258,7 +263,7 @@ private struct Authorized: MicrophoneAuthority {
         let hardware = FakeHardware(holdsReadying: true)
         let capture = AudioCapture(hardware: hardware)
         let starting = Task { try await capture.start(grant, atRest: .open) }
-        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        await hardware.changed.settled { hardware.inputs.first?.waiters == 1 }
         #expect(hardware.engines.isEmpty)
         hardware.inputs[0].finishReadying()
         try await starting.value
@@ -273,10 +278,10 @@ private struct Authorized: MicrophoneAuthority {
         let hardware = FakeHardware(holdsReadying: true)
         let capture = AudioCapture(hardware: hardware)
         let starting = Task { try await capture.start(grant, atRest: .open) }
-        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        await hardware.changed.settled { hardware.inputs.first?.waiters == 1 }
         try hardware.changeDefaultInput()
         hardware.inputs[0].finishReadying()
-        try await untilItHolds { hardware.inputs.count == 2 && hardware.inputs[1].waiters == 1 }
+        await hardware.changed.settled { hardware.inputs.count == 2 && hardware.inputs[1].waiters == 1 }
         #expect(hardware.engines.isEmpty)
         hardware.inputs[1].finishReadying()
         try await starting.value
@@ -290,7 +295,7 @@ private struct Authorized: MicrophoneAuthority {
         let hardware = FakeHardware(holdsReadying: true)
         let capture = AudioCapture(hardware: hardware)
         let starting = Task { try await capture.start(grant, atRest: .open) }
-        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        await hardware.changed.settled { hardware.inputs.first?.waiters == 1 }
         capture.stop()
         hardware.inputs[0].finishReadying()
         try await starting.value
@@ -647,13 +652,13 @@ private struct Authorized: MicrophoneAuthority {
         try await capture.start(grant, atRest: .shut)
         capture.rest(as: .open)
         #expect(capture.atRest == .open)
-        try await untilItHolds { hardware.engines.count == 1 }
+        await hardware.changed.settled { hardware.engines.count == 1 }
         #expect(!hardware.engines[0].disposed)
         capture.rest(as: .shut)
         #expect(capture.atRest == .shut)
         // The close lands a main-actor turn later, and a reading before it is not told shut.
         #expect("\(capture.doing)" == "being shut")
-        try await untilItHolds { hardware.engines[0].disposed }
+        await hardware.changed.settled { hardware.engines[0].disposed }
         #expect("\(capture.doing)" == "\(MicrophoneAtRest.shut)")
         #expect(isListening(capture))
         #expect(reports.said == ["rest open: reached", "rest shut: reached"])
@@ -669,7 +674,7 @@ private struct Authorized: MicrophoneAuthority {
         let session = try capture.beginSession(at: origin, preRoll: 0)
         hardware.engines[0].appending([1, 2], origin)
         capture.rest(as: .shut)
-        try await untilItHolds { reports.said == ["rest shut: left for the key-up"] }
+        await reports.changed.settled { reports.said == ["rest shut: left for the key-up"] }
         #expect(!hardware.engines[0].disposed)
         #expect(isRunning(capture))
         hardware.engines[0].appending([3, 4], after(2))
@@ -690,7 +695,7 @@ private struct Authorized: MicrophoneAuthority {
     /// still being reached: the stretch a save asking for the microphone held can land in.
     private func readyingASecondInput(_ hardware: FakeHardware, _ capture: AudioCapture) async throws {
         let starting = Task { try await capture.start(grant, atRest: .shut) }
-        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        await hardware.changed.settled { hardware.inputs.first?.waiters == 1 }
         hardware.inputs[0].finishReadying()
         try await starting.value
         try hardware.changeDefaultInput()
@@ -707,13 +712,17 @@ private struct Authorized: MicrophoneAuthority {
         try await readyingASecondInput(hardware, capture)
 
         capture.rest(as: .open)
-        try await untilItHolds { hardware.inputs[1].waiters == 1 }
+        await hardware.changed.settled { hardware.inputs[1].waiters == 1 }
         #expect(hardware.engines.isEmpty)
         // The menu reads this, and a dark microphone is not called held open.
         #expect("\(capture.doing)" == "held open once its input is reached")
+        // [LAW:no-ambient-temporal-coupling] exception: the move's reported wait is real elapsed
+        // time, so this holds the input unreadied for a real span the report must measure as at
+        // least that. It cannot race: the measured interval spans this sleep, so `>=` holds under
+        // any load. Driving it by an injected clock needs a clock seam in AudioCapture (its own strand).
         try await Task.sleep(for: .milliseconds(20))
         hardware.inputs[1].finishReadying()
-        try await untilItHolds { reports.said.count == 2 }
+        await reports.changed.settled { reports.said.count == 2 }
         #expect(reports.said == ["defaultInputChanged: readied", "rest open: reached"])
         #expect(hardware.engines.map(\.readying) == [2])
         #expect(reports.waits[0] >= .milliseconds(20))
@@ -726,14 +735,14 @@ private struct Authorized: MicrophoneAuthority {
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
         let starting = Task { try await capture.start(grant, atRest: .shut) }
-        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        await hardware.changed.settled { hardware.inputs.first?.waiters == 1 }
 
         capture.rest(as: .open)
-        try await untilItHolds { hardware.inputs[0].waiters == 2 }
+        await hardware.changed.settled { hardware.inputs[0].waiters == 2 }
         #expect(hardware.engines.isEmpty)
         hardware.inputs[0].finishReadying()
         try await starting.value
-        try await untilItHolds { reports.said == ["rest open: reached"] }
+        await reports.changed.settled { reports.said == ["rest open: reached"] }
         #expect(hardware.engines.map(\.readying) == [1])
     }
 
@@ -746,10 +755,10 @@ private struct Authorized: MicrophoneAuthority {
         try await readyingASecondInput(hardware, capture)
 
         capture.rest(as: .open)
-        try await untilItHolds { hardware.inputs[1].waiters == 1 }
+        await hardware.changed.settled { hardware.inputs[1].waiters == 1 }
         capture.stop()
         hardware.inputs[1].finishReadying()
-        try await untilItHolds { reports.said.count == 2 }
+        await reports.changed.settled { reports.said.count == 2 }
         #expect(reports.said.last == "rest open: stopped")
         #expect(hardware.engines.isEmpty)
     }
@@ -764,11 +773,11 @@ private struct Authorized: MicrophoneAuthority {
         try await readyingASecondInput(hardware, capture)
 
         capture.rest(as: .open)
-        try await untilItHolds { hardware.inputs[1].waiters == 1 }
+        await hardware.changed.settled { hardware.inputs[1].waiters == 1 }
         let session = try capture.beginSession(at: origin, preRoll: 0)
         #expect(hardware.engines.map(\.readying) == [2])
         hardware.inputs[1].finishReadying()
-        try await untilItHolds { reports.said.count == 2 }
+        await reports.changed.settled { reports.said.count == 2 }
         #expect(reports.said.last == "rest open: left for the key-up")
         _ = capture.endSession(session)
         #expect(hardware.engines.count == 1)
@@ -786,11 +795,11 @@ private struct Authorized: MicrophoneAuthority {
         try await readyingASecondInput(hardware, capture)
 
         capture.rest(as: .open)
-        try await untilItHolds { hardware.inputs[1].waiters == 1 }
+        await hardware.changed.settled { hardware.inputs[1].waiters == 1 }
         capture.rest(as: .shut)
-        try await untilItHolds { reports.said.count == 2 }
+        await reports.changed.settled { reports.said.count == 2 }
         hardware.inputs[1].finishReadying()
-        try await untilItHolds { reports.said.count == 3 }
+        await reports.changed.settled { reports.said.count == 3 }
         #expect(Array(reports.said.dropFirst()) == ["rest shut: reached", "rest open: superseded"])
         #expect(hardware.engines.isEmpty)
     }
@@ -802,7 +811,7 @@ private struct Authorized: MicrophoneAuthority {
         let reports = Reports()
         let capture = AudioCapture(hardware: hardware, startingAt: origin, reporting: { reports.record($0) })
         let starting = Task { try await capture.start(grant, atRest: .open) }
-        try await untilItHolds { hardware.inputs.first?.waiters == 1 }
+        await hardware.changed.settled { hardware.inputs.first?.waiters == 1 }
         hardware.inputs[0].finishReadying()
         try await starting.value
         // The device change relaunches the held microphone in place, on an input still being
@@ -811,7 +820,7 @@ private struct Authorized: MicrophoneAuthority {
         #expect(hardware.engines.map(\.readying) == [1, 2])
 
         capture.rest(as: .shut)
-        try await untilItHolds { hardware.engines[1].disposed }
+        await hardware.changed.settled { hardware.engines[1].disposed }
         #expect(!hardware.inputs[1].isReadied)
         #expect(reports.said.last == "rest shut: reached")
     }
@@ -1422,6 +1431,9 @@ private struct Authorized: MicrophoneAuthority {
     @MainActor private final class Reports {
         private(set) var said: [String] = []
         private(set) var waits: [Duration] = []
+        /// Moved whenever a report is recorded, so a test awaits the report rather than polling
+        /// for it. [LAW:no-ambient-temporal-coupling]
+        let changed = Changes()
         func record(_ report: CaptureReport) {
             switch report {
             case .device(let report):
@@ -1446,6 +1458,7 @@ private struct Authorized: MicrophoneAuthority {
             case .failed(let failure):
                 said.append("failed: \(failure)")
             }
+            changed.note()  // [LAW:no-ambient-temporal-coupling] a report was recorded
         }
     }
 

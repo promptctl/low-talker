@@ -115,7 +115,16 @@ public final class EngineTurns: Sendable {
 
     private let state = Mutex(State())
 
-    public init() {}
+    /// Run after each change to `reading`, outside the lock. It lets an observer await a
+    /// transition (`await changes.settled { turns.reading.waiting == 1 }`) rather than poll
+    /// `reading` against a clock; it defaults to doing nothing, so production is unchanged.
+    /// [LAW:no-ambient-temporal-coupling] The engine's own readable state, completed from a
+    /// snapshot something must poll to one it can await.
+    private let onReadingChanged: @Sendable () -> Void
+
+    public init(onReadingChanged: @escaping @Sendable () -> Void = {}) {
+        self.onReadingChanged = onReadingChanged
+    }
 
     public var reading: Reading {
         state.withLock { $0.reading }
@@ -164,6 +173,7 @@ public final class EngineTurns: Sendable {
             return (state.admit(), waiting, yielded)
         }
         next?.resume(returning: true)
+        onReadingChanged()  // [LAW:no-ambient-temporal-coupling] a closed hold may admit a waiter
         return (waiting, yielded)
     }
 
@@ -192,6 +202,7 @@ public final class EngineTurns: Sendable {
                 return (preempted, state.admit())
             }
             next?.resume(returning: true)
+            onReadingChanged()  // [LAW:no-ambient-temporal-coupling] the decode is done; the engine is freed and handed on
             // A decode a hold cancelled failed because of the hold, so it is owed another run;
             // one that finished anyway keeps its result, and was not cancelled.
             guard preempted, !Task.isCancelled, case .failure = result else { return try result.get() }
@@ -226,6 +237,10 @@ public final class EngineTurns: Sendable {
                 }
                 if refused { go.resume(returning: false) }
                 admitted?.resume(returning: true)
+                // [LAW:no-ambient-temporal-coupling] A parked waiter raised `waiting` here,
+                // before this suspends; the note has to fire now, since `turn` does not return
+                // until the waiter is admitted and `waiting` has fallen again.
+                onReadingChanged()
             }
         } onCancel: {
             state.withLock { state -> CheckedContinuation<Bool, Never>? in
@@ -233,6 +248,7 @@ public final class EngineTurns: Sendable {
                 defer { state.sync() }
                 return state.waiting.remove(at: index).go
             }?.resume(returning: false)
+            onReadingChanged()  // [LAW:no-ambient-temporal-coupling] a waiting decode was taken off the queue
         }
         guard admitted else { throw .cancelled }
         // [LAW:single-enforcer] Dictation first, for work that gives way to it as for served

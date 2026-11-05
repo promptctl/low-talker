@@ -33,8 +33,17 @@ public final class ServerSwitch {
     }
 
     public private(set) var state: State = .off {
-        didSet { ServedRequest.logger.notice("server: \(self.state, privacy: .public)") }
+        didSet {
+            ServedRequest.logger.notice("server: \(self.state, privacy: .public)")
+            onStateChange?()
+        }
     }
+
+    /// Run after each change to `state`, so a test awaits a transition
+    /// (`await changes.settled { ... }`) rather than polling `state` against a clock. Unset in
+    /// the app, so production is unchanged. [LAW:no-ambient-temporal-coupling] The switch's own
+    /// readable state, completed from a snapshot something must poll to one it can await.
+    var onStateChange: (@MainActor () -> Void)?
 
     /// Whether the person has switched serving on, kept in the app's defaults. Unset reads
     /// as off. [LAW:one-source-of-truth]

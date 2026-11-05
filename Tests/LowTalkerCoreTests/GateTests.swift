@@ -15,9 +15,9 @@ import TestProbes
         let gate = Gate()
         let through = Flag()
         let waiting = Task { await gate.wait(); through.raise() }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         waiting.cancel()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { through.raised })
+        await through.changed.settled { through.raised }
         #expect(gate.waiting == 0)
     }
 
@@ -33,7 +33,7 @@ import TestProbes
             through.raise()
         }
         waiting.cancel()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { through.raised })
+        await through.changed.settled { through.raised }
         #expect(gate.waiting == 0)
     }
 
@@ -49,9 +49,9 @@ import TestProbes
             }
             both.raise()
         }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { gate.waiting == 2 })
+        await gate.changed.settled { gate.waiting == 2 }
         gate.open()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { both.raised })
+        await both.changed.settled { both.raised }
         #expect(gate.waiting == 0)
     }
 }

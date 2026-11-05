@@ -74,11 +74,19 @@ public final class Gate: Sendable {
 public final class Flag: Sendable {
     private let value = Mutex(false)
 
+    /// Moves when the flag is raised, so a test awaits the raise
+    /// (`await flag.changed.settled { flag.raised }`) rather than polling for it.
+    /// [LAW:no-ambient-temporal-coupling]
+    public let changed = Changes()
+
     public init() {}
 
     public var raised: Bool { value.withLock { $0 } }
 
-    public func raise() { value.withLock { $0 = true } }
+    public func raise() {
+        value.withLock { $0 = true }
+        changed.note()
+    }
 }
 
 /// The dual of `Gate`: where a gate holds work back until a test opens it, this wakes a test

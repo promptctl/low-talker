@@ -1,4 +1,5 @@
 import LoopLifecycle
+import TestProbes
 import Testing
 
 /// A step of the loop the test holds open: each run waits until the test releases it with
@@ -10,10 +11,15 @@ private final class Held<Answer: Sendable> {
     private var waiting: [CheckedContinuation<Answer, Never>] = []
     /// How many runs are waiting to be released.
     var waiters: Int { waiting.count }
+    /// Moved when a run reaches here, so a test awaits the step being reached rather than
+    /// polling for it. [LAW:no-ambient-temporal-coupling]
+    let changed = Changes()
 
     func run() async -> Answer {
         begun += 1
-        return await withCheckedContinuation { waiting.append($0) }
+        // [LAW:no-ambient-temporal-coupling] The run raises `waiters` here, before this
+        // suspends; the note fires now, since this does not return until the run is released.
+        return await withCheckedContinuation { waiting.append($0); changed.note() }
     }
 
     func release(_ answer: Answer) {
@@ -31,6 +37,9 @@ private final class App {
     var watching = false
     /// How many fresh readings the lifecycle took, which is how an owed reading is seen paid.
     private(set) var readings = 0
+    /// Moved when a reading is taken or the hotkey starts watching, so a test awaits those
+    /// rather than polling for them. [LAW:no-ambient-temporal-coupling]
+    let changed = Changes()
     /// How many times the come-up offered the guided setup, which the real effect shows only
     /// when a requirement is unmet. A quit during the come-up offers none.
     private(set) var setUpsOffered = 0
@@ -42,10 +51,12 @@ private final class App {
         adopt: { [weak self] in
             await self?.adopt.run()
             self?.watching = true
+            self?.changed.note()  // [LAW:no-ambient-temporal-coupling] the hotkey now watches
         },
         requirementsMet: { [weak self] in
             guard let self else { return false }
             readings += 1
+            changed.note()  // [LAW:no-ambient-temporal-coupling] a reading was taken
             return requirementsMet
         },
         watching: { [weak self] in self?.watching ?? false },
@@ -56,13 +67,6 @@ private final class App {
     var untimed: [LoopLifecycle.Event] {
         events.map { if case .capture(let capture, _) = $0 { .capture(capture, waited: .zero) } else { $0 } }
     }
-}
-
-/// Lets what is queued on the main actor run until `holds` is true, and fails if it never is.
-@MainActor
-private func untilItHolds(_ holds: () -> Bool) async throws {
-    for _ in 0..<1000 where !holds() { await Task.yield() }
-    try #require(holds())
 }
 
 /// The loop's come-ups and rebuilds as readings arrive, against an app the test holds at each
@@ -77,11 +81,11 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         let app = App()
         app.lifecycle.settle(requirementsMet: true)
         app.lifecycle.settle(requirementsMet: true)
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         app.capture.release(.started)
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         app.adopt.release(())
-        try await untilItHolds { app.readings == 1 }
+        await app.changed.settled { app.readings == 1 }
         #expect(app.capture.begun == 1)
         #expect(app.adopt.begun == 1)
         #expect(app.untimed == [
@@ -98,12 +102,12 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         app.watching = true
         app.lifecycle.inputMethodWasSwitchedOn()
         app.lifecycle.settle(requirementsMet: true)
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         app.lifecycle.settle(requirementsMet: true)
         app.lifecycle.settle(requirementsMet: true)
         #expect(app.readings == 0)
         app.adopt.release(())
-        try await untilItHolds { app.readings == 1 }
+        await app.changed.settled { app.readings == 1 }
         for _ in 0..<10 { await Task.yield() }
         #expect(app.readings == 1)
         #expect(app.adopt.begun == 1)
@@ -116,16 +120,16 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
     @Test func aReadingOwedToAComeUpThatLeftTheLoopDownBringsItUpAgain() async throws {
         let app = App()
         app.lifecycle.settle(requirementsMet: true)
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         app.lifecycle.settle(requirementsMet: true)
         app.capture.release(.notStarted)
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         #expect(app.capture.begun == 2)
         #expect(app.adopt.begun == 0)
         app.capture.release(.started)
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         app.adopt.release(())
-        try await untilItHolds { app.watching }
+        await app.changed.settled { app.watching }
         #expect(app.untimed == [
             .settled(.comingUp), .settled(.owed),
             .capture(.notStarted, waited: .zero),
@@ -140,9 +144,9 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         let first = app.lifecycle.comeUp()
         let second = app.lifecycle.comeUp()
         #expect(first == second)
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         app.capture.release(.started)
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         app.adopt.release(())
         await first.value
         #expect(app.capture.begun == 1)
@@ -155,7 +159,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
     @Test func aCaptureThatDidNotStartBuildsNoLoopAndOffersSetUp() async throws {
         let app = App()
         let up = app.lifecycle.comeUp()
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         app.capture.release(.notStarted)
         await up.value
         #expect(app.adopt.begun == 0)
@@ -168,9 +172,9 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
     @Test func aComeUpOverACaptureAlreadyRunningBuildsTheLoopAndSaysSo() async throws {
         let app = App()
         let up = app.lifecycle.comeUp()
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         app.capture.release(.running)
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         app.adopt.release(())
         await up.value
         #expect(app.watching)
@@ -183,7 +187,12 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
     @Test func theComeUpTellsHowLongCaptureTookToStart() async throws {
         let app = App()
         let up = app.lifecycle.comeUp()
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
+        // [LAW:no-ambient-temporal-coupling] exception: the come-up's reported wait is real
+        // elapsed time, so this holds capture unstarted for a real span the come-up must measure
+        // as at least that. It cannot race: the come-up's interval spans this sleep, so `>=`
+        // holds under any load. Driving it by an injected clock needs a clock seam in
+        // LoopLifecycle (its own strand).
         try await Task.sleep(for: .milliseconds(50))
         app.capture.release(.notStarted)
         await up.value
@@ -200,7 +209,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
     @Test func aQuitDuringTheCaptureWaitBuildsNoLoopAndOffersNoSetUp() async throws {
         let app = App()
         let up = app.lifecycle.comeUp()
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         #expect(app.lifecycle.quit() == nil)
         app.capture.release(.started)
         await up.value
@@ -231,7 +240,7 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         app.watching = true
         app.lifecycle.inputMethodWasSwitchedOn()
         app.lifecycle.settle(requirementsMet: true)
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         let rebuilding = try #require(app.lifecycle.quit())
         app.adopt.release(())
         await rebuilding.value
@@ -245,14 +254,14 @@ private func untilItHolds(_ holds: () -> Bool) async throws {
         app.watching = true
         app.lifecycle.inputMethodWasSwitchedOn()
         app.lifecycle.settle(requirementsMet: true)
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         let up = app.lifecycle.comeUp()
-        try await untilItHolds { app.capture.waiters == 1 }
+        await app.capture.changed.settled { app.capture.waiters == 1 }
         app.capture.release(.started)
         for _ in 0..<10 { await Task.yield() }
         #expect(app.adopt.begun == 1)
         app.adopt.release(())
-        try await untilItHolds { app.adopt.waiters == 1 }
+        await app.adopt.changed.settled { app.adopt.waiters == 1 }
         #expect(app.adopt.begun == 2)
         app.adopt.release(())
         await up.value
