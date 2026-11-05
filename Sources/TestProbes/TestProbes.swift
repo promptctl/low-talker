@@ -24,6 +24,10 @@ public final class Gate: Sendable {
 
     private let state = Mutex(State())
 
+    /// Moves whenever the count of waiters changes, so a test awaits work arriving here
+    /// (`await gate.changed.settled { gate.waiting == 1 }`) rather than polling for it.
+    public let changed = Changes()
+
     public init() {}
 
     public var waiting: Int { state.withLock { $0.waiters.count } }
@@ -35,6 +39,7 @@ public final class Gate: Sendable {
             return state.waiters
         }
         released.values.forEach { $0.resume() }
+        if !released.isEmpty { changed.note() }
     }
 
     public func wait() async {
@@ -53,10 +58,13 @@ public final class Gate: Sendable {
                     state.waiters[arrival] = continuation
                     return false
                 }
-                if through { continuation.resume() }
+                if through { continuation.resume() } else { changed.note() }
             }
         } onCancel: {
-            state.withLock { $0.waiters.removeValue(forKey: arrival) }?.resume()
+            if let waiter = state.withLock({ $0.waiters.removeValue(forKey: arrival) }) {
+                waiter.resume()
+                changed.note()
+            }
         }
     }
 }
@@ -71,4 +79,73 @@ public final class Flag: Sendable {
     public var raised: Bool { value.withLock { $0 } }
 
     public func raise() { value.withLock { $0 = true } }
+}
+
+/// The dual of `Gate`: where a gate holds work back until a test opens it, this wakes a test
+/// when work moved, so a test proves an effect arrived by awaiting it rather than by polling a
+/// clock until a deadline. Whatever mutates calls `note`; an observer calls `settled` and
+/// comes back the moment its condition holds. [LAW:no-ambient-temporal-coupling]
+///
+/// Lost-wakeup-free by a count read under the same lock a wake bumps: an observer reads the
+/// count, checks its condition, and parks only for a count still equal to the one it read, so a
+/// `note` landing between the read and the park is not missed - it moved the count, and the
+/// park sees it moved and comes back at once to re-check.
+public final class Changes: Sendable {
+    private struct State {
+        var moved = 0
+        var parked: [Int: CheckedContinuation<Void, Never>] = [:]
+        var next = 0
+    }
+
+    private let state = Mutex(State())
+
+    public init() {}
+
+    /// Work moved: wake every observer so each re-checks its condition.
+    public func note() {
+        let woken = state.withLock { state in
+            state.moved += 1
+            defer { state.parked = [:] }
+            return state.parked.values
+        }
+        woken.forEach { $0.resume() }
+    }
+
+    /// Await until `condition` holds, re-checked on every `note`. No clock and no deadline: a
+    /// condition that never holds is a bug that hangs here for the test runner's outer timeout
+    /// to name, not a partial result read after a window lapsed. [LAW:no-silent-failure]
+    ///
+    /// `condition` is the caller's and is asked on the caller's actor; this owns only the
+    /// waking. A cancelled wait comes back rather than staying parked, the same reason `Gate`'s
+    /// does: a task group whose first failure cancels its siblings is the ordinary way a suite
+    /// arrives here, and a wait that outlived its cancellation would hold the whole suite.
+    public func settled(
+        isolation: isolated (any Actor)? = #isolation,
+        _ condition: () throws -> Bool
+    ) async rethrows {
+        while !Task.isCancelled {
+            let seen = state.withLock { $0.moved }
+            if try condition() { return }
+            let id = state.withLock { state in
+                let id = state.next
+                state.next += 1
+                return id
+            }
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    // Resumed under the same lock a wake and a cancellation take, so it is
+                    // resumed exactly once whichever reaches the lock first: a note that already
+                    // moved the count, a cancellation, or neither, in which case it is parked.
+                    let resumeNow = state.withLock { state in
+                        guard !Task.isCancelled, state.moved == seen else { return true }
+                        state.parked[id] = continuation
+                        return false
+                    }
+                    if resumeNow { continuation.resume() }
+                }
+            } onCancel: {
+                state.withLock { $0.parked.removeValue(forKey: id) }?.resume()
+            }
+        }
+    }
 }

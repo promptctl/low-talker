@@ -5,6 +5,7 @@ import Grants
 import Insertion
 import LowTalkerCore
 import Synchronization
+import TestProbes
 
 /// A store kept in memory, outliving the rigs built over it as a file outlives the app, and
 /// keeping the store's contract.
@@ -150,6 +151,11 @@ final class FakeTranscriber: Transcriber {
     private let missedAtKeyUp: Partial.Unread?
     private let quiet: Quiet
     private let answer: @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
+    /// A test's signal, set by the Rig, moved whenever the audio heard so far changes so a test
+    /// awaits the engine hearing it instead of polling for it. [LAW:no-ambient-temporal-coupling]
+    private let onChange = Mutex<Changes?>(nil)
+    func noting(_ changes: Changes) { onChange.withLock { $0 = changes } }
+    private func moved() { onChange.withLock { $0 }?.note() }
 
     /// `reading` is what a pass makes of the audio so far and `confirming` the words two
     /// passes have agreed on, which the answer has to begin with, and `repunctuating` how
@@ -190,10 +196,12 @@ final class FakeTranscriber: Transcriber {
             samples += clip.samples
             partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: unreading(samples)))
             arrived.withLock { $0 = samples }
+            moved()
         }
         missedAtKeyUp.map { partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: $0)) }
         let clip = AudioClip(samples: samples)
         heard.withLock { $0.append(clip) }
+        moved()
         return Transcription(transcript: try await answer(clip), quiet: quiet)
     }
 }
@@ -224,6 +232,11 @@ final class FakeInputMethod: Inserter, Sendable {
     }
 
     private let state = Mutex(State())
+    /// A test's signal, set by the Rig, moved whenever this fake's state changes so a test
+    /// awaits the change instead of polling for it. [LAW:no-ambient-temporal-coupling]
+    private let onChange = Mutex<Changes?>(nil)
+    func noting(_ changes: Changes) { onChange.withLock { $0 = changes } }
+    private func moved() { onChange.withLock { $0 }?.note() }
 
     /// Every text put at the cursor, in order. A held insert is not in it until it is let go.
     var inserted: [String] { state.withLock { $0.inserted } }
@@ -258,10 +271,14 @@ final class FakeInputMethod: Inserter, Sendable {
     }
 
     func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
+        // Every exit - the text landing, a refusal thrown, a take-back - moves the signal, so a
+        // test awaits the insert resolving. The hold below moves it separately, before it blocks.
+        defer { moved() }
         let (text, destination) = (request.text, request.destination)
         state.withLock { $0.asked += 1 }
         if let gate = state.withLock({ $0.gate }) {
             state.withLock { $0.holding += 1 }
+            moved()
             gate.wait()
             state.withLock { $0.holding -= 1 }
         }

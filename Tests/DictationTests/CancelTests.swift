@@ -35,7 +35,7 @@ import TestProbes
     /// when the cursor takes them, or `held` words when it does not.
     private static func said(_ samples: [Float], in rig: Rig, until reached: @escaping @MainActor () -> Bool) async throws {
         rig.speak(samples)
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { reached() })
+        await rig.until { reached() }
     }
 
     /// An earlier press whose words no cursor took, so the hold offers `"old words"`.
@@ -226,11 +226,11 @@ import TestProbes
         begin(rig)
         rig.inputMethod.hold()
         rig.speak([1, 2])
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.inputMethod.holding == 1 })
+        await rig.until { rig.inputMethod.holding == 1 }
         rig.hold.dismiss()
         rig.inputMethod.refusing(refusal)
         rig.inputMethod.letGo()
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { rig.hold.held?.words == Transcript(typed: " hello") })
+        await rig.until { rig.hold.held?.words == Transcript(typed: " hello") }
         return earlier
     }
 
