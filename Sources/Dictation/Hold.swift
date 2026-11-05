@@ -198,7 +198,8 @@ public enum HeldUnkept: Error, Equatable, Sendable, CustomStringConvertible {
 
 /// The words no cursor has taken, kept until one does, and the words the person dismissed last,
 /// kept until one step brings them back or a later dismissal replaces them. Brandon, 2026-10-15:
-/// a dictation's words are never thrown away.
+/// a dictation's words are never thrown away. The one exception is the person's own Escape, which
+/// throws a dictation away on purpose: `forget` lets go of the words it left held.
 ///
 /// [LAW:no-shared-mutable-globals] One for the life of the app, so a loop rebuilt over a new
 /// config keeps what the old one held. Written by the loop as it places words and by the

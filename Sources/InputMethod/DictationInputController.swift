@@ -54,7 +54,8 @@ public final class DictationInputController: IMKInputController {
             let kept = SteeringGate.shared.verdict(for: key, at: event.timestamp) == .keep
             // The system's own answer to a Return that did nothing, so a kept one is heard at the
             // moment it was typed and not only found in a log. An Escape that was kept did
-            // something - it threw the dictation away - and says so on screen. [LAW:no-silent-failure]
+            // something, it threw the dictation away, and a take-back the field refused is the
+            // app's notice to give. [LAW:no-silent-failure]
             if kept, key == .return { NSSound.beep() }
             return kept
         }

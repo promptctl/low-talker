@@ -300,6 +300,24 @@ import TestProbes
         #expect(rig.hold.held == .unaccounted(part(" hello", "\(unanswered)")))
     }
 
+    /// An insert that may have landed covers what it carried: the earlier words and the press's own
+    /// failed ones stand with it, and the report counts every one.
+    @Test func earlierAndFailedWordsAnUnansweredInsertCarriedStandToo() async throws {
+        let rig = try await Rig(hearing: Self.engine())
+        let unanswered = InsertFailure.unreachable(.answerDidNotArrive(port: "port", after: .seconds(1)))
+        try await Self.holdingEarlierWords(rig)
+        rig.inputMethod.refusing(Self.refusal)
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.hold.held?.words == Transcript(typed: "old words hello") }
+        rig.inputMethod.refusing(unanswered)
+        try await Self.said([3, 4], in: rig) { rig.hold.held == .unaccounted(part("old words hello there", "\(unanswered)")) }
+
+        Self.cancel(rig)
+        let cancelled = try #require(await rig.report().cancelled)
+
+        #expect(cancelled == Cancelled(takenBack: 0, earlierWordsLanded: 0, forgotten: 0, dismissed: 0, standing: 4, discarded: 2))
+    }
+
     /// Words that landed on either side of one that may have landed are not one run at the caret,
     /// so the take-back is refused, loudly, and the words stay and are counted.
     @Test func wordsAroundAnUnansweredInsertCannotBeTakenBack() async throws {

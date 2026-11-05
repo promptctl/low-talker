@@ -420,7 +420,7 @@ extension HotkeyDetectorTests {
         _ = keyboard.press(.rightOption, at: 0)
 
         #expect(keyboard.detector.steer(.cancel) == .ended(.ended(.cancelled)))
-        #expect(keyboard.detector.phase == .idle)
+        #expect(keyboard.detector.phase == .cancelled(rightOption.chord))
     }
 
     @Test func escapeCancelsALatchedPress() {
@@ -442,6 +442,18 @@ extension HotkeyDetectorTests {
 
         #expect(keyboard.release(.rightOption, at: 400) == [])
         #expect(keyboard.press(.rightOption, at: 1000) == began(rightOption, at: 1000))
+    }
+
+    /// The chord is still down after the cancel, so a modifier added to it is not a new press that
+    /// something blocks: nothing is listening until the chord comes up.
+    @Test func aModifierAddedToTheChordAfterACancelBeginsNothing() {
+        var keyboard = Keyboard()
+        _ = keyboard.press(.rightOption, at: 0)
+        _ = keyboard.detector.steer(.cancel)
+
+        #expect(keyboard.press(.leftShift, at: 300) == [])
+        #expect(keyboard.detector.steer(.cancel) == .nothingOpen)
+        #expect(keyboard.detector.lapse() == nil)
     }
 
     @Test func escapeCancelsNothingWhenNoPressIsOpen() {

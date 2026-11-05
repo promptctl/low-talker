@@ -126,6 +126,9 @@ public struct HotkeyDetector: Sendable {
         /// A tap left listening on in this mode; the next press of its chord, or of any chord
         /// listened for, ends it.
         case latched(Mode)
+        /// Escape threw a held press away while its chord was still down: nothing is listening
+        /// until a key of the chord comes up, and its release ends nothing.
+        case cancelled(KeyChord)
     }
 
     public private(set) var modes: Modes
@@ -182,7 +185,7 @@ public struct HotkeyDetector: Sendable {
         case (.latched(let latched), nil, _) where latched.chord.isCompleted(by: event.key, holding: event.modifiers) || latched.chord.isBlocked(by: event.key, holding: event.modifiers):
             phase = .idle
             return [.ended(.released(.tap, at: event.time))]
-        case (.held, _, _), (.blocked, _, _), (.latched, nil, _), (.idle, nil, nil):
+        case (.held, _, _), (.blocked, _, _), (.cancelled, _, _), (.latched, nil, _), (.idle, nil, nil):
             return []
         }
     }
@@ -208,7 +211,10 @@ public struct HotkeyDetector: Sendable {
         case .blocked(let chord, let since) where chord.modifiers.contains(event.key):
             phase = .idle
             return [.ended(typedUnder(since: since) ? .usedAsModifier : .released(kind(since: since), at: event.time))]
-        case .held, .blocked, .latched, .idle:
+        case .cancelled(let chord) where chord.modifiers.contains(event.key):
+            phase = .idle
+            return []
+        case .held, .blocked, .cancelled, .latched, .idle:
             return []
         }
     }
@@ -250,10 +256,13 @@ public struct HotkeyDetector: Sendable {
             return .ended(.ended(.released(.tap, at: time)))
         case (.send, .held):
             return .chordDown
-        case (.cancel, .latched), (.cancel, .held):
+        case (.cancel, .latched):
             phase = .idle
             return .ended(.ended(.cancelled))
-        case (_, .blocked), (_, .idle):
+        case (.cancel, .held(let mode, _)):
+            phase = .cancelled(mode.chord)
+            return .ended(.ended(.cancelled))
+        case (_, .blocked), (_, .cancelled), (_, .idle):
             return .nothingOpen
         }
     }
@@ -274,7 +283,7 @@ public struct HotkeyDetector: Sendable {
     /// was the invention this ending exists to stop.
     public mutating func lapse() -> Transition? {
         let transition: Transition? = switch phase {
-        case .idle: nil
+        case .idle, .cancelled: nil
         case .held, .blocked, .latched: .ended(.lapsed)
         }
         phase = .idle

@@ -211,8 +211,8 @@ public final class Dictation {
             var landedWords = 0
             /// Earlier words an insert of the press carried into the field: delivered, not the press's.
             var earlierWordsLanded = 0
-            /// The press's own words in inserts that may have landed: the hold stands them, as it does
-            /// for any such insert.
+            /// Words in inserts that may have landed, the press's own and the earlier ones they
+            /// carried: the hold stands them, as it does for any such insert.
             var standingWords = 0
 
             /// What the hold would keep of its offered part if the press were cancelled now.
@@ -363,7 +363,8 @@ public final class Dictation {
         func failed(run: Int, mayHaveLanded: Bool, offered: Int) {
             state.withLock { state in
                 if mayHaveLanded {
-                    state.provenance.standingWords += run
+                    // The insert covers everything it carried, so the words held before it stand too.
+                    state.provenance.standingWords += state.provenance.pre + state.provenance.own + run
                     state.provenance.pre = 0
                     state.provenance.own = 0
                 } else if offered == state.provenance.pre + state.provenance.own + run {
@@ -1058,7 +1059,7 @@ public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
     public let forgotten: Int
     /// Its own words no cursor took that the person dismissed before cancelling: theirs, so they stay dismissed.
     public let dismissed: Int
-    /// Its own words in inserts that may have landed: they stand in the hold with its warning.
+    /// Words in inserts that may have landed, its own and the earlier ones they carried: they stand in the hold with its warning.
     public let standing: Int
     /// What was said past the commits, dropped.
     public let discarded: Int
