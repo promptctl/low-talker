@@ -111,7 +111,7 @@ import Testing
         func verdict(_ window: ArraySlice<Float>) throws -> Verdict { throw Failure() }
     }
 
-    /// A discriminator that cannot answer fails the utterance as the engine, and a pass waiting
+    /// A discriminator that cannot answer fails the utterance as the gate, and a pass waiting
     /// on its speech is woken rather than left waiting.
     @Test func aDiscriminatorThatCannotAnswerFailsTheFillAndWakesTheWait() async throws {
         let utterance = Utterance(judging: Unanswerable())
@@ -122,7 +122,7 @@ import Testing
                 feed.finish()
             })
         } throws: { error in
-            guard case TranscriptionFailure.engine(let cause) = error else { return false }
+            guard case TranscriptionFailure.gate(let cause) = error else { return false }
             return cause is Unanswerable.Failure
         }
         #expect(await waiting.ended)

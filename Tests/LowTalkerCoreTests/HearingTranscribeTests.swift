@@ -1,4 +1,5 @@
 @testable import LowTalkerCore
+import Synchronization
 import Testing
 import WhisperKit
 
@@ -244,5 +245,68 @@ import WhisperKit
             }
         }
         guard case .unreadable(.wordEndsBeforeStart)? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
+    }
+
+    /// A discriminator that calls every frame speech until it has been asked `answers` times, and
+    /// cannot answer after.
+    final class Failing: Discriminator {
+        struct Failure: Error {}
+        let lookbehind = 0
+        let lookahead: Int
+        private let answers: Int
+        private let asked = Mutex(0)
+
+        init(answering answers: Int, lookahead: Int = 0) {
+            self.answers = answers
+            self.lookahead = lookahead
+        }
+
+        func verdict(_ window: ArraySlice<Float>) throws -> Verdict {
+            guard asked.withLock({ $0 += 1; return $0 }) <= answers else { throw Failure() }
+            return .speech
+        }
+    }
+
+    /// Hears `clips` through `judging`, handing every pass the same reading, and gives what the
+    /// loop failed with and every partial it was told.
+    static func hear(_ clips: [AudioClip], judging discriminator: any Discriminator) async -> (failure: TranscriptionFailure?, partials: [Partial]) {
+        let audio = AsyncStream<AudioClip> { feed in
+            for clip in clips { feed.yield(clip) }
+            feed.finish()
+        }
+        var partials: [Partial] = []
+        do {
+            _ = try await Hearing.transcribe(audio, margin: margin, context: 3, judging: discriminator, pass: { _ in reading }, partial: { partials.append($0) })
+            return (nil, partials)
+        } catch {
+            return (error, partials)
+        }
+    }
+
+    /// A gate that fails as the utterance ends still has its last pass read the audio it judged,
+    /// and that reading is told before the failure is thrown, so the press holds the words the
+    /// pass read (low-reliability-z2z.u8q). The pass is the only one: 0.7 s of speech with its
+    /// hangover is under a pass during the hold.
+    @Test func aGateThatFailsAsTheUtteranceEndsTellsTheLastReading() async {
+        let (failure, partials) = await Self.hear([Self.speech(0.4)], judging: Failing(answering: 3, lookahead: Utterance.frameCount))
+        guard case .gate(let cause)? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
+        #expect(cause is Failing.Failure)
+        #expect(partials.map(\.text) == [" see you"])
+    }
+
+    /// A gate that fails mid-press closes the utterance, and the last pass reads the audio judged
+    /// before the failure, told before the failure is thrown (low-reliability-z2z.u8q).
+    @Test func aGateThatFailsMidPressTellsTheLastReading() async {
+        let clips = (0..<4).map { _ in Self.speech(0.1) }
+        let (failure, partials) = await Self.hear(clips, judging: Failing(answering: 2))
+        guard case .gate? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
+        #expect(partials.map(\.text) == [" see you"])
+    }
+
+    /// A gate that fails before any frame is judged leaves no pass, so there is no reading to tell.
+    @Test func aGateThatFailsBeforeAnySpeechTellsNothing() async {
+        let (failure, partials) = await Self.hear([Self.speech(0.4)], judging: Failing(answering: 0))
+        guard case .gate? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
+        #expect(partials.isEmpty)
     }
 }

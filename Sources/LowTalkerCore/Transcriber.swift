@@ -121,6 +121,9 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
     /// The engine's own library failed: a model, a decoder, a buffer. WhisperKit's errors
     /// (`WhisperError`) name a stage or a file, never what it read.
     case engine(any Error)
+    /// The discriminator that tells the gate's speech from other sounds failed, so no audio past
+    /// the frame it could not judge was heard. What the passes read before it stands.
+    case gate(any Error)
 
     public var description: String {
         switch self {
@@ -130,6 +133,7 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"
+        case .gate(let error): "the speech gate failed: \(error)"
         }
     }
 }

@@ -175,9 +175,9 @@ actor Utterance {
     }
 
     /// Takes `clip` in, and every frame its verdict can now be read for. A discriminator that
-    /// cannot answer is the engine failing, not quiet. [LAW:no-silent-failure]
+    /// cannot answer is the gate failing, not quiet. [LAW:no-silent-failure]
     func append(_ clip: AudioClip) throws(TranscriptionFailure) {
-        do { take(try lookahead.append(clip.samples)) } catch { throw .engine(error) }
+        do { take(try lookahead.append(clip.samples)) } catch { throw .gate(error) }
         wake()
     }
 
@@ -260,7 +260,7 @@ actor Utterance {
     /// silence past the end.
     func end() throws(TranscriptionFailure) {
         defer { close() }
-        do { take(try lookahead.finish()) } catch { throw .engine(error) }
+        do { take(try lookahead.finish()) } catch { throw .gate(error) }
     }
 
     /// Nothing more is taken, judged or not: a pass waiting on speech gets what there is,
