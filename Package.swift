@@ -162,6 +162,11 @@ let package = Package(
         // so nothing a person installs runs it. [LAW:one-way-deps]
         .executableTarget(name: "model-tool", dependencies: ["ModelInstall", "LowTalkerCore", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
         .testTarget(name: "ModelToolTests", dependencies: ["model-tool", "ModelInstall", "LowTalkerCore"]),
+        // Destroys or changes the device a press is open on, against real hardware, and says
+        // whether the press kept the speech said after it. In no product and never copied into
+        // a bundle, like `model-tool`: a driver for a person at a Mac with a loopback device,
+        // and for the checkpoint low-reliability-z2z.01v. [LAW:one-way-deps]
+        .executableTarget(name: "mic-cut-probe", dependencies: ["LowTalkerCore", "Grants"]),
         .testTarget(
             name: "ModelInstallTests",
             dependencies: [

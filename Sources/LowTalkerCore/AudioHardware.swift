@@ -159,9 +159,18 @@ public enum AudioHardwareError: Error, Equatable, CustomStringConvertible {
     case deviceWatchFailed(OSStatus)
     /// A buffer arrived with no host clock behind its time.
     case bufferWithoutTime
-    case noInputComponent
-    case componentUnavailable(OSStatus)
     case inputUnavailable(OSStatus)
+    /// A device whose input this cannot read as 32-bit float samples, which says what it
+    /// offered. Refused when the microphone is readied rather than recorded as noise.
+    case unsupportedInput(device: AudioObjectID, why: InputRefusal)
+    /// The device handed over a buffer list of another shape than the one its microphone was
+    /// readied under, after slices of that shape had been heard: it renegotiated under the
+    /// press, and what it hands over from here is another input's.
+    case inputShapeChanged(ShapeMismatch)
+    /// The device never handed over a buffer list of the shape it was readied under. A
+    /// replacement would be readied from the same properties and fail the same way, so this
+    /// fails the press instead.
+    case shapeNeverMatched(ShapeMismatch)
     case noDefaultInput(OSStatus)
     /// Readying a microphone left the device running on this process's account, so the
     /// split the whole resting state rests on - reach a microphone without taking one - did
@@ -171,7 +180,6 @@ public enum AudioHardwareError: Error, Equatable, CustomStringConvertible {
     /// menu-bar indicator is showing for it.
     case runningStateUnreadable(OSStatus)
     case nameUnreadable(OSStatus)
-    case renderFailed(OSStatus)
     /// The device asked to hand over more audio at once than it offered when the press opened.
     case overlongSlice(frames: Int, capacity: Int)
     /// The thread handing a press's audio over fell so far behind the device that the ring
@@ -183,14 +191,14 @@ public enum AudioHardwareError: Error, Equatable, CustomStringConvertible {
         case .defaultInputWatchFailed(let status): "CoreAudio refused a listener on the default input device (status \(status))"
         case .deviceWatchFailed(let status): "CoreAudio refused a listener on the input device this microphone is bound to (status \(status))"
         case .bufferWithoutTime: "the input device delivered a buffer with no host time; nothing can say when its samples were captured"
-        case .noInputComponent: "this Mac has no HAL audio unit to capture through"
-        case .componentUnavailable(let status): "the HAL audio unit could not be instantiated (status \(status))"
         case .inputUnavailable(let status): "the input device would not be made ready to capture (status \(status))"
+        case .unsupportedInput(let device, let why): "the input device \(device) cannot be captured: \(why)"
+        case .inputShapeChanged(let shape): "the input device changed what it hands over while capturing: \(shape)"
+        case .shapeNeverMatched(let shape): "the input device hands over something other than what it offered: \(shape)"
         case .noDefaultInput(let status): "this Mac has no default input device (status \(status))"
         case .preparingOpenedTheDevice(let device): "readying a microphone opened device \(device) instead of only reaching it"
         case .runningStateUnreadable(let status): "CoreAudio would not say whether the input device is running (status \(status))"
         case .nameUnreadable(let status): "CoreAudio would not say the input device's name (status \(status))"
-        case .renderFailed(let status): "the input device refused to hand over a buffer it had announced (status \(status))"
         case .overlongSlice(let frames, let capacity): "the input device asked to hand over \(frames) frames at once, past the \(capacity) it offered when the press opened"
         case .deliveryFellBehind(let dropped): "the microphone's audio was handed over too slowly to keep up with the device, and \(dropped) of its buffers were lost"
         }

@@ -19,7 +19,7 @@ import Testing
         #expect(throws: AudioHardwareError.bufferWithoutTime) { try HostTime(placedOnlyAmongSamples) }
     }
 
-    /// The render callback is handed a raw stamp rather than an `AVAudioTime`, and it
+    /// The IOProc is handed a raw stamp rather than an `AVAudioTime`, and it
     /// reads the same ticks the same way.
     @Test func aRenderStampInHostTicksBecomesTheSecondsItStandsFor() throws {
         var stamp = AudioTimeStamp()
