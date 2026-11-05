@@ -9,12 +9,9 @@ import TestProbes
 /// A decode that stands in for a long one sleeps until it is cancelled, which is what a
 /// WhisperKit decode does when its task is: it throws `CancellationError`.
 @Suite struct EngineTurnsTests {
-    private static func soon(_ condition: () -> Bool) async throws -> Bool {
-        try await holds(within: .seconds(10), askingEvery: .milliseconds(2), condition)
-    }
-
     @Test func aHoldCancelsTheServedDecodeInFlightWhichRunsAgainOnceTheHoldLetsGo() async throws {
-        let turns = EngineTurns()
+        let changes = Changes()
+        let turns = EngineTurns(onReadingChanged: { changes.note() })
         let runs = Count()
         let served = Task {
             try await turns.decode(as: .served) { () async throws(TranscriptionFailure) in
@@ -23,9 +20,9 @@ import TestProbes
                 return "heard"
             }
         }
-        #expect(try await Self.soon { turns.reading.decoding == .served })
+        await changes.settled { turns.reading.decoding == .served }
         let hold = turns.hold()
-        #expect(try await Self.soon { turns.reading.decoding == nil && turns.reading.waiting == 1 })
+        await changes.settled { turns.reading.decoding == nil && turns.reading.waiting == 1 }
         #expect(try await turns.decode(as: .dictation) { "spoken" } == "spoken")
         #expect(runs.now == 1)
         #expect(hold.release() == EngineHold.Displaced(preempted: true, waiting: 1, yielded: false))
@@ -58,11 +55,12 @@ import TestProbes
     }
 
     @Test func aServedDecodeAskedForDuringAHoldWaitsForEveryHoldToLetGo() async throws {
-        let turns = EngineTurns()
+        let changes = Changes()
+        let turns = EngineTurns(onReadingChanged: { changes.note() })
         let first = turns.hold()
         let second = turns.hold()
         let served = Task { try await turns.decode(as: .served) { "heard" } }
-        #expect(try await Self.soon { turns.reading.waiting == 1 })
+        await changes.settled { turns.reading.waiting == 1 }
         first.release()
         #expect(turns.reading.waiting == 1 && turns.reading.decoding == nil)
         #expect(second.release() == EngineHold.Displaced(preempted: false, waiting: 1, yielded: false))
@@ -74,7 +72,7 @@ import TestProbes
         let turns = EngineTurns()
         let gate = Gate()
         let spoken = Task { try await turns.decode(as: .dictation) { await gate.wait(); return "spoken" } }
-        #expect(try await Self.soon { gate.waiting == 1 })
+        await gate.changed.settled { gate.waiting == 1 }
         let hold = turns.hold()
         gate.open()
         #expect(try await spoken.value == "spoken")
@@ -85,7 +83,8 @@ import TestProbes
     /// A hold is not the only thing that ends a served decode: a caller that goes away
     /// takes its decode with it, waiting or running, and it is not run again.
     @Test func aServedCallerThatIsCancelledEndsItsDecodeWhetherWaitingOrRunning() async throws {
-        let turns = EngineTurns()
+        let changes = Changes()
+        let turns = EngineTurns(onReadingChanged: { changes.note() })
         let runs = Count()
         let running = Task {
             try await turns.decode(as: .served) { () async throws(TranscriptionFailure) in
@@ -94,7 +93,7 @@ import TestProbes
                 throw .cancelled
             }
         }
-        #expect(try await Self.soon { turns.reading.decoding == .served })
+        await changes.settled { turns.reading.decoding == .served }
         running.cancel()
         let runningEnded = await #expect(throws: TranscriptionFailure.self) { try await running.value }
         if case .cancelled? = runningEnded {} else { Issue.record("the running decode ended on \(String(describing: runningEnded)), not cancelled") }
@@ -102,7 +101,7 @@ import TestProbes
 
         let hold = turns.hold()
         let waiting = Task { try await turns.decode(as: .served) { _ = runs.add() } }
-        #expect(try await Self.soon { turns.reading.waiting == 1 })
+        await changes.settled { turns.reading.waiting == 1 }
         waiting.cancel()
         let waitingEnded = await #expect(throws: TranscriptionFailure.self) { try await waiting.value }
         if case .cancelled? = waitingEnded {} else { Issue.record("the waiting decode ended on \(String(describing: waitingEnded)), not cancelled") }

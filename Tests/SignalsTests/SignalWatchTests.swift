@@ -15,7 +15,7 @@ import Testing
             (number == SIGUSR1 ? user1 : user2).raise()
         }
         kill(getpid(), SIGUSR1)
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { user1.raised })
+        await user1.changed.settled { user1.raised }
         #expect(!user2.raised)
         // The sources stop when the watch goes, and nothing below reads it.
         withExtendedLifetime(watch) {}

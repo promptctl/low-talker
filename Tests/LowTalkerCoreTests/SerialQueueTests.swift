@@ -9,9 +9,17 @@ import TestProbes
 private final class Release: Sendable {
     private let onMainThread = Mutex<Bool?>(nil)
 
+    /// Moves when the watched object is let go, so a test awaits the release
+    /// (`await release.changed.settled { release.seen != nil }`) rather than polling for it.
+    /// [LAW:no-ambient-temporal-coupling]
+    let changed = Changes()
+
     var seen: Bool? { onMainThread.withLock { $0 } }
 
-    func record() { onMainThread.withLock { $0 = pthread_main_np() != 0 } }
+    func record() {
+        onMainThread.withLock { $0 = pthread_main_np() != 0 }
+        changed.note()
+    }
 }
 
 /// Tells its `Release` where it was let go of.
@@ -244,7 +252,7 @@ private struct Boom: Error {}
         let queue = SerialQueue()
         let release = Release()
         try await Self.submitHolding(Held(release), to: queue).value
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { release.seen != nil })
+        await release.changed.settled { release.seen != nil }
         #expect(release.seen == true)
     }
 

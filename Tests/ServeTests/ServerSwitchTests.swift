@@ -3,6 +3,7 @@ import LowTalkerCore
 import Network
 @testable import Serve
 import Synchronization
+import TestProbes
 import Testing
 
 /// The app's server as the person switches it (low-serve-axq.tom): off until chosen, the
@@ -17,6 +18,9 @@ import Testing
     /// The port the switch's first listen was given, which every listen after it asks for
     /// again, as the app's fixed port would be.
     let held = HeldPort()
+    /// Moved whenever a switch this test made changes state, so `listening` awaits the switch
+    /// reaching its server rather than polling for it. [LAW:no-ambient-temporal-coupling]
+    let changes = Changes()
 
     deinit {
         try? FileManager.default.removeItem(at: domain.appendingPathExtension("plist"))
@@ -24,11 +28,13 @@ import Testing
 
     /// A switch over this test's defaults, listening on loopback.
     func aSwitch() -> ServerSwitch {
-        ServerSwitch(defaults: defaults) { [held] binding, engine throws(ListenRefused) in
-            let server = try await TranscriptionServer.listen(at: ListenAddress(binding: binding, port: held.port.withLock { $0 }), engine: engine, record: { _ in })
-            held.port.withLock { $0 = server.port }
-            return server
+        let server = ServerSwitch(defaults: defaults) { [held] binding, engine throws(ListenRefused) in
+            let listener = try await TranscriptionServer.listen(at: ListenAddress(binding: binding, port: held.port.withLock { $0 }), engine: engine, record: { _ in })
+            held.port.withLock { $0 = listener.port }
+            return listener
         }
+        server.onStateChange = { [changes] in changes.note() }
+        return server
     }
 
     @Test func offUntilChosenAndBindsNothing() async throws {
@@ -122,7 +128,9 @@ import Testing
         let server = aSwitch()
         defer { server.choose(false, at: { .loopback }) }
         server.choose(true, at: { unheld })
-        try await Task.sleep(for: .milliseconds(200))
+        // `resume` sets `.starting` synchronously before spawning its task, and this actor is
+        // held until the next await, so no wait is needed for it to hold here, and it cannot
+        // leave `.starting` while the bind waits on an address no interface answers.
         #expect("\(server.state)" == "starting")
         server.choose(false, at: { unheld })
         await server.running?.value
@@ -164,23 +172,29 @@ import Testing
             for await binding in read { return binding }
             throw CancellationError()
         })
-        try await Task.sleep(for: .milliseconds(200))
+        // `.starting` is set synchronously by `resume`, before its task runs, and this actor
+        // is held until the next await, so it holds here with no wait, and it cannot leave
+        // `.starting` while the binding stays unread.
         #expect("\(server.state)" == "starting")
         reading.yield(.loopback)
         _ = try await listening(server)
     }
 
-    /// Waits until the switch reads listening, and returns its server.
+    /// Waits until the switch reads listening, and returns its server. A switch that never
+    /// reaches listening or stopped hangs here for the test runner's outer timeout to name,
+    /// rather than being read partway through a window that lapsed. [LAW:no-silent-failure]
     func listening(_ server: ServerSwitch) async throws -> Running {
-        let deadline = ContinuousClock.now + .seconds(30)
-        while ContinuousClock.now < deadline {
+        await changes.settled {
             switch server.state {
-            case .listening(let listener): return Running(server: listener, events: AsyncStream { $0.finish() })
-            case .stopped(let reason): throw ListenFailed(reason: reason)
-            case .off, .starting: try await Task.sleep(for: .milliseconds(10))
+            case .listening, .stopped: true
+            case .off, .starting: false
             }
         }
-        throw ListenFailed(reason: "still \(server.state) after 30 s")
+        switch server.state {
+        case .listening(let listener): return Running(server: listener, events: AsyncStream { $0.finish() })
+        case .stopped(let reason): throw ListenFailed(reason: reason)
+        case .off, .starting: throw ListenFailed(reason: "the switch woke on \(server.state)")
+        }
     }
 }
 

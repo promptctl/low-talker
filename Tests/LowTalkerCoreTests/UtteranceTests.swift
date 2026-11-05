@@ -182,7 +182,8 @@ import Testing
         let (never, feed) = AsyncStream<AudioClip>.makeStream()
         let filling = Task { try await utterance.fill(from: never) }
         async let heard = utterance.audio(beyond: 100_000)
-        try await Task.sleep(for: .milliseconds(20))
+        // `heard` cannot return until the utterance ends, and it ends only when the fill is
+        // cancelled, so awaiting `heard` proves the waiter was woken without timing the cancel.
         filling.cancel()
         let (samples, _, ended, _) = await heard
         #expect(ended)

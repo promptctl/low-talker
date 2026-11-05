@@ -1,12 +1,16 @@
 import Synchronization
 
-/// A clock that stands still until the test moves it. Unlike `StepClock`, a sleep on it
-/// suspends until `advanceToNextDeadline()` reaches its deadline, so whatever the sleeper
-/// raced - another task reading the clock - takes its turn at the instant the test holds
-/// the hands at, not at whatever instant the machine got round to it.
-/// [LAW:no-ambient-temporal-coupling]
+/// A clock that stands still until the test moves it: a sleep on it suspends until
+/// `advanceToNextDeadline()` reaches its deadline, so whatever the sleeper raced - another
+/// task reading the clock - takes its turn at the instant the test holds the hands at, not at
+/// whatever instant the machine got round to it. [LAW:no-ambient-temporal-coupling]
 final class TestClock: Clock, Sendable {
-    typealias Instant = StepClock.Instant
+    struct Instant: InstantProtocol {
+        var since: Duration
+        func advanced(by duration: Duration) -> Instant { Instant(since: since + duration) }
+        func duration(to other: Instant) -> Duration { other.since - since }
+        static func < (a: Instant, b: Instant) -> Bool { a.since < b.since }
+    }
 
     private struct Sleeper {
         let id: Int
