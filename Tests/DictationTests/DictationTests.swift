@@ -901,7 +901,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let first = await rig.report()
         let second = await rig.report()
         #expect(try first.get().transcription.transcript.text == "a")
-        guard case .usedAsModifier(landed: 0, held: 0) = second else { Issue.record("a blocked chord is never dictation, so it is reported as neither a session nor a failure"); return }
+        guard case .usedAsModifier(landed: 0, discarded: 0) = second else { Issue.record("a blocked chord is never dictation, so it is reported as neither a session nor a failure"); return }
     }
 
     /// What the app awaits before it quits. A surface that went while a session was still in
@@ -1713,22 +1713,22 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.store.kept == .unplaced(part("a", "WARNING: The hotkey stopped listening during your dictation.")))
     }
 
-    /// The chord was a typed key's modifier - Return pressed to send before letting go: the
-    /// press inserts nothing more and is reported as what it was rather than as a failure,
-    /// and everything it heard is held, from the whole of its audio.
-    @Test func aPressUsedAsAModifierHoldsWhatItHeardAndIsNoFailure() async throws {
+    /// The chord was a typed key's modifier - Option held for a special character: the person
+    /// was typing, so the press inserts nothing, holds nothing, and shows no warning. It is
+    /// reported as what it was rather than as a failure, with the words it dropped counted.
+    @Test func aPressUsedAsAModifierGetsOutOfTheWayAndIsNoFailure() async throws {
         let engine = FakeTranscriber { clip in Transcript(typed: clip.samples == [4, 5] ? " b" : "a") }
         let rig = try await Rig(hearing: engine)
         rig.usedAsModifier(speaking: [1, 2, 3])
-        guard case .usedAsModifier(let landed, let held) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        guard case .usedAsModifier(let landed, let discarded) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
         #expect(landed == 0)
-        #expect(held == 1)
-        #expect(engine.clips.first?.samples == [1, 2, 3])
+        #expect(discarded == 1)
         #expect(rig.inputMethod.inserted.isEmpty)
-        #expect(rig.hold.held == .unplaced(part("a", "WARNING: You typed a key while holding the dictation chord.")))
+        #expect(rig.hold.held == nil)
+        // The next press is dictation as if it had never happened: nothing is carried ahead of it.
         rig.hold(speaking: [4, 5])
         #expect(try await rig.session().transcription.transcript.text == " b")
-        #expect(rig.inputMethod.inserted == ["a b"])
+        #expect(rig.inputMethod.inserted == [" b"])
     }
 
     /// A chord used as a modifier with nothing said into it is a typed key and nothing else:
@@ -1738,8 +1738,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             throw .nothingSpoken(peak: 0, quiet: .none)
         })
         rig.usedAsModifier(speaking: [0, 0, 0])
-        guard case .usedAsModifier(let landed, let held) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
-        #expect(landed == 0 && held == 0)
+        guard case .usedAsModifier(let landed, let discarded) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        #expect(landed == 0 && discarded == 0)
         #expect(rig.hold.held == nil)
     }
 
@@ -2010,7 +2010,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.turns.reading.holds == 0)
         rig.keyUp()
         let report = await rig.pressReport()
-        guard case .usedAsModifier(landed: 0, held: 0) = report.outcome else { Issue.record("a blocked chord is never dictation, so its outcome is neither a session nor a failure"); return }
+        guard case .usedAsModifier(landed: 0, discarded: 0) = report.outcome else { Issue.record("a blocked chord is never dictation, so its outcome is neither a session nor a failure"); return }
         #expect(report.opened == nil)
         #expect(rig.hardware.engines.isEmpty)
         #expect(engine.clips.isEmpty)
@@ -2028,7 +2028,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
         rig.dictation.press(.blocked(Rig.dictation, by: [.leftShift]))
         rig.dictation.press(.ended(.usedAsModifier))
-        guard case .usedAsModifier(landed: 0, held: 0) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
+        guard case .usedAsModifier(landed: 0, discarded: 0) = await rig.report() else { Issue.record("expected a press used as a modifier"); return }
         #expect(rig.hold.held == nil)
         #expect(rig.shown.activities.isEmpty)
     }
