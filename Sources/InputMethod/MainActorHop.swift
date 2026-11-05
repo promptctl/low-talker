@@ -30,11 +30,11 @@ private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIde
 ///
 /// `level` is the log's, for a callback made once per key typed: said at debug it is not a
 /// record of when a person typed.
-nonisolated func onMainActor<Argument, Result: Sendable>(_ callback: StaticString, _ argument: Argument, level: OSLogType = .default,
-                                                         _ body: @MainActor (Argument) -> Result) -> Result {
+nonisolated func onMainActor<Argument, Answer: Sendable>(_ callback: StaticString, _ argument: Argument, level: OSLogType = .default,
+                                                         _ body: @MainActor (Argument) -> Answer) -> Answer {
     nonisolated(unsafe) let argument = argument
     let hop: Hop
-    let result: Result
+    let result: Answer
     if Thread.isMainThread {
         result = MainActor.assumeIsolated { body(argument) }
         hop = .inline
