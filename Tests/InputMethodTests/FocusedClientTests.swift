@@ -310,4 +310,61 @@ import Testing
 
         #expect(try self.cursor(client).get() === new)
     }
+
+    // MARK: an Open or Save panel's field, whose client is the service that draws the panel
+
+    private static let panelService = "com.apple.appkit.xpc.openAndSavePanelService"
+    private static let installer = "com.apple.installer"
+
+    /// A cursor as `Client.init` makes it for the panel's client while `host` was in front.
+    private func panelCursor(hosted host: String = installer, answering field: FieldAnswer = textEdit) throws -> Cursor {
+        let application = try #require(CursorApplication.named(by: Self.panelService, inFront: host))
+        return Cursor(in: application, answering: field)
+    }
+
+    /// The case measured on studious: Installer in front, its Open panel's name field focused.
+    @Test func wordsGoToThePanelsFieldWhileItsHostIsInFront() throws {
+        let client = FocusedClient()
+        let cursor = try panelCursor()
+        client.took(cursor)
+
+        #expect(try self.cursor(client, whileInFrontIs: Self.installer).get() === cursor)
+    }
+
+    /// The panel's file list gives document access from a type-select buffer with its caret on
+    /// no screen, which is what keeps words out of it now that the panel is in front.
+    @Test func thePanelsFileListIsStillNotAField() throws {
+        let client = FocusedClient()
+        client.took(try panelCursor(answering: Self.typeSelect))
+
+        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.installer).get() }
+    }
+
+    /// A person who left the app the panel belongs to is refused, as for any cursor left behind.
+    @Test func aPanelLeftBehindIsRefusedOnceAnotherAppIsInFront() throws {
+        let client = FocusedClient()
+        client.took(try panelCursor())
+
+        #expect(throws: Refusal.cursorIsInAnotherApp) { try cursor(client, whileInFrontIs: "com.apple.Safari").get() }
+    }
+
+    /// The words after a dictation's first are bound to the app the first went to, and what
+    /// the cursor reports as that is the host - the service is never in front.
+    @Test func laterWordsOfADictationIntoThePanelStillGoToIt() throws {
+        let client = FocusedClient()
+        let cursor = try panelCursor()
+        client.took(cursor)
+
+        #expect(try self.cursor(client, for: .app(cursor.application), whileInFrontIs: Self.installer).get() === cursor)
+    }
+
+    /// The host quitting takes its panel's cursor with it, so the same app relaunched into
+    /// front is not committed into through a proxy for a process that is gone.
+    @Test func theHostQuittingClearsThePanelsCursor() throws {
+        let client = FocusedClient()
+        client.took(try panelCursor())
+        client.applicationQuit(Self.installer)
+
+        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.installer).get() }
+    }
 }
