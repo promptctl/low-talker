@@ -24,6 +24,14 @@ MASTER = {
     "family=soft-room source=breathing/1-18755-A-23 db=-55 room=-70": "-",
     "family=soft-before source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a level=-20": "170-499",
     "family=soft-before source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a level=-40": "170-499",
+    # A lone soft word, a cough alone and a soft reader, each said with no room before it:
+    # master refuses the word, the cough, and hands the reader from its first sound.
+    "family=soft-room source=sound/coughing/1-19111-A-24 db=-45 room=-60": "-",
+    "family=soft-open fixture=say/yes db=-45 room=clean": "-",
+    "family=soft-open fixture=librispeech/a db=-45 room=clean": "0-199",
+    # The same two fixtures at full level from their first sound: what a soft press is held to.
+    "family=bench fixture=say/yes level=0 trim=trimmed room=clean": "0-39",
+    "family=bench fixture=librispeech/a level=0 trim=trimmed room=clean": "0-199",
 }
 
 
@@ -43,7 +51,7 @@ class ReportTests(unittest.TestCase):
         result = self.report(rows(MASTER), rows(MASTER))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cases losing more than on master: none", result.stdout)
-        self.assertEqual(result.stdout.count("changed: none"), 7)
+        self.assertEqual(result.stdout.count("changed: none"), 8)
         self.assertIn("cases handing more of it than on master: none", result.stdout)
 
     def test_loss_after_a_transient_is_counted_beyond_the_silence_control(self):
@@ -103,6 +111,28 @@ class ReportTests(unittest.TestCase):
         self.assertRegex(result.stdout, r"breathing\s+-55\s+-70\s+1\s+1\s+0\s+0.30 s\s+0.30 s\s+1.80 s\s+0.30 s")
         self.assertIn("alone, changed: 1\n    source=breathing/1-18755-A-23 db=-55 room=-70: let in 0.41 s, lost 0.00 s", result.stdout)
         self.assertIn("before a reader, changed: 1\n    source=breathing/1-18755-A-23 db=-55 room=-70 fixture=librispeech/a level=-40: let in 1.50 s", result.stdout)
+
+    def test_a_soft_speakers_first_word_handed_is_counted_beside_master(self):
+        word = "family=soft-open fixture=say/yes db=-45 room=clean"
+        result = self.report(rows(MASTER), rows({**MASTER, word: "0-39"}, {word: "beef"}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Of two presses at -45 dBFS with no room, master hands one (the reader, 2.00 s) and the
+        # tree both (the reader and the word's 0.40 s); master loses 0.40 s of the word's full-level
+        # 0.40 s in one press, and the tree loses none.
+        self.assertRegex(result.stdout, r"-45\s+clean\s+2\s+2\s+1\s+2.40 s\s+2.00 s\s+0\s+0.00 s\s+1\s+0.40 s")
+        self.assertIn("changed: 1\n    fixture=say/yes db=-45 room=clean: let in 0.40 s, lost 0.00 s", result.stdout)
+
+    def test_a_soft_word_handed_short_of_its_full_level_fixture_is_counted_as_losing(self):
+        word = "family=soft-open fixture=say/yes db=-45 room=clean"
+        result = self.report(rows(MASTER), rows({**MASTER, word: "0-9"}, {word: "beef"}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"-45\s+clean\s+2\s+2\s+1\s+2.10 s\s+2.00 s\s+1\s+0.30 s\s+1\s+0.40 s")
+
+    def test_a_sound_with_no_speaker_that_a_press_hands_is_counted_among_the_soft_sound(self):
+        sound = "family=soft-room source=sound/coughing/1-19111-A-24 db=-45 room=-60"
+        result = self.report(rows(MASTER), rows({**MASTER, sound: "0-9"}, {sound: "beef"}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"sound\s+-45\s+-60\s+1\s+1\s+0")
 
     def test_files_holding_different_cases_are_no_comparison(self):
         case = "family=tap fixture=say/yes room=-35"

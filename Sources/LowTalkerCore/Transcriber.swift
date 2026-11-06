@@ -49,8 +49,9 @@ public struct Quiet: Hashable, Sendable {
     /// Seconds no pass was handed, before the speech and between it: heard as nothing,
     /// while the words are still timed in the audio as it was sent.
     public let letGo: TimeInterval
-    /// The peak of the quietest tenth of a second heard, digital silence aside: the least
-    /// room the quiet was judged against. None when no room was heard.
+    /// The peak of the quietest tenth of a second heard that the discriminator did not call
+    /// speech, digital silence aside: the least room the quiet was judged against. None when
+    /// no room was heard.
     public let room: Float?
     /// Seconds within range of the loudest that stood too near the room to be speech.
     public let refusedAsRoom: TimeInterval
@@ -58,6 +59,10 @@ public struct Quiet: Hashable, Sendable {
     /// that the discriminator called something other than speech: breathing or a fan under a
     /// speaker's level, which the room alone would have let through as it does a whisper.
     public let refusedAsNotSpeech: TimeInterval
+    /// Seconds judged with no room heard in the last few seconds, because every frame in them
+    /// was called speech or none had arrived: a speaker's opening word, or speech with no pause,
+    /// held to the range alone, since no room was there to stand clear of.
+    public let roomless: TimeInterval
     public let transients: Transients
     /// The peak of the loudest syllable in frames the discriminator called speech: the range
     /// the speech was judged against. None when no such syllable was heard.
@@ -70,16 +75,17 @@ public struct Quiet: Hashable, Sendable {
     public let keptOutFrames: Int
 
     /// Nothing let go, no room heard, nothing refused and no range.
-    public static let none = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0)
+    public static let none = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, refusedAsNotSpeech: 0, roomless: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0)
 
     public init(
-        letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, refusedAsNotSpeech: TimeInterval,
+        letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, refusedAsNotSpeech: TimeInterval, roomless: TimeInterval,
         transients: Transients, range: Float?, keptOut: Float?, keptOutFrames: Int
     ) {
         self.letGo = letGo
         self.room = room
         self.refusedAsRoom = refusedAsRoom
         self.refusedAsNotSpeech = refusedAsNotSpeech
+        self.roomless = roomless
         self.transients = transients
         self.range = range
         self.keptOut = keptOut
@@ -129,7 +135,7 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
         switch self {
         case .cancelled: "the decode was cancelled before the engine took it"
         case .nothingSpoken(let peak, let quiet):
-            "nothing spoken: the loudest sample was \(peak) over a room of \(quiet.room.map { "\($0)" } ?? "none heard"), \(quiet.refusedAsNotSpeech) s clear of it were called no speech, and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
+            "nothing spoken: the loudest sample was \(peak) over a room of \(quiet.room.map { "\($0)" } ?? "none heard"), \(quiet.refusedAsNotSpeech) s clear of it were called no speech, \(quiet.roomless) s were judged with no room heard, and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"

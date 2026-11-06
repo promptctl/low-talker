@@ -200,7 +200,7 @@ struct Fixtures {
     var readers: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("librispeech/") } }
     var shortPresses: [(name: String, samples: [Float])] { speech.filter { $0.name.hasPrefix("say/") } }
 
-    var cases: [Case] { bench + transientCases + talk + tap + tapAfter + softRoom }
+    var cases: [Case] { bench + transientCases + talk + tap + tapAfter + softRoom + softSounds + softOpen }
 
     /// Every fixture at 0, -20 and -40 dB, whole and from its first sound, clean and in a quiet
     /// and a loud room. At -40 dB every fixture peaks under the -40 dBFS floor.
@@ -300,6 +300,44 @@ struct Fixtures {
                 Case(id: "family=tap fixture=\(name) room=\(db)", inserted: nil) {
                     let audio = samples + Array(repeating: 0, count: 10 * Self.rate)
                     return zip(audio, Noise.samples(audio.count, at: Float(pow(10, Double(db) / 20)))).map(+)
+                }
+            }
+        }
+    }
+
+    /// A cough, sneeze, knock or clap under the -40 dBFS floor with nothing said, as the first
+    /// sound of the press: each ESC-50 clip, at -45 and -55 dBFS over a room at -60 and -70 dBFS
+    /// (`family=soft-room source=sound/...`). Nothing has been heard before it, so a sound the
+    /// discriminator called speech would meet no room to hold its run to: these are the rows
+    /// that show what that costs.
+    var softSounds: [Case] {
+        transients.flatMap { source in
+            let peak = AudioClip(samples: source.samples).peak
+            return [-45, -55].flatMap { db in
+                [-60, -70].map { room in
+                    let (gain, noise) = (Float(pow(10, Double(db) / 20)) / peak, Float(pow(10, Double(room) / 20)))
+                    return Case(id: "family=soft-room source=sound/\(source.name) db=\(db) room=\(room)", inserted: nil) {
+                        zip(source.samples, Noise.samples(source.samples.count, at: noise)).map { $0 * gain + $1 }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every bench fixture from its first sound, at -45 and -55 dBFS peak, with no room before
+    /// it and none, or a room at -60 or -70 dBFS, around it (`family=soft-open`): a soft speaker
+    /// who says their first word the instant the microphone opens, as a press with the
+    /// microphone shut at rest has it. `say/yes` is the lone word of them.
+    var softOpen: [Case] {
+        speech.flatMap { name, samples in
+            let base = Self.fromFirstSound(samples)
+            let peak = AudioClip(samples: base).peak
+            return [-45, -55].flatMap { db in
+                [("clean", Float(0)), ("-60", Float(0.001)), ("-70", Float(0.000316))].map { room, noise in
+                    let gain = Float(pow(10, Double(db) / 20)) / peak
+                    return Case(id: "family=soft-open fixture=\(name) db=\(db) room=\(room)", inserted: nil) {
+                        zip(base, Noise.samples(base.count, at: noise)).map { $0 * gain + $1 }
+                    }
                 }
             }
         }

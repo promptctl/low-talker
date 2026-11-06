@@ -312,10 +312,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// was called no speech before a speaker, the transients refused, and the range with the sound
     /// kept out of it.
     @Test func aPressLineSaysTheRoomItsQuietWasJudgedAgainst() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, refusedAsNotSpeech: 0.7, transients: Transients(count: 2, longest: 0.03), range: 0.1, keptOut: 0.5, keptOutFrames: 3)) { _ in Transcript(typed: "hi") })
+        let rig = try await Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, refusedAsNotSpeech: 0.7, roomless: 0.3, transients: Transients(count: 2, longest: 0.03), range: 0.1, keptOut: 0.5, keptOutFrames: 3)) { _ in Transcript(typed: "hi") })
         rig.hold(speaking: [1, 2, 3])
         let line = try await rig.session().description
-        #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room, 0.7 s as no speech, 2 transients refused, the longest sounding 0.03 s; range -20.0 dBFS, -6.0 dBFS kept out of it in 3 frames)"), "\(line)")
+        #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room, 0.7 s as no speech, 0.3 s judged with no room heard, 2 transients refused, the longest sounding 0.03 s; range -20.0 dBFS, -6.0 dBFS kept out of it in 3 frames)"), "\(line)")
     }
 
     /// With no range and nothing kept out of it, the press's line says so.
