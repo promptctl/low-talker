@@ -210,7 +210,7 @@ actor Utterance {
         // of the last `roomSpan` before it. None while every frame has been called speech: a
         // speaker who opens the press, or talks on without a pause, has no room to stand clear of,
         // and is not their own.
-        let room = (recent.compactMap { $0 } + [nobodySpeaking ? peak : nil].compactMap { $0 }).min()
+        let room = (recent + [nobodySpeaking ? peak : nil]).compactMap { $0 }.min()
         recent = Array((recent + [reading]).suffix(Self.roomFrames))
         // A speaker is heard while a clip, or the run it carries on, is at a speaker's level, and
         // for good once a syllable the discriminator called speech has sounded

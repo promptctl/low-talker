@@ -362,6 +362,19 @@ import Testing
         #expect(timeline.quiet.room == 0.0005)
     }
 
+    /// The room is the last 3 s of time, not the last readings: frames that give none, digital
+    /// silence here, age a reading out, so a word after a longer silence has no room to be judged
+    /// against and says so, where one after a shorter silence is judged against the room it heard.
+    @Test(arguments: [(2.0, 0.0), (3.5, 0.2)]) func aRoomReadingAgesOutAcrossFramesThatGiveNone(silence: Double, roomless: Double) async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.0005, count: 1_600)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0, count: AudioClip.sampleCount(for: silence))))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.006, count: 3_200)))
+        try await utterance.end()
+        let (_, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(timeline.quiet.roomless == roomless)
+    }
+
     /// A word whose frame the discriminator misses, said after the room has been heard, is kept
     /// whole: the room is the quietest frame of the span, not the missed frame at the word's level.
     @Test func aWordMissedMidwayAfterTheRoomWasHeardIsKeptWhole() async throws {

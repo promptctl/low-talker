@@ -144,7 +144,7 @@ import WhisperKit
         #expect(quiet.letGo == AudioClip.duration(for: audio.count))
         #expect(quiet.transients == Transients(count: 1, longest: 0.03))
         #expect(passes.isEmpty)
-        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 over a room of 0.002, 0.0 s clear of it were called no speech, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
+        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 over a room of 0.002, 0.0 s clear of it were called no speech, 0.0 s were judged with no room heard, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
     }
 
     /// Speech under a second, well under what a pass waits for during the hold,
