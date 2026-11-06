@@ -204,7 +204,7 @@ actor Utterance {
         samples += frame.samples
         let peak = frame.peak
         loudestHeard = max(loudestHeard, peak)
-        let (against, reading) = room.hear(frame, peak: peak, verdict)
+        let (against, reading) = room.hear(samples: frame.samples.count, peak: peak, verdict)
         let judgement = Judgement(
             peak: peak, verdict: verdict, range: loudestSpeech, run: burst?.runPeak ?? 0, room: against, opensBurst: burst == nil
         )
@@ -372,9 +372,9 @@ struct Room {
     /// was not called speech, and the readings of the last `roomSpan` before it. None while every
     /// frame has been called speech: a speaker who opens the press, or talks on without a pause,
     /// has no room to stand clear of, and is not their own.
-    mutating func hear(_ frame: AudioClip, peak: Float, _ verdict: Verdict) -> (against: Float?, reading: Float?) {
+    mutating func hear(samples count: Int, peak: Float, _ verdict: Verdict) -> (against: Float?, reading: Float?) {
         let nobodySpeaking = !verdict.isSpeech
-        let reading = peak > 0 && frame.samples.count == SpeechGate.frameCount && nobodySpeaking ? peak : nil
+        let reading = peak > 0 && count == SpeechGate.frameCount && nobodySpeaking ? peak : nil
         let against = (recent + [nobodySpeaking ? peak : nil]).compactMap { $0 }.min()
         recent = Array((recent + [reading]).suffix(Self.frames))
         return (against, reading)

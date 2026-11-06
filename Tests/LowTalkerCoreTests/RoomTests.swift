@@ -8,7 +8,7 @@ import Testing
     }
 
     static func hear(_ room: inout Room, _ frame: AudioClip, _ verdict: Verdict) -> (against: Float?, reading: Float?) {
-        room.hear(frame, peak: frame.peak, verdict)
+        room.hear(samples: frame.samples.count, peak: frame.peak, verdict)
     }
 
     @Test func aFrameNotCalledSpeechIsItsOwnReadingAndTheRoomUntilQuieterIsHeard() {
