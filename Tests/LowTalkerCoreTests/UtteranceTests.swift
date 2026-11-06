@@ -363,9 +363,10 @@ import Testing
     }
 
     /// The room is the last 3 s of time, not the last readings: frames that give none, digital
-    /// silence here, age a reading out, so a word after a longer silence has no room to be judged
-    /// against and says so, where one after a shorter silence is judged against the room it heard.
-    @Test(arguments: [(2.0, 0.0), (3.5, 0.2)]) func aRoomReadingAgesOutAcrossFramesThatGiveNone(silence: Double, roomless: Double) async throws {
+    /// silence here, age a reading out. The reading is gone for the first word frame after 3.0 s
+    /// of silence, and for the second only after 2.9 s, so one frame of the word is judged with
+    /// no room heard where the silence is 2.9 s and both are where it is 3.0 s.
+    @Test(arguments: [(2.9, 0.1), (3.0, 0.2)]) func aRoomReadingAgesOutAcrossFramesThatGiveNone(silence: Double, roomless: Double) async throws {
         let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.0005, count: 1_600)))
         try await utterance.append(AudioClip(samples: Array(repeating: 0, count: AudioClip.sampleCount(for: silence))))
