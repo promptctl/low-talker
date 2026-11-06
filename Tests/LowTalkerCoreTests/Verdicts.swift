@@ -8,7 +8,7 @@ struct Verdicts: Discriminator {
     let call: @Sendable (ArraySlice<Float>) -> Verdict
 
     func verdict(_ window: ArraySlice<Float>) throws -> Verdict {
-        call(window.dropFirst(lookbehind).prefix(Utterance.frameCount))
+        call(window.dropFirst(lookbehind).prefix(SpeechGate.frameCount))
     }
 
     /// Every frame speech, judged as it fills: the gate as it was before it had a discriminator.

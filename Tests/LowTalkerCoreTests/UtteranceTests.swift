@@ -226,7 +226,7 @@ import Testing
         #expect(quiet.room == nil && quiet.refusedAsRoom == 0)
     }
 
-    /// Speech under the -40 dBFS floor is speech when it stands clear of the room: 0.008 over a
+    /// Speech under `audible`, -40 dBFS, is speech when it stands clear of the room: 0.008 over a
     /// room of 0.001 is heard, and so is a tenth of both, so a low input volume, a distant
     /// microphone or a whisper is cut into speech and quiet as a loud speaker is
     /// (low-reliability-z2z.3vd).
@@ -278,7 +278,7 @@ import Testing
     /// first sample once a pause in it shows the room: what came before the first frame to stand
     /// clear of the room rides with it as its lead-in.
     @Test func softSpeechOpeningThePressIsKept() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.005))
         let word = AudioClip(samples: Array(repeating: 0.008, count: 3_200))
         try await utterance.append(word)
         try await utterance.append(Self.quiet(1_600))
@@ -299,9 +299,11 @@ import Testing
         try await utterance.append(AudioClip(samples: Array(repeating: 0.001, count: 1_600)))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.0003, count: 1_280)))
         try await utterance.end()
-        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        let (samples, arrived, _, _) = await utterance.audio(beyond: 0)
         #expect(samples.count == word.count + Utterance.hangover)
         #expect(samples.prefix(word.count).allSatisfy { $0 == 0.006 })
+        // The fade arrived and was kept, not zeros standing in for it.
+        #expect(arrived == word.count + 1_600 + 1_280)
     }
 
     /// A soft word that runs on is no room of its own making: with nothing else heard it is
@@ -338,7 +340,7 @@ import Testing
 
     /// Soft speech within 10 dB of a room that has been heard is kept while the discriminator
     /// calls it speech: the room refuses what it does not call speech, not the quiet half of a
-    /// word, so a speaker 8 dB over a noisy room is not cut into pieces.
+    /// word, so a word that falls from 10 dB to 7 dB over a noisy room is not cut off at its tail.
     @Test func speechWithinTenDecibelsOfTheRoomIsKeptWhole() async throws {
         let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.002, count: 16_000)))
@@ -382,19 +384,20 @@ import Testing
         let miss: Float = 0.0061
         let utterance = Utterance(judging: Verdicts(lookbehind: 0, lookahead: 0) { frame in
             let peak = AudioClip.peak(of: frame)
-            return peak == 0.0061 || peak < 0.004 ? .other : .speech
+            return peak == miss || peak < 0.004 ? .other : .speech
         })
         try await utterance.append(AudioClip(samples: Array(repeating: 0.0005, count: 16_000)))
         for level: Float in [0.006, 0.006, 0.006, miss, 0.006, 0.006, 0.006] {
             try await utterance.append(AudioClip(samples: Array(repeating: level, count: 1_600)))
         }
         try await utterance.end()
-        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
         #expect(samples.count == Utterance.leadIn + 11_200 + Utterance.hangover)
+        #expect(timeline.quiet.refusedAsRoom == 0)
     }
 
-    /// Speech is judged against the utterance's own loudest clip, not a level: a
-    /// clip within the range of the loudest is speech and one under it is not, at
+    /// Speech is judged against the utterance's own loudest frame, not a level: a
+    /// frame within the range of the loudest is speech and one under it is not, at
     /// full level and at a tenth of it alike, so a soft speaker in a quiet room is cut
     /// into speech and quiet where a loud one is.
     @Test(arguments: [Float(1), 0.1]) func speechStandsWithinRangeOfTheLoudest(scale: Float) async throws {
@@ -407,13 +410,14 @@ import Testing
         #expect(samples.count == Utterance.leadIn + 3_200 + Utterance.hangover)
     }
 
-    /// A click does not make the room a speaker: noise that stands no higher than the room
-    /// is quiet, though it lies within range of the click, so a tap left open after a
-    /// keystroke hands no pass a minute of it to read words into (low-dictation-f15).
-    /// Speech that does stand above the room is speech, and the room and what it refused
-    /// are on the record. A microphone that opens on digital silence has not heard the room
-    /// yet, so the click's room is the one after it.
-    @Test(arguments: [Float(0.002), 0]) func theRoomAfterAClickIsQuiet(opening: Float) async throws {
+    /// A loud sound does not make the room a speaker: noise that stands no higher than the room
+    /// is quiet, though it lies within range of the sound, so a tap left open after a keystroke
+    /// hands no pass a minute of it to read words into (low-dictation-f15). The sound here is
+    /// 0.1 s of 0.03 that the discriminator calls speech, so it sets the range; a click sets none
+    /// (`aClickJoinedToSpeechSetsNoRange`). Speech that does stand above the room is speech, and
+    /// the room and what it refused are on the record. A microphone that opens on digital silence
+    /// has not heard the room yet, so the sound's room is the one after it.
+    @Test(arguments: [Float(0.002), 0]) func theRoomAfterALoudSoundThatSetsTheRangeIsQuiet(opening: Float) async throws {
         let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
         let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? opening : -opening }))
@@ -421,10 +425,10 @@ import Testing
         for _ in 0..<60 { try await utterance.append(room) }
         let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
         #expect(samples.count == Utterance.leadIn + 1_600 + Utterance.hangover)
-        // Let go: all of the room but the click's lead-in and hangover, and the lead-in of
+        // Let go: all of the room but the sound's lead-in and hangover, and the lead-in of
         // speech that may yet follow.
-        // The minute after the click is refused as room; the room before it never stood clear of itself.
-        // After digital silence the click is judged with no room heard, the tenth of a second it fills.
+        // The minute after the sound is refused as room; the room before it never stood clear of itself.
+        // After digital silence the sound is judged with no room heard, the tenth of a second it fills.
         let roomless = opening == 0 ? 0.1 : 0.0
         #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, refusedAsNotSpeech: 0, roomless: roomless, transients: .none, range: 0.03, keptOut: nil, keptOutFrames: 0))
 
@@ -459,9 +463,11 @@ import Testing
         #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
     }
 
-    /// A click a tenth of a second before speech is one burst with it, and rides with it.
+    /// A click a tenth of a second before speech, across a frame the discriminator calls quiet, is
+    /// one burst with it, and rides with it: the click is no transient, since the burst it joined
+    /// holds a syllable.
     @Test func aClickJustBeforeSpeechRidesWithIt() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(Self.click)
         try await utterance.append(Self.quiet(1_600))
         try await utterance.append(Self.speech(1_600))
@@ -493,7 +499,7 @@ import Testing
     }
 
     /// A soft speaker after a loud click is heard: the click, refused as a transient, is no
-    /// speaker to judge what follows against, so speech 24 dB under it is speech once the
+    /// speaker to judge what follows against, so speech 26 dB under it is speech once the
     /// click has gone with the quiet.
     @Test func aSoftSpeakerAfterALoudClickIsHeard() async throws {
         let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
@@ -507,20 +513,39 @@ import Testing
         #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
     }
 
-    /// A soft speaker near `audible` is heard though a syllable runs from a frame over it
-    /// into one under it: the run carries the range across the frames, so the second frame is
-    /// judged against the first, not against itself alone.
-    @Test func aRunAtTheFloorCarriesItsRangeAcrossFrames() async throws {
+    /// A syllable that runs from the end of one frame into the start of the next is heard though
+    /// neither holds it alone: 0.04 s of it closes the first frame and 0.02 s opens the second, a
+    /// syllable being 0.06 s, so the run carries across the frames.
+    @Test func aSyllableRunningAcrossTwoFramesIsHeard() async throws {
         let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         let clips = AsyncStream<AudioClip> { continuation in
             continuation.yield(Self.quiet(16_000))
             continuation.yield(AudioClip(samples: Self.quiet(960).samples + Array(repeating: 0.012, count: 640)))
-            continuation.yield(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.008, count: 320) + Self.quiet(1_280).samples))
             continuation.finish()
         }
         try await utterance.fill(from: clips)
         let (samples, _, _, _) = await utterance.audio(beyond: 0)
         #expect(samples.count == Utterance.leadIn + 640 + 1_600 + Utterance.hangover)
+    }
+
+    /// A run too short to hold a syllable sets no range, but the frame after it is judged against
+    /// the run's peak all the same: a soft frame called speech that follows 0.04 s at 0.5 stands
+    /// 30 dB under it, is no part of that burst, and leaves a click and nothing spoken. Were the
+    /// run not carried, the soft frame would join it and make the 0.06 s a syllable.
+    @Test func aRunTooShortForASyllableCarriesItsPeakIntoTheNextFrame() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        let clips = AsyncStream<AudioClip> { continuation in
+            continuation.yield(Self.quiet(16_000))
+            continuation.yield(AudioClip(samples: Self.quiet(960).samples + Array(repeating: 0.5, count: 640)))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
+            continuation.finish()
+        }
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            try await utterance.fill(from: clips)
+        }
+        guard case .nothingSpoken(let peak, _)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.5)
     }
 
     /// A click in the same burst as speech sets no range either: the speech is judged against

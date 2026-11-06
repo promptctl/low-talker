@@ -56,12 +56,13 @@ import Testing
         #expect(quiet.range == 0.5 && quiet.keptOut == nil && quiet.keptOutFrames == 0)
     }
 
-    /// The room after a cough is judged as the same room alone is: what decides whether a sound
-    /// is handed is the gate's, not the discriminator's.
-    @Test func theRoomAfterACoughIsJudgedAsTheRoomAlone() async throws {
-        let room = Self.level(0.0178, 3)
-        let alone = try await Self.handed(room, judging: Self.coughs)
-        let after = try await Self.handed(Self.cough + room, judging: Self.coughs)
+    /// What follows a cough is judged as it is alone: the cough, called other, sets no range, so
+    /// 3 s of a steady 0.0178, which is over `audible` and called speech, is handed as it is
+    /// with no cough before it.
+    @Test func whatFollowsACoughIsJudgedAsItIsAlone() async throws {
+        let follows = Self.level(0.0178, 3)
+        let alone = try await Self.handed(follows, judging: Self.coughs)
+        let after = try await Self.handed(Self.cough + follows, judging: Self.coughs)
         #expect(after.samples.count == Self.cough.count + alone.samples.count)
     }
 
@@ -100,9 +101,9 @@ import Testing
         let utterance = Utterance(judging: Verdicts.other(atOrAbove: 0.8, lookahead: AudioClip.sampleCount(for: 0.2)))
         try await utterance.append(AudioClip(samples: Self.level(0.5, 0.3)))
         let early = await utterance.audio(beyond: 0)
-        #expect(early.arrived == Utterance.frameCount)
+        #expect(early.arrived == SpeechGate.frameCount)
         try await utterance.end()
-        #expect(await utterance.audio(beyond: 0).arrived == 3 * Utterance.frameCount)
+        #expect(await utterance.audio(beyond: 0).arrived == 3 * SpeechGate.frameCount)
     }
 
     struct Unanswerable: Discriminator {

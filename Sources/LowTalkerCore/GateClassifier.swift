@@ -31,7 +31,7 @@ final class GateClassifier: Discriminator, Sendable {
         configuration.computeUnits = .cpuOnly
         let loaded = try MLModel(contentsOf: try await MLModel.compileModel(at: package), configuration: configuration)
         let shape = loaded.modelDescription.inputDescriptionsByName["samples"]?.multiArrayConstraint?.shape
-        guard shape == [1, NSNumber(value: lookbehind + Utterance.frameCount + lookahead)] else { throw GateClassifierError.shape(shape) }
+        guard shape == [1, NSNumber(value: lookbehind + SpeechGate.frameCount + lookahead)] else { throw GateClassifierError.shape(shape) }
         model = Mutex(loaded)
     }
 

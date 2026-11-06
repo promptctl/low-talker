@@ -13,7 +13,7 @@ protocol Discriminator: Sendable {
     /// Samples after a frame its verdict reads: zeros past the end of an utterance that has ended.
     var lookahead: Int { get }
     /// The verdict on the frame inside `window`: `lookbehind` samples, the frame, then
-    /// `lookahead` samples, `Utterance.frame` long in all but the frame. The window is a slice of
+    /// `lookahead` samples, `SpeechGate.frame` long in all but the frame. The window is a slice of
     /// the gate's own buffer, so its indices start wherever the frame lies: read it as a
     /// sequence, or from its `startIndex`, never from 0.
     func verdict(_ window: ArraySlice<Float>) throws -> Verdict
@@ -25,12 +25,16 @@ enum Verdict: Sendable {
     /// A cough, a knock, a clap, a sneeze, the room: anything but speech.
     case other
 
+    var isSpeech: Bool {
+        switch self {
+        case .speech: true
+        case .other: false
+        }
+    }
+
     /// What a window of a frame with this verdict, peaking at `peak`, adds to the range: its
     /// peak when the frame is speech, nothing otherwise.
     func reference(_ peak: Float) -> Float {
-        switch self {
-        case .speech: peak
-        case .other: 0
-        }
+        isSpeech ? peak : 0
     }
 }

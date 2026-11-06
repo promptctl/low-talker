@@ -94,7 +94,7 @@ import WhisperKit
     /// An engine that reads words into any second of quiet it is handed, as Whisper does
     /// ("Thank you."), then " see you" over the 0.4 s of speech that ends the pass.
     static func hallucinating(_ pass: Hearing.Pass) -> [Transcript.Word] {
-        let longestQuiet = pass.samples.split { $0 >= Utterance.audible }.map(\.count).max() ?? 0
+        let longestQuiet = pass.samples.split { $0 >= SpeechGate.audible }.map(\.count).max() ?? 0
         let at = AudioClip.duration(for: pass.samples.count - Utterance.hangover) - 0.4
         let heardInQuiet = longestQuiet >= AudioClip.sampleCount(for: 1) ? [word(" Thank", 0, 0.2), word(" you.", 0.2, 0.4)] : []
         return heardInQuiet + [word(" see", at, at + 0.2), word(" you", at + 0.2, at + 0.4)]
@@ -288,7 +288,7 @@ import WhisperKit
     /// pass read (low-reliability-z2z.u8q). The pass is the only one: 0.7 s of speech with its
     /// hangover is under a pass during the hold.
     @Test func aGateThatFailsAsTheUtteranceEndsTellsTheLastReading() async {
-        let (failure, partials) = await Self.hear([Self.speech(0.4)], judging: Failing(answering: 3, lookahead: Utterance.frameCount))
+        let (failure, partials) = await Self.hear([Self.speech(0.4)], judging: Failing(answering: 3, lookahead: SpeechGate.frameCount))
         guard case .gate(let cause)? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
         #expect(cause is Failing.Failure)
         #expect(partials.map(\.text) == [" see you"])
