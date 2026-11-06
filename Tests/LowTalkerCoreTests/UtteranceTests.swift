@@ -299,9 +299,11 @@ import Testing
         try await utterance.append(AudioClip(samples: Array(repeating: 0.001, count: 1_600)))
         try await utterance.append(AudioClip(samples: Array(repeating: 0.0003, count: 1_280)))
         try await utterance.end()
-        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        let (samples, arrived, _, _) = await utterance.audio(beyond: 0)
         #expect(samples.count == word.count + Utterance.hangover)
         #expect(samples.prefix(word.count).allSatisfy { $0 == 0.006 })
+        // The fade arrived and was kept, not zeros standing in for it.
+        #expect(arrived == word.count + 1_600 + 1_280)
     }
 
     /// A soft word that runs on is no room of its own making: with nothing else heard it is
@@ -461,9 +463,11 @@ import Testing
         #expect(timeline.quiet.transients == Transients(count: 1, longest: 0.03))
     }
 
-    /// A click a tenth of a second before speech is one burst with it, and rides with it.
+    /// A click a tenth of a second before speech, across a frame the discriminator calls quiet, is
+    /// one burst with it, and rides with it: the click is no transient, since the burst it joined
+    /// holds a syllable.
     @Test func aClickJustBeforeSpeechRidesWithIt() async throws {
-        let utterance = Utterance(judging: Verdicts.everyFrameSpeech)
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
         try await utterance.append(Self.click)
         try await utterance.append(Self.quiet(1_600))
         try await utterance.append(Self.speech(1_600))
