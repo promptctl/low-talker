@@ -487,6 +487,7 @@ private struct Answering: Sendable {
         event.roomPeak = heard.transcription.quiet.room.map(Double.init)
         event.refusedAsRoomSeconds = heard.transcription.quiet.refusedAsRoom
         event.refusedAsNotSpeechSeconds = heard.transcription.quiet.refusedAsNotSpeech
+        event.roomlessSeconds = heard.transcription.quiet.roomless
         event.transients = heard.transcription.quiet.transients.count
         event.longestTransientSeconds = heard.transcription.quiet.transients.longest
         event.rangePeak = heard.transcription.quiet.range.map(Double.init)
@@ -635,6 +636,8 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     public internal(set) var refusedAsRoomSeconds: Double?
     /// Seconds within range of its loudest and clear of the room, before any speaker was heard, called no speech.
     public internal(set) var refusedAsNotSpeechSeconds: Double?
+    /// Seconds of the upload judged with no room heard, held to the range alone.
+    public internal(set) var roomlessSeconds: Double?
     /// Bursts of sound in the upload refused as too brief to be speech, and seconds the longest sounded.
     public internal(set) var transients: Int?
     public internal(set) var longestTransientSeconds: Double?

@@ -33,7 +33,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// answers a turn with nothing said in it: completed, with an empty transcript, and never
     /// failed (low-serve-7t8). The socket's event counts it.
     @Test func aSilentTurnIsCompletedWithNothingSaid() async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0, refusedAsNotSpeech: 0, roomless: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))))
         defer { running.server.stop() }
         var client = Client(running)
         // 100 of 32767, about -50 dBFS: a quiet room, under the speaker's level the stub hears words at.
@@ -125,7 +125,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// The socket's one event says what happened on it, the passes the engine failed to read
     /// during its items included (low-reliability-z2z.5s1).
     @Test func theSocketsEventCountsWhatHappenedOnIt() async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, refusedAsNotSpeech: 0.25, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
+        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, refusedAsNotSpeech: 0.25, roomless: 0, transients: Transients(count: 2, longest: 0.03), range: 0.5, keptOut: 0.75, keptOutFrames: 3), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 1)

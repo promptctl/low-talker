@@ -289,6 +289,96 @@ import Testing
         #expect(samples.prefix(3_200).allSatisfy { $0 == 0.008 })
     }
 
+    /// A lone soft word said the instant the microphone opens has no room around it to stand clear
+    /// of, so it is heard on the discriminator's call, whole and with the tail it fades into: the
+    /// bench's `say/yes` at -40 dB, three tenths of a second of it and the fade after.
+    @Test func aLoneSoftWordOpeningThePressIsHeard() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        let word = Array(repeating: Float(0.006), count: 4_800)
+        try await utterance.append(AudioClip(samples: word))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.001, count: 1_600)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.0003, count: 1_280)))
+        try await utterance.end()
+        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        #expect(samples.count == word.count + Utterance.hangover)
+        #expect(samples.prefix(word.count).allSatisfy { $0 == 0.006 })
+    }
+
+    /// A soft word that runs on is no room of its own making: with nothing else heard it is
+    /// kept to its last sample, however long it runs, rather than its first tenth of a second
+    /// and the hangover.
+    @Test func aSteadySoftWordWithNoRoomAroundItIsKeptWhole() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        let word = Array(repeating: Float(0.006), count: 40_000)
+        try await utterance.append(AudioClip(samples: word))
+        try await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == word.count + Utterance.hangover)
+        #expect(samples.prefix(word.count).allSatisfy { $0 == 0.006 })
+        #expect(timeline.quiet.refusedAsRoom == 0)
+    }
+
+    /// A sound that opens the press and fills one tenth of a second the discriminator calls speech,
+    /// a sneeze or a click at the microphone's opening, is no speech when the frames after it are
+    /// not: with no room heard, a word proves itself on its second frame, and this one has none.
+    @Test func oneFrameCalledSpeechOpeningThePressIsNoSyllable() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        let clips = AsyncStream<AudioClip> { continuation in
+            continuation.yield(AudioClip(samples: Array(repeating: 0.006, count: 1_600)))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.0005, count: 16_000)))
+            continuation.finish()
+        }
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            try await utterance.fill(from: clips)
+        }
+        guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.006)
+        #expect(quiet.transients.count == 1)
+    }
+
+    /// Soft speech within 10 dB of a room that has been heard is kept while the discriminator
+    /// calls it speech: the room refuses what it does not call speech, not the quiet half of a
+    /// word, so a speaker 8 dB over a noisy room is not cut into pieces.
+    @Test func speechWithinTenDecibelsOfTheRoomIsKeptWhole() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.002, count: 16_000)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.0065, count: 3_200)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.0045, count: 8_000)))
+        try await utterance.end()
+        let (samples, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 3_200 + 8_000 + Utterance.hangover)
+        #expect(timeline.quiet.refusedAsRoom == 0)
+    }
+
+    /// A press that opens on a word and reads a room only after it says both: the room it read,
+    /// and the seconds it judged before any room was heard, which the range alone held.
+    @Test func aPressThatOpenedOnAWordCountsTheSecondsItJudgedWithNoRoom() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.006, count: 4_800)))
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.0005, count: 16_000)))
+        try await utterance.end()
+        let (_, _, _, timeline) = await utterance.audio(beyond: 0)
+        #expect(timeline.quiet.roomless == 0.3)
+        #expect(timeline.quiet.room == 0.0005)
+    }
+
+    /// A word whose frame the discriminator misses, said after the room has been heard, is kept
+    /// whole: the room is the quietest frame of the span, not the missed frame at the word's level.
+    @Test func aWordMissedMidwayAfterTheRoomWasHeardIsKeptWhole() async throws {
+        let miss: Float = 0.0061
+        let utterance = Utterance(judging: Verdicts(lookbehind: 0, lookahead: 0) { frame in
+            let peak = AudioClip.peak(of: frame)
+            return peak == 0.0061 || peak < 0.004 ? .other : .speech
+        })
+        try await utterance.append(AudioClip(samples: Array(repeating: 0.0005, count: 16_000)))
+        for level: Float in [0.006, 0.006, 0.006, miss, 0.006, 0.006, 0.006] {
+            try await utterance.append(AudioClip(samples: Array(repeating: level, count: 1_600)))
+        }
+        try await utterance.end()
+        let (samples, _, _, _) = await utterance.audio(beyond: 0)
+        #expect(samples.count == Utterance.leadIn + 11_200 + Utterance.hangover)
+    }
+
     /// Speech is judged against the utterance's own loudest clip, not a level: a
     /// clip within the range of the loudest is speech and one under it is not, at
     /// full level and at a tenth of it alike, so a soft speaker in a quiet room is cut
@@ -320,7 +410,9 @@ import Testing
         // Let go: all of the room but the click's lead-in and hangover, and the lead-in of
         // speech that may yet follow.
         // The minute after the click is refused as room; the room before it never stood clear of itself.
-        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, refusedAsNotSpeech: 0, transients: .none, range: 0.03, keptOut: nil, keptOutFrames: 0))
+        // After digital silence the click is judged with no room heard, the tenth of a second it fills.
+        let roomless = opening == 0 ? 0.1 : 0.0
+        #expect(timeline.quiet == Quiet(letGo: AudioClip.duration(for: 61 * 16_000 - 2 * Utterance.leadIn - Utterance.hangover), room: 0.002, refusedAsRoom: 60, refusedAsNotSpeech: 0, roomless: roomless, transients: .none, range: 0.03, keptOut: nil, keptOutFrames: 0))
 
         try await utterance.append(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
         // The few samples the end cuts a frame short to are no tenth of a second, so no room reading.

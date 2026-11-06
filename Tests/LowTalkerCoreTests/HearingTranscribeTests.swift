@@ -70,7 +70,7 @@ import WhisperKit
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
-        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, refusedAsNotSpeech: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, refusedAsNotSpeech: 0, roomless: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
         #expect(passes.isEmpty)
     }
 
