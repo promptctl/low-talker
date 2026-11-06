@@ -35,9 +35,6 @@ enum Verdict: Sendable {
     /// What a window of a frame with this verdict, peaking at `peak`, adds to the range: its
     /// peak when the frame is speech, nothing otherwise.
     func reference(_ peak: Float) -> Float {
-        switch self {
-        case .speech: peak
-        case .other: 0
-        }
+        isSpeech ? peak : 0
     }
 }

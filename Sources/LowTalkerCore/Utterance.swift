@@ -204,7 +204,7 @@ actor Utterance {
         samples += frame.samples
         let peak = frame.peak
         loudestHeard = max(loudestHeard, peak)
-        let (against, reading) = room.hear(frame, verdict)
+        let (against, reading) = room.hear(frame, peak: peak, verdict)
         let judgement = Judgement(
             peak: peak, verdict: verdict, range: loudestSpeech, run: burst?.runPeak ?? 0, room: against, opensBurst: burst == nil
         )
@@ -259,7 +259,7 @@ actor Utterance {
 
     /// Appends every clip of `audio` as it arrives, then ends the utterance.
     ///
-    /// [LAW:no-silent-failure] An utterance with no speech in it is refused here, with its
+    /// [LAW:parse-dont-validate] An utterance with no speech in it is refused here, with its
     /// loudest peak and its quiet, the room and the transients among it: an empty transcript
     /// would not say whether nothing was said, nothing stood clear of the room, or all it held
     /// was a click. No pass is handed any of it, so the samples still kept are quiet too.
@@ -372,8 +372,7 @@ struct Room {
     /// was not called speech, and the readings of the last `roomSpan` before it. None while every
     /// frame has been called speech: a speaker who opens the press, or talks on without a pause,
     /// has no room to stand clear of, and is not their own.
-    mutating func hear(_ frame: AudioClip, _ verdict: Verdict) -> (against: Float?, reading: Float?) {
-        let peak = frame.peak
+    mutating func hear(_ frame: AudioClip, peak: Float, _ verdict: Verdict) -> (against: Float?, reading: Float?) {
         let nobodySpeaking = !verdict.isSpeech
         let reading = peak > 0 && frame.samples.count == SpeechGate.frameCount && nobodySpeaking ? peak : nil
         let against = (recent + [nobodySpeaking ? peak : nil]).compactMap { $0 }.min()
@@ -457,7 +456,7 @@ struct Timeline: Sendable {
     /// Samples let go, by the kept sample they were let go before: quiet let go at one
     /// place across many clips is one gap.
     private var gaps: [Int: Int] = [:]
-    var ledger = Ledger()
+    fileprivate(set) var ledger = Ledger()
 
     /// The quiet no pass is handed, and the room it was judged against.
     var quiet: Quiet { quiet(lettingGo: 0) }

@@ -529,6 +529,25 @@ import Testing
         #expect(samples.count == Utterance.leadIn + 640 + 1_600 + Utterance.hangover)
     }
 
+    /// A run too short to hold a syllable sets no range, but the frame after it is judged against
+    /// the run's peak all the same: a soft frame called speech that follows 0.04 s at 0.5 stands
+    /// 30 dB under it, is no part of that burst, and leaves a click and nothing spoken. Were the
+    /// run not carried, the soft frame would join it and make the 0.06 s a syllable.
+    @Test func aRunTooShortForASyllableCarriesItsPeakIntoTheNextFrame() async throws {
+        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
+        let clips = AsyncStream<AudioClip> { continuation in
+            continuation.yield(Self.quiet(16_000))
+            continuation.yield(AudioClip(samples: Self.quiet(960).samples + Array(repeating: 0.5, count: 640)))
+            continuation.yield(AudioClip(samples: Array(repeating: 0.008, count: 1_600)))
+            continuation.finish()
+        }
+        let refusal = await #expect(throws: TranscriptionFailure.self) {
+            try await utterance.fill(from: clips)
+        }
+        guard case .nothingSpoken(let peak, _)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
+        #expect(peak == 0.5)
+    }
+
     /// A click in the same burst as speech sets no range either: the speech is judged against
     /// its own loudest syllable, so a softer word after it, within range of the speaker but not
     /// of the click, is speech.
