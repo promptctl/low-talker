@@ -81,7 +81,8 @@ public final class DictationInputController: IMKInputController {
     /// The key-binding style: the text input system binds each key-down to an action and asks here
     /// for that action. Return is bound to `insertNewline:`, which is held for the words the app owes
     /// and kept when the gate keeps it. Escape is bound to `cancelOperation:`: it is reported to the
-    /// app, and kept only while the app's word box is open. Every other action is declined.
+    /// app, which cancels the open press and closes the panel, and it is kept while the panel is
+    /// shown. Every other action is declined.
     ///
     /// Overridden with an optional selector, as IMK may call with none.
     nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {
@@ -103,7 +104,7 @@ public final class DictationInputController: IMKInputController {
     /// The held Return: kept, and the system's beep said, when the gate keeps it.
     @MainActor private func holdReturn() -> Bool {
         guard AppState.shared.holdsReturn else { return false }
-        let kept = SteeringGate.shared.verdict(for: .return, at: ProcessInfo.processInfo.systemUptime) == .keep
+        let kept = SteeringGate.shared.verdict(at: ProcessInfo.processInfo.systemUptime) == .keep
         // The system's own answer to a Return that did nothing, so a kept one is heard at the moment it
         // was typed and not only found in a log. [LAW:no-silent-failure]
         if kept { NSSound.beep() }

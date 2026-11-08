@@ -476,8 +476,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// added to `SteeringKey` has to say what it does here before this builds.
     private func react(to key: SteeringKey) {
         switch key {
-        // Escape: the panel goes away and the held words with it, as its close control does.
-        case .escape: hud.dismissByKey(); hold.dismiss()
+        // Escape, with the panel shown: the open press is cancelled, the held words no cursor has
+        // taken are let go, and the panel closes. The words already at the cursor are not touched.
+        // The input method keeps an Escape only while the panel is shown, so a shut panel is no
+        // Escape for us. [LAW:single-enforcer]
+        case .escape:
+            guard hud.isShown else { return }
+            listening.map { KeySteering(dictation: $0.dictation, hotkey: $0.hotkey).escape() }
+            hold.dismiss()
+            hud.dismissByKey()
         // Return is held and sent by the input method; the app has nothing to do when it passes.
         case .return: break
         }

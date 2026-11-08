@@ -148,9 +148,6 @@ import Testing
     @Test func aStampIsAFiniteMomentOnTheClock() {
         #expect(Wire.question(id: Wire.owed, payload: Wire.stamp(7.25)) == .owed(at: 7.25))
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(0)) == .settled(at: 0))
-        #expect(Wire.question(id: Wire.cancel, payload: Wire.stamp(4.5)) == .cancel(at: 4.5))
-        #expect(Wire.question(id: Wire.cancel, payload: Wire.stamp(1e12)) == nil)
-        #expect(Wire.question(id: Wire.cancel, payload: nil) == nil)
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(-1)) == nil)
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(1e12)) == nil)
         #expect(Wire.question(id: Wire.owed, payload: nil) == nil)
@@ -161,24 +158,6 @@ import Testing
     @Test func theAnswersCrossAsTheValuesThatWereSent() {
         for owing in [Owing.nothing, .words] { #expect(Wire.owing(of: Wire.owing(owing)) == owing) }
         for settlement in [Settlement.landed, .notLanded] { #expect(Wire.settlement(of: Wire.settlement(settlement)) == settlement) }
-        for cancellation in [Cancellation.nothing, .dictation] { #expect(Wire.cancellation(of: Wire.cancellation(cancellation)) == cancellation) }
         #expect(Wire.owing(of: Wire.settlement(.landed)) == nil)
-        #expect(Wire.cancellation(of: Wire.settlement(.landed)) == nil)
-    }
-
-    /// The question an Escape asks once a debt is admitted carries the effect on the app's side and
-    /// is answered when it is known, over the real port.
-    @Test(.timeLimit(.minutes(1))) func theCancelQuestionIsAnsweredWithWhatBecameOfTheDictation() async throws {
-        let name = aPortNobodyElseUses()
-        let (port, _, questions) = try hostNoticesAndQuestions(name: name, senders: try OwnProcess.identity())
-        let asker = try Self.asker(name)
-
-        async let asking = onAThreadOfItsOwn { asker.cancel(at: 8, within: Self.bound) }
-        let asked = try #require(await questions.first { @Sendable _ in true })
-        #expect(asked.question == .cancel(at: 8))
-        #expect(asked.reply.send(Cancellation.dictation) == .delivered)
-
-        #expect(await asking == .success(.dictation))
-        withExtendedLifetime(port) {}
     }
 }
