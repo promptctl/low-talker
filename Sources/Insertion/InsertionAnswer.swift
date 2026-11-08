@@ -355,18 +355,17 @@ enum Wire {
         return (try? JSONDecoder().decode(Build.self, from: data)).map(Optional.some)
     }
 
-    /// The app's settings, carried by a greeting: the input method takes them as the settings to
-    /// hold to until the app says otherwise.
-    static func greeting(_ settings: InputMethodSettings) -> Data { try! JSONEncoder().encode(settings) }
+    /// The app's state, carried by a greeting: the input method keeps it until the app says otherwise.
+    static func greeting(_ state: InputMethodState) -> Data { try! JSONEncoder().encode(state) }
 
-    /// [LAW:parse-dont-validate] The settings a greeting carries, or nil when it carries none, as
-    /// an insert's greeting does not.
-    static func settings(ofGreeting data: Data) -> InputMethodSettings? {
-        data.isEmpty ? nil : try? JSONDecoder().decode(InputMethodSettings.self, from: data)
+    /// [LAW:parse-dont-validate] The state a greeting carries, or nil when it carries none, as an
+    /// insert's greeting does not.
+    static func state(ofGreeting data: Data) -> InputMethodState? {
+        data.isEmpty ? nil : try? JSONDecoder().decode(InputMethodState.self, from: data)
     }
 
     /// The key a key report carries.
-    static func key(_ keyCode: UInt16) -> Data { try! JSONEncoder().encode(keyCode) }
+    static func key(_ key: SteeringKey) -> Data { try! JSONEncoder().encode(key) }
 
     /// [LAW:parse-dont-validate] A greeting's answer, or nothing at all. The refusal is an
     /// insert's answer, because the port refuses a sender the same way whichever message
@@ -430,7 +429,7 @@ enum Wire {
         switch id {
         case cursorArrived: build(of: payload ?? Data()).map { .cursorArrived(CursorArrival(pid: pid, build: $0)) }
         case overMemoryCeiling: payload.flatMap { try? JSONDecoder().decode(Overrun.self, from: $0) }.map { .overMemoryCeiling(pid: pid, $0) }
-        case keyTyped: payload.flatMap { try? JSONDecoder().decode(UInt16.self, from: $0) }.map { .keyTyped(pid: pid, keyCode: $0) }
+        case keyTyped: payload.flatMap { try? JSONDecoder().decode(SteeringKey.self, from: $0) }.map { .keyTyped(pid: pid, $0) }
         default: nil
         }
     }

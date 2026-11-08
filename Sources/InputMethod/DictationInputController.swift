@@ -1,5 +1,6 @@
 import AppKit
 import Identity
+import Insertion
 import InputMethodKit
 import os
 
@@ -71,41 +72,42 @@ public final class DictationInputController: IMKInputController {
     }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
-    /// studious, 2026-09-27), which is every key typed. The app hears the modifier keys itself.
-    /// Nothing typed is held unless the app holds a Return, and `handle` returns at once for every
-    /// other key, so a key costs one turn on the main thread and no wait. [LAW:dataflow-not-control-flow]
+    /// studious, 2026-09-27), which the text input system binds to actions for `didCommand`. The app
+    /// hears the modifier keys itself. [LAW:dataflow-not-control-flow]
     nonisolated override public func recognizedEvents(_: Any!) -> Int {
         Int(NSEvent.EventTypeMask.keyDown.rawValue)
     }
 
-    /// Declines every key but a bare Return, which is held for the words the app owes, and an
-    /// Escape, which is kept when the app cancels an open dictation with it.
+    /// The key-binding style: the text input system binds each key-down to an action and asks here
+    /// for that action. Return is bound to `insertNewline:`, which is held for the words the app owes
+    /// and kept when the gate keeps it. Escape is bound to `cancelOperation:`: it is reported to the
+    /// app, and kept only while the app's word box is open. Every other action is declined.
     ///
-    /// Overridden with an optional event because IMK also calls this with no event at all
-    /// (low-input-method-8vv: the call after an activate trapped on the implicitly unwrapped
-    /// event the inherited signature has), and with events that are not keys, whose key code is
-    /// not to be read.
-    nonisolated override public func handle(_ event: NSEvent?, client _: Any!) -> Bool {
+    /// Overridden with an optional selector, as IMK may call with none.
+    nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {
         // Debug level: this is made once per key typed anywhere.
-        return onMainActor("handle", event, level: .debug) { event in
-            // Which controller a key reaches is the one thing in this process that says which
-            // window has the keyboard. [LAW:nothing-unseen] Debug level, like the hop line.
-            imkLog.debug("\(self.said("was handed an event", about: self.cursor), privacy: .public)")
-            guard let event, event.type == .keyDown else { return false }
-            // A key the app asked to hear of is reported, never held: the report is queued for the app
-            // and this returns at once, so the key passes on as it would have.
-            if ReportedKeys.shared.reports(event.keyCode) { Notices.shared.keyTyped(event.keyCode) }
-            // Only a Return and an Escape are ever held, and only while the app holds a Return.
-            guard ReturnHolding.shared.holds,
-                  let key = SteeringKey(keyCode: event.keyCode, flags: event.modifierFlags) else { return false }
-            let kept = SteeringGate.shared.verdict(for: key, at: event.timestamp) == .keep
-            // The system's own answer to a Return that did nothing, so a kept one is heard at the
-            // moment it was typed and not only found in a log. An Escape that was kept did
-            // something, it threw the dictation away, and a take-back the field refused is the
-            // app's notice to give. [LAW:no-silent-failure]
-            if kept, key == .return { NSSound.beep() }
-            return kept
+        return onMainActor("didCommand", selector, level: .debug) { selector in
+            imkLog.debug("\(self.said("was handed a command", about: self.cursor), privacy: .public)")
+            if selector == NSSelectorFromString("insertNewline:") { return self.holdReturn() }
+            if selector == NSSelectorFromString("cancelOperation:") {
+                Notices.shared.keyTyped(.escape)
+                return AppState.shared.panelShown
+            }
+            return false
         }
+    }
+
+    /// Text is never handed to this input method as keys, so it is declined.
+    nonisolated override public func inputText(_: String!, client _: Any!) -> Bool { false }
+
+    /// The held Return: kept, and the system's beep said, when the gate keeps it.
+    @MainActor private func holdReturn() -> Bool {
+        guard AppState.shared.holdsReturn else { return false }
+        let kept = SteeringGate.shared.verdict(for: .return, at: ProcessInfo.processInfo.systemUptime) == .keep
+        // The system's own answer to a Return that did nothing, so a kept one is heard at the moment it
+        // was typed and not only found in a log. [LAW:no-silent-failure]
+        if kept { NSSound.beep() }
+        return kept
     }
 
     /// The text input system gave this controller's client focus, which is the only way

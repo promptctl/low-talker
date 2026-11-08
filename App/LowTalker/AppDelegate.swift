@@ -56,13 +56,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activity: Dictation.Activity = .idle
     /// The loop's activity again, floating over the app being dictated into, with the words
     /// no cursor took.
-    private lazy var hud: HUD = HUD(dismiss: { [unowned self] in hold.dismiss() }, insert: { [unowned self] in
-        // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
-        let words = hold.held?.allWords.words.count ?? 0
-        let unheard = listening == nil ? ", with no loop listening to insert them" : ""
-        sessions.notice("asked to insert \(words) held words\(unheard, privacy: .public)")
-        listening?.dictation.insertHeld()
-    })
+    private lazy var hud: HUD = {
+        let hud = HUD(dismiss: { [unowned self] in hold.dismiss() }, insert: { [unowned self] in
+            // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
+            let words = hold.held?.allWords.words.count ?? 0
+            let unheard = listening == nil ? ", with no loop listening to insert them" : ""
+            sessions.notice("asked to insert \(words) held words\(unheard, privacy: .public)")
+            listening?.dictation.insertHeld()
+        })
+        // The input method keeps Escape for the app only while the box is open, so it is told each change.
+        hud.onShownChange = { [unowned self] _ in tellInputMethodOfState() }
+        return hud
+    }()
     /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
     /// new config keeps offering them, and so does the next launch.
     private lazy var hold: Hold = Hold(store: HeldFile.app, failedToKeep: { [unowned self] unkept in
@@ -408,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     heard: { [unowned self] notice in
                         inputMethod.heard(notice).map(showInputMethod)
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
-                        if case let .keyTyped(_, keyCode) = notice { keyReactions[keyCode]?() }
+                        if case let .keyTyped(_, key) = notice { react(to: key) }
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
@@ -438,7 +443,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// for holding a Return, since a fresh one has none until it hears it.
     private func show(_ event: InputMethodSupervisor.Event) {
         log.notice("input method: \(event, privacy: .public)")
-        if case .running = event { tellInputMethodOfSettings() }
+        if case .running = event { tellInputMethodOfState() }
         showInputMethod(inputMethod.told(event))
     }
 
@@ -446,33 +451,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let returnHold = ReturnHoldSetting()
     private let returnHoldLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "returnhold")
 
-    /// Says the setting to the input method, off the main actor since the greeting is a round
-    /// trip. Unreachable, which is the input method not running, is said in the log: it is told
-    /// again when it starts.
-    private func tellInputMethodOfSettings() {
-        let (settings, build) = (InputMethodSettings(holdsReturn: returnHold.isOn, reportedKeys: Array(keyReactions.keys)), build)
+    /// Says the state to the input method, off the main actor since the greeting is a round trip.
+    /// Unreachable, which is the input method not running, is said in the log: it is told again
+    /// when it starts.
+    private func tellInputMethodOfState() {
+        let (state, build) = (InputMethodState(holdsReturn: returnHold.isOn, panelShown: hud.isShown), build)
         Task.detached { [returnHoldLog] in
             let inserter = await InputMethodInserter(build: build)
             do throws(InsertFailure) {
-                try inserter.tell(settings)
-                returnHoldLog.notice("told the input method its settings: holds a Return \(settings.holdsReturn, privacy: .public), reports \(settings.reportedKeys.count, privacy: .public) keys")
+                try inserter.tell(state)
+                returnHoldLog.notice("told the input method: holds a Return \(state.holdsReturn, privacy: .public), word box open \(state.panelShown, privacy: .public)")
             } catch {
-                returnHoldLog.notice("could not tell the input method it holds a Return: \(error, privacy: .public)")
+                returnHoldLog.notice("could not tell the input method its state: \(error, privacy: .public)")
             }
         }
     }
 
     @objc private func toggleReturnHold() {
         returnHold.set(!returnHold.isOn)
-        tellInputMethodOfSettings()
+        tellInputMethodOfState()
     }
 
-    /// What each key the input method reports does, by virtual key code. The input method is told
-    /// to report exactly these keys, so a key added here is reported to the app with no other change.
-    private lazy var keyReactions: [UInt16: () -> Void] = [
+    /// What each steering key the input method reports does. The switch is exhaustive, so a key
+    /// added to `SteeringKey` has to say what it does here before this builds.
+    private func react(to key: SteeringKey) {
+        switch key {
         // Escape: the panel goes away and the held words with it, as its close control does.
-        53: { [unowned self] in hud.dismissByKey(); hold.dismiss() },
-    ]
+        case .escape: hud.dismissByKey(); hold.dismiss()
+        // Return is held and sent by the input method; the app has nothing to do when it passes.
+        case .return: break
+        }
+    }
 
     /// The line says how to press only while an input method that can type the words is
     /// running: one of this app's build, or one that has not said its build yet, whose

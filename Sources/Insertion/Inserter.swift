@@ -124,9 +124,9 @@ public struct InputMethodInserter: Inserter {
     /// method reads it off the greeting, which every message is preceded by, so it is in place
     /// before any key is asked for and is kept until the app says otherwise.
     /// [LAW:one-source-of-truth] The app's setting is the record; the input method keeps a copy.
-    public func tell(_ settings: InputMethodSettings) throws(InsertFailure) {
+    public func tell(_ state: InputMethodState) throws(InsertFailure) {
         let far = try farEnd()
-        try greet(Wire.greeting(settings), to: far)
+        try greet(Wire.greeting(state), to: far)
     }
 
     public func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {

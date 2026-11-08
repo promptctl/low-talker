@@ -197,7 +197,15 @@ final class HUD {
         }
     }
 
+    /// Whether the panel is on screen, and what is told when that changes, so the input method
+    /// knows whether Escape is the box's to take.
+    private(set) var isShown = false {
+        didSet { if isShown != oldValue { onShownChange?(isShown) } }
+    }
+    var onShownChange: ((Bool) -> Void)?
+
     private func hide() {
+        isShown = false
         panel.orderOut(nil)
         corner.orderOut(nil)
         below.orderOut(nil)
@@ -230,6 +238,7 @@ final class HUD {
         let frame = NSRect(x: screen.midX - size.width / 2, y: screen.minY + screen.height * 0.12, width: size.width, height: size.height)
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
+        isShown = true
         // The circle's centre sits on the face's top-left arc, as a Notification Center
         // banner's does, and the button sits under the face's right edge. Both are there only
         // while something is held.

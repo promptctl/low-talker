@@ -1,6 +1,15 @@
 import AppKit
 @testable import InputMethod
+import Insertion
 import Testing
+
+/// A key-down with `keyCode` and `flags`, built as the system builds one. Constructing an event
+/// needs no permission, so the tests read the same `NSEvent` the handler is given.
+private func keyDown(_ keyCode: UInt16, _ flags: NSEvent.ModifierFlags) -> NSEvent {
+    NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+        characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: keyCode)!
+}
 
 /// Which keys steer dictation, held by the keys a person types and the modifiers that make a
 /// Return another key. [LAW:behavior-not-structure] Asked of values, not of how the enum is built.
@@ -38,7 +47,7 @@ import Testing
 
     @Test(arguments: keys)
     func aKeyOtherThanEscapeIsASteeringKeyOnlyIfItIsABareReturn(typed: Typed) {
-        #expect((SteeringKey(keyCode: typed.keyCode, flags: typed.flags) != nil) == typed.steers, "\(typed)")
+        #expect((SteeringKey(event: keyDown(typed.keyCode, typed.flags)) != nil) == typed.steers, "\(typed)")
     }
 
     /// Escape steers whatever is held with it: a held chord is a modifier on it, this process cannot
@@ -54,11 +63,19 @@ import Testing
         [.capsLock],
     ])
     func escapeSteersWhateverIsHeldWithIt(flags: NSEvent.ModifierFlags) {
-        #expect(SteeringKey(keyCode: 53, flags: flags) == .escape)
+        #expect(SteeringKey(event: keyDown(53, flags)) == .escape)
     }
 
     @Test func returnIsReturn() {
-        #expect(SteeringKey(keyCode: 36, flags: []) == .return)
-        #expect(SteeringKey(keyCode: 76, flags: [.numericPad]) == .return)
+        #expect(SteeringKey(event: keyDown(36, [])) == .return)
+        #expect(SteeringKey(event: keyDown(76, [.numericPad])) == .return)
+    }
+
+    /// Only a key-down steers: a key-up of Return, or a change of modifiers, is nothing to hold.
+    @Test func aKeyUpIsNotASteeringKey() throws {
+        let up = try #require(NSEvent.keyEvent(
+            with: .keyUp, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+        #expect(SteeringKey(event: up) == nil)
     }
 }

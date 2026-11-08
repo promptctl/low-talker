@@ -22,7 +22,7 @@ public nonisolated final class Notices: Sendable {
     public enum Notice: Equatable, Sendable {
         case cursorArrived
         case overMemoryCeiling(Overrun)
-        case keyTyped(UInt16)
+        case keyTyped(SteeringKey)
     }
 
     /// One element per notice. The newest are kept if the reader falls behind, since one
@@ -44,8 +44,8 @@ public nonisolated final class Notices: Sendable {
 
     /// A key the app asked to hear of was pressed. Yielded and not waited for, so the key handler
     /// that reports it returns at once and the key goes on to the app as it would have.
-    public func keyTyped(_ keyCode: UInt16) {
-        continuation.yield(.keyTyped(keyCode))
+    public func keyTyped(_ key: SteeringKey) {
+        continuation.yield(.keyTyped(key))
     }
 
     /// A controller was activated while this process held `footprint` bytes. The overrun, when
@@ -90,7 +90,7 @@ extension NoticeSender {
         switch notice {
         case .cursorArrived: tellCursorArrived()
         case .overMemoryCeiling(let overrun): tellOverMemoryCeiling(overrun)
-        case .keyTyped(let keyCode): tellKeyTyped(keyCode)
+        case .keyTyped(let key): tellKeyTyped(key)
         }
     }
 }

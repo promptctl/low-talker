@@ -102,9 +102,9 @@ public enum InputMethodNotice: Equatable, Sendable {
     case cursorArrived(CursorArrival)
     /// The input method is ending itself, holding more memory than its ceiling (IMK rule 7).
     case overMemoryCeiling(pid: pid_t, Overrun)
-    /// A key the app asked to hear of was pressed. The key itself passes on as it would have: it
-    /// was reported, not held.
-    case keyTyped(pid: pid_t, keyCode: UInt16)
+    /// A steering key was pressed. The key itself passes on as it would have: it was reported,
+    /// not held, unless the input method held it for the app's answer.
+    case keyTyped(pid: pid_t, SteeringKey)
 }
 
 /// An input method's memory footprint over its ceiling, in bytes. One under or at the ceiling,
@@ -210,8 +210,8 @@ public struct NoticeSender: Sendable {
     /// Tells the app this input method is ending itself over its memory ceiling.
     public func tellOverMemoryCeiling(_ overrun: Overrun) -> Told { tell(Wire.overrun(overrun), id: Wire.overMemoryCeiling) }
 
-    /// Tells the app a key it asked to hear of was pressed.
-    public func tellKeyTyped(_ keyCode: UInt16) -> Told { tell(Wire.key(keyCode), id: Wire.keyTyped) }
+    /// Tells the app a steering key was pressed.
+    public func tellKeyTyped(_ key: SteeringKey) -> Told { tell(Wire.key(key), id: Wire.keyTyped) }
 
     private func tell(_ payload: Data, id: mach_msg_id_t) -> Told {
         var remote = mach_port_t()

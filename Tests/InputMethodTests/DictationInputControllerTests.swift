@@ -1,117 +1,91 @@
 import AppKit
 import InputMethod
+import Insertion
 import Testing
 
-/// The controller hands back every key it is offered, a bare Return aside, which is held for
-/// words the app owes: with no app connected, as here, nothing is owed and it is handed back too.
-/// What a connected gate does with a Return is `SteeringGateTests`'s.
+/// The controller answers the text input system's commands. Return and Escape are the two it decides: a
+/// Return is held for words the app owes, and an Escape is kept only while the app's word box is open.
+/// Every other command, and all text, is declined, so it reaches the app as it would have.
 ///
-/// [LAW:behavior-not-structure] Asked by offering real events and reading the answer, not by
-/// checking which methods the class overrides: a later ticket may answer keys through a
-/// different door, and what must not change is that no key stops here.
+/// [LAW:behavior-not-structure] Asked by naming the command and reading the answer, not by checking which
+/// methods the class overrides.
 ///
-/// On the main actor because the answering is done with AppKit objects - an `NSEvent` and an
-/// `IMKInputController` - and swift-testing runs the cases of a parameterised test
-/// concurrently. Building those off the main thread is not promised to work, and what an
-/// unpromised thing does is fail on some runs and not others.
-/// [LAW:no-ambient-temporal-coupling]
+/// On the main actor because the controller is an `IMKInputController`, which is built and answered there.
 ///
-/// Serialized because the arrivals told are one stream with one reader at a time: two cases
-/// waiting on it at once each take arrivals the other is waiting for.
+/// Serialized because `AppState` is one shared fact and each case sets it.
 @Suite(.serialized) @MainActor struct DictationInputControllerTests {
-    /// A key as something that can be carried into a test case. `NSEvent` itself cannot -
-    /// it is explicitly not `Sendable` - so what travels is the description of the press and
-    /// the event is built where it is used.
-    struct Press: Sendable, CustomStringConvertible {
-        let description: String
-        let characters: String
-        let keyCode: UInt16
-        let modifiers: NSEvent.ModifierFlags.RawValue
+    /// The commands the text input system binds Return and Escape to.
+    static let insertNewline = NSSelectorFromString("insertNewline:")
+    static let cancelOperation = NSSelectorFromString("cancelOperation:")
 
-        /// Throwing rather than force-unwrapping: an `NSEvent` AppKit declined to build is
-        /// this one case failing by name, where a trap would take the whole test process
-        /// down and every other suite's result with it.
-        var event: NSEvent {
-            get throws {
-                try #require(NSEvent.keyEvent(
-                    with: .keyDown, location: .zero, modifierFlags: .init(rawValue: modifiers), timestamp: 0,
-                    windowNumber: 0, context: nil, characters: characters, charactersIgnoringModifiers: characters,
-                    isARepeat: false, keyCode: keyCode
-                ), "AppKit built no event for \(description)")
-            }
+    /// Sets what the app last said for the length of one case, then puts back nothing held.
+    private func withState(holdsReturn: Bool, panelShown: Bool, _ body: (DictationInputController) throws -> Void) throws {
+        let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
+        AppState.shared.set(InputMethodState(holdsReturn: holdsReturn, panelShown: panelShown))
+        defer { AppState.shared.set(.none) }
+        try body(controller)
+    }
+
+    /// Key-downs are always asked for, so Escape reaches the controller whatever the Return setting says.
+    @Test func keyDownsAreAlwaysAskedFor() throws {
+        let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
+        #expect(controller.recognizedEvents(nil) == 0x400)
+    }
+
+    /// A fresh input method has been told nothing: no Return held and no box open.
+    @Test func aFreshInputMethodHoldsNothingAndShowsNothing() {
+        let state = AppState()
+        #expect(state.holdsReturn == false)
+        #expect(state.panelShown == false)
+    }
+
+    /// Escape passes while the word box is closed.
+    @Test func escapePassesWhileTheBoxIsClosed() throws {
+        try withState(holdsReturn: false, panelShown: false) { controller in
+            #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == false)
         }
     }
 
-    /// Presses a person would notice losing: a plain letter, the dead key the checkpoint
-    /// types, a Command shortcut, and Return.
-    /// `nonisolated` where the suite is not: this is the case list, read to build the cases
-    /// before any of them runs, and it carries no AppKit object - `Press` is four values.
-    nonisolated static let presses: [Press] = [
-        .init(description: "the letter e", characters: "e", keyCode: 14, modifiers: 0),
-        .init(description: "Option+E, the dead key", characters: "´", keyCode: 14, modifiers: NSEvent.ModifierFlags.option.rawValue),
-        .init(description: "Command+Z", characters: "z", keyCode: 6, modifiers: NSEvent.ModifierFlags.command.rawValue),
-        .init(description: "Return", characters: "\r", keyCode: 36, modifiers: 0),
-    ]
+    /// Escape is kept for the app while the word box is open.
+    @Test func escapeIsKeptWhileTheBoxIsOpen() throws {
+        try withState(holdsReturn: false, panelShown: true) { controller in
+            #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == true)
+        }
+    }
 
-    /// Key-downs are always asked for: Escape is reported from them whatever the Return setting
-    /// says, and `handle` returns at once for every key it does not hold. 0x400 is the value the
-    /// text input system offers.
-    @Test func keyDownsAreAlwaysAskedFor() throws {
+    /// A Return passes when nothing is held, as it did before the hold.
+    @Test func aReturnPassesWhenNothingIsHeld() throws {
+        try withState(holdsReturn: false, panelShown: false) { controller in
+            #expect(controller.didCommand(by: Self.insertNewline, client: nil) == false)
+        }
+    }
+
+    /// A command the input method does not decide is declined, so it reaches the app.
+    @Test(arguments: ["moveLeft:", "deleteBackward:", "insertTab:"])
+    func anOtherCommandIsDeclined(name: String) throws {
+        try withState(holdsReturn: true, panelShown: true) { controller in
+            #expect(controller.didCommand(by: NSSelectorFromString(name), client: nil) == false, "\(name) was claimed")
+        }
+    }
+
+    /// Text is never handed to this input method as keys, so it is declined.
+    @Test func textIsDeclined() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        ReturnHolding.shared.set(false)
-        #expect(controller.recognizedEvents(nil) == 0x400)
-        ReturnHolding.shared.set(true)
-        defer { ReturnHolding.shared.set(false) }
-        #expect(controller.recognizedEvents(nil) == 0x400)
+        #expect(controller.inputText("e", client: nil) == false)
     }
 
-    /// Off by default: a fresh input method has been told nothing, so it asks for no key.
-    @Test func aFreshInputMethodHoldsNoReturn() {
-        #expect(ReturnHolding().holds == false)
-    }
-
-    /// A change of the modifier keys, offered anyway, is handed back like every key.
-    @Test func aChangeOfTheModifierKeysIsHandedBack() throws {
+    /// A call carrying no selector, which IMK may make, is declined rather than trapping and taking the
+    /// input method down.
+    @Test func aCallWithNoSelectorIsDeclined() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        let moved = try #require(CGEvent(keyboardEventSource: nil, virtualKey: 61, keyDown: true))
-        moved.type = .flagsChanged
-        moved.flags = .maskAlternate
-        let event = try #require(NSEvent(cgEvent: moved))
-        #expect(controller.handle(event, client: nil) == false, "Right Option was claimed by the input method")
+        #expect(controller.didCommand(by: nil, client: nil) == false)
     }
 
-    /// A cursor given focus is told to the app, which offers it words no cursor took.
+    /// A cursor given focus is told to the app, which offers it words no cursor took. Other notices
+    /// the shared stream holds, such as a reported Escape, are passed over.
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsTold() async {
         Notices.shared.cursorArrived(in: "com.apple.TextEdit")
-        #expect(await Notices.shared.notices.first { @Sendable _ in true } == .cursorArrived)
-    }
-
-    /// A call carrying no event, which IMK makes, is handed back rather than trapping and
-    /// taking the input method down.
-    @Test func aCallWithNoEventIsHandedBack() throws {
-        let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        #expect(controller.handle(nil, client: nil) == false)
-    }
-
-    /// Held on, so the gate itself is what answers each key: with no app to ask, every key,
-    /// a Return among them, passes.
-    @Test(arguments: presses)
-    func everyKeyIsHandedBack(press: Press) throws {
-        let controller = try #require(
-            DictationInputController(server: nil, delegate: nil, client: nil),
-            "the controller could not be built to be asked"
-        )
-        ReturnHolding.shared.set(true)
-        defer { ReturnHolding.shared.set(false) }
-        #expect(try controller.handle(press.event, client: nil) == false, "\(press) was claimed by the input method")
-    }
-
-    /// Off, a key IMK hands anyway passes at once, untouched, without the gate being asked.
-    @Test(arguments: presses)
-    func aKeyIsHandedBackWhileNothingIsHeld(press: Press) throws {
-        let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        ReturnHolding.shared.set(false)
-        #expect(try controller.handle(press.event, client: nil) == false, "\(press) was claimed while nothing was held")
+        #expect(await Notices.shared.notices.first { @Sendable notice in notice == .cursorArrived } == .cursorArrived)
     }
 
     /// The bundle's `InputMethodServerControllerClass` is a string macOS resolves through

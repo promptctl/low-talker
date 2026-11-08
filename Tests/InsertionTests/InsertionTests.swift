@@ -99,17 +99,17 @@ import Testing
         #expect(try JSONSerialization.jsonObject(with: Wire.said(build)) as? [String: String] == ["number": "9", "revision": "0123456789ab"])
     }
 
-    /// A key the input method reports is a notice carrying its key code, from the process that sent it.
-    @Test func aReportedKeyIsANoticeWithItsCode() {
-        #expect(Wire.notice(id: Wire.keyTyped, payload: Wire.key(53), from: 7) == .keyTyped(pid: 7, keyCode: 53))
+    /// A steering key the input method reports is a notice carrying that key, from the process that sent it.
+    @Test func aReportedKeyIsANoticeWithItsKey() {
+        #expect(Wire.notice(id: Wire.keyTyped, payload: Wire.key(.escape), from: 7) == .keyTyped(pid: 7, .escape))
     }
 
-    /// The app's settings ride on a greeting. An insert's greeting carries none, and the input
-    /// method must read that as no change, not as off.
-    @Test func aGreetingCarriesTheSettingsOrNone() {
-        let settings = InputMethodSettings(holdsReturn: true, reportedKeys: [53])
-        #expect(Wire.settings(ofGreeting: Wire.greeting(settings)) == settings)
-        #expect(Wire.settings(ofGreeting: Data()) == nil)
+    /// The app's state rides on a greeting. An insert's greeting carries none, and the input method must
+    /// read that as no change, not as cleared.
+    @Test func aGreetingCarriesTheStateOrNone() {
+        let state = InputMethodState(holdsReturn: true, panelShown: false)
+        #expect(Wire.state(ofGreeting: Wire.greeting(state)) == state)
+        #expect(Wire.state(ofGreeting: Data()) == nil)
     }
 
     /// An insert that reports no characters is a real answer - a zero-length request arrives
