@@ -408,6 +408,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     heard: { [unowned self] notice in
                         inputMethod.heard(notice).map(showInputMethod)
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
+                        if case let .keyTyped(_, keyCode) = notice { keyReactions[keyCode]?() }
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
@@ -437,7 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// for holding a Return, since a fresh one has none until it hears it.
     private func show(_ event: InputMethodSupervisor.Event) {
         log.notice("input method: \(event, privacy: .public)")
-        if case .running = event { tellInputMethodOfReturnHold() }
+        if case .running = event { tellInputMethodOfSettings() }
         showInputMethod(inputMethod.told(event))
     }
 
@@ -448,13 +449,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Says the setting to the input method, off the main actor since the greeting is a round
     /// trip. Unreachable, which is the input method not running, is said in the log: it is told
     /// again when it starts.
-    private func tellInputMethodOfReturnHold() {
-        let (holds, build) = (returnHold.isOn, build)
+    private func tellInputMethodOfSettings() {
+        let (settings, build) = (InputMethodSettings(holdsReturn: returnHold.isOn, reportedKeys: Array(keyReactions.keys)), build)
         Task.detached { [returnHoldLog] in
             let inserter = await InputMethodInserter(build: build)
             do throws(InsertFailure) {
-                try inserter.tell(holdsReturn: holds)
-                returnHoldLog.notice("told the input method it holds a Return: \(holds, privacy: .public)")
+                try inserter.tell(settings)
+                returnHoldLog.notice("told the input method its settings: holds a Return \(settings.holdsReturn, privacy: .public), reports \(settings.reportedKeys.count, privacy: .public) keys")
             } catch {
                 returnHoldLog.notice("could not tell the input method it holds a Return: \(error, privacy: .public)")
             }
@@ -463,8 +464,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleReturnHold() {
         returnHold.set(!returnHold.isOn)
-        tellInputMethodOfReturnHold()
+        tellInputMethodOfSettings()
     }
+
+    /// What each key the input method reports does, by virtual key code. The input method is told
+    /// to report exactly these keys, so a key added here is reported to the app with no other change.
+    private lazy var keyReactions: [UInt16: () -> Void] = [
+        // Escape: the panel goes away and the held words with it, as its close control does.
+        53: { [unowned self] in hud.dismissByKey(); hold.dismiss() },
+    ]
 
     /// The line says how to press only while an input method that can type the words is
     /// running: one of this app's build, or one that has not said its build yet, whose

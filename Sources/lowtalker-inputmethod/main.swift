@@ -114,9 +114,10 @@ let insertions = Task.detached { () -> InsertionPort? in
     do {
         let port = try await InsertionPort(build: build, queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
             logger.error("\(String(describing: event), privacy: .public)")
-        }, holding: { holds in
-            ReturnHolding.shared.set(holds)
-            logger.notice("the app holds a Return for dictated words: \(holds, privacy: .public)")
+        }, holding: { settings in
+            ReturnHolding.shared.set(settings.holdsReturn)
+            ReportedKeys.shared.set(settings.reportedKeys)
+            logger.notice("the app holds a Return for dictated words: \(settings.holdsReturn, privacy: .public); reports \(settings.reportedKeys.count, privacy: .public) keys")
         }) { request in
             // Read on the main actor, where the effects are, and handed to the decision as
             // values. [LAW:effects-at-boundaries]

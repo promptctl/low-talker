@@ -161,7 +161,18 @@ final class HUD {
 
     /// `insertable` is whether a loop is listening to insert what is held through, without which
     /// Insert is not offered.
+    /// A key put the panel away, so it stays away whatever the activity says until a press starts.
+    private var dismissedByKey = false
+
+    /// Puts the panel away at once, whatever it shows, until the next press starts.
+    func dismissByKey() {
+        dismissedByKey = true
+        hide()
+    }
+
     func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
+        if case .listening = activity { dismissedByKey = false }
+        guard !dismissedByKey else { return hide() }
         // A press on its way carries the words a cursor is offered in its own insert, so only a
         // panel with nothing on its way asks for a click, and only for those words: not those
         // that may have landed. Insert is offered once the press is closed, since an ask is

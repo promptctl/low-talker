@@ -99,12 +99,17 @@ import Testing
         #expect(try JSONSerialization.jsonObject(with: Wire.said(build)) as? [String: String] == ["number": "9", "revision": "0123456789ab"])
     }
 
-    /// The app's setting for holding a Return rides on a greeting as a boolean. An insert's
-    /// greeting carries none, and the input method must read that as no change, not as off.
-    @Test func aGreetingCarriesTheHoldSettingOrNone() {
-        #expect(Wire.holdsReturn(ofGreeting: Wire.greeting(holdsReturn: true)) == true)
-        #expect(Wire.holdsReturn(ofGreeting: Wire.greeting(holdsReturn: false)) == false)
-        #expect(Wire.holdsReturn(ofGreeting: Data()) == nil)
+    /// A key the input method reports is a notice carrying its key code, from the process that sent it.
+    @Test func aReportedKeyIsANoticeWithItsCode() {
+        #expect(Wire.notice(id: Wire.keyTyped, payload: Wire.key(53), from: 7) == .keyTyped(pid: 7, keyCode: 53))
+    }
+
+    /// The app's settings ride on a greeting. An insert's greeting carries none, and the input
+    /// method must read that as no change, not as off.
+    @Test func aGreetingCarriesTheSettingsOrNone() {
+        let settings = InputMethodSettings(holdsReturn: true, reportedKeys: [53])
+        #expect(Wire.settings(ofGreeting: Wire.greeting(settings)) == settings)
+        #expect(Wire.settings(ofGreeting: Data()) == nil)
     }
 
     /// An insert that reports no characters is a real answer - a zero-length request arrives

@@ -53,13 +53,13 @@ import Testing
         .init(description: "Return", characters: "\r", keyCode: 36, modifiers: 0),
     ]
 
-    /// Key-downs are asked for only while the app says it holds a Return, which is the one door a
-    /// Return reaches this process by. Off, nothing is asked for, so no key typed reaches this
-    /// process at all. 0x400 is what the text input system offers when nobody says.
-    @Test func keyDownsAreAskedForOnlyWhileTheAppHoldsAReturn() throws {
+    /// Key-downs are always asked for: Escape is reported from them whatever the Return setting
+    /// says, and `handle` returns at once for every key it does not hold. 0x400 is the value the
+    /// text input system offers.
+    @Test func keyDownsAreAlwaysAskedFor() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
         ReturnHolding.shared.set(false)
-        #expect(controller.recognizedEvents(nil) == 0)
+        #expect(controller.recognizedEvents(nil) == 0x400)
         ReturnHolding.shared.set(true)
         defer { ReturnHolding.shared.set(false) }
         #expect(controller.recognizedEvents(nil) == 0x400)

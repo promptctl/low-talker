@@ -71,12 +71,11 @@ public final class DictationInputController: IMKInputController {
     }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
-    /// studious, 2026-09-27), which is every key typed, and only while the app has said it holds
-    /// a Return. The app hears the modifier keys itself. Off, this asks for nothing, so no key a
-    /// person types reaches this process, and the text input system delivers every key as it
-    /// would with no input method in the path. [LAW:dataflow-not-control-flow]
+    /// studious, 2026-09-27), which is every key typed. The app hears the modifier keys itself.
+    /// Nothing typed is held unless the app holds a Return, and `handle` returns at once for every
+    /// other key, so a key costs one turn on the main thread and no wait. [LAW:dataflow-not-control-flow]
     nonisolated override public func recognizedEvents(_: Any!) -> Int {
-        ReturnHolding.shared.holds ? Int(NSEvent.EventTypeMask.keyDown.rawValue) : 0
+        Int(NSEvent.EventTypeMask.keyDown.rawValue)
     }
 
     /// Declines every key but a bare Return, which is held for the words the app owes, and an
@@ -87,14 +86,17 @@ public final class DictationInputController: IMKInputController {
     /// event the inherited signature has), and with events that are not keys, whose key code is
     /// not to be read.
     nonisolated override public func handle(_ event: NSEvent?, client _: Any!) -> Bool {
-        // Off, no key is handed here by IMK; a key handed anyway passes, as it did before the hold.
-        guard ReturnHolding.shared.holds else { return false }
         // Debug level: this is made once per key typed anywhere.
         return onMainActor("handle", event, level: .debug) { event in
             // Which controller a key reaches is the one thing in this process that says which
             // window has the keyboard. [LAW:nothing-unseen] Debug level, like the hop line.
             imkLog.debug("\(self.said("was handed an event", about: self.cursor), privacy: .public)")
-            guard let event, event.type == .keyDown,
+            guard let event, event.type == .keyDown else { return false }
+            // A key the app asked to hear of is reported, never held: the report is queued for the app
+            // and this returns at once, so the key passes on as it would have.
+            if ReportedKeys.shared.reports(event.keyCode) { Notices.shared.keyTyped(event.keyCode) }
+            // Only a Return and an Escape are ever held, and only while the app holds a Return.
+            guard ReturnHolding.shared.holds,
                   let key = SteeringKey(keyCode: event.keyCode, flags: event.modifierFlags) else { return false }
             let kept = SteeringGate.shared.verdict(for: key, at: event.timestamp) == .keep
             // The system's own answer to a Return that did nothing, so a kept one is heard at the

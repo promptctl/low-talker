@@ -318,6 +318,8 @@ enum Wire {
     // from before still running past an install is told as not understood, not misread.
     static let cursorArrived: mach_msg_id_t = 4
     static let overMemoryCeiling: mach_msg_id_t = 5
+    /// A key the app asked to hear of was pressed; reported, never answered.
+    static let keyTyped: mach_msg_id_t = 9
     /// The questions the input method asks the app about a Return or an Escape it holds, each
     /// answered: whether anything is owed, which both ask; then, for a Return, whether it settled,
     /// and for an Escape, to throw the open dictation away.
@@ -353,15 +355,18 @@ enum Wire {
         return (try? JSONDecoder().decode(Build.self, from: data)).map(Optional.some)
     }
 
-    /// The app's setting for holding a Return, carried by a greeting: the input method takes it
-    /// as the setting to hold to until the app says otherwise.
-    static func greeting(holdsReturn: Bool) -> Data { try! JSONEncoder().encode(holdsReturn) }
+    /// The app's settings, carried by a greeting: the input method takes them as the settings to
+    /// hold to until the app says otherwise.
+    static func greeting(_ settings: InputMethodSettings) -> Data { try! JSONEncoder().encode(settings) }
 
-    /// [LAW:parse-dont-validate] The setting a greeting carries, or nil when it carries none, as
+    /// [LAW:parse-dont-validate] The settings a greeting carries, or nil when it carries none, as
     /// an insert's greeting does not.
-    static func holdsReturn(ofGreeting data: Data) -> Bool? {
-        data.isEmpty ? nil : try? JSONDecoder().decode(Bool.self, from: data)
+    static func settings(ofGreeting data: Data) -> InputMethodSettings? {
+        data.isEmpty ? nil : try? JSONDecoder().decode(InputMethodSettings.self, from: data)
     }
+
+    /// The key a key report carries.
+    static func key(_ keyCode: UInt16) -> Data { try! JSONEncoder().encode(keyCode) }
 
     /// [LAW:parse-dont-validate] A greeting's answer, or nothing at all. The refusal is an
     /// insert's answer, because the port refuses a sender the same way whichever message
@@ -425,6 +430,7 @@ enum Wire {
         switch id {
         case cursorArrived: build(of: payload ?? Data()).map { .cursorArrived(CursorArrival(pid: pid, build: $0)) }
         case overMemoryCeiling: payload.flatMap { try? JSONDecoder().decode(Overrun.self, from: $0) }.map { .overMemoryCeiling(pid: pid, $0) }
+        case keyTyped: payload.flatMap { try? JSONDecoder().decode(UInt16.self, from: $0) }.map { .keyTyped(pid: pid, keyCode: $0) }
         default: nil
         }
     }
