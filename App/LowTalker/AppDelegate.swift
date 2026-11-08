@@ -1112,9 +1112,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Anything but plainly on or off is said under the item, since a checkmark cannot say it.
         if openAtLogin != .on, openAtLogin != .off { menu.addItem(readout("    \(openAtLogin)")) }
         // Off by default. On, a Return typed while dictating is sent after the dictated words, so
-        // the message goes out with them in it; the input method then asks for every key typed.
-        let hold = menu.addItem(withTitle: "Hold Return for Dictated Words", action: #selector(toggleReturnHold), keyEquivalent: "")
-        hold.state = returnHold.isOn ? .on : .off
+        // the message goes out with them in it; the input method holds a Return only when this is on.
+        let holdItem = menu.addItem(withTitle: "Hold Return for Dictated Words", action: #selector(toggleReturnHold), keyEquivalent: "")
+        holdItem.state = returnHold.isOn ? .on : .off
         if let serving {
             let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
             item.state = serving.chosen ? .on : .off

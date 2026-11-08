@@ -70,15 +70,12 @@ public nonisolated final class Notices: Sendable {
         for await notice in notices {
             let told = tell(notice)
             switch notice {
-            case .cursorArrived:
+            case .cursorArrived, .keyTyped:
                 if told != fared { log.log(level: told.isFault ? .error : .default, "\(told.description, privacy: .public)") }
                 fared = told
             case .overMemoryCeiling(let overrun):
                 log.fault("\(overrun.description, privacy: .public); \(told.description, privacy: .public)")
                 end()
-            case .keyTyped:
-                if told != fared { log.log(level: told.isFault ? .error : .default, "\(told.description, privacy: .public)") }
-                fared = told
             }
         }
     }

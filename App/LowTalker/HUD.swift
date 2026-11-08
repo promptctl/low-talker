@@ -159,8 +159,6 @@ final class HUD {
         return place
     }()
 
-    /// `insertable` is whether a loop is listening to insert what is held through, without which
-    /// Insert is not offered.
     /// A key put the panel away, so it stays away whatever the activity says until a press starts.
     private var dismissedByKey = false
 
@@ -170,6 +168,8 @@ final class HUD {
         hide()
     }
 
+    /// `insertable` is whether a loop is listening to insert what is held through, without which
+    /// Insert is not offered.
     func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
         if case .listening = activity { dismissedByKey = false }
         guard !dismissedByKey else { return hide() }

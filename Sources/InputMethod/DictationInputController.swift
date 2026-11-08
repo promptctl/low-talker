@@ -28,11 +28,11 @@ nonisolated func controllerLine(controller: UInt, _ event: String, client: Strin
 /// the cursor, and a Return typed meanwhile would reach the app ahead of them and send the message
 /// without them; the only grant-free way for it to arrive after is this process declining it once
 /// the words are committed, so `SteeringGate` holds it here until the app says they have landed. An
-/// Escape is for the dictation when one is open: the gate asks the app to throw it away and keeps
-/// the Escape when it did, and the app takes the words already at the cursor back afterwards. The
-/// verdict is the gate's, and this answers with it, so there is no key whose answer is a decision
-/// made here. [LAW:dataflow-not-control-flow] A swallowed key is invisible - the person sees a
-/// Return that did nothing - so the gate says every one it keeps in the log. [LAW:no-silent-failure]
+/// Escape is kept while the word box is shown, and the app cancels the open press when told; the
+/// words already at the cursor are taken back by the app afterwards. The verdict is the gate's for
+/// a Return, and this answers with it, so there is no key whose answer is a decision made here.
+/// [LAW:dataflow-not-control-flow] A swallowed key is invisible - the person sees a Return that did
+/// nothing - so the gate says every one it keeps in the log. [LAW:no-silent-failure]
 ///
 /// `@objc` with an explicit name because `InputMethodServerControllerClass` in the bundle's
 /// `Info.plist` names this class as a string, and the Objective-C runtime is what resolves
