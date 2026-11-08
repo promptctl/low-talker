@@ -408,10 +408,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     heard: { [unowned self] notice in
                         inputMethod.heard(notice).map(showInputMethod)
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
+                        if case let .keyTyped(_, key) = notice { react(to: key) }
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
-                    asked: { KeySteering(dictation: dictation, hotkey: hotkey).answer($0, through: $1) },
+                    asked: { KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting().isOn }, panelShown: { [unowned self] in self.hud.isShown }).answer($0, through: $1) },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
             } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }
         }
@@ -437,6 +438,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func show(_ event: InputMethodSupervisor.Event) {
         log.notice("input method: \(event, privacy: .public)")
         showInputMethod(inputMethod.told(event))
+    }
+
+    /// The menu's checkbox for holding a Return until the dictated words land. The input method
+    /// asks for it at each Return, so a change here needs no word to the input method.
+    private let returnHold = ReturnHoldSetting()
+
+    @objc private func toggleReturnHold() {
+        returnHold.set(!returnHold.isOn)
+    }
+
+    /// What each steering key the input method reports does. The switch is exhaustive, so a key
+    /// added to `SteeringKey` has to say what it does here before this builds.
+    private func react(to key: SteeringKey) {
+        switch key {
+        // Escape, with the panel shown: the open press is cancelled, the held words no cursor has
+        // taken are let go, and the panel closes. The words the press already put at the cursor are taken back by the press's own path.
+        // The input method keeps an Escape only while the panel is shown, so a shut panel is no
+        // Escape for us. [LAW:single-enforcer]
+        case .escape:
+            listening.map { KeySteering.escape($0.hotkey) }
+            hold.dismiss()
+            hud.dismissByKey()
+        // Return is held and sent by the input method; the app has nothing to do when it passes.
+        case .return: break
+        }
     }
 
     /// The line says how to press only while an input method that can type the words is
@@ -1060,6 +1086,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Anything but plainly on or off is said under the item, since a checkmark cannot say it.
         if openAtLogin != .on, openAtLogin != .off { menu.addItem(readout("    \(openAtLogin)")) }
+        // Off by default. On, a Return typed while dictating is sent after the dictated words, so
+        // the message goes out with them in it; the input method holds a Return only when this is on.
+        let holdItem = menu.addItem(withTitle: "Hold Return for Dictated Words", action: #selector(toggleReturnHold), keyEquivalent: "")
+        holdItem.state = returnHold.isOn ? .on : .off
         if let serving {
             let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
             item.state = serving.chosen ? .on : .off

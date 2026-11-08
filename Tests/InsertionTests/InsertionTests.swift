@@ -99,6 +99,11 @@ import Testing
         #expect(try JSONSerialization.jsonObject(with: Wire.said(build)) as? [String: String] == ["number": "9", "revision": "0123456789ab"])
     }
 
+    /// A steering key the input method reports is a notice carrying that key, from the process that sent it.
+    @Test func aReportedKeyIsANoticeWithItsKey() {
+        #expect(Wire.notice(id: Wire.keyTyped, payload: Wire.key(.escape), from: 7) == .keyTyped(pid: 7, .escape))
+    }
+
     /// An insert that reports no characters is a real answer - a zero-length request arrives
     /// as an empty request and is answered honestly - so nothing here may turn it away.
     @Test func anInsertOfNothingIntoARealAppStillCrosses() {

@@ -53,6 +53,8 @@ public struct InputMethodWatch: Sendable {
     public mutating func heard(_ notice: InputMethodNotice) -> Showing? {
         switch notice {
         case .cursorArrived(let arrival): self.arrival = arrival
+        // A key is for the app to react to as it hears it; nothing the standing says.
+        case .keyTyped: break
         case let .overMemoryCeiling(pid, overrun):
             lastOverrun = overrun
             ending = switch process {

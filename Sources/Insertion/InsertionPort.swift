@@ -54,12 +54,13 @@ public final class InsertionPort: Sendable {
 
     /// Hosts the insert port, admitting the app and nobody else, and answering each greeting
     /// with `build`, this input method's own, or with none when its bundle carries none.
-    ///
+       ///
     /// `async` because admitting means verifying this process's own signature, which
     /// `signedLikeThisProcess` runs off the caller's actor; see there for why.
     public convenience init(
         build: Build?, queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
+        told: @escaping @Sendable (Event) -> Void,
+        answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
     ) async throws(PortNotHosted) {
         let senders: PeerIdentity
         do throws(PeerIdentity.Unreadable) { senders = try await .signedLikeThisProcess(identifier: AppIdentity.bundleIdentifier) } catch { throw .noRequirement(error) }
@@ -70,7 +71,8 @@ public final class InsertionPort: Sendable {
     /// without being an input method. [LAW:decomposition]
     convenience init(
         portName: String, senders: PeerIdentity, build: Build?, queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
+        told: @escaping @Sendable (Event) -> Void,
+        answer: @escaping @Sendable (InsertRequest) -> InsertionAnswer
     ) throws(PortNotHosted) {
         try self.init(portName: portName, queue: queue, told: told) { request in
             do throws(PeerIdentity.NotAdmitted) {
@@ -80,9 +82,8 @@ public final class InsertionPort: Sendable {
                 return Wire.answer(.refused(.senderIsNotThisInstallationsApp))
             }
             // The greeting is answered with the build: the sender has been admitted, and it
-            // decides whether this build is one to send its words to. [LAW:single-enforcer]
-            // [LAW:dataflow-not-control-flow] The id is the wire's own discriminator, and
-            // these are its two values.
+            // decides whether this build is one to send its words to. The input method keeps no
+            // copy of the app's state; it asks for each thing it needs. [LAW:single-enforcer]
             guard request.id != Wire.greeting else { return Wire.said(build) }
             // Bytes that are not a request are answered, never dropped: a sender that hears
             // nothing waits out its timeout and learns nothing. [LAW:no-silent-failure]

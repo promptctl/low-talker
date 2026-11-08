@@ -22,26 +22,23 @@ public enum Settlement: String, Codable, Sendable {
     case notLanded
 }
 
-/// What an Escape did, the answer to the question it asks once a debt is admitted: the app threw
-/// away the dictation that was open, or there was none for it to throw away.
-public enum Cancellation: String, Codable, Sendable {
-    /// No press was open, so the Escape was not for dictation and goes to the app as typed.
-    case nothing
-    /// A press was open and is cancelled, so the Escape was spent on it.
-    case dictation
+/// Whether the app's word box is open: the answer to whether an Escape is the app's to cancel with.
+/// [LAW:types-are-the-program] Two values: the box is open, or it is not.
+public enum PanelState: String, Codable, Sendable {
+    case shut
+    case shown
 }
 
-/// What the input method asks the app about a steering key it is holding, stamped with the
-/// moment the key went down on the clock every key event is stamped by, so the audio is cut
-/// where the key was typed and not where the question arrived.
+/// What the input method asks the app about a key it is holding, stamped with the moment the
+/// key went down on the clock every key event is stamped by, so the audio is cut where the key
+/// was typed and not where the question arrived.
 public enum Question: Equatable, Sendable {
-    /// Is anything owed? Answered at once, from the port's own queue. Both keys ask it first.
+    /// Is anything owed? Answered at once, from the port's own queue. A Return asks it first.
     case owed(at: TimeInterval)
-    /// Return: say when everything owed has settled. Answered later, from the main actor.
+    /// Say when everything owed has settled. Answered later, from the main actor.
     case settled(at: TimeInterval)
-    /// Escape: throw away the dictation that is open. Carries the effect, so it is asked only once
-    /// a debt is admitted, and answered when it is known, from the main actor.
-    case cancel(at: TimeInterval)
+    /// Is the word box open? An Escape is kept for the app when it is. Answered from the main actor.
+    case panel(at: TimeInterval)
 }
 
 /// Whatever can answer the questions: the right a question came with, or a test's stand-in,
@@ -49,7 +46,7 @@ public enum Question: Equatable, Sendable {
 public protocol Answering: Sendable {
     func send(_ owing: Owing) -> Reply.Delivery
     func send(_ settlement: Settlement) -> Reply.Delivery
-    func send(_ cancellation: Cancellation) -> Reply.Delivery
+    func send(_ panel: PanelState) -> Reply.Delivery
 }
 
 /// The one right to answer a question, owned by whoever holds this. Answering consumes it, and
@@ -71,7 +68,7 @@ public final class Reply: Answering {
 
     public func send(_ owing: Owing) -> Delivery { send(Wire.owing(owing)) }
     public func send(_ settlement: Settlement) -> Delivery { send(Wire.settlement(settlement)) }
-    public func send(_ cancellation: Cancellation) -> Delivery { send(Wire.cancellation(cancellation)) }
+    public func send(_ panel: PanelState) -> Delivery { send(Wire.panelState(panel)) }
 
     private func send(_ payload: Data) -> Delivery {
         let first = answered.withLock { answered in
@@ -151,14 +148,14 @@ public struct Asker: Sendable {
         ask(Wire.owed, Wire.stamp(timestamp), within: bound, read: Wire.owing(of:))
     }
 
-    /// Whether the app threw away a dictation that was open for an Escape, within `bound`.
-    public func cancel(at timestamp: TimeInterval, within bound: Duration) -> Result<Cancellation, NotAnswered> {
-        ask(Wire.cancel, Wire.stamp(timestamp), within: bound, read: Wire.cancellation(of:))
-    }
-
     /// Whether what the app owes landed, within `bound`.
     public func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered> {
         ask(Wire.settled, Wire.stamp(timestamp), within: bound, read: Wire.settlement(of:))
+    }
+
+    /// Whether the app's word box is open, within `bound`.
+    public func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered> {
+        ask(Wire.panel, Wire.stamp(timestamp), within: bound, read: Wire.panelState(of:))
     }
 
     private func ask<Answer>(_ id: mach_msg_id_t, _ payload: Data, within bound: Duration, read: (Data) -> Answer?) -> Result<Answer, NotAnswered> {

@@ -159,9 +159,24 @@ final class HUD {
         return place
     }()
 
+    /// A key put the panel away, so it stays away whatever the activity says until a press starts.
+    private var dismissedByKey = false
+
+    /// Puts the panel away at once, whatever it shows, until the next press starts.
+    func dismissByKey() {
+        dismissedByKey = true
+        hide()
+    }
+
     /// `insertable` is whether a loop is listening to insert what is held through, without which
     /// Insert is not offered.
     func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
+        // A press starts as listening or refused, and either one is new words to show.
+        switch activity {
+        case .listening, .refused: dismissedByKey = false
+        case .idle, .transcribing: break
+        }
+        guard !dismissedByKey else { return hide() }
         // A press on its way carries the words a cursor is offered in its own insert, so only a
         // panel with nothing on its way asks for a click, and only for those words: not those
         // that may have landed. Insert is offered once the press is closed, since an ask is
@@ -186,7 +201,11 @@ final class HUD {
         }
     }
 
+    /// Whether the panel is on screen. The input method asks for it when an Escape is typed.
+    private(set) var isShown = false
+
     private func hide() {
+        isShown = false
         panel.orderOut(nil)
         corner.orderOut(nil)
         below.orderOut(nil)
@@ -219,6 +238,7 @@ final class HUD {
         let frame = NSRect(x: screen.midX - size.width / 2, y: screen.minY + screen.height * 0.12, width: size.width, height: size.height)
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
+        isShown = true
         // The circle's centre sits on the face's top-left arc, as a Notification Center
         // banner's does, and the button sits under the face's right edge. Both are there only
         // while something is held.
