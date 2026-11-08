@@ -12,17 +12,28 @@ import Testing
 ///
 /// On the main actor because the controller is an `IMKInputController`, which is built and answered there.
 ///
-/// Serialized because `AppState` is one shared fact and each case sets it.
+/// Serialized because the gate is one shared fact and each case connects the app it asks.
 @Suite(.serialized) @MainActor struct DictationInputControllerTests {
     /// The commands the text input system binds Return and Escape to.
     static let insertNewline = NSSelectorFromString("insertNewline:")
     static let cancelOperation = NSSelectorFromString("cancelOperation:")
 
-    /// Sets what the app last said for the length of one case, then puts back nothing held.
-    private func withState(holdsReturn: Bool, panelShown: Bool, _ body: (DictationInputController) throws -> Void) throws {
+    /// The app as the gate asks it, answering each question with what the case gave it.
+    private struct App: SteeringAsking {
+        var owing: Result<Owing, NotAnswered> = .success(.nothing)
+        var settling: Result<Settlement, NotAnswered> = .success(.landed)
+        var panelling: Result<PanelState, NotAnswered> = .success(.shut)
+
+        func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { owing }
+        func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { settling }
+        func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> { panelling }
+    }
+
+    /// Connects `app` to the gate for the length of one case, then disconnects it.
+    private func withApp(_ app: App = App(), _ body: (DictationInputController) throws -> Void) throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        AppState.shared.set(InputMethodState(holdsReturn: holdsReturn, panelShown: panelShown))
-        defer { AppState.shared.set(.none) }
+        SteeringGate.shared.connect(app)
+        defer { SteeringGate.shared.connect(SteeringGate.Unconnected()) }
         try body(controller)
     }
 
@@ -32,38 +43,52 @@ import Testing
         #expect(controller.recognizedEvents(nil) == 0x400)
     }
 
-    /// A fresh input method has been told nothing: no Return held and no box open.
-    @Test func aFreshInputMethodHoldsNothingAndShowsNothing() {
-        let state = AppState()
-        #expect(state.holdsReturn == false)
-        #expect(state.panelShown == false)
-    }
-
     /// Escape passes while the word box is closed.
     @Test func escapePassesWhileTheBoxIsClosed() throws {
-        try withState(holdsReturn: false, panelShown: false) { controller in
+        try withApp(App(panelling: .success(.shut))) { controller in
             #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == false)
         }
     }
 
     /// Escape is kept for the app while the word box is open.
     @Test func escapeIsKeptWhileTheBoxIsOpen() throws {
-        try withState(holdsReturn: false, panelShown: true) { controller in
+        try withApp(App(panelling: .success(.shown))) { controller in
             #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == true)
         }
     }
 
-    /// A Return passes when nothing is held, as it did before the hold.
-    @Test func aReturnPassesWhenNothingIsHeld() throws {
-        try withState(holdsReturn: false, panelShown: false) { controller in
+    /// Escape passes when no app answers whether its box is open, as it does with no app running.
+    @Test func escapePassesWhenNoAppAnswers() throws {
+        try withApp(App(panelling: .failure(.nobodyIsListening(port: "port")))) { controller in
+            #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == false)
+        }
+    }
+
+    /// A Return passes when the app owes nothing, as it did before the hold.
+    @Test func aReturnPassesWhenNothingIsOwed() throws {
+        try withApp(App(owing: .success(.nothing))) { controller in
             #expect(controller.didCommand(by: Self.insertNewline, client: nil) == false)
+        }
+    }
+
+    /// A Return passes once the words the app owes have landed.
+    @Test func aReturnPassesWhenTheOwedWordsLand() throws {
+        try withApp(App(owing: .success(.words), settling: .success(.landed))) { controller in
+            #expect(controller.didCommand(by: Self.insertNewline, client: nil) == false)
+        }
+    }
+
+    /// A Return is kept when the words the app owes did not all reach a cursor.
+    @Test func aReturnIsKeptWhenTheOwedWordsDoNotLand() throws {
+        try withApp(App(owing: .success(.words), settling: .success(.notLanded))) { controller in
+            #expect(controller.didCommand(by: Self.insertNewline, client: nil) == true)
         }
     }
 
     /// A command the input method does not decide is declined, so it reaches the app.
     @Test(arguments: ["moveLeft:", "deleteBackward:", "insertTab:"])
     func anOtherCommandIsDeclined(name: String) throws {
-        try withState(holdsReturn: true, panelShown: true) { controller in
+        try withApp(App(owing: .success(.words), panelling: .success(.shown))) { controller in
             #expect(controller.didCommand(by: NSSelectorFromString(name), client: nil) == false, "\(name) was claimed")
         }
     }

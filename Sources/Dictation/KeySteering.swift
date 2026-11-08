@@ -19,20 +19,33 @@ import os
 public struct KeySteering: Sendable {
     private let dictation: Dictation
     private let hotkey: Hotkey
+    /// Whether a bare Return is held at all: the setting, read where the question is answered. A
+    /// Return is held against a debt only while it is on, so with it off nothing is owed.
+    private let holdsReturn: @Sendable () -> Bool
+    /// Whether the word box is open, read on the main actor where the box is.
+    private let panelShown: @MainActor @Sendable () -> Bool
 
     private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "lowtalker", category: "hotkey")
 
-    public init(dictation: Dictation, hotkey: Hotkey) {
+    public init(dictation: Dictation, hotkey: Hotkey, holdsReturn: @escaping @Sendable () -> Bool, panelShown: @escaping @MainActor @Sendable () -> Bool) {
         self.dictation = dictation
         self.hotkey = hotkey
+        self.holdsReturn = holdsReturn
+        self.panelShown = panelShown
     }
 
     /// Answers `question` through `reply`, now or when it is known.
     public func answer(_ question: Question, through reply: some Answering) {
         switch question {
         case .owed:
-            let owing: Owing = dictation.owes ? .words : .nothing
+            let owing: Owing = holdsReturn() && dictation.owes ? .words : .nothing
             Self.report(reply.send(owing), "whether words were owed (\(owing))")
+        case .panel:
+            let isShown = panelShown
+            Task { @MainActor in
+                let panel: PanelState = isShown() ? .shown : .shut
+                Self.report(reply.send(panel), "whether the word box is open (\(panel))")
+            }
         case .settled(let moment):
             let (dictation, hotkey) = (dictation, hotkey)
             Task { @MainActor in
@@ -47,7 +60,7 @@ public struct KeySteering: Sendable {
     /// cancelled, and its words not yet at a cursor are taken back by the press's own path. Nothing
     /// is cancelled when no press is open, and the outcome is in that press's own report.
     /// [LAW:single-enforcer] The detector ends the press, as it ends every press.
-    @MainActor public func escape() {
+    @MainActor public static func escape(_ hotkey: Hotkey) {
         let steered = hotkey.steer(.cancel)
         Self.log.debug("escape: \(String(describing: steered), privacy: .public)")
     }

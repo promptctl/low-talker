@@ -91,8 +91,10 @@ public final class DictationInputController: IMKInputController {
             imkLog.debug("\(self.said("was handed a command", about: self.cursor), privacy: .public)")
             if selector == NSSelectorFromString("insertNewline:") { return self.holdReturn() }
             if selector == NSSelectorFromString("cancelOperation:") {
-                Notices.shared.keyTyped(.escape)
-                return AppState.shared.panelShown
+                let kept = SteeringGate.shared.escapeVerdict(at: ProcessInfo.processInfo.systemUptime) == .keep
+                // The app cancels the open press when told, and is told only of an Escape it is kept. [LAW:single-enforcer]
+                if kept { Notices.shared.keyTyped(.escape) }
+                return kept
             }
             return false
         }
@@ -103,7 +105,6 @@ public final class DictationInputController: IMKInputController {
 
     /// The held Return: kept, and the system's beep said, when the gate keeps it.
     @MainActor private func holdReturn() -> Bool {
-        guard AppState.shared.holdsReturn else { return false }
         let kept = SteeringGate.shared.verdict(at: ProcessInfo.processInfo.systemUptime) == .keep
         // The system's own answer to a Return that did nothing, so a kept one is heard at the moment it
         // was typed and not only found in a log. [LAW:no-silent-failure]

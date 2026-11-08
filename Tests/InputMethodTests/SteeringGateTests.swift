@@ -13,9 +13,11 @@ import Testing
     private struct App: SteeringAsking {
         var owing: @Sendable () -> Result<Owing, NotAnswered> = { .success(.words) }
         var settling: @Sendable () -> Result<Settlement, NotAnswered> = { .success(.landed) }
+        var panelling: @Sendable () -> Result<PanelState, NotAnswered> = { .success(.shut) }
 
         func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { owing() }
         func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { settling() }
+        func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> { panelling() }
     }
 
     /// A list that a thread other than the test's appends to.
@@ -146,6 +148,36 @@ import Testing
     @MainActor
     @Test func aGateNoAppWasConnectedToPassesEveryReturn() {
         #expect(SteeringGate().verdict(at: 1) == .pass)
+    }
+
+    // MARK: - Escape
+
+    /// An Escape is kept while the app's word box is open, since the app cancels the press with it.
+    @MainActor
+    @Test func anEscapeWhileTheBoxIsOpenIsKept() {
+        let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shown) }))
+        #expect(gate.escapeVerdict(at: 1) == .keep)
+    }
+
+    /// An Escape with the box shut is the app in front's, as typed.
+    @MainActor
+    @Test func anEscapeWithTheBoxShutPasses() {
+        let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shut) }))
+        #expect(gate.escapeVerdict(at: 1) == .pass)
+    }
+
+    /// An app that does not say whether its box is open has said nothing, so the Escape passes.
+    @MainActor
+    @Test(arguments: [NotAnswered.nobodyIsListening(port: "port"), .silent(after: .milliseconds(100)), .abandoned])
+    func anEscapeTheAppDoesNotAnswerForPasses(why: NotAnswered) {
+        let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .failure(why) }))
+        #expect(gate.escapeVerdict(at: 1) == .pass)
+    }
+
+    /// With no app connected, nothing is shown and every Escape passes.
+    @MainActor
+    @Test func anEscapeWithNoAppConnectedPasses() {
+        #expect(SteeringGate().escapeVerdict(at: 1) == .pass)
     }
 
     /// The ceiling is the longest the app itself waits on an insert, one number and not two, and

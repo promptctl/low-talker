@@ -64,8 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sessions.notice("asked to insert \(words) held words\(unheard, privacy: .public)")
             listening?.dictation.insertHeld()
         })
-        // The input method keeps Escape for the app only while the box is open, so it is told each change.
-        hud.onShownChange = { [unowned self] _ in tellInputMethodOfState() }
         return hud
     }()
     /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
@@ -417,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
-                    asked: { KeySteering(dictation: dictation, hotkey: hotkey).answer($0, through: $1) },
+                    asked: { KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting().isOn }, panelShown: { [unowned self] in self.hud.isShown }).answer($0, through: $1) },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
             } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }
         }
@@ -439,37 +437,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if case .failure(let refusal) = hearing { showHotkeyStatus(.off(refusal.reason)) }
     }
 
-    /// The input method's process as the notices keep it. A process that starts is told the setting
-    /// for holding a Return, since a fresh one has none until it hears it.
+    /// The input method's process as the notices keep it.
     private func show(_ event: InputMethodSupervisor.Event) {
         log.notice("input method: \(event, privacy: .public)")
-        if case .running = event { tellInputMethodOfState() }
         showInputMethod(inputMethod.told(event))
     }
 
-    /// The menu's checkbox for holding a Return until the dictated words land.
+    /// The menu's checkbox for holding a Return until the dictated words land. The input method
+    /// asks for it at each Return, so a change here needs no word to the input method.
     private let returnHold = ReturnHoldSetting()
-    private let returnHoldLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "returnhold")
-
-    /// Says the state to the input method, off the main actor since the greeting is a round trip.
-    /// Unreachable, which is the input method not running, is said in the log: it is told again
-    /// when it starts.
-    private func tellInputMethodOfState() {
-        let (state, build) = (InputMethodState(holdsReturn: returnHold.isOn, panelShown: hud.isShown), build)
-        Task.detached { [returnHoldLog] in
-            let inserter = await InputMethodInserter(build: build)
-            do throws(InsertFailure) {
-                try inserter.tell(state)
-                returnHoldLog.notice("told the input method: holds a Return \(state.holdsReturn, privacy: .public), word box open \(state.panelShown, privacy: .public)")
-            } catch {
-                returnHoldLog.notice("could not tell the input method its state: \(error, privacy: .public)")
-            }
-        }
-    }
 
     @objc private func toggleReturnHold() {
         returnHold.set(!returnHold.isOn)
-        tellInputMethodOfState()
     }
 
     /// What each steering key the input method reports does. The switch is exhaustive, so a key
@@ -481,8 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The input method keeps an Escape only while the panel is shown, so a shut panel is no
         // Escape for us. [LAW:single-enforcer]
         case .escape:
-            guard hud.isShown else { return }
-            listening.map { KeySteering(dictation: $0.dictation, hotkey: $0.hotkey).escape() }
+            listening.map { KeySteering.escape($0.hotkey) }
             hold.dismiss()
             hud.dismissByKey()
         // Return is held and sent by the input method; the app has nothing to do when it passes.

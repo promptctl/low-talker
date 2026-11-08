@@ -104,14 +104,6 @@ import Testing
         #expect(Wire.notice(id: Wire.keyTyped, payload: Wire.key(.escape), from: 7) == .keyTyped(pid: 7, .escape))
     }
 
-    /// The app's state rides on a greeting. An insert's greeting carries none, and the input method must
-    /// read that as no change, not as cleared.
-    @Test func aGreetingCarriesTheStateOrNone() {
-        let state = InputMethodState(holdsReturn: true, panelShown: false)
-        #expect(Wire.state(ofGreeting: Wire.greeting(state)) == state)
-        #expect(Wire.state(ofGreeting: Data()) == nil)
-    }
-
     /// An insert that reports no characters is a real answer - a zero-length request arrives
     /// as an empty request and is answered honestly - so nothing here may turn it away.
     @Test func anInsertOfNothingIntoARealAppStillCrosses() {

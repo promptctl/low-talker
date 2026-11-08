@@ -120,18 +120,9 @@ public struct InputMethodInserter: Inserter {
         self.build = build
     }
 
-    /// Tells the input method whether the app holds a Return for the words it owes. The input
-    /// method reads it off the greeting, which every message is preceded by, so it is in place
-    /// before any key is asked for and is kept until the app says otherwise.
-    /// [LAW:one-source-of-truth] The app's setting is the record; the input method keeps a copy.
-    public func tell(_ state: InputMethodState) throws(InsertFailure) {
-        let far = try farEnd()
-        try greet(Wire.greeting(state), to: far)
-    }
-
     public func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
         let far = try farEnd()
-        try greet(Data(), to: far)
+        try greet(to: far)
         let received: Mach.Received
         do throws(Unreachable) {
             received = try roundTrip(
@@ -195,11 +186,11 @@ public struct InputMethodInserter: Inserter {
     /// already gone to whoever that was. The receive right the greeting is answered from is the
     /// one the words go to, and only its holder can move it, so the process that answered is the
     /// process that hears.
-    private func greet(_ payload: Data, to far: FarEnd) throws(InsertFailure) {
+    private func greet(to far: FarEnd) throws(InsertFailure) {
         let greeting: Mach.Received
         do throws(Unreachable) {
             greeting = try roundTrip(
-                payload, id: Wire.greeting, to: far.remote, answeredOn: far.reply, by: far.answerer, within: far.phase, once: .notSent,
+                Data(), id: Wire.greeting, to: far.remote, answeredOn: far.reply, by: far.answerer, within: far.phase, once: .notSent,
                 unanswered: .didNotSayWhoItIs(port: portName, after: far.phase),
                 // Dropped unanswered before any words went, which is a far end not answering.
                 abandoned: .nothingIsListening(port: portName))

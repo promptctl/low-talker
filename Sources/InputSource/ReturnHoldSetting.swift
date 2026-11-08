@@ -4,8 +4,8 @@ import Foundation
 /// typed while dictating sends the message with the dictation in it. Off by default: with it off, a
 /// Return is never held and passes as it does with no input method in it.
 ///
-/// [LAW:one-source-of-truth] The app's preferences are the record. The input method learns it
-/// from the app's greetings and keeps no setting of its own.
+/// [LAW:one-source-of-truth] The app's preferences are the record. The input method asks the app
+/// about it at each Return and keeps no copy of its own.
 public struct ReturnHoldSetting {
     private static let key = "holdReturnForDictation"
 

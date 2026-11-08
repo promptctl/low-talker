@@ -16,16 +16,18 @@ public nonisolated enum SteeringVerdict: Equatable, Sendable {
     case keep
 }
 
-/// The questions a held Return asks the app, as the gate asks them: `Asker` is the real one,
-/// a test's is a fake with no port and no app. [LAW:decomposition]
+/// The questions a held key asks the app, as the gate asks them: `Asker` is the real one, a test's
+/// is a fake with no port and no app. [LAW:decomposition]
 public nonisolated protocol SteeringAsking: Sendable {
     func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
     func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
+    func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered>
 }
 
 extension Asker: SteeringAsking {}
 
-/// Holds a Return in `handle` while the app is asked what it means for the dictation.
+/// Holds a Return in `handle` while the app is asked what it means for the dictation, and keeps an
+/// Escape while the app's word box is open.
 ///
 /// A Return is held until the words the app owes have landed, then let through.
 ///
@@ -39,8 +41,9 @@ extension Asker: SteeringAsking {}
 /// the Return: one sent ahead of its words sends the message without them, and one that did
 /// nothing costs a keystroke. [LAW:no-silent-failure] Every verdict is in the log.
 ///
-/// An Escape is not held here. It is the panel's to close, and `DictationInputController` keeps
-/// it while the panel is shown; the app then cancels the open press itself.
+/// An Escape is kept only while the app says its word box is open, and then the app cancels the
+/// open press and lets go the held words itself. Anything else, including an app that does not
+/// answer, passes the Escape to the app in front as typed.
 ///
 /// While it waits the main thread commits what the app's inserts ask of it (`MainTurns`), since
 /// those are the words it is waiting for. The ceiling protects the keyboard, which the held thread
@@ -56,8 +59,8 @@ public nonisolated final class SteeringGate: Sendable {
     /// The longest a key is held: what the app itself waits on an insert.
     /// `SteeringGateTests` holds it equal to that.
     public static let standardCeiling = InputMethodInserter.standardTimeout
-    /// How long the app has to say whether it owes anything. An app that does not say in this
-    /// time has admitted nothing, and the key passes.
+    /// How long the app has to answer a question. An app that does not answer in this time has
+    /// admitted nothing, and the key passes.
     public static let standardQuestion = Duration.milliseconds(100)
 
     /// Where the words the app owes are committed while a Return waits for them.
@@ -89,6 +92,9 @@ public nonisolated final class SteeringGate: Sendable {
         public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> {
             .failure(.nobodyIsListening(port: "no app has been connected yet"))
         }
+        public func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> {
+            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+        }
     }
 
     /// A verdict and the reason for it, which is the line the log says.
@@ -100,39 +106,56 @@ public nonisolated final class SteeringGate: Sendable {
         var routine = false
     }
 
-    /// One key's verdict, set once by its thread and read by `verdict`. Made for that key
-    /// alone, so what it holds is never another's.
+    /// One key's verdict, set once by its thread and read by its gate. Made for that key alone, so
+    /// what it holds is never another's.
     private final class Slot: Sendable {
         let decided = Mutex<Decided?>(nil)
     }
 
-    /// What the gate does with a Return typed at `timestamp`, on the main thread, where
-    /// `handle` is called. Returns once the Return passes or is kept, and in between runs the
-    /// commits the app's inserts ask for.
-    ///
-    /// The questions are asked on a thread made for this one key, with its own reply port and
-    /// its own slot for the verdict. A late answer to an earlier key lands in that key's
-    /// abandoned slot and is read by nobody, and a key typed while an earlier one's thread is
-    /// still blocked is not queued behind it. [LAW:no-ambient-temporal-coupling]
+    /// What the gate does with a Return typed at `timestamp`, on the main thread, where `handle` is
+    /// called. Returns once the Return passes or is kept, and in between runs the commits the app's
+    /// inserts ask for.
     @MainActor
     public func verdict(at timestamp: TimeInterval) -> SteeringVerdict {
+        let (question, ceiling) = (self.question, self.ceiling)
+        return answered("a Return", unanswered: Decided(verdict: .keep, because: "the app had not answered after \(ceiling)")) { asker in
+            Self.decide(asker, at: timestamp, question: question, ceiling: ceiling)
+        }
+    }
+
+    /// What the gate does with an Escape typed, on the main thread, where `didCommand` is called:
+    /// kept while the app's word box is open, and passed otherwise.
+    @MainActor
+    public func escapeVerdict(at timestamp: TimeInterval) -> SteeringVerdict {
+        let question = self.question
+        return answered("an Escape", unanswered: Decided(verdict: .pass, because: "the app had not answered whether its word box is open")) { asker in
+            Self.decideEscape(asker, at: timestamp, question: question)
+        }
+    }
+
+    /// Runs `decide` against the app on a thread made for this one key, with its own reply port and
+    /// its own slot for the verdict. A late answer to an earlier key lands in that key's abandoned
+    /// slot and is read by nobody, and a key typed while an earlier one's thread is still blocked is
+    /// not queued behind it. [LAW:no-ambient-temporal-coupling]
+    @MainActor
+    private func answered(_ subject: String, unanswered: Decided, _ decide: @escaping @Sendable (any SteeringAsking) -> Decided) -> SteeringVerdict {
         let asking = asker.withLock { $0 }
         let slot = Slot()
-        let (turns, question, ceiling) = (self.turns, self.question, self.ceiling)
+        let turns = self.turns
+        let ceiling = self.ceiling
         let started = ContinuousClock.now
         Thread {
-            let decided = Self.decide(asking, at: timestamp, question: question, ceiling: ceiling)
+            let decided = decide(asking)
             slot.decided.withLock { $0 = decided }
             turns.poke()
         }.start()
         turns.hold(until: started + ceiling, while: { slot.decided.withLock { $0 } == nil })
-        let decided = slot.decided.withLock { $0 }
-            ?? Decided(verdict: .keep, because: "the app had not answered after \(ceiling)")
+        let decided = slot.decided.withLock { $0 } ?? unanswered
         let waited = ContinuousClock.now - started
         if decided.routine {
-            log.debug("a Return \(decided.verdict == .pass ? "passes" : "is kept", privacy: .public): \(decided.because, privacy: .public)")
+            log.debug("\(subject, privacy: .public) \(decided.verdict == .pass ? "passes" : "is kept", privacy: .public): \(decided.because, privacy: .public)")
         } else {
-            log.notice("a Return \(decided.verdict == .pass ? "passes" : "is kept", privacy: .public) after \(waited, privacy: .public): \(decided.because, privacy: .public)")
+            log.notice("\(subject, privacy: .public) \(decided.verdict == .pass ? "passes" : "is kept", privacy: .public) after \(waited, privacy: .public): \(decided.because, privacy: .public)")
         }
         return decided.verdict
     }
@@ -155,6 +178,17 @@ public nonisolated final class SteeringGate: Sendable {
             case .success(.notLanded): return Decided(verdict: .keep, because: "the words did not all reach a cursor")
             case .failure(let why): return Decided(verdict: .keep, because: "the debt was admitted and not settled: \(why)")
             }
+        }
+    }
+
+    private static func decideEscape(_ asker: any SteeringAsking, at timestamp: TimeInterval, question: Duration) -> Decided {
+        switch asker.panel(at: timestamp, within: question) {
+        case .success(.shown):
+            return Decided(verdict: .keep, because: "the word box is open, so the app cancels the press with it")
+        case .success(.shut):
+            return Decided(verdict: .pass, because: "the word box is shut", routine: true)
+        case .failure(let why):
+            return Decided(verdict: .pass, because: "the app did not say the word box is open: \(why)", routine: isAbsence(why))
         }
     }
 }

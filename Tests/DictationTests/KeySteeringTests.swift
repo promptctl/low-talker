@@ -15,6 +15,7 @@ import Testing
     private enum Said: Equatable {
         case owing(Owing)
         case settlement(Settlement)
+        case panel(PanelState)
     }
 
     /// The answers the input method would hear, in order.
@@ -31,6 +32,11 @@ import Testing
 
         func send(_ settlement: Settlement) -> Reply.Delivery {
             continuation.yield(.settlement(settlement))
+            return .delivered
+        }
+
+        func send(_ panel: PanelState) -> Reply.Delivery {
+            continuation.yield(.panel(panel))
             return .delivered
         }
 
@@ -57,14 +63,14 @@ import Testing
         let feed: Feed
         let steering: KeySteering
 
-        init(refusing refusal: InsertFailure? = nil) async throws {
+        init(refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false) async throws {
             rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
             rig.inputMethod.refusing(refusal)
             feed = Feed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             let dictation = rig.dictation
             try hotkey.start(feeding: dictation)
-            steering = KeySteering(dictation: dictation, hotkey: hotkey)
+            steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { holdsReturn }, panelShown: { panelOpen })
         }
 
         /// Right Option going down or up, `held` milliseconds into the press, stamped on the
@@ -115,7 +121,7 @@ import Testing
         let loop = try await Loop()
         await loop.latchedPress()
 
-        loop.steering.escape()
+        KeySteering.escape(loop.hotkey)
 
         #expect(loop.hotkey.phase == .idle)
         let cancelled = try #require(await loop.rig.report().cancelled)
@@ -131,7 +137,7 @@ import Testing
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
 
-        loop.steering.escape()
+        KeySteering.escape(loop.hotkey)
 
         loop.chord(.up, atMilliseconds: 400)
         await loop.delivered()
@@ -143,7 +149,7 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func anEscapeWithNoPressOpenCancelsNothing() async throws {
         let loop = try await Loop()
 
-        loop.steering.escape()
+        KeySteering.escape(loop.hotkey)
 
         #expect(loop.hotkey.phase == .idle)
     }
@@ -157,6 +163,27 @@ import Testing
 
         #expect(await answers.next() == .owing(.nothing))
         #expect(await answers.next() == .settlement(.landed))
+    }
+
+    /// With the Return setting off a Return is never held, so nothing is owed even while words are.
+    @Test(.timeLimit(.minutes(1))) func nothingIsOwedWhileTheReturnSettingIsOff() async throws {
+        let loop = try await Loop(holdsReturn: false)
+        await loop.latchedPress()
+        let answers = Answers()
+
+        loop.steering.answer(.owed(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .owing(.nothing))
+    }
+
+    /// The word box is asked about on the main actor and answered with whether it is open.
+    @Test(.timeLimit(.minutes(1))) func theBoxIsAnsweredWithWhetherItIsOpen() async throws {
+        let loop = try await Loop(panelOpen: true)
+        let answers = Answers()
+
+        loop.steering.answer(.panel(at: loop.typedNow), through: answers)
+
+        #expect(await answers.next() == .panel(.shown))
     }
 
     /// A press that ended on its own and is still decoding is owed too, though no key steered it.

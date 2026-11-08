@@ -320,10 +320,12 @@ enum Wire {
     static let overMemoryCeiling: mach_msg_id_t = 5
     /// A key the app asked to hear of was pressed; reported, never answered.
     static let keyTyped: mach_msg_id_t = 9
-    /// The questions the input method asks the app about a Return it holds, each answered: whether
-    /// anything is owed, then whether what is owed settled.
+    /// The questions the input method asks the app about a key it holds, each answered: whether
+    /// anything is owed, then whether what is owed settled, and whether the word box is open. 8 was
+    /// the Escape cancel question, retired, and is not reused.
     static let owed: mach_msg_id_t = 6
     static let settled: mach_msg_id_t = 7
+    static let panel: mach_msg_id_t = 10
 
     /// The first byte of every request, and one no UTF-8 text contains. An input method built
     /// when a request was its bare text, still running past an install, reads this as bytes
@@ -351,15 +353,6 @@ enum Wire {
     private static func build(of data: Data) -> Build?? {
         guard !data.isEmpty else { return .some(nil) }
         return (try? JSONDecoder().decode(Build.self, from: data)).map(Optional.some)
-    }
-
-    /// The app's state, carried by a greeting: the input method keeps it until the app says otherwise.
-    static func greeting(_ state: InputMethodState) -> Data { try! JSONEncoder().encode(state) }
-
-    /// [LAW:parse-dont-validate] The state a greeting carries, or nil when it carries none, as an
-    /// insert's greeting does not.
-    static func state(ofGreeting data: Data) -> InputMethodState? {
-        data.isEmpty ? nil : try? JSONDecoder().decode(InputMethodState.self, from: data)
     }
 
     /// The key a key report carries.
@@ -408,6 +401,7 @@ enum Wire {
         return switch id {
         case owed: .owed(at: stamp.timestamp)
         case settled: .settled(at: stamp.timestamp)
+        case panel: .panel(at: stamp.timestamp)
         default: nil
         }
     }
@@ -416,6 +410,8 @@ enum Wire {
     static func owing(of data: Data) -> Owing? { try? JSONDecoder().decode(Owing.self, from: data) }
     static func settlement(_ settlement: Settlement) -> Data { try! JSONEncoder().encode(settlement) }
     static func settlement(of data: Data) -> Settlement? { try? JSONDecoder().decode(Settlement.self, from: data) }
+    static func panelState(_ panel: PanelState) -> Data { try! JSONEncoder().encode(panel) }
+    static func panelState(of data: Data) -> PanelState? { try? JSONDecoder().decode(PanelState.self, from: data) }
 
     /// [LAW:parse-dont-validate] The notice the input method process `pid` sent, or nil when
     /// the message is none, or its payload is not what its id says. A cursor arrival carries

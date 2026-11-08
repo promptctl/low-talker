@@ -197,12 +197,8 @@ final class HUD {
         }
     }
 
-    /// Whether the panel is on screen, and what is told when that changes, so the input method
-    /// knows whether Escape is the box's to take.
-    private(set) var isShown = false {
-        didSet { if isShown != oldValue { onShownChange?(isShown) } }
-    }
-    var onShownChange: ((Bool) -> Void)?
+    /// Whether the panel is on screen. The input method asks for it when an Escape is typed.
+    private(set) var isShown = false
 
     private func hide() {
         isShown = false
