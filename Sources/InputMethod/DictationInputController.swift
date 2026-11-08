@@ -71,9 +71,13 @@ public final class DictationInputController: IMKInputController {
     }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
-    /// studious, 2026-09-27), which is every key typed. The app hears the modifier keys itself,
-    /// and a Return and an Escape are the keys anything here answers differently.
-    nonisolated override public func recognizedEvents(_: Any!) -> Int { Int(NSEvent.EventTypeMask.keyDown.rawValue) }
+    /// studious, 2026-09-27), which is every key typed, and only while the app has said it holds
+    /// a Return. The app hears the modifier keys itself. Off, this asks for nothing, so no key a
+    /// person types reaches this process, and the text input system delivers every key as it
+    /// would with no input method in the path. [LAW:dataflow-not-control-flow]
+    nonisolated override public func recognizedEvents(_: Any!) -> Int {
+        ReturnHolding.shared.holds ? Int(NSEvent.EventTypeMask.keyDown.rawValue) : 0
+    }
 
     /// Declines every key but a bare Return, which is held for the words the app owes, and an
     /// Escape, which is kept when the app cancels an open dictation with it.
@@ -83,8 +87,10 @@ public final class DictationInputController: IMKInputController {
     /// event the inherited signature has), and with events that are not keys, whose key code is
     /// not to be read.
     nonisolated override public func handle(_ event: NSEvent?, client _: Any!) -> Bool {
+        // Off, no key is handed here by IMK; a key handed anyway passes, as it did before the hold.
+        guard ReturnHolding.shared.holds else { return false }
         // Debug level: this is made once per key typed anywhere.
-        onMainActor("handle", event, level: .debug) { event in
+        return onMainActor("handle", event, level: .debug) { event in
             // Which controller a key reaches is the one thing in this process that says which
             // window has the keyboard. [LAW:nothing-unseen] Debug level, like the hop line.
             imkLog.debug("\(self.said("was handed an event", about: self.cursor), privacy: .public)")

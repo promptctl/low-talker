@@ -353,6 +353,16 @@ enum Wire {
         return (try? JSONDecoder().decode(Build.self, from: data)).map(Optional.some)
     }
 
+    /// The app's setting for holding a Return, carried by a greeting: the input method takes it
+    /// as the setting to hold to until the app says otherwise.
+    static func greeting(holdsReturn: Bool) -> Data { try! JSONEncoder().encode(holdsReturn) }
+
+    /// [LAW:parse-dont-validate] The setting a greeting carries, or nil when it carries none, as
+    /// an insert's greeting does not.
+    static func holdsReturn(ofGreeting data: Data) -> Bool? {
+        data.isEmpty ? nil : try? JSONDecoder().decode(Bool.self, from: data)
+    }
+
     /// [LAW:parse-dont-validate] A greeting's answer, or nothing at all. The refusal is an
     /// insert's answer, because the port refuses a sender the same way whichever message
     /// it sent.

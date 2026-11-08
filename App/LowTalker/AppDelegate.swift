@@ -433,10 +433,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if case .failure(let refusal) = hearing { showHotkeyStatus(.off(refusal.reason)) }
     }
 
-    /// The input method's process as the notices keep it.
+    /// The input method's process as the notices keep it. A process that starts is told the setting
+    /// for holding a Return, since a fresh one has none until it hears it.
     private func show(_ event: InputMethodSupervisor.Event) {
         log.notice("input method: \(event, privacy: .public)")
+        if case .running = event { tellInputMethodOfReturnHold() }
         showInputMethod(inputMethod.told(event))
+    }
+
+    /// The menu's checkbox for holding a Return until the dictated words land.
+    private let returnHold = ReturnHoldSetting()
+    private let returnHoldLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "returnhold")
+
+    /// Says the setting to the input method, off the main actor since the greeting is a round
+    /// trip. Unreachable, which is the input method not running, is said in the log: it is told
+    /// again when it starts.
+    private func tellInputMethodOfReturnHold() {
+        let (holds, build) = (returnHold.isOn, build)
+        Task.detached { [returnHoldLog] in
+            let inserter = await InputMethodInserter(build: build)
+            do throws(InsertFailure) {
+                try inserter.tell(holdsReturn: holds)
+                returnHoldLog.notice("told the input method it holds a Return: \(holds, privacy: .public)")
+            } catch {
+                returnHoldLog.notice("could not tell the input method it holds a Return: \(error, privacy: .public)")
+            }
+        }
+    }
+
+    @objc private func toggleReturnHold() {
+        returnHold.set(!returnHold.isOn)
+        tellInputMethodOfReturnHold()
     }
 
     /// The line says how to press only while an input method that can type the words is
@@ -1060,6 +1087,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Anything but plainly on or off is said under the item, since a checkmark cannot say it.
         if openAtLogin != .on, openAtLogin != .off { menu.addItem(readout("    \(openAtLogin)")) }
+        // Off by default. On, a Return typed while dictating is sent after the dictated words, so
+        // the message goes out with them in it; the input method then asks for every key typed.
+        let hold = menu.addItem(withTitle: "Hold Return for Dictated Words", action: #selector(toggleReturnHold), keyEquivalent: "")
+        hold.state = returnHold.isOn ? .on : .off
         if let serving {
             let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
             item.state = serving.chosen ? .on : .off

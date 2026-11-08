@@ -53,11 +53,21 @@ import Testing
         .init(description: "Return", characters: "\r", keyCode: 36, modifiers: 0),
     ]
 
-    /// Key-downs are asked for, which is the one door a Return reaches this process by; the app
-    /// hears the modifier keys itself. 0x400 is what the text input system offers when nobody says.
-    @Test func keyDownsAreAskedFor() throws {
+    /// Key-downs are asked for only while the app says it holds a Return, which is the one door a
+    /// Return reaches this process by. Off, nothing is asked for, so no key typed reaches this
+    /// process at all. 0x400 is what the text input system offers when nobody says.
+    @Test func keyDownsAreAskedForOnlyWhileTheAppHoldsAReturn() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
+        ReturnHolding.shared.set(false)
+        #expect(controller.recognizedEvents(nil) == 0)
+        ReturnHolding.shared.set(true)
+        defer { ReturnHolding.shared.set(false) }
         #expect(controller.recognizedEvents(nil) == 0x400)
+    }
+
+    /// Off by default: a fresh input method has been told nothing, so it asks for no key.
+    @Test func aFreshInputMethodHoldsNoReturn() {
+        #expect(ReturnHolding().holds == false)
     }
 
     /// A change of the modifier keys, offered anyway, is handed back like every key.
@@ -83,13 +93,25 @@ import Testing
         #expect(controller.handle(nil, client: nil) == false)
     }
 
+    /// Held on, so the gate itself is what answers each key: with no app to ask, every key,
+    /// a Return among them, passes.
     @Test(arguments: presses)
     func everyKeyIsHandedBack(press: Press) throws {
         let controller = try #require(
             DictationInputController(server: nil, delegate: nil, client: nil),
             "the controller could not be built to be asked"
         )
+        ReturnHolding.shared.set(true)
+        defer { ReturnHolding.shared.set(false) }
         #expect(try controller.handle(press.event, client: nil) == false, "\(press) was claimed by the input method")
+    }
+
+    /// Off, a key IMK hands anyway passes at once, untouched, without the gate being asked.
+    @Test(arguments: presses)
+    func aKeyIsHandedBackWhileNothingIsHeld(press: Press) throws {
+        let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
+        ReturnHolding.shared.set(false)
+        #expect(try controller.handle(press.event, client: nil) == false, "\(press) was claimed while nothing was held")
     }
 
     /// The bundle's `InputMethodServerControllerClass` is a string macOS resolves through

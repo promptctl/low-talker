@@ -120,48 +120,23 @@ public struct InputMethodInserter: Inserter {
         self.build = build
     }
 
+    /// Tells the input method whether the app holds a Return for the words it owes. The input
+    /// method reads it off the greeting, which every message is preceded by, so it is in place
+    /// before any key is asked for and is kept until the app says otherwise.
+    /// [LAW:one-source-of-truth] The app's setting is the record; the input method keeps a copy.
+    public func tell(holdsReturn: Bool) throws(InsertFailure) {
+        let far = try farEnd()
+        try greet(Wire.greeting(holdsReturn: holdsReturn), to: far)
+    }
+
     public func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
-        let answerer: PeerIdentity
-        do throws(PeerIdentity.Unreadable) { answerer = try self.answerer.get() } catch { throw .answererUnreadable(error) }
-        var remote = mach_port_t()
-        // [LAW:parse-dont-validate] The boundary: past here there is a port or a thrown
-        // reason, never a maybe-port that later code has to keep asking about.
-        guard lt_bootstrap_look_up(portName, &remote) == KERN_SUCCESS else {
-            throw .unreachable(.nothingIsListening(port: portName))
-        }
-        defer { mach_port_deallocate(mach_task_self_, remote) }
-        let reply: ReceiveRight
-        do throws(ReceiveRight.NotAllocated) { reply = try ReceiveRight(sendable: false) } catch { throw .unreachable(.failed(port: portName, status: error.status, words: .notSent)) }
-        let phase = timeout / 4
-        // Who holds the name is asked before a word is said to it. A name anyone can compute
-        // is a name anyone can register first, and checking only the answer to the words
-        // would be checking after the dictation had already gone to whoever that was. The
-        // receive right the greeting is answered from is the one the words go to, and only
-        // its holder can move it, so the process that answered is the process that hears.
-        let greeting: Mach.Received
-        do throws(Unreachable) {
-            greeting = try roundTrip(
-                Data(), id: Wire.greeting, to: remote, answeredOn: reply, by: answerer, within: phase, once: .notSent,
-                unanswered: .didNotSayWhoItIs(port: portName, after: phase),
-                // Dropped unanswered before any words went, which is a far end not answering.
-                abandoned: .nothingIsListening(port: portName))
-        } catch { throw .unreachable(error) }
-        // The greeting's answer is the input method's build, or its refusal to listen, which is
-        // thrown by name like any other.
-        let said = greeting.payload ?? Data()
-        switch Wire.greeting(of: said) {
-        case .admitted(let inputMethod)?:
-            if let mismatch = BuildMismatch(app: build, inputMethod: inputMethod) { throw .buildMismatch(mismatch) }
-        case .refused(let refusal)?:
-            throw .refused(refusal)
-        case nil:
-            throw .unreachable(.answerWasNotReadable(port: portName, bytes: said.count, words: .notSent))
-        }
+        let far = try farEnd()
+        try greet(Data(), to: far)
         let received: Mach.Received
         do throws(Unreachable) {
             received = try roundTrip(
-                Wire.request(request), id: Wire.insert, to: remote, answeredOn: reply, by: answerer, within: phase, once: .mayHaveLanded,
-                unanswered: .answerDidNotArrive(port: portName, after: phase),
+                Wire.request(request), id: Wire.insert, to: far.remote, answeredOn: far.reply, by: far.answerer, within: far.phase, once: .mayHaveLanded,
+                unanswered: .answerDidNotArrive(port: portName, after: far.phase),
                 abandoned: .answerWasAbandoned(port: portName))
         } catch { throw .unreachable(error) }
         let data = received.payload ?? Data()
@@ -175,6 +150,70 @@ public struct InputMethodInserter: Inserter {
         case .inserted(let characters, let into): return Inserted(characters: characters, into: into)
         case .refused(let refusal): throw .refused(refusal)
         case .notYetTaken(let characters, let into): throw .notYetTaken(NotYetTaken(characters: characters, into: into))
+        }
+    }
+
+    /// The input method's end of one exchange: the name looked up, the reply right its answers
+    /// come on, who may answer, and how long each half may wait. Released with the exchange.
+    private final class FarEnd {
+        let remote: mach_port_t
+        let reply: ReceiveRight
+        let answerer: PeerIdentity
+        let phase: Duration
+
+        init(remote: mach_port_t, reply: ReceiveRight, answerer: PeerIdentity, phase: Duration) {
+            self.remote = remote
+            self.reply = reply
+            self.answerer = answerer
+            self.phase = phase
+        }
+
+        deinit { mach_port_deallocate(mach_task_self_, remote) }
+    }
+
+    /// Looks the input method's port up and makes the reply right, before any message is sent.
+    private func farEnd() throws(InsertFailure) -> FarEnd {
+        let answerer: PeerIdentity
+        do throws(PeerIdentity.Unreadable) { answerer = try self.answerer.get() } catch { throw .answererUnreadable(error) }
+        var remote = mach_port_t()
+        // [LAW:parse-dont-validate] The boundary: past here there is a port or a thrown
+        // reason, never a maybe-port that later code has to keep asking about.
+        guard lt_bootstrap_look_up(portName, &remote) == KERN_SUCCESS else {
+            throw .unreachable(.nothingIsListening(port: portName))
+        }
+        let reply: ReceiveRight
+        do throws(ReceiveRight.NotAllocated) { reply = try ReceiveRight(sendable: false) } catch {
+            mach_port_deallocate(mach_task_self_, remote)
+            throw .unreachable(.failed(port: portName, status: error.status, words: .notSent))
+        }
+        return FarEnd(remote: remote, reply: reply, answerer: answerer, phase: timeout / 4)
+    }
+
+    /// The greeting every message is preceded by, carrying `payload`. Who holds the name is asked
+    /// before a word is said to it. A name anyone can compute is a name anyone can register
+    /// first, and checking only the answer to the words would be checking after the dictation had
+    /// already gone to whoever that was. The receive right the greeting is answered from is the
+    /// one the words go to, and only its holder can move it, so the process that answered is the
+    /// process that hears.
+    private func greet(_ payload: Data, to far: FarEnd) throws(InsertFailure) {
+        let greeting: Mach.Received
+        do throws(Unreachable) {
+            greeting = try roundTrip(
+                payload, id: Wire.greeting, to: far.remote, answeredOn: far.reply, by: far.answerer, within: far.phase, once: .notSent,
+                unanswered: .didNotSayWhoItIs(port: portName, after: far.phase),
+                // Dropped unanswered before any words went, which is a far end not answering.
+                abandoned: .nothingIsListening(port: portName))
+        } catch { throw .unreachable(error) }
+        // The greeting's answer is the input method's build, or its refusal to listen, which is
+        // thrown by name like any other.
+        let said = greeting.payload ?? Data()
+        switch Wire.greeting(of: said) {
+        case .admitted(let inputMethod)?:
+            if let mismatch = BuildMismatch(app: build, inputMethod: inputMethod) { throw .buildMismatch(mismatch) }
+        case .refused(let refusal)?:
+            throw .refused(refusal)
+        case nil:
+            throw .unreachable(.answerWasNotReadable(port: portName, bytes: said.count, words: .notSent))
         }
     }
 

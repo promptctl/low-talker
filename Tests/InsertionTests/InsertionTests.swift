@@ -99,6 +99,14 @@ import Testing
         #expect(try JSONSerialization.jsonObject(with: Wire.said(build)) as? [String: String] == ["number": "9", "revision": "0123456789ab"])
     }
 
+    /// The app's setting for holding a Return rides on a greeting as a boolean. An insert's
+    /// greeting carries none, and the input method must read that as no change, not as off.
+    @Test func aGreetingCarriesTheHoldSettingOrNone() {
+        #expect(Wire.holdsReturn(ofGreeting: Wire.greeting(holdsReturn: true)) == true)
+        #expect(Wire.holdsReturn(ofGreeting: Wire.greeting(holdsReturn: false)) == false)
+        #expect(Wire.holdsReturn(ofGreeting: Data()) == nil)
+    }
+
     /// An insert that reports no characters is a real answer - a zero-length request arrives
     /// as an empty request and is answered honestly - so nothing here may turn it away.
     @Test func anInsertOfNothingIntoARealAppStillCrosses() {
