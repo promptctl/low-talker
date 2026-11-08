@@ -1,11 +1,10 @@
 import AppKit
-import Carbon.HIToolbox
 
 /// A key the input method reports to the app, and the keys that steer dictation: the one place that
 /// says which keys those are. Every other key is declined as it always was.
 ///
 /// Lives in `Insertion` because both ends name it: the input method reports and holds these keys,
-/// and the app says what each one does. Read off an `NSEvent`, which needs no permission to read.
+/// and the app says what each one does.
 ///
 /// [LAW:parse-dont-validate] A key either is one of these, with the proof in the type, or is nil
 /// here and nothing downstream asks again. [LAW:one-source-of-truth] Adding a case is the one
@@ -32,16 +31,9 @@ public nonisolated enum SteeringKey: Codable, Equatable, Sendable, CustomStringC
     /// Enter carries, make nothing else of it.
     private static let makeAnotherKey: NSEvent.ModifierFlags = [.shift, .control, .option, .command, .function]
 
-    /// The steering key a key-down is, or nil for every other key. A key-down is the only kind of
-    /// event this reads, so a key-up or a change of modifiers is nil.
-    public init?(event: NSEvent) {
-        guard event.type == .keyDown else { return nil }
-        switch Int(event.keyCode) {
-        case kVK_Return, kVK_ANSI_KeypadEnter:
-            guard event.modifierFlags.isDisjoint(with: Self.makeAnotherKey) else { return nil }
-            self = .return
-        case kVK_Escape: self = .escape
-        default: return nil
-        }
+    /// Whether a Return held with `flags` is another key, which passes as typed, rather than a bare
+    /// Return that steers. [LAW:single-enforcer] The one rule for it; the input method asks here.
+    public static func makesAnotherKey(_ flags: NSEvent.ModifierFlags) -> Bool {
+        !flags.isDisjoint(with: makeAnotherKey)
     }
 }

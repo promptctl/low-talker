@@ -101,10 +101,16 @@ public final class DictationInputController: IMKInputController {
     }
 
     /// Text is never handed to this input method as keys, so it is declined.
-    nonisolated override public func inputText(_: String!, client _: Any!) -> Bool { false }
+    /// Entered on the main actor like every callback, though its answer is always no.
+    nonisolated override public func inputText(_ text: String!, client _: Any!) -> Bool {
+        onMainActor("inputText", text, level: .debug) { _ in false }
+    }
 
     /// The held Return: kept, and the system's beep said, when the gate keeps it.
     @MainActor private func holdReturn() -> Bool {
+        // A Return with a modifier is another key and passes as typed. IMK hands the command while the
+        // key is still down, so the modifiers held now are the key's own. [LAW:single-enforcer]
+        guard !SteeringKey.makesAnotherKey(NSEvent.modifierFlags) else { return false }
         let kept = SteeringGate.shared.verdict(at: ProcessInfo.processInfo.systemUptime) == .keep
         // The system's own answer to a Return that did nothing, so a kept one is heard at the moment it
         // was typed and not only found in a log. [LAW:no-silent-failure]
