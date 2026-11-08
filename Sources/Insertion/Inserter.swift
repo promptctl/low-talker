@@ -122,6 +122,8 @@ public struct InputMethodInserter: Inserter {
 
     public func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
         let far = try farEnd()
+        // The far end's send right is released when `far` is, so it is kept to the end of this call.
+        defer { withExtendedLifetime(far) {} }
         try greet(to: far)
         let received: Mach.Received
         do throws(Unreachable) {

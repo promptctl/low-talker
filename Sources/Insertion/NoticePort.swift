@@ -102,8 +102,8 @@ public enum InputMethodNotice: Equatable, Sendable {
     case cursorArrived(CursorArrival)
     /// The input method is ending itself, holding more memory than its ceiling (IMK rule 7).
     case overMemoryCeiling(pid: pid_t, Overrun)
-    /// A steering key was pressed. The key itself passes on as it would have: it was reported,
-    /// not held, unless the input method held it for the app's answer.
+    /// A steering key the input method kept was pressed. It is reported so the app can act on it;
+    /// the key itself does not reach the app in front.
     case keyTyped(pid: pid_t, SteeringKey)
 }
 

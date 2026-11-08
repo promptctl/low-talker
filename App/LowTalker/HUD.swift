@@ -171,7 +171,11 @@ final class HUD {
     /// `insertable` is whether a loop is listening to insert what is held through, without which
     /// Insert is not offered.
     func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
-        if case .listening = activity { dismissedByKey = false }
+        // A press starts as listening or refused, and either one is new words to show.
+        switch activity {
+        case .listening, .refused: dismissedByKey = false
+        case .idle, .transcribing: break
+        }
         guard !dismissedByKey else { return hide() }
         // A press on its way carries the words a cursor is offered in its own insert, so only a
         // panel with nothing on its way asks for a click, and only for those words: not those

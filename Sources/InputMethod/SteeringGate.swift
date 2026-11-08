@@ -26,7 +26,7 @@ public nonisolated protocol SteeringAsking: Sendable {
 
 extension Asker: SteeringAsking {}
 
-/// Holds a Return in `handle` while the app is asked what it means for the dictation, and keeps an
+/// Holds a Return in `didCommand(by:)` while the app is asked what it means for the dictation, and keeps an
 /// Escape while the app's word box is open.
 ///
 /// A Return is held until the words the app owes have landed, then let through.
