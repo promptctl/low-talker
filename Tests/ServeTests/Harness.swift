@@ -10,7 +10,7 @@ import Testing
 /// what it was given. While audio streams in it confirms a word per half second heard, up
 /// to half the words, so a streamed utterance has words confirmed before it ends and
 /// words left for the final transcript. Audio that never reaches `Utterance.audible` it
-/// refuses as nothing spoken, as the engine refuses a room with nothing clear of it, with
+/// refuses as nothing spoken, as the engine's gate refuses audio under its floor, with
 /// `quiet`, and noise it hears its words in doubtfully.
 /// Its partials say it failed to read the passes `unread` counts.
 final class Stub: Transcriber {

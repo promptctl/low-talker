@@ -1078,7 +1078,7 @@ public final class Dictation {
             // A cut that heard nothing past the commits leaves the hold's warning on the words
             // it already holds, which that warning is about. Words a failed decode leaves are
             // told as missing what was said after them, beside the cut.
-            let warning = unread.map { _ in "\(cut.warning) \(PressStopped.readingFailed)" } ?? cut.warning
+            let warning = unread == nil ? cut.warning : "\(cut.warning) \(PressStopped.readingFailed)"
             if held > 0 { hold.heldBack(rest, warning: warning) }
             // [LAW:no-silent-failure] The report names what left words unplaced first: a refused
             // commit came before the decode's end, and either before the cut was known.

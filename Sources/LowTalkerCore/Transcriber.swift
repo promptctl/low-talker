@@ -103,7 +103,7 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
         switch self {
         case .cancelled: "the decode was cancelled before the engine took it"
         case .nothingSpoken(let peak, let quiet):
-            "nothing spoken: the loudest sample was \(peak) against the audible floor \(Utterance.audible), and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
+            "nothing spoken: the loudest sample was \(peak) against the audible floor \(Utterance.audible) over a room of \(quiet.room.map { "\($0)" } ?? "none heard"), and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"
