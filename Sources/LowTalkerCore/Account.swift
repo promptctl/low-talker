@@ -35,7 +35,7 @@ extension WordFree {
 extension TranscriptionFailure: Accounted {
     public var account: Account {
         switch self {
-        case .cancelled, .nothingSpoken, .vocabulary, .engine, .gate: Account(facts: description)
+        case .cancelled, .nothingSpoken, .vocabulary, .engine: Account(facts: description)
         case .unreadable(let reading): reading.account
         }
     }

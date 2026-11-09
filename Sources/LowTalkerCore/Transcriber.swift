@@ -42,60 +42,32 @@ public struct Transcription: Sendable {
     }
 }
 
-/// What the speech gate made of an utterance's quiet: how much it let go, the room and the
-/// range it judged it against, what the room, the discriminator and the transients refused,
-/// and what was kept out of the range.
+/// What the speech gate made of an utterance's quiet: how much it let go, the room it judged
+/// it against, and what the room and the transients refused.
 public struct Quiet: Hashable, Sendable {
     /// Seconds no pass was handed, before the speech and between it: heard as nothing,
     /// while the words are still timed in the audio as it was sent.
     public let letGo: TimeInterval
-    /// The peak of the quietest tenth of a second heard that the discriminator did not call
-    /// speech, digital silence aside: the least room the quiet was judged against. None when
-    /// no room was heard.
+    /// The peak of the quietest tenth of a second heard, digital silence aside: the least
+    /// room the quiet was judged against. None when no room was heard.
     public let room: Float?
     /// Seconds within range of the loudest that stood too near the room to be speech.
     public let refusedAsRoom: TimeInterval
-    /// Seconds within range of the loudest and clear of the room, before any speaker was heard,
-    /// that the discriminator called something other than speech: breathing or a fan under a
-    /// speaker's level, which the room alone would have let through as it does a whisper.
-    public let refusedAsNotSpeech: TimeInterval
-    /// Seconds judged with no room heard in the last few seconds, because every frame in them
-    /// was called speech or none had arrived: a speaker's opening word, or speech with no pause,
-    /// held to the range alone, since no room was there to stand clear of.
-    public let roomless: TimeInterval
     public let transients: Transients
-    /// The peak of the loudest syllable in frames the discriminator called speech: the range
-    /// the speech was judged against. None when no such syllable was heard.
-    public let range: Float?
-    /// The loudest sound that stood above the range when it was heard and was kept out of it,
-    /// the discriminator having called it something other than speech, and how many frames
-    /// were. A cough before a soft speaker, or a loudest syllable the discriminator missed: this
-    /// says what the gate did, not which. None, and zero frames, when nothing was.
-    public let keptOut: Float?
-    public let keptOutFrames: Int
 
-    /// Nothing let go, no room heard, nothing refused and no range.
-    public static let none = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, refusedAsNotSpeech: 0, roomless: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0)
+    /// Nothing let go, no room heard and nothing refused.
+    public static let none = Quiet(letGo: 0, room: nil, refusedAsRoom: 0, transients: .none)
 
-    public init(
-        letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, refusedAsNotSpeech: TimeInterval, roomless: TimeInterval,
-        transients: Transients, range: Float?, keptOut: Float?, keptOutFrames: Int
-    ) {
+    public init(letGo: TimeInterval, room: Float?, refusedAsRoom: TimeInterval, transients: Transients) {
         self.letGo = letGo
         self.room = room
         self.refusedAsRoom = refusedAsRoom
-        self.refusedAsNotSpeech = refusedAsNotSpeech
-        self.roomless = roomless
         self.transients = transients
-        self.range = range
-        self.keptOut = keptOut
-        self.keptOutFrames = keptOutFrames
     }
 }
 
 /// The bursts of sound the gate refused as too brief to be speech, a click, a door or a run of
-/// keystrokes, let go with the quiet around them. Before a speaker is heard, soft sound the
-/// discriminator called speech that never ran clear of the room is one too, sounding 0 s.
+/// keystrokes, let go with the quiet around them.
 public struct Transients: Hashable, Sendable {
     public let count: Int
     /// Seconds the longest of them sounded without a break.
@@ -116,10 +88,9 @@ public struct Transients: Hashable, Sendable {
 public enum TranscriptionFailure: Error, CustomStringConvertible {
     /// The caller stopped waiting for the engine before its turn came.
     case cancelled
-    /// Nothing sounded as long as a syllable: no clip stood clear of the room, none under a
-    /// speaker's level was called speech, or what did sound was a transient. `peak` is the
-    /// loudest sample heard, and `quiet` all of the audio, with the room it was judged against
-    /// and what it refused.
+    /// Nothing sounded as long as a syllable: no clip reached the audible floor, or what did was
+    /// a transient. `peak` is the loudest sample heard, and `quiet` all of the audio, with the
+    /// room it was judged against and the transients it refused.
     case nothingSpoken(peak: Float, quiet: Quiet)
     case vocabulary(VocabularyError)
     /// The engine read the audio and its reading could not become a transcript.
@@ -127,19 +98,15 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
     /// The engine's own library failed: a model, a decoder, a buffer. WhisperKit's errors
     /// (`WhisperError`) name a stage or a file, never what it read.
     case engine(any Error)
-    /// The discriminator that tells the gate's speech from other sounds failed, so no audio past
-    /// the frame it could not judge was heard. What the passes read before it stands.
-    case gate(any Error)
 
     public var description: String {
         switch self {
         case .cancelled: "the decode was cancelled before the engine took it"
         case .nothingSpoken(let peak, let quiet):
-            "nothing spoken: the loudest sample was \(peak) over a room of \(quiet.room.map { "\($0)" } ?? "none heard"), \(quiet.refusedAsNotSpeech) s clear of it were called no speech, \(quiet.roomless) s were judged with no room heard, and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: SpeechGate.syllable)) s a syllable sounds"
+            "nothing spoken: the loudest sample was \(peak) against the audible floor \(Utterance.audible) over a room of \(quiet.room.map { "\($0)" } ?? "none heard"), and \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") sounded at most \(quiet.transients.longest) s of the \(AudioClip.duration(for: Utterance.syllable)) s a syllable sounds"
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"
-        case .gate(let error): "the speech gate failed: \(error)"
         }
     }
 }

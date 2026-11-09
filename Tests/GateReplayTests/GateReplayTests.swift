@@ -21,23 +21,23 @@ private let repository = URL(fileURLWithPath: #filePath)
         let esc50 = try #require(environment["GATE_REPLAY_ESC50"], "GATE_REPLAY_ESC50 names the folder scripts/gate-replay/fetch-esc50 fills")
         let fixtures = try Fixtures(bench: repository.appendingPathComponent("bench"), esc50: URL(fileURLWithPath: esc50))
         try #require(!fixtures.transients.isEmpty && !fixtures.breaths.isEmpty, "no ESC-50 clips under \(esc50)")
-        let rows = try await Self.measure(fixtures.cases, judging: try await GateClassifier())
+        let rows = await Self.measure(fixtures.cases)
         try (rows.sorted().joined(separator: "\n") + "\n").write(toFile: out, atomically: true, encoding: .utf8)
     }
 
     /// Every case's row, measured as many at a time as there are cores: each utterance is
-    /// its own actor, and nothing passes between cases but the one classifier judging them all.
-    static func measure(_ cases: [Case], judging discriminator: any Discriminator) async throws -> [String] {
-        try await withThrowingTaskGroup(of: String.self) { group in
+    /// its own actor, and nothing passes between cases.
+    static func measure(_ cases: [Case]) async -> [String] {
+        await withTaskGroup(of: String.self) { group in
             var rows: [String] = []
             var pending = cases[...]
             for _ in 0..<ProcessInfo.processInfo.activeProcessorCount {
                 guard let next = pending.popFirst() else { break }
-                group.addTask { try await next.row(judging: discriminator) }
+                group.addTask { await next.row() }
             }
-            for try await row in group {
+            for await row in group {
                 rows.append(row)
-                if let next = pending.popFirst() { group.addTask { try await next.row(judging: discriminator) } }
+                if let next = pending.popFirst() { group.addTask { await next.row() } }
             }
             return rows
         }
@@ -75,12 +75,12 @@ struct Case: Sendable {
 
     /// The id, the count and FNV-1a hash of the samples the last pass is handed, and the
     /// windows of the signal they came from, as runs `first-last` (inclusive), or `-`.
-    func row(judging discriminator: any Discriminator) async throws -> String {
-        let utterance = Utterance(judging: discriminator)
+    func row() async -> String {
+        let utterance = Utterance()
         for clip in AudioClip(samples: signal()).chunks(of: Self.hundredth) {
-            try await utterance.append(clip)
+            await utterance.append(clip)
         }
-        try await utterance.end()
+        await utterance.end()
         let (handed, arrived, _, timeline) = await utterance.audio(beyond: 0)
         var hash: UInt64 = 0xCBF2_9CE4_8422_2325
         for sample in handed {
@@ -307,9 +307,8 @@ struct Fixtures {
 
     /// A cough, sneeze, knock or clap under the -40 dBFS floor with nothing said, as the first
     /// sound of the press: each ESC-50 clip, at -45 and -55 dBFS over a room at -60 and -70 dBFS
-    /// (`family=soft-room source=sound/...`). Nothing has been heard before it, so a sound the
-    /// discriminator called speech would meet no room to hold its run to: these are the rows
-    /// that show what that costs.
+    /// (`family=soft-room source=sound/...`). Nothing has been heard before it: these rows show
+    /// whether the floor lets any of it through.
     var softSounds: [Case] {
         transients.flatMap { source in
             let peak = AudioClip(samples: source.samples).peak

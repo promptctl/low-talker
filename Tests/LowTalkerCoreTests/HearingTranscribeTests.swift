@@ -1,5 +1,4 @@
 @testable import LowTalkerCore
-import Synchronization
 import Testing
 import WhisperKit
 
@@ -45,7 +44,7 @@ import WhisperKit
         var partials: [Partial] = []
         // Kept rather than thrown, so the feed is let go and waited for however the loop ends.
         let transcription = await Result { () async throws(TranscriptionFailure) in
-            try await Hearing.transcribe(clips, margin: margin, context: 3, judging: Verdicts.speech(atOrAbove: 0.004), pass: { pass throws(TranscriptionFailure) in
+            try await Hearing.transcribe(clips, margin: margin, context: 3, pass: { pass throws(TranscriptionFailure) in
                 passes.append(pass)
                 record.yield(pass)
                 if failing(passes.count) { throw unreadable }
@@ -58,8 +57,7 @@ import WhisperKit
     }
 
     /// Nothing reaching the gate is no pass at all and a refusal, not a decode of
-    /// silence that comes back empty. All of it is quiet, and none of it stood clear of the room for
-    /// the discriminator to refuse.
+    /// silence that comes back empty. All of it is quiet, judged against the room it heard.
     @Test func aSilentHoldMakesNoPassAndIsRefused() async {
         var passes: [Hearing.Pass] = []
         let refusal = await #expect(throws: TranscriptionFailure.self) {
@@ -70,7 +68,7 @@ import WhisperKit
         }
         guard case .nothingSpoken(let peak, let quiet)? = refusal else { Issue.record("refused as \(String(describing: refusal))"); return }
         #expect(peak == 0.001)
-        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, refusedAsNotSpeech: 0, roomless: 0, transients: .none, range: nil, keptOut: nil, keptOutFrames: 0))
+        #expect(quiet == Quiet(letGo: 2, room: 0.001, refusedAsRoom: 0, transients: .none))
         #expect(passes.isEmpty)
     }
 
@@ -79,22 +77,22 @@ import WhisperKit
     @Test func theTranscriptionCarriesTheQuietTheGateKept() async throws {
         let room = AudioClip(samples: (0..<16_000).map { $0.isMultiple(of: 2) ? 0.002 : -0.002 })
         let clips = [room, AudioClip(samples: Array(repeating: 0.03, count: 1_600))] + Array(repeating: room, count: 60)
-        let utterance = Utterance(judging: Verdicts.speech(atOrAbove: 0.004))
-        for clip in clips { try await utterance.append(clip) }
-        try await utterance.end()
+        let utterance = Utterance()
+        for clip in clips { await utterance.append(clip) }
+        await utterance.end()
         let gate = await utterance.audio(beyond: 0).timeline.quiet
-        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60 && gate.refusedAsNotSpeech == 0)
+        #expect(gate.room == 0.002 && gate.refusedAsRoom == 60)
         let transcription = try await Hearing.transcribe(AsyncStream { feed in
             for clip in clips { feed.yield(clip) }
             feed.finish()
-        }, margin: Self.margin, context: 3, judging: Verdicts.speech(atOrAbove: 0.004), pass: { _ in Self.reading }, partial: { _ in })
+        }, margin: Self.margin, context: 3, pass: { _ in Self.reading }, partial: { _ in })
         #expect(transcription.quiet == gate)
     }
 
     /// An engine that reads words into any second of quiet it is handed, as Whisper does
     /// ("Thank you."), then " see you" over the 0.4 s of speech that ends the pass.
     static func hallucinating(_ pass: Hearing.Pass) -> [Transcript.Word] {
-        let longestQuiet = pass.samples.split { $0 >= SpeechGate.audible }.map(\.count).max() ?? 0
+        let longestQuiet = pass.samples.split { $0 >= Utterance.audible }.map(\.count).max() ?? 0
         let at = AudioClip.duration(for: pass.samples.count - Utterance.hangover) - 0.4
         let heardInQuiet = longestQuiet >= AudioClip.sampleCount(for: 1) ? [word(" Thank", 0, 0.2), word(" you.", 0.2, 0.4)] : []
         return heardInQuiet + [word(" see", at, at + 0.2), word(" you", at + 0.2, at + 0.4)]
@@ -115,7 +113,7 @@ import WhisperKit
         }
         feed.finish()
         var passes: [Hearing.Pass] = []
-        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, judging: Verdicts.speech(atOrAbove: 0.004), pass: { pass in
+        let transcription = try await Hearing.transcribe(clips, margin: Self.margin, context: 3, pass: { pass in
             passes.append(pass)
             return Self.hallucinating(pass)
         }, partial: { _ in })
@@ -144,7 +142,7 @@ import WhisperKit
         #expect(quiet.letGo == AudioClip.duration(for: audio.count))
         #expect(quiet.transients == Transients(count: 1, longest: 0.03))
         #expect(passes.isEmpty)
-        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 over a room of 0.002, 0.0 s clear of it were called no speech, 0.0 s were judged with no room heard, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
+        #expect(refusal?.description == "nothing spoken: the loudest sample was 0.03 against the audible floor 0.01 over a room of 0.002, and 1 transient sounded at most 0.03 s of the 0.06 s a syllable sounds")
     }
 
     /// Speech under a second, well under what a pass waits for during the hold,
@@ -245,68 +243,5 @@ import WhisperKit
             }
         }
         guard case .unreadable(.wordEndsBeforeStart)? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
-    }
-
-    /// A discriminator that calls every frame speech until it has been asked `answers` times, and
-    /// cannot answer after.
-    final class Failing: Discriminator {
-        struct Failure: Error {}
-        let lookbehind = 0
-        let lookahead: Int
-        private let answers: Int
-        private let asked = Mutex(0)
-
-        init(answering answers: Int, lookahead: Int = 0) {
-            self.answers = answers
-            self.lookahead = lookahead
-        }
-
-        func verdict(_ window: ArraySlice<Float>) throws -> Verdict {
-            guard asked.withLock({ $0 += 1; return $0 }) <= answers else { throw Failure() }
-            return .speech
-        }
-    }
-
-    /// Hears `clips` through `judging`, handing every pass the same reading, and gives what the
-    /// loop failed with and every partial it was told.
-    static func hear(_ clips: [AudioClip], judging discriminator: any Discriminator) async -> (failure: TranscriptionFailure?, partials: [Partial]) {
-        let audio = AsyncStream<AudioClip> { feed in
-            for clip in clips { feed.yield(clip) }
-            feed.finish()
-        }
-        var partials: [Partial] = []
-        do {
-            _ = try await Hearing.transcribe(audio, margin: margin, context: 3, judging: discriminator, pass: { _ in reading }, partial: { partials.append($0) })
-            return (nil, partials)
-        } catch {
-            return (error, partials)
-        }
-    }
-
-    /// A gate that fails as the utterance ends still has its last pass read the audio it judged,
-    /// and that reading is told before the failure is thrown, so the press holds the words the
-    /// pass read (low-reliability-z2z.u8q). The pass is the only one: 0.7 s of speech with its
-    /// hangover is under a pass during the hold.
-    @Test func aGateThatFailsAsTheUtteranceEndsTellsTheLastReading() async {
-        let (failure, partials) = await Self.hear([Self.speech(0.4)], judging: Failing(answering: 3, lookahead: SpeechGate.frameCount))
-        guard case .gate(let cause)? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
-        #expect(cause is Failing.Failure)
-        #expect(partials.map(\.text) == [" see you"])
-    }
-
-    /// A gate that fails mid-press closes the utterance, and the last pass reads the audio judged
-    /// before the failure, told before the failure is thrown (low-reliability-z2z.u8q).
-    @Test func aGateThatFailsMidPressTellsTheLastReading() async {
-        let clips = (0..<4).map { _ in Self.speech(0.1) }
-        let (failure, partials) = await Self.hear(clips, judging: Failing(answering: 2))
-        guard case .gate? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
-        #expect(partials.map(\.text) == [" see you"])
-    }
-
-    /// A gate that fails before any frame is judged leaves no pass, so there is no reading to tell.
-    @Test func aGateThatFailsBeforeAnySpeechTellsNothing() async {
-        let (failure, partials) = await Self.hear([Self.speech(0.4)], judging: Failing(answering: 0))
-        guard case .gate? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
-        #expect(partials.isEmpty)
     }
 }
