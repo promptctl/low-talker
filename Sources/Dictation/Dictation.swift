@@ -61,10 +61,8 @@ public final class Dictation {
         public var description: String {
             let destination = performed.first.map { " into \($0.into.rawValue)" } ?? ""
             let quiet = transcription.quiet
-            let level = { (peak: Float?, none: String) in peak.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? none }
-            let room = level(quiet.room, "none heard")
-            let range = "range \(level(quiet.range, "none")), \(level(quiet.keptOut, "nothing")) kept out of it in \(quiet.keptOutFrames) frame\(quiet.keptOutFrames == 1 ? "" : "s")"
-            return "heard \(transcription.transcript.words.count) words in a \(press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room, \(String(format: "%.1f", quiet.refusedAsNotSpeech)) s as no speech, \(String(format: "%.1f", quiet.roomless)) s judged with no room heard, \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") refused, the longest sounding \(String(format: "%.2f", quiet.transients.longest)) s; \(range)) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
+            let room = quiet.room.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? "none heard"
+            return "heard \(transcription.transcript.words.count) words in a \(press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room, \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") refused, the longest sounding \(String(format: "%.2f", quiet.transients.longest)) s) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination)"
         }
     }
 
@@ -1040,7 +1038,7 @@ public final class Dictation {
                 // [LAW:no-silent-failure] The decode failed, and what the passes during the hold
                 // read past the commits is held, the words said after them missing.
                 let rest = heard.streaming.rest(of: heard.streaming.reading)
-                if !rest.isBlank { hold.heldBack(rest, warning: PressStopped.readingFailed(by: failed.failure)) }
+                if !rest.isBlank { hold.heldBack(rest, warning: PressStopped.readingFailed) }
                 // A refused commit came before the decode's end, so the report names it first. The
                 // audio is kept whether or not one was refused.
                 let cause = keeping(failed.failure)
@@ -1070,21 +1068,21 @@ public final class Dictation {
             // decode leaves what the passes during the hold read. Nothing spoken is nothing more
             // to hold rather than a failure.
             let rest = words(past: heard.streaming, in: decoded)
-            let unread: (cause: any Accounted, warning: String)?
+            let unread: (any Accounted)?
             switch decoded.transcription {
             case .success: unread = nil
             case .failure(let failed):
-                if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = (keeping(failed.failure), PressStopped.readingFailed(by: failed.failure)) }
+                if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = keeping(failed.failure) }
             }
             let held = rest.isBlank ? 0 : rest.words.count
             // A cut that heard nothing past the commits leaves the hold's warning on the words
             // it already holds, which that warning is about. Words a failed decode leaves are
             // told as missing what was said after them, beside the cut.
-            let warning = unread.map { "\(cut.warning) \($0.warning)" } ?? cut.warning
+            let warning = unread.map { _ in "\(cut.warning) \(PressStopped.readingFailed)" } ?? cut.warning
             if held > 0 { hold.heldBack(rest, warning: warning) }
             // [LAW:no-silent-failure] The report names what left words unplaced first: a refused
             // commit came before the decode's end, and either before the cut was known.
-            if let cause = unplaced ?? unread?.cause { throw stopped(cause) }
+            if let cause = unplaced ?? unread { throw stopped(cause) }
             switch cut {
             case .lapsed: throw Failed(PressLapsed(landed: landed.words, held: held))
             case .lost(let lost): throw Failed(SpeechLost(lost: lost, landed: landed.words, held: held))
@@ -1232,15 +1230,8 @@ public struct PressStopped: Accounted {
     public let landed: Int
     public let cause: any Accounted
 
-    /// What the hold shows beside the words the passes read, when the decode failed: the engine
-    /// failing a pass leaves words said after its earlier readings missing, and the speech gate
-    /// failing leaves the audio after it unheard, though the last pass read what it had judged.
-    static func readingFailed(by failure: any Accounted) -> String {
-        switch failure as? TranscriptionFailure {
-        case .gate?: "WARNING: The speech gate failed during your dictation, so audio after the failure was not heard and words said after it are missing."
-        default: "WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing."
-        }
-    }
+    /// What the hold shows beside the words the passes during the hold read, when the decode failed.
+    static let readingFailed = "WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing."
 
     public var description: String { "\(cause)" + insertedBefore(landed) }
     /// What it left at the cursor, which is a count, and then the cause's account.

@@ -9,7 +9,7 @@ import Testing
 /// An engine that hears the conformance fixture's words in whatever it is given, and keeps
 /// what it was given. While audio streams in it confirms a word per half second heard, up
 /// to half the words, so a streamed utterance has words confirmed before it ends and
-/// words left for the final transcript. Audio that never reaches `SpeechGate.audible` it
+/// words left for the final transcript. Audio that never reaches `Utterance.audible` it
 /// refuses as nothing spoken, as the engine refuses a room with nothing clear of it, with
 /// `quiet`, and noise it hears its words in doubtfully.
 /// Its partials say it failed to read the passes `unread` counts.
@@ -42,11 +42,11 @@ final class Stub: Transcriber {
                 last = sample
             }
             samples += clip.samples.count
-            let confirmed = loudest < SpeechGate.audible ? 0 : min(words.count / 2, Int(seconds / 0.5))
+            let confirmed = loudest < Utterance.audible ? 0 : min(words.count / 2, Int(seconds / 0.5))
             partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0, unread: unread))
         }
         heard.withLock { $0.append((seconds, vocabulary, Task.isCancelled)) }
-        guard loudest >= SpeechGate.audible else { throw .nothingSpoken(peak: loudest, quiet: quiet) }
+        guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest, quiet: quiet) }
         let transcript = try answer.get()
         // White noise changes sign on about half its samples, speech and a tone on far fewer.
         // Noise is read as the engine reads a primed hallucination over it: words, barely believed.

@@ -486,13 +486,8 @@ private struct Answering: Sendable {
         event.quietSeconds = heard.transcription.quiet.letGo
         event.roomPeak = heard.transcription.quiet.room.map(Double.init)
         event.refusedAsRoomSeconds = heard.transcription.quiet.refusedAsRoom
-        event.refusedAsNotSpeechSeconds = heard.transcription.quiet.refusedAsNotSpeech
-        event.roomlessSeconds = heard.transcription.quiet.roomless
         event.transients = heard.transcription.quiet.transients.count
         event.longestTransientSeconds = heard.transcription.quiet.transients.longest
-        event.rangePeak = heard.transcription.quiet.range.map(Double.init)
-        event.keptOutPeak = heard.transcription.quiet.keptOut.map(Double.init)
-        event.keptOutFrames = heard.transcription.quiet.keptOutFrames
         event.nothingSpokenPeak = heard.nothingSpokenPeak.map(Double.init)
         let segment = try Segment(heard.transcription.transcript)
         (event.avgLogprob, event.compressionRatio) = (segment?.avgLogprob, segment?.compressionRatio)
@@ -634,19 +629,9 @@ public struct ServedRequest: Sendable, Codable, Equatable {
     /// against, and seconds within range of its loudest that stood too near the room to be speech.
     public internal(set) var roomPeak: Double?
     public internal(set) var refusedAsRoomSeconds: Double?
-    /// Seconds within range of its loudest and clear of the room, before any speaker was heard, called no speech.
-    public internal(set) var refusedAsNotSpeechSeconds: Double?
-    /// Seconds of the upload judged with no room heard, held to the range alone.
-    public internal(set) var roomlessSeconds: Double?
     /// Bursts of sound in the upload refused as too brief to be speech, and seconds the longest sounded.
     public internal(set) var transients: Int?
     public internal(set) var longestTransientSeconds: Double?
-    /// The peak of the upload's loudest syllable in frames called speech, the range it was
-    /// judged against; and the loudest sound above the range kept out of it as not speech, and
-    /// in how many frames.
-    public internal(set) var rangePeak: Double?
-    public internal(set) var keptOutPeak: Double?
-    public internal(set) var keptOutFrames: Int?
     /// The loudest sample of an upload refused as nothing spoken, which was answered as
     /// nothing said.
     public internal(set) var nothingSpokenPeak: Double?

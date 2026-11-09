@@ -652,19 +652,10 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
         /// too near the room to be speech.
         public internal(set) var roomPeak: Double?
         public internal(set) var refusedAsRoomSeconds: Double = 0
-        /// Seconds within range of an item's loudest and clear of the room, before any speaker was heard, called no speech.
-        public internal(set) var refusedAsNotSpeechSeconds: Double = 0
-        /// Seconds of the completed items judged with no room heard, held to the range alone.
-        public internal(set) var roomlessSeconds: Double = 0
         /// Bursts of sound in the completed items refused as too brief to be speech, and seconds the
         /// longest of them sounded.
         public internal(set) var transients = 0
         public internal(set) var longestTransientSeconds: Double = 0
-        /// The loudest range any completed item's speech was judged against, the loudest sound
-        /// above an item's range kept out of it as not speech, and the frames kept out in all.
-        public internal(set) var rangePeak: Double?
-        public internal(set) var keptOutPeak: Double?
-        public internal(set) var keptOutFrames = 0
         /// Completed items refused as nothing spoken, answered as nothing said, and the loudest
         /// sample any of them held: how loud a microphone with nothing said into it came.
         public internal(set) var nothingSpoken = 0
@@ -685,13 +676,8 @@ public struct RealtimeActivity: Sendable, Codable, Equatable {
                 quietSeconds += heard.transcription.quiet.letGo
                 roomPeak = [roomPeak, heard.transcription.quiet.room.map(Double.init)].compactMap { $0 }.min()
                 refusedAsRoomSeconds += heard.transcription.quiet.refusedAsRoom
-                refusedAsNotSpeechSeconds += heard.transcription.quiet.refusedAsNotSpeech
-                roomlessSeconds += heard.transcription.quiet.roomless
                 transients += heard.transcription.quiet.transients.count
                 longestTransientSeconds = max(longestTransientSeconds, heard.transcription.quiet.transients.longest)
-                rangePeak = [rangePeak, heard.transcription.quiet.range.map(Double.init)].compactMap { $0 }.max()
-                keptOutPeak = [keptOutPeak, heard.transcription.quiet.keptOut.map(Double.init)].compactMap { $0 }.max()
-                keptOutFrames += heard.transcription.quiet.keptOutFrames
                 if let peak = heard.nothingSpokenPeak {
                     nothingSpoken += 1
                     nothingSpokenPeak = max(nothingSpokenPeak ?? 0, Double(peak))

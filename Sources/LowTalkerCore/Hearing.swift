@@ -152,8 +152,7 @@ extension Hearing {
     /// arrived, feeding the words back in and telling `partial` what is heard so far.
     /// The last pass's reading is the transcript, told with the quiet the utterance let
     /// go. Engine-agnostic: `pass` is the engine, `margin` the span it decodes no window
-    /// under, `context` how many confirmed words it is told to say first, and `judging`
-    /// what tells the gate's speech from other sounds.
+    /// under, and `context` how many confirmed words it is told to say first.
     ///
     /// [LAW:dataflow-not-control-flow] The one branch is the utterance's own state:
     /// speech to hear, or nothing more. A pass over what is there is the same pass
@@ -167,24 +166,19 @@ extension Hearing {
     /// A pass during the hold is speculative: the next one rereads its audio. So one the
     /// engine fails to read leaves the reading to the next, and the partial counts it.
     /// Only the last pass's failure, the transcript's own reading, fails the utterance,
-    /// as does any pass once the decode is cancelled. A gate that fails fails it too, after the
-    /// last pass has read the audio it judged, and that reading is told to `partial` before the
-    /// failure is thrown. [LAW:no-silent-failure]
+    /// as does any pass once the decode is cancelled. [LAW:no-silent-failure]
     static func transcribe(
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         margin: Int,
         context: Int,
-        judging discriminator: any Discriminator,
         pass: (Pass) async throws(TranscriptionFailure) -> [Transcript.Word],
         partial: (Partial) -> Void
     ) async throws(TranscriptionFailure) -> Transcription {
-        let utterance = Utterance(judging: discriminator)
+        let utterance = Utterance()
         // A value, because an `async let` throws untyped.
         async let fed = Result { () async throws(TranscriptionFailure) in try await utterance.fill(from: audio) }
         var hearing = Hearing(margin: margin, context: context)
         var heard = await utterance.audio(beyond: hearing.passable)
-        // The reading of a pass run once the utterance had ended, which no partial has told.
-        var lastReading: Partial?
         while heard.samples.count > hearing.heard {
             do throws(TranscriptionFailure) {
                 let words = try await pass(Pass(samples: heard.samples, arrived: heard.arrived, cut: hearing.cut, saying: hearing.saying))
@@ -193,22 +187,11 @@ extension Hearing {
                 if heard.ended || Task.isCancelled { throw error }
                 hearing.miss(through: heard.samples.count, for: error)
             }
-            if heard.ended {
-                lastReading = hearing.partial
-                break
-            }
+            if heard.ended { break }
             partial(heard.timeline.place(hearing.partial))
             heard = await utterance.audio(beyond: hearing.passable)
         }
-        do throws(TranscriptionFailure) {
-            try await fed.get()
-        } catch {
-            // [LAW:no-silent-failure] A gate that failed ended the utterance, but the last pass still
-            // read the audio it judged, and no transcript carries that reading out: `partial` does,
-            // as it does for every pass before the last. A refusal as nothing spoken has no pass.
-            if case .gate = error, let lastReading { partial(heard.timeline.place(lastReading)) }
-            throw error
-        }
+        try await fed.get()
         // Timed from the audio's first sample, not from the quiet the utterance let go.
         return Transcription(transcript: heard.timeline.place(hearing.transcript), quiet: heard.timeline.quiet)
     }

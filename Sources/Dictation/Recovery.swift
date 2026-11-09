@@ -152,7 +152,7 @@ public final class Recovery {
             case .nothingSpoken:
                 Self.log.notice("kept speech \(entry.id, privacy: .public) held nothing spoken, so it was let go")
                 return finish(entry)
-            case .vocabulary, .unreadable, .engine, .gate: return fail(entry, "\(error)")
+            case .vocabulary, .unreadable, .engine: return fail(entry, "\(error)")
             }
         }
         let words = transcription.transcript

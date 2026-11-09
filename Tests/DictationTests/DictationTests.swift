@@ -308,22 +308,13 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.inputMethod.inserted == ["hi"])
     }
 
-    /// The press's line says the room its quiet was judged against, what that room refused, what
-    /// was called no speech before a speaker, the transients refused, and the range with the sound
-    /// kept out of it.
+    /// The press's line says the room its quiet was judged against, what that room refused, and
+    /// the transients refused.
     @Test func aPressLineSaysTheRoomItsQuietWasJudgedAgainst() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, refusedAsNotSpeech: 0.7, roomless: 0.3, transients: Transients(count: 2, longest: 0.03), range: 0.1, keptOut: 0.5, keptOutFrames: 3)) { _ in Transcript(typed: "hi") })
+        let rig = try await Rig(hearing: FakeTranscriber(quiet: Quiet(letGo: 2, room: 0.001, refusedAsRoom: 1.5, transients: Transients(count: 2, longest: 0.03))) { _ in Transcript(typed: "hi") })
         rig.hold(speaking: [1, 2, 3])
         let line = try await rig.session().description
-        #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room, 0.7 s as no speech, 0.3 s judged with no room heard, 2 transients refused, the longest sounding 0.03 s; range -20.0 dBFS, -6.0 dBFS kept out of it in 3 frames)"), "\(line)")
-    }
-
-    /// With no range and nothing kept out of it, the press's line says so.
-    @Test func aPressLineSaysWhenThereWasNoRange() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hi") })
-        rig.hold(speaking: [1, 2, 3])
-        let line = try await rig.session().description
-        #expect(line.contains("; range none, nothing kept out of it in 0 frames)"), "\(line)")
+        #expect(line.contains("past 2.0 s of quiet (room -60.0 dBFS, 1.5 s refused as room, 2 transients refused, the longest sounding 0.03 s)"), "\(line)")
     }
 
     /// Confirmed words land while the key is still down, each run once and in order, and
@@ -627,26 +618,6 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         guard case .unreadable(.speechWithoutWords)? = stopped.cause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.cause)"); return }
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing.")))
-    }
-
-    /// A press whose speech gate fails holds the words the last pass read, and says the audio
-    /// after the failure was not heard, not that the engine failed a pass: released and cut
-    /// alike, the hold's warning is the failure's (low-reliability-z2z.u8q).
-    @Test func aPressWhoseGateFailsHoldsWhatWasReadAndSaysTheRestWasNotHeard() async throws {
-        struct Gone: Error {}
-        let gate = "WARNING: The speech gate failed during your dictation, so audio after the failure was not heard and words said after it are missing."
-        for cut in [false, true] {
-            let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ throws(TranscriptionFailure) in throw .gate(Gone()) }
-            let rig = try await Rig(hearing: engine)
-            rig.dictation.press(.began(Rig.dictation, at: rig.now))
-            rig.speak([1, 2])
-            await rig.until { rig.inputMethod.inserted == ["hello"] }
-            if cut { rig.dictation.press(.ended(.lapsed)) } else { rig.keyUp() }
-            let stopped = try #require(await rig.report().failure as? PressStopped)
-            #expect(stopped.landed == 1)
-            guard case .gate? = stopped.cause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.cause)"); return }
-            #expect(rig.hold.held == .unplaced(part(" there friend", cut ? "WARNING: The hotkey stopped listening during your dictation. \(gate)" : gate)))
-        }
     }
 
     /// The engine hears a press while it is still going on: the audio reaches it as it is
