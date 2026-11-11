@@ -288,17 +288,17 @@ private let stranger = PeerIdentity.signed(identifier: "someone.else", certifica
 /// Every refusal, a later build's included, every way the channel fails, words not yet taken,
 /// and an answerer this end could not name.
 let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure: .refused($0), mayHaveLanded: false) } + [
-    FailedInsert(failure: .unreachable(.nothingIsListening(port: port)), mayHaveLanded: false),
-    FailedInsert(failure: .unreachable(.requestWasNotTaken(port: port, after: .seconds(1))), mayHaveLanded: false),
-    FailedInsert(failure: .unreachable(.answerDidNotArrive(port: port, after: .seconds(1))), mayHaveLanded: true),
-    FailedInsert(failure: .unreachable(.didNotSayWhoItIs(port: port, after: .seconds(1))), mayHaveLanded: false),
-    FailedInsert(failure: .unreachable(.answerWasAbandoned(port: port)), mayHaveLanded: true),
-    FailedInsert(failure: .unreachable(.answeredByAStranger(port: port, pid: 7, because: .someoneElse(stranger), required: stranger, words: .notSent)), mayHaveLanded: false),
-    FailedInsert(failure: .unreachable(.answeredByAStranger(port: port, pid: 7, because: .someoneElse(stranger), required: stranger, words: .mayHaveLanded)), mayHaveLanded: true),
-    FailedInsert(failure: .unreachable(.failed(port: port, status: KERN_FAILURE, words: .notSent)), mayHaveLanded: false),
-    FailedInsert(failure: .unreachable(.failed(port: port, status: KERN_FAILURE, words: .mayHaveLanded)), mayHaveLanded: true),
-    FailedInsert(failure: .unreachable(.answerWasNotReadable(port: port, bytes: 3, words: .notSent)), mayHaveLanded: false),
-    FailedInsert(failure: .unreachable(.answerWasNotReadable(port: port, bytes: 3, words: .mayHaveLanded)), mayHaveLanded: true),
+    FailedInsert(failure: .unreachable(Unreachable(.nobodyIsListening(port: port), at: .greeting)), mayHaveLanded: false),
+    FailedInsert(failure: .unreachable(Unreachable(.notTaken(port: port, after: .seconds(1)), at: .greeting)), mayHaveLanded: false),
+    FailedInsert(failure: .unreachable(Unreachable(.noAnswer(port: port, after: .seconds(1)), at: .words)), mayHaveLanded: true),
+    FailedInsert(failure: .unreachable(Unreachable(.noAnswer(port: port, after: .seconds(1)), at: .greeting)), mayHaveLanded: false),
+    FailedInsert(failure: .unreachable(Unreachable(.abandoned(port: port), at: .words)), mayHaveLanded: true),
+    FailedInsert(failure: .unreachable(Unreachable(.answeredByAStranger(port: port, pid: 7, because: .someoneElse(stranger), required: stranger), at: .greeting)), mayHaveLanded: false),
+    FailedInsert(failure: .unreachable(Unreachable(.answeredByAStranger(port: port, pid: 7, because: .someoneElse(stranger), required: stranger), at: .words)), mayHaveLanded: true),
+    FailedInsert(failure: .unreachable(Unreachable(.failedToSend(port: port, status: KERN_FAILURE), at: .greeting)), mayHaveLanded: false),
+    FailedInsert(failure: .unreachable(Unreachable(.failedToReceive(port: port, status: KERN_FAILURE), at: .words)), mayHaveLanded: true),
+    FailedInsert(failure: .unreachable(Unreachable(.notReadable(port: port, bytes: 3), at: .greeting)), mayHaveLanded: false),
+    FailedInsert(failure: .unreachable(Unreachable(.notReadable(port: port, bytes: 3), at: .words)), mayHaveLanded: true),
     FailedInsert(failure: .notYetTaken(NotYetTaken(characters: 11, into: "com.apple.TextEdit")), mayHaveLanded: true),
     FailedInsert(failure: .answererUnreadable(.noCertificate), mayHaveLanded: false),
     FailedInsert(failure: .refusedForAnUnknownReason("aReasonFromALaterBuild"), mayHaveLanded: false),
@@ -623,7 +623,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             Transcript(typed: samples.count >= 6 ? " hello there my" : samples.count >= 4 ? " hello there" : samples.count >= 2 ? " hello" : "")
         }) { _ in Transcript(typed: " hello there my friend") }
         let rig = try await Rig(hearing: engine)
-        let unanswered = InsertFailure.unreachable(.answerDidNotArrive(port: "port", after: .seconds(1)))
+        let unanswered = InsertFailure.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words))
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         await rig.until { rig.inputMethod.inserted == [" hello"] }

@@ -117,19 +117,17 @@ public struct InputMethodInserter: Inserter {
     }
 
     public func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
-        let far = try farEnd()
-        // The far end's send right is released when `far` is, so it is kept to the end of this call.
-        defer { withExtendedLifetime(far) {} }
-        try greet(to: far)
-        let received: Mach.Received
-        do throws(Unreachable) {
-            received = try roundTrip(
-                Wire.request(request), id: Wire.insert, to: far.remote, answeredOn: far.reply, by: far.answerer, within: far.phase, once: .mayHaveLanded,
-                unanswered: .answerDidNotArrive(port: portName, after: far.phase),
-                abandoned: .answerWasAbandoned(port: portName))
-        } catch { throw .unreachable(error) }
-        let data = received.payload ?? Data()
-        guard let answer = Wire.answer(of: data) else { throw unread(data, words: .mayHaveLanded) }
+        let answerer: PeerIdentity
+        do throws(PeerIdentity.Unreadable) { answerer = try self.answerer.get() } catch { throw .answererUnreadable(error) }
+        // Nothing has been said to the far end before the greeting, so failing to reach it is a
+        // greeting's failure.
+        let exchange: Exchange
+        do throws(WireFailure) { exchange = try Exchange(portName: portName, answerer: answerer) } catch {
+            throw .unreachable(Unreachable(error, at: .greeting))
+        }
+        try greet(through: exchange)
+        let data = try say(Wire.request(request), id: Wire.insert, through: exchange, at: .words)
+        guard let answer = Wire.answer(of: data) else { throw unread(data, at: .words) }
         // [LAW:parse-dont-validate] The wire's sum ends here: past this line a refusal or
         // words not yet taken is a failure thrown like the others, and a caller holds words
         // inserted or nothing.
@@ -140,116 +138,35 @@ public struct InputMethodInserter: Inserter {
         }
     }
 
-    /// The input method's end of one exchange: the name looked up, the reply right its answers
-    /// come on, who may answer, and how long each half may wait. Released with the exchange.
-    private final class FarEnd {
-        let remote: mach_port_t
-        let reply: ReceiveRight
-        let answerer: PeerIdentity
-        let phase: Duration
-
-        init(remote: mach_port_t, reply: ReceiveRight, answerer: PeerIdentity, phase: Duration) {
-            self.remote = remote
-            self.reply = reply
-            self.answerer = answerer
-            self.phase = phase
-        }
-
-        deinit { mach_port_deallocate(mach_task_self_, remote) }
-    }
-
-    /// Looks the input method's port up and makes the reply right, before any message is sent.
-    private func farEnd() throws(InsertFailure) -> FarEnd {
-        let answerer: PeerIdentity
-        do throws(PeerIdentity.Unreadable) { answerer = try self.answerer.get() } catch { throw .answererUnreadable(error) }
-        var remote = mach_port_t()
-        // [LAW:parse-dont-validate] The boundary: past here there is a port or a thrown
-        // reason, never a maybe-port that later code has to keep asking about.
-        guard lt_bootstrap_look_up(portName, &remote) == KERN_SUCCESS else {
-            throw .unreachable(.nothingIsListening(port: portName))
-        }
-        let reply: ReceiveRight
-        do throws(ReceiveRight.NotAllocated) { reply = try ReceiveRight(sendable: false) } catch {
-            mach_port_deallocate(mach_task_self_, remote)
-            throw .unreachable(.failed(port: portName, status: error.status, words: .notSent))
-        }
-        return FarEnd(remote: remote, reply: reply, answerer: answerer, phase: timeout / 4)
-    }
-
-    /// The greeting every message is preceded by, carrying `payload`. Who holds the name is asked
-    /// before a word is said to it. A name anyone can compute is a name anyone can register
-    /// first, and checking only the answer to the words would be checking after the dictation had
-    /// already gone to whoever that was. The receive right the greeting is answered from is the
-    /// one the words go to, and only its holder can move it, so the process that answered is the
-    /// process that hears.
-    private func greet(to far: FarEnd) throws(InsertFailure) {
-        let greeting: Mach.Received
-        do throws(Unreachable) {
-            greeting = try roundTrip(
-                Data(), id: Wire.greeting, to: far.remote, answeredOn: far.reply, by: far.answerer, within: far.phase, once: .notSent,
-                unanswered: .didNotSayWhoItIs(port: portName, after: far.phase),
-                // Dropped unanswered before any words went, which is a far end not answering.
-                abandoned: .nothingIsListening(port: portName))
-        } catch { throw .unreachable(error) }
+    /// The greeting every insert is preceded by. Who holds the name is asked before a word is
+    /// said to it. A name anyone can compute is a name anyone can register first, and checking
+    /// only the answer to the words would be checking after the dictation had already gone to
+    /// whoever that was. The receive right the greeting is answered from is the one the words go
+    /// to, and only its holder can move it, so the process that answered is the process that hears.
+    private func greet(through exchange: Exchange) throws(InsertFailure) {
+        let said = try say(Data(), id: Wire.greeting, through: exchange, at: .greeting)
         // The greeting's answer is the input method's build, or its refusal to listen, which is
         // thrown by name like any other.
-        let said = greeting.payload ?? Data()
         switch Wire.greeting(of: said) {
         case .admitted?: return
         case .refused(let refusal)?: throw .refused(refusal)
-        case nil: throw unread(said, words: .notSent)
+        case nil: throw unread(said, at: .greeting)
+        }
+    }
+
+    /// One step of the insert across the wire. Each step's send and its receive get a quarter of
+    /// the budget apiece, so the whole insert returns within `timeout`.
+    private func say(_ payload: Data, id: mach_msg_id_t, through exchange: Exchange, at step: Unreachable.Step) throws(InsertFailure) -> Data {
+        do throws(WireFailure) { return try exchange.roundTrip(payload, id: id, within: timeout / 4) } catch {
+            throw .unreachable(Unreachable(error, at: step))
         }
     }
 
     /// What an answer this build could not read says: a refusal for a reason only another
-    /// build names, which commits nothing, or no answer at all, which leaves the words where
-    /// they were when it came. [LAW:single-enforcer] The one reading of unread bytes, for the
-    /// greeting and the words alike.
-    private func unread(_ data: Data, words: Words) -> InsertFailure {
+    /// build names, which commits nothing, or no answer at all. [LAW:single-enforcer] The one
+    /// reading of unread bytes, for the greeting and the words alike.
+    private func unread(_ data: Data, at step: Unreachable.Step) -> InsertFailure {
         Wire.refusalReason(of: data).map(InsertFailure.refusedForAnUnknownReason)
-            ?? .unreachable(.answerWasNotReadable(port: portName, bytes: data.count, words: words))
-    }
-
-    /// One message out and its answer back, from `answerer` and nobody else, each half
-    /// bounded by `phase`. What differs between the greeting and the words is only what a
-    /// silence or a dropped question means, and where the words are `once` the message is
-    /// in the far end's queue, so that is all the caller says. Before then they are not sent,
-    /// whichever message this is: a send the kernel refuses leaves nothing queued.
-    /// [LAW:one-type-per-behavior]
-    private func roundTrip(
-        _ payload: Data, id: mach_msg_id_t, to remote: mach_port_t, answeredOn reply: ReceiveRight,
-        by answerer: PeerIdentity, within phase: Duration, once words: Words, unanswered: Unreachable, abandoned: Unreachable
-    ) throws(Unreachable) -> Mach.Received {
-        let sent = Mach.send(
-            payload, id: id, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
-            replyTo: reply.port, timeout: phase)
-        switch sent {
-        case MACH_MSG_SUCCESS:
-            break
-        case MACH_SEND_TIMED_OUT:
-            throw Unreachable.requestWasNotTaken(port: portName, after: phase)
-        // The far end went away between resolving the name and sending to it, which is the
-        // same fact as never having found it and is said the same way.
-        case MACH_SEND_INVALID_DEST:
-            throw Unreachable.nothingIsListening(port: portName)
-        default:
-            throw Unreachable.failed(port: portName, status: sent, words: .notSent)
-        }
-        let received: Mach.Received
-        switch Mach.receive(on: reply.port, timeout: phase) {
-        case .received(let arrived): received = arrived
-        case .failed(MACH_RCV_TIMED_OUT): throw unanswered
-        case .failed(let status): throw Unreachable.failed(port: portName, status: status, words: words)
-        }
-        received.discardReply()
-        // The kernel's word that the right the answer was to come back on was destroyed
-        // unanswered: the far end took the message and then went away, or dropped it.
-        guard received.id != Mach.answerAbandoned else { throw abandoned }
-        do throws(PeerIdentity.NotAdmitted) {
-            try answerer.admits(received.sender)
-        } catch {
-            throw Unreachable.answeredByAStranger(port: portName, pid: received.sender.pid, because: error, required: answerer, words: words)
-        }
-        return received
+            ?? .unreachable(Unreachable(.notReadable(port: portName, bytes: data.count), at: step))
     }
 }

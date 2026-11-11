@@ -70,7 +70,7 @@ import Testing
 
     /// Escape passes when no app answers whether its box is open, as it does with no app running.
     @Test func escapePassesWhenNoAppAnswers() {
-        let answered = answer(Self.cancelOperation, asking: App(panelling: .failure(.nobodyIsListening(port: "port"))))
+        let answered = answer(Self.cancelOperation, asking: App(panelling: .failure(.wire(.nobodyIsListening(port: "port")))))
         #expect(answered.kept == false)
         #expect(answered.beeps == 0 && answered.told == [])
     }

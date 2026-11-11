@@ -88,30 +88,16 @@ public final class Reply: Answering {
 /// Why a question came back with no answer from this installation's app. Each is a fact the
 /// asker can act on; none is an answer. [LAW:types-are-the-program]
 public enum NotAnswered: Error, Equatable, Sendable, CustomStringConvertible {
-    /// No app is listening on the name: the app is not running.
-    case nobodyIsListening(port: String)
+    /// The wire did not carry the question and its answer, failing it as it fails an insert.
+    case wire(WireFailure)
     /// This process cannot say who the app's signature must be, so no answer could be
-    /// believed.
+    /// believed, and nothing was asked.
     case unverifiable(PeerIdentity.Unreadable)
-    /// Nothing arrived within the bound, whether the question went unheard or the answer
-    /// was never made.
-    case silent(after: Duration)
-    /// The app dropped the question: it quit, or let go of the right to answer.
-    case abandoned
-    /// Someone answered who is not this installation's app.
-    case notBelieved(PeerIdentity.NotAdmitted)
-    case notReadable(bytes: Int)
-    case failed(port: String, status: kern_return_t)
 
     public var description: String {
         switch self {
-        case .nobodyIsListening(let port): "nothing is listening on \(port)"
+        case .wire(let failure): "\(failure)"
         case .unverifiable(let why): "no answer can be believed, because this process cannot say who the app is: \(why)"
-        case .silent(let bound): "no answer came within \(bound)"
-        case .abandoned: "the app dropped the question unanswered"
-        case .notBelieved(let why): "an answer came from someone who is not this installation's app: \(why)"
-        case .notReadable(let bytes): "an answer of \(bytes) bytes is not one this input method knows"
-        case let .failed(port, status): "a question could not be asked on \(port): \(Mach.describe(status))"
         }
     }
 }
@@ -161,32 +147,10 @@ public struct Asker: Sendable {
     private func ask<Answer>(_ id: mach_msg_id_t, _ payload: Data, within bound: Duration, read: (Data) -> Answer?) -> Result<Answer, NotAnswered> {
         let answerer: PeerIdentity
         do throws(PeerIdentity.Unreadable) { answerer = try self.answerer.get() } catch { return .failure(.unverifiable(error)) }
-        var remote = mach_port_t()
-        guard lt_bootstrap_look_up(portName, &remote) == KERN_SUCCESS else { return .failure(.nobodyIsListening(port: portName)) }
-        defer { mach_port_deallocate(mach_task_self_, remote) }
-        let reply: ReceiveRight
-        do throws(ReceiveRight.NotAllocated) { reply = try ReceiveRight(sendable: false) } catch { return .failure(.failed(port: portName, status: error.status)) }
-        let sent = Mach.send(
-            payload, id: id, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
-            replyTo: reply.port, timeout: bound)
-        switch sent {
-        case MACH_MSG_SUCCESS: break
-        case MACH_SEND_TIMED_OUT: return .failure(.silent(after: bound))
-        case MACH_SEND_INVALID_DEST: return .failure(.nobodyIsListening(port: portName))
-        default: return .failure(.failed(port: portName, status: sent))
-        }
-        let received: Mach.Received
-        switch Mach.receive(on: reply.port, timeout: bound) {
-        case .received(let arrived): received = arrived
-        case .failed(MACH_RCV_TIMED_OUT): return .failure(.silent(after: bound))
-        case .failed(let status): return .failure(.failed(port: portName, status: status))
-        }
-        received.discardReply()
-        guard received.id != Mach.answerAbandoned else { return .failure(.abandoned) }
-        do throws(PeerIdentity.NotAdmitted) { try answerer.admits(received.sender) } catch { return .failure(.notBelieved(error)) }
-        guard let payload = received.payload, let answer = read(payload) else {
-            return .failure(.notReadable(bytes: received.payload?.count ?? 0))
-        }
-        return .success(answer)
+        do throws(WireFailure) {
+            let said = try Exchange(portName: portName, answerer: answerer).roundTrip(payload, id: id, within: bound)
+            guard let answer = read(said) else { throw .notReadable(port: portName, bytes: said.count) }
+            return .success(answer)
+        } catch { return .failure(.wire(error)) }
     }
 }

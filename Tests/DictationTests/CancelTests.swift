@@ -341,7 +341,7 @@ import TestProbes
     /// under the failure's warning, as for any such insert, and the report counts them.
     @Test func wordsThatMayHaveLandedStand() async throws {
         let rig = try await Rig(hearing: Self.engine())
-        let unanswered = InsertFailure.unreachable(.answerDidNotArrive(port: "port", after: .seconds(1)))
+        let unanswered = InsertFailure.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words))
         rig.inputMethod.refusing(unanswered)
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.hold.held != nil }
@@ -358,7 +358,7 @@ import TestProbes
     /// failed ones stand with it, and the report counts every one.
     @Test func earlierAndFailedWordsAnUnansweredInsertCarriedStandToo() async throws {
         let rig = try await Rig(hearing: Self.engine())
-        let unanswered = InsertFailure.unreachable(.answerDidNotArrive(port: "port", after: .seconds(1)))
+        let unanswered = InsertFailure.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words))
         try await Self.holdingEarlierWords(rig)
         rig.inputMethod.refusing(Self.refusal)
         Self.begin(rig)
@@ -376,7 +376,7 @@ import TestProbes
     /// so the take-back is refused, loudly, and the words stay and are counted.
     @Test func wordsAroundAnUnansweredInsertCannotBeTakenBack() async throws {
         let rig = try await Rig(hearing: Self.engine())
-        let unanswered = InsertFailure.unreachable(.answerDidNotArrive(port: "port", after: .seconds(1)))
+        let unanswered = InsertFailure.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words))
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
         rig.inputMethod.refusing(unanswered)
@@ -417,7 +417,7 @@ import TestProbes
         let rig = try await Rig(hearing: Self.engine())
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
-        rig.inputMethod.refusingTakeBack(.unreachable(.answerDidNotArrive(port: "port", after: .seconds(1))))
+        rig.inputMethod.refusingTakeBack(.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words)))
 
         Self.cancel(rig)
         let left = try #require(await rig.report().failure as? CancelLeftWords)

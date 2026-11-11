@@ -106,13 +106,13 @@ public nonisolated final class SteeringGate: Sendable {
     public struct Unconnected: SteeringAsking {
         public init() {}
         public func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> {
-            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+            .failure(.wire(.nobodyIsListening(port: "no app has been connected yet")))
         }
         public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> {
-            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+            .failure(.wire(.nobodyIsListening(port: "no app has been connected yet")))
         }
         public func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> {
-            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+            .failure(.wire(.nobodyIsListening(port: "no app has been connected yet")))
         }
     }
 
@@ -166,7 +166,7 @@ public nonisolated final class SteeringGate: Sendable {
     /// Whether an app that is not there, which is how an app that is not running looks from here
     /// and is as ordinary as a key typed with it off.
     private static func isAbsence(_ why: NotAnswered) -> Bool {
-        if case .nobodyIsListening = why { true } else { false }
+        if case .wire(.nobodyIsListening) = why { true } else { false }
     }
 
     private static func decide(_ asker: any SteeringAsking, at timestamp: TimeInterval, question: Duration, ceiling: Duration) -> SteeringDecision {

@@ -277,54 +277,47 @@ public enum Words: Equatable, Sendable, CustomStringConvertible {
     }
 }
 
-/// The transport failing to carry the question, which is never an answer. [LAW:no-silent-failure]
-/// Nothing here is retried and nothing is guessed: each case says what the channel did.
-public enum Unreachable: Error, Equatable, Sendable, InsertWarning {
-    case nothingIsListening(port: String)
-    /// The send itself timed out: the request never entered the far end's queue.
-    case requestWasNotTaken(port: String, after: Duration)
-    case answerDidNotArrive(port: String, after: Duration)
-    /// The far end took the greeting and did not answer it in time, so the words were never
-    /// sent.
-    case didNotSayWhoItIs(port: String, after: Duration)
-    /// The far end took the request and let go of the way back without answering.
-    case answerWasAbandoned(port: String)
-    /// Whatever answered is not this installation's input method. Found out from its answer
-    /// to the greeting, before the words go; after them it is the input method gone before
-    /// the kernel could say who had answered.
-    case answeredByAStranger(port: String, pid: pid_t, because: PeerIdentity.NotAdmitted, required: PeerIdentity, words: Words)
-    /// A Mach status none of the others names, which is the arm every unknown status takes.
-    case failed(port: String, status: kern_return_t, words: Words)
-    /// Bytes came back that are not an answer, which is what an input method left running
-    /// from before an update says: it described what it did in a shape this end no longer
-    /// reads.
-    case answerWasNotReadable(port: String, bytes: Int, words: Words)
+/// The wire failing to carry an insert, read for the words: which `WireFailure` it was, and at
+/// which step of the insert. [LAW:no-silent-failure] Nothing here is retried and nothing is
+/// guessed. [LAW:one-source-of-truth] Where the words are is not stored beside the failure: it
+/// follows from the step and from whether the message was queued, so no value can say a
+/// greeting's failure may have put words at the cursor.
+public struct Unreachable: Error, Equatable, Sendable, InsertWarning {
+    /// The two messages of an insert: the greeting that asks who holds the name, then the words.
+    public enum Step: Equatable, Sendable {
+        case greeting
+        case words
+    }
+
+    public let wire: WireFailure
+    public let step: Step
+
+    public init(_ wire: WireFailure, at step: Step) {
+        (self.wire, self.step) = (wire, step)
+    }
 
     public var reason: String {
-        switch self {
-        case let .nothingIsListening(port): "No input method is answering on \(port); it is not installed or not selected."
-        case let .requestWasNotTaken(port, after): "The input method on \(port) did not take the request within \(after)."
-        case let .answerDidNotArrive(port, after): "The input method on \(port) took the request but did not answer within \(after)."
-        case let .didNotSayWhoItIs(port, after): "The input method on \(port) did not say who it is within \(after)."
-        case let .answerWasAbandoned(port): "The input method on \(port) took the request and went away without answering."
-        case let .answeredByAStranger(port, pid, because, required, _):
+        switch (wire, step) {
+        // A greeting dropped unanswered went before any words did, which is a far end not answering.
+        case let (.nobodyIsListening(port), _), let (.abandoned(port), .greeting):
+            "No input method is answering on \(port); it is not installed or not selected."
+        case let (.notTaken(port, after), _): "The input method on \(port) did not take the request within \(after)."
+        case let (.noAnswer(port, after), .greeting): "The input method on \(port) did not say who it is within \(after)."
+        case let (.noAnswer(port, after), .words): "The input method on \(port) took the request but did not answer within \(after)."
+        case let (.abandoned(port), .words): "The input method on \(port) took the request and went away without answering."
+        case let (.answeredByAStranger(port, pid, because, required), _):
             "pid \(pid) answered on \(port) and is not the input method, \(required) - \(because)."
-        case let .failed(port, status, _): "The request to \(port) failed: \(Mach.describe(status))."
-        case let .answerWasNotReadable(port, bytes, _): "The input method on \(port) answered \(bytes) bytes that are not an answer."
+        case let (.failedToSend(port, status), _), let (.failedToReceive(port, status), _):
+            "The request to \(port) failed: \(Mach.describe(status))."
+        case let (.notReadable(port, bytes), _): "The input method on \(port) answered \(bytes) bytes that are not an answer."
         }
     }
 
     public var fate: String? { "\(words)" }
 
-    /// Where the words were when the channel failed: carried by the cases that can fail on
-    /// either side of the send, and fixed by the phase for the rest.
-    public var words: Words {
-        switch self {
-        case .nothingIsListening, .requestWasNotTaken, .didNotSayWhoItIs: .notSent
-        case .answerDidNotArrive, .answerWasAbandoned: .mayHaveLanded
-        case let .answeredByAStranger(_, _, _, _, words), let .failed(_, _, words), let .answerWasNotReadable(_, _, words): words
-        }
-    }
+    /// Where the words were when the wire failed: unsent at the greeting, and at the words
+    /// unsent only until the message was queued.
+    public var words: Words { step == .words && wire.queued ? .mayHaveLanded : .notSent }
 }
 
 /// Why an insert's words are not at the cursor: everything an `Inserter` throws.

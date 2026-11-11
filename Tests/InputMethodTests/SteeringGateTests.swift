@@ -81,7 +81,7 @@ import Testing
 
     /// A debt the app admitted and then did not settle is not a debt that was settled.
     @MainActor
-    @Test(arguments: [NotAnswered.silent(after: .seconds(5)), .abandoned, .notReadable(bytes: 3)])
+    @Test(arguments: [NotAnswered.wire(.noAnswer(port: "p", after: .seconds(5))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 3))])
     func aDebtTheAppAdmittedAndDidNotSettleKeepsTheReturn(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .failure(why) }))
         #expect(gate.verdict(at: 1).verdict == .keep)
@@ -91,7 +91,7 @@ import Testing
     /// reached, or cannot say, has admitted none, and the Return passes as it would with no
     /// LowTalker at all.
     @MainActor
-    @Test(arguments: [NotAnswered.nobodyIsListening(port: "p"), .silent(after: .milliseconds(100)), .abandoned, .notReadable(bytes: 0)])
+    @Test(arguments: [NotAnswered.wire(.nobodyIsListening(port: "p")), .wire(.noAnswer(port: "p", after: .milliseconds(100))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 0))])
     func anAppThatAdmitsNoDebtLetsTheReturnPass(why: NotAnswered) {
         let asked = Log()
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(
@@ -162,7 +162,7 @@ import Testing
 
     /// An app that does not say whether its box is open has said nothing, so the Escape passes.
     @MainActor
-    @Test(arguments: [NotAnswered.nobodyIsListening(port: "port"), .silent(after: .milliseconds(100)), .abandoned])
+    @Test(arguments: [NotAnswered.wire(.nobodyIsListening(port: "port")), .wire(.noAnswer(port: "p", after: .milliseconds(100))), .wire(.abandoned(port: "p"))])
     func anEscapeTheAppDoesNotAnswerForPasses(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .failure(why) }))
         #expect(gate.escapeVerdict(at: 1).verdict == .pass)
