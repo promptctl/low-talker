@@ -2111,6 +2111,26 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect("\(Dictation.Activity.refused(why: "no microphone"))" == "refused: no microphone")
     }
 
+    /// The word box over a press ended while the model loads, or after it failed, says nothing
+    /// of the press and offers neither a click nor Insert for held words, so the box goes away
+    /// at the key's release unless words are held; every other activity reads as the box always
+    /// drew it.
+    @Test func aPressWaitingOnTheLoadHasNoLineInTheBoxAndOffersNothing() {
+        let preparing = EngineReadiness.preparing(.loading, since: .now)
+        let failed = EngineReadiness.failed("no model")
+        let ready = EngineReadiness.ready(.default, after: .seconds(2))
+        typealias Box = Dictation.Activity.Box
+        let heard = Transcript(typed: "hi")
+        #expect(Dictation.Activity.transcribing.box(over: preparing) == Box(state: nil, offersClick: false, offersInsert: false))
+        #expect(Dictation.Activity.transcribing.box(over: failed) == Box(state: nil, offersClick: false, offersInsert: false))
+        #expect(Dictation.Activity.transcribing.box(over: ready) == Box(state: "Transcribing", offersClick: false, offersInsert: true))
+        for readiness in [preparing, failed, ready] {
+            #expect(Dictation.Activity.idle.box(over: readiness) == Box(state: nil, offersClick: true, offersInsert: true))
+            #expect(Dictation.Activity.listening(heard: heard).box(over: readiness) == Box(state: "Listening", heard: heard, offersClick: false, offersInsert: false))
+            #expect(Dictation.Activity.refused(why: "x").box(over: readiness) == Box(state: "Not listening", refusal: "x", offersClick: false, offersInsert: false))
+        }
+    }
+
     /// The icon is the press's while there is one and the engine's otherwise, except that a
     /// press ended before the engine is ready shows the wait it is in.
 

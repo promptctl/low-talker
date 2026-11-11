@@ -53,6 +53,44 @@ extension Dictation {
             }
         }
 
+        /// What the word box shows of this activity over `readiness`.
+        ///
+        /// A press ended before the engine is ready waits on the load, which on a first run takes
+        /// minutes. It wears the icon's face for that wait, no press, so it has no line of its
+        /// own and the box goes away at the key's release unless words are held; those are
+        /// shown with neither a click nor Insert offered for them, since either is queued behind
+        /// the press and nothing would happen until the load ends. [LAW:one-source-of-truth]
+        /// The precedence is `shown(over:)`, the one the icon reads.
+        public func box(over readiness: EngineReadiness) -> Box {
+            switch (self, shown(over: readiness)) {
+            case (.transcribing, .idle): Box(state: nil, offersClick: false, offersInsert: false)
+            case (.idle, _): Box(state: nil, offersClick: true, offersInsert: true)
+            case let (.listening(heard), _): Box(state: "Listening", heard: heard, offersClick: false, offersInsert: false)
+            case let (.refused(why), _): Box(state: "Not listening", refusal: why, offersClick: false, offersInsert: false)
+            case (.transcribing, _): Box(state: "Transcribing", offersClick: false, offersInsert: true)
+            }
+        }
+
+        /// The word box's face for an activity: the line saying what the press is doing, if
+        /// any; the words being spoken, which it shows in place of any held; why a press is not
+        /// heard; whether held words are offered to a click into a text field, which only a box
+        /// with nothing on its way does; and whether Insert may be offered for them.
+        public struct Box: Equatable, Sendable {
+            public let state: String?
+            public let heard: Transcript?
+            public let refusal: String?
+            public let offersClick: Bool
+            public let offersInsert: Bool
+
+            public init(state: String?, heard: Transcript? = nil, refusal: String? = nil, offersClick: Bool, offersInsert: Bool) {
+                self.state = state
+                self.heard = heard
+                self.refusal = refusal
+                self.offersClick = offersClick
+                self.offersInsert = offersInsert
+            }
+        }
+
         /// The activity without the words, which are what the user dictated, so a log may
         /// carry it in the clear.
         public var description: String {
