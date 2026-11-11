@@ -23,17 +23,19 @@ import Synchronization
 final class SliceRing: @unchecked Sendable {
     /// One thing the IO thread handed over, in the order it happened.
     enum Entry {
-        /// The next `frames` frames of every channel, the first captured at `stamp`.
+        /// The next `frames` frames, the first captured at `stamp`.
         case slice(frames: Int, stamp: AudioTimeStamp)
         /// A render that delivered nothing, and why. Typed rather than `any Error`, because
         /// boxing an existential allocates and this is made on the IO thread.
         case fault(AudioHardwareError)
     }
 
-    let channels: Int
-    /// Frames per channel the ring holds.
+    /// Frames the ring holds.
     let capacity: Int
-    /// Channel `c` occupies `capacity` frames from `c * capacity`.
+    /// The shape of the renders it is pushed.
+    var layout: InputLayout { downmix.layout }
+    /// What every push is heard as: one channel, so the ring holds what the pipeline hears.
+    private let downmix: Downmix
     private let samples: UnsafeMutablePointer<Float>
     private let entries: UnsafeMutablePointer<Entry>
     private let entryCapacity: Int
@@ -48,13 +50,14 @@ final class SliceRing: @unchecked Sendable {
     nonisolated(unsafe) private var framesPushed = 0
     private let droppedCount = Atomic<Int>(0)
 
-    init(channels: Int, frames capacity: Int, entries entryCapacity: Int) {
-        precondition(channels > 0 && capacity > 0 && entryCapacity > 0, "a ring holds something")
-        self.channels = channels
+    /// A ring for renders of `layout`.
+    init(_ layout: InputLayout, frames capacity: Int, entries entryCapacity: Int) {
+        precondition(layout.channels > 0 && capacity > 0 && entryCapacity > 0, "a ring holds something")
+        downmix = Downmix(layout)
         self.capacity = capacity
         self.entryCapacity = entryCapacity
-        samples = .allocate(capacity: channels * capacity)
-        samples.initialize(repeating: 0, count: channels * capacity)
+        samples = .allocate(capacity: capacity)
+        samples.initialize(repeating: 0, count: capacity)
         entries = .allocate(capacity: entryCapacity)
         entries.initialize(repeating: .slice(frames: 0, stamp: AudioTimeStamp()), count: entryCapacity)
     }
@@ -68,12 +71,10 @@ final class SliceRing: @unchecked Sendable {
     /// Slices and faults that found the ring full and were never handed over.
     var dropped: Int { droppedCount.load(ordering: .relaxed) }
 
-    /// Producer end: copies `frames` frames of `list` in, planar. `layout` says how many
-    /// channels each buffer carries: an interleaved buffer of k channels is de-interleaved to
-    /// k rings, and a buffer of one is copied as it is. The caller has already held `list` to
-    /// `layout` (`InputLayout.verdict`), which is what makes every read here in bounds.
-    func push(_ list: UnsafePointer<AudioBufferList>, layout: InputLayout, frames: Int, stamp: AudioTimeStamp) {
-        precondition(layout.channels == channels, "a ring is made for the channels of the layout it is pushed")
+    /// Producer end: mixes `frames` frames of `list` in, a render of the ring's layout. The
+    /// caller has already held `list` to that layout (`InputLayout.verdict`), which is what
+    /// makes every read here in bounds.
+    func push(_ list: UnsafePointer<AudioBufferList>, frames: Int, stamp: AudioTimeStamp) {
         let start = framesPushed
         guard start + frames - framesPopped.load(ordering: .acquiring) <= capacity else {
             return drop()
@@ -81,21 +82,7 @@ final class SliceRing: @unchecked Sendable {
         guard let slot = claim() else { return drop() }
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         let at = start % capacity
-        let head = min(frames, capacity - at)
-        for index in 0..<layout.buffers.count {
-            let width = layout.buffers[index]
-            let source = list[index].mData!.assumingMemoryBound(to: Float.self)
-            for lane in 0..<width {
-                let ring = samples + (layout.offsets[index] + lane) * capacity
-                if width == 1 {
-                    (ring + at).update(from: source, count: head)
-                    ring.update(from: source + head, count: frames - head)
-                } else {
-                    for frame in 0..<head { ring[at + frame] = source[frame * width + lane] }
-                    for frame in 0..<(frames - head) { ring[frame] = source[(head + frame) * width + lane] }
-                }
-            }
-        }
+        downmix.mix(list, frames: frames, into: samples + at, min(frames, capacity - at), then: samples)
         framesPushed = start + frames
         publish(.slice(frames: frames, stamp: stamp), at: slot)
     }
@@ -113,35 +100,27 @@ final class SliceRing: @unchecked Sendable {
         return true
     }
 
-    /// The shape a slice is popped in: one channel of float samples at the device's rate.
-    /// AVAudioFormat describes it for every device, where one buffer per device channel has
-    /// no description past two channels without a channel layout, and with one AVAudioConverter
-    /// downmixes it to silence (measured on macOS 26, for 2, 4 and 16 channels).
+    /// The shape a slice is popped in: one channel of float samples at the device's rate, which
+    /// AVAudioFormat describes whatever the device's channel count.
     static func format(sampleRate: Double) -> AVAudioFormat? {
         AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)
     }
 
-    /// Consumer end: the oldest entry, or nil when there is none. A slice's frames are mixed
-    /// down into `buffer`, of `format`, whose frame length becomes the slice's: each sample is
-    /// the mean of every channel's, the equal-weight downmix AVAudioConverter gives stereo. A
-    /// voice on one channel of N arrives at 1/N of its level.
+    /// Consumer end: the oldest entry, or nil when there is none. A slice's frames are copied
+    /// into `buffer`, one channel like the ring, whose frame length becomes the slice's.
     func pop(into buffer: AVAudioPCMBuffer) -> Entry? {
         let next = popped.load(ordering: .relaxed)
         guard next < pushed.load(ordering: .acquiring) else { return nil }
         let entry = entries[next % entryCapacity]
         if case .slice(let frames, _) = entry {
             precondition(frames <= Int(buffer.frameCapacity), "a slice larger than the buffer it is popped into")
+            precondition(buffer.format.channelCount == 1, "a slice is one channel")
             let start = framesPopped.load(ordering: .relaxed)
             let at = start % capacity
             let head = min(frames, capacity - at)
-            let mix = buffer.floatChannelData![0]
-            mix.update(repeating: 0, count: frames)
-            let weight = 1 / Float(channels)
-            for channel in 0..<channels {
-                let ring = samples + channel * capacity
-                for frame in 0..<head { mix[frame] += weight * ring[at + frame] }
-                for frame in 0..<(frames - head) { mix[head + frame] += weight * ring[frame] }
-            }
+            let destination = buffer.floatChannelData![0]
+            destination.update(from: samples + at, count: head)
+            (destination + head).update(from: samples, count: frames - head)
             buffer.frameLength = AVAudioFrameCount(frames)
             framesPopped.store(start + frames, ordering: .releasing)
         }

@@ -195,58 +195,84 @@ import Testing
 
     /// The next slice of `ring`, as the one channel it pops as.
     static func popped(_ ring: SliceRing, frames: Int) -> [Float] {
-        let popped = AVAudioPCMBuffer(pcmFormat: SliceRing.format(sampleRate: 48_000)!, frameCapacity: AVAudioFrameCount(frames))!
+        let popped = AVAudioPCMBuffer(pcmFormat: SliceRing.format(sampleRate: ring.layout.sampleRate)!, frameCapacity: AVAudioFrameCount(frames))!
         _ = ring.pop(into: popped)
         return Array(UnsafeBufferPointer(start: popped.floatChannelData![0], count: Int(popped.frameLength)))
     }
 
-    @Test func anInterleavedBufferPopsAsTheMeanOfItsChannels() throws {
-        let layout = InputLayout(buffers: [2], sampleRate: 48_000)
-        let ring = SliceRing(channels: 2, frames: 8, entries: 4)
-        // Frames (0, 100), (1, 101), (2, 102): left counts up from 0, right from 100.
-        let list = List([(2, 6)])
-        for frame in 0..<3 {
-            list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2] = Float(frame)
-            list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2 + 1] = Float(100 + frame)
+    /// A render of `layout` whose channel `channel` of `frame` holds `value(channel, frame)`.
+    static func render(_ layout: InputLayout, frames: Int, _ value: (Int, Int) -> Float) -> List {
+        let list = List(layout.buffers.map { ($0, $0 * frames) })
+        for (index, width) in layout.buffers.enumerated() {
+            for frame in 0..<frames {
+                for lane in 0..<width {
+                    list.pointer[index].mData!.assumingMemoryBound(to: Float.self)[frame * width + lane] = value(layout.offsets[index] + lane, frame)
+                }
+            }
         }
-        ring.push(list.base, layout: layout, frames: 3, stamp: AudioTimeStamp())
-        #expect(Self.popped(ring, frames: 8) == [50, 51, 52])
+        return list
     }
 
-    @Test func twoBuffersOfDifferentWidthsPopAsTheMeanOfEveryChannelAcrossTheWrap() throws {
-        // Buffer 0 is stereo interleaved, buffer 1 mono: channels 0 and 1, then 2.
-        let layout = InputLayout(buffers: [2, 1], sampleRate: 48_000)
-        let ring = SliceRing(channels: 3, frames: 5, entries: 8)
+    static func push(_ ring: SliceRing, frames: Int, _ value: (Int, Int) -> Float) {
+        let list = render(ring.layout, frames: frames, value)
+        ring.push(list.base, frames: frames, stamp: AudioTimeStamp())
+    }
+
+    /// A voice on any one channel of a device, its other channels silent, is heard at its own
+    /// level, whichever buffer and lane carries it and across the ring's wrap. Buffer 0 is stereo
+    /// interleaved, buffer 1 mono: channels 0 and 1, then 2.
+    @Test(arguments: [0, 1, 2])
+    func aVoiceOnOneChannelIsHeardAtItsLevelAcrossTheWrap(voiced: Int) {
+        let ring = SliceRing(InputLayout(buffers: [2, 1], sampleRate: 48_000), frames: 5, entries: 8)
         // Four frames, then four more: the second wraps the five-frame ring.
         for round in 0..<2 {
-            let list = List([(2, 8), (1, 4)])
-            for frame in 0..<4 {
-                let value = Float(round * 4 + frame)
-                list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2] = value
-                list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2 + 1] = value + 30
-                list.pointer[1].mData!.assumingMemoryBound(to: Float.self)[frame] = value + 60
-            }
-            ring.push(list.base, layout: layout, frames: 4, stamp: AudioTimeStamp())
-            #expect(Self.popped(ring, frames: 5) == (0..<4).map { Float(round * 4 + $0) + 30 })
+            Self.push(ring, frames: 4) { channel, frame in channel == voiced ? Float(round * 4 + frame + 1) : 0 }
+            #expect(Self.popped(ring, frames: 5) == (0..<4).map { Float(round * 4 + $0 + 1) })
         }
     }
 
-    /// A device of any channel count is heard, an audio interface or a 16-channel loopback with
-    /// the voice on its last channel included: what it pops as is a shape the converter reads,
-    /// carrying that channel at its share of the mix.
-    @Test(arguments: [1, 2, 3, 4, 16])
-    func everyChannelCountIsHeardOnItsLastChannel(channels: Int) throws {
-        let layout = InputLayout(buffers: [channels], sampleRate: 48_000)
-        let ring = SliceRing(channels: channels, frames: 8, entries: 4)
-        let list = List([(channels, 4 * channels)])
-        for frame in 0..<4 {
-            for channel in 0..<channels {
-                list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * channels + channel] = channel == channels - 1 ? Float(channels) : 0
-            }
-        }
-        ring.push(list.base, layout: layout, frames: 4, stamp: AudioTimeStamp())
+    /// Channels that carry one signal, as a stereo microphone's do, are heard as it.
+    @Test func channelsCarryingOneSignalAreHeardAsIt() {
+        let ring = SliceRing(InputLayout(buffers: [2], sampleRate: 48_000), frames: 8, entries: 4)
+        Self.push(ring, frames: 3) { _, frame in Float(frame + 1) / 4 }
+        #expect(Self.popped(ring, frames: 8) == [0.25, 0.5, 0.75])
+    }
+
+    /// Digital silence on every channel is heard as silence.
+    @Test func silenceOnEveryChannelIsHeardAsSilence() {
+        let ring = SliceRing(InputLayout(buffers: [4], sampleRate: 48_000), frames: 8, entries: 4)
+        Self.push(ring, frames: 4) { _, _ in 0 }
+        #expect(Self.popped(ring, frames: 8) == [0, 0, 0, 0])
+    }
+
+    /// A voice that moves from one channel to another fades across the render it moved in, from
+    /// the channel it left to the one it reached, rather than stepping at the render's edge.
+    @Test func aVoiceThatMovesChannelFadesAcrossTheRender() {
+        let ring = SliceRing(InputLayout(buffers: [1, 1], sampleRate: 48_000), frames: 8, entries: 4)
+        Self.push(ring, frames: 4) { channel, _ in channel == 0 ? 1 : 0 }
         #expect(Self.popped(ring, frames: 8) == [1, 1, 1, 1])
-        _ = try AudioClip.Converter(from: try #require(SliceRing.format(sampleRate: layout.sampleRate)))
+        Self.push(ring, frames: 4) { channel, _ in channel == 1 ? 1 : 0 }
+        let faded = Self.popped(ring, frames: 8)
+        for (sample, expected) in zip(faded, [0, 0.25, 0.5, 0.75] as [Float]) {
+            #expect(abs(sample - expected) < 1e-6, "\(faded)")
+        }
+    }
+
+    /// A device of any channel count is heard at the voice's level once converted, an audio
+    /// interface or a 16-channel loopback with the voice on its last channel included: what it
+    /// pops as is a shape the converter reads, and the converter hands back the voice rather than
+    /// silence or a share of it.
+    @Test(arguments: [1, 2, 3, 4, 16])
+    func everyChannelCountIsHeardAtTheVoicesLevel(channels: Int) throws {
+        let layout = InputLayout(buffers: [channels], sampleRate: 48_000)
+        let ring = SliceRing(layout, frames: 4_800, entries: 4)
+        Self.push(ring, frames: 4_800) { channel, _ in channel == channels - 1 ? 0.5 : 0 }
+        let popped = AVAudioPCMBuffer(pcmFormat: try #require(SliceRing.format(sampleRate: layout.sampleRate)), frameCapacity: 4_800)!
+        _ = ring.pop(into: popped)
+        let converted = try AudioClip.Converter(from: popped.format).convert(popped)
+        // Past the resampler's onset, where a step from nothing rings.
+        let settled = converted.dropFirst(converted.count / 2)
+        #expect(settled.allSatisfy { abs($0 - 0.5) < 0.01 }, "\(settled.min() ?? 0)...\(settled.max() ?? 0)")
     }
 
     // MARK: what a fault means for the input

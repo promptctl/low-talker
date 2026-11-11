@@ -28,7 +28,6 @@ final class SliceDelivery: @unchecked Sendable {
     nonisolated(unsafe) private let popped: AVAudioPCMBuffer
     private let appending: @Sendable ([Float], HostTime) -> Void
     private let onFailure: @Sendable (any Error) -> Void
-    private let layout: InputLayout
     /// The most frames one slice can carry, which is what the delivery's buffers were sized
     /// for.
     private let capacity: Int
@@ -42,23 +41,20 @@ final class SliceDelivery: @unchecked Sendable {
     /// How many of the ring's drops have been reported. The delivery thread's alone.
     nonisolated(unsafe) private var reportedDrops = 0
 
-    /// Starts the thread. `slice` is the most frames one slice can carry; `converter` is the
-    /// delivery's until `finish()` returns.
+    /// Starts the thread, delivering renders of the ring's layout. `slice` is the most frames
+    /// one slice can carry; `converter` is the delivery's until `finish()` returns, and its
+    /// source is the format each slice is popped in.
     init(
         _ ring: SliceRing,
-        layout: InputLayout,
         slice: Int,
         converter: AudioClip.Converter,
         appending: @escaping @Sendable ([Float], HostTime) -> Void,
         onFailure: @escaping @Sendable (any Error) -> Void
     ) throws {
-        guard let format = SliceRing.format(sampleRate: layout.sampleRate),
-              let popped = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(slice))
-        else {
+        guard let popped = AVAudioPCMBuffer(pcmFormat: converter.source, frameCapacity: AVAudioFrameCount(slice)) else {
             throw AudioClipError.bufferAllocationFailed
         }
         self.ring = ring
-        self.layout = layout
         self.capacity = slice
         self.popped = popped
         self.converter = converter
@@ -79,7 +75,7 @@ final class SliceDelivery: @unchecked Sendable {
     /// which is not a shape fault.
     func deliver(_ list: UnsafePointer<AudioBufferList>, stamp: AudioTimeStamp) {
         guard !faulted else { return }
-        switch layout.verdict(of: list, capacity: capacity) {
+        switch ring.layout.verdict(of: list, capacity: capacity) {
         case .empty:
             return
         case .overlong(let frames):
@@ -88,7 +84,7 @@ final class SliceDelivery: @unchecked Sendable {
             faulted = ring.push(matched ? .inputShapeChanged(mismatch) : .shapeNeverMatched(mismatch))
         case .frames(let frames):
             matched = true
-            ring.push(list, layout: layout, frames: frames, stamp: stamp)
+            ring.push(list, frames: frames, stamp: stamp)
         }
         doorbell.signal()
     }

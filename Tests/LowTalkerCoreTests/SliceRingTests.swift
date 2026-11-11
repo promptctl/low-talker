@@ -35,7 +35,7 @@ import Testing
         let buffer = slice(from: first, frames: frames)
         // The list points into the buffer, which ARC may release after its last use.
         withExtendedLifetime(buffer) {
-            ring.push(buffer.audioBufferList, layout: mono, frames: frames, stamp: stamp(ticks))
+            ring.push(buffer.audioBufferList, frames: frames, stamp: stamp(ticks))
         }
     }
 
@@ -56,7 +56,7 @@ import Testing
     /// Slices come out in the order they went in, each with its own frames and stamp, and
     /// the frames that wrap past the end of the ring come out whole.
     @Test func slicesPopInOrderAcrossTheWrap() throws {
-        let ring = SliceRing(channels: 1, frames: 100, entries: 4)
+        let ring = SliceRing(SliceRingTests.mono, frames: 100, entries: 4)
         let popped = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: 100)!
         var first = 0
         for round in 0..<5 {
@@ -76,7 +76,7 @@ import Testing
     /// A push that finds no room drops its slice and counts it, and the slices already in the
     /// ring are untouched - by a full ring of frames, and by a full ring of entries.
     @Test func aFullRingDropsAndCounts() throws {
-        let ring = SliceRing(channels: 1, frames: 100, entries: 2)
+        let ring = SliceRing(SliceRingTests.mono, frames: 100, entries: 2)
         let popped = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: 100)!
         Self.push(ring, from: 0, frames: 60, at: 1)
         Self.push(ring, from: 60, frames: 60, at: 2)  // 120 frames will not fit in 100.
@@ -96,7 +96,7 @@ import Testing
 
     /// A fault takes its place in the order the IO thread met it.
     @Test func faultsKeepTheirPlace() throws {
-        let ring = SliceRing(channels: 1, frames: 100, entries: 4)
+        let ring = SliceRing(SliceRingTests.mono, frames: 100, entries: 4)
         let popped = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: 100)!
         Self.push(ring, from: 0, frames: 10, at: 1)
         ring.push(.overlongSlice(frames: 200, capacity: 100))
@@ -113,10 +113,9 @@ import Testing
         let appended = Mutex<[([Float], HostTime)]>([])
         let failures = Mutex<[String]>([])
 
-        func delivery(_ ring: SliceRing, slice: Int, layout: InputLayout = SliceRingTests.mono) throws -> SliceDelivery {
+        func delivery(_ ring: SliceRing, slice: Int) throws -> SliceDelivery {
             try SliceDelivery(
                 ring,
-                layout: layout,
                 slice: slice,
                 converter: AudioClip.Converter(from: SliceRingTests.format),
                 appending: { samples, time in self.appended.withLock { $0.append((samples, time)) } },
@@ -129,7 +128,7 @@ import Testing
     /// their stamps, and `finish` returns only once the last of them has been.
     @Test func deliveryHandsOverEverySliceBeforeFinishing() throws {
         let collected = Collected()
-        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 16_000, entries: 64), slice: 160)
+        let delivery = try collected.delivery(SliceRing(SliceRingTests.mono, frames: 16_000, entries: 64), slice: 160)
         let produced = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInteractive).async {
             for index in 0..<50 {
@@ -151,7 +150,7 @@ import Testing
     /// whatever follows: replacing its input would read the same properties and mismatch again.
     @Test func aShapeThatNeverMatchedIsReportedOnceAsThat() throws {
         let collected = Collected()
-        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        let delivery = try collected.delivery(SliceRing(SliceRingTests.mono, frames: 1_000, entries: 8), slice: 100)
         let wrong = InputLayoutTests.List([(2, 20)])
         delivery.deliver(wrong.base, stamp: Self.stamp(1))
         delivery.deliver(wrong.base, stamp: Self.stamp(2))
@@ -168,7 +167,7 @@ import Testing
     /// renegotiated under the press, and a replacement is the answer.
     @Test func aShapeThatChangedAfterItMatchedIsReportedOnceAsThat() throws {
         let collected = Collected()
-        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        let delivery = try collected.delivery(SliceRing(SliceRingTests.mono, frames: 1_000, entries: 8), slice: 100)
         Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(1))
         let wrong = InputLayoutTests.List([(2, 20)])
         delivery.deliver(wrong.base, stamp: Self.stamp(2))
@@ -184,7 +183,7 @@ import Testing
     /// push a fault, and ring the delivery thread, on every cycle after it.
     @Test func anOverlongRenderIsReportedOnce() throws {
         let collected = Collected()
-        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        let delivery = try collected.delivery(SliceRing(SliceRingTests.mono, frames: 1_000, entries: 8), slice: 100)
         for index in 0..<5 {
             Self.deliver(delivery, from: 0, frames: 200, at: Self.stamp(UInt64(index + 1)))
         }
@@ -206,8 +205,7 @@ import Testing
         }
         let held = Held()
         let delivery = try SliceDelivery(
-            SliceRing(channels: 1, frames: 1_000, entries: 2),
-            layout: Self.mono,
+            SliceRing(SliceRingTests.mono, frames: 1_000, entries: 2),
             slice: 100,
             converter: AudioClip.Converter(from: Self.format),
             appending: { _, _ in
@@ -242,7 +240,7 @@ import Testing
     /// A cycle of no frames is a device's to deliver and is neither heard nor a fault.
     @Test func aCycleOfNoFramesIsNotAFault() throws {
         let collected = Collected()
-        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 1_000, entries: 8), slice: 100)
+        let delivery = try collected.delivery(SliceRing(SliceRingTests.mono, frames: 1_000, entries: 8), slice: 100)
         let empty = InputLayoutTests.List([(1, 0)])
         delivery.deliver(empty.base, stamp: Self.stamp(1))
         Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(2))
@@ -261,7 +259,7 @@ import Testing
         // A ring of 50 frames under slices of up to 100: a slice of 60 is within what the
         // delivery was sized for and more than the ring can hold, so it is dropped however far
         // the thread has got.
-        let delivery = try collected.delivery(SliceRing(channels: 1, frames: 50, entries: 8), slice: 100)
+        let delivery = try collected.delivery(SliceRing(SliceRingTests.mono, frames: 50, entries: 8), slice: 100)
         Self.deliver(delivery, from: 0, frames: 10, at: Self.stamp(5, valid: false))
         Self.deliver(delivery, from: 0, frames: 60, at: Self.stamp(6))
         // Last: an oversized render fails the press, and nothing after it is delivered.

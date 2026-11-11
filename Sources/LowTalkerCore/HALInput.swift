@@ -102,7 +102,7 @@ final class HALInput: PreparedInput {
         }
     }
 
-    /// A microphone reached: the device's input shape, the format and the converter, and the
+    /// A microphone reached: the device's input shape and the converter, and the
     /// IOProc created against the device, with the device read back as not running. Everything
     /// a press should not have to pay for, and everything that has to be given back.
     ///
@@ -120,9 +120,6 @@ final class HALInput: PreparedInput {
     /// what `Elsewhere` hands back, and the IOProc's own calls are CoreAudio's to serialize.
     private final class Reach: @unchecked Sendable {
         let sink: Sink
-        /// What each press's ring and converter are built in: planar float at the device's
-        /// rate, one channel per channel of the layout.
-        let format: AVAudioFormat
         /// The shape of what the IOProc is handed, read when this was readied.
         let layout: InputLayout
         /// The device this was prepared against. A prepared input is bound to one device, so
@@ -154,7 +151,6 @@ final class HALInput: PreparedInput {
             // double-free one `deinit` is also about to take. [LAW:single-enforcer]
             let layout: InputLayout
             let sink: Sink
-            let format: AVAudioFormat
             let queue = DispatchQueue(label: "ai.promptctl.low-talker.input-io", qos: .userInteractive)
             var created: AudioDeviceIOProcID?
             // Appended one at a time below, and read by the catch, so a second registration that
@@ -163,14 +159,11 @@ final class HALInput: PreparedInput {
             do {
                 layout = try HALInput.layout(of: device)
 
-                // The shape the ring pops each slice in, mixed down to one channel, so the
-                // converter only resamples and nothing here has to know how many channels the
-                // device has or how it lays them out.
-                guard let described = SliceRing.format(sampleRate: layout.sampleRate) else {
+                // The ring mixes every render down to one channel, so the converter only
+                // resamples, whatever the device's channel count.
+                guard let format = SliceRing.format(sampleRate: layout.sampleRate) else {
                     throw AudioClipError.unconvertibleFormat(sampleRate: layout.sampleRate, channels: 1)
                 }
-                format = described
-
                 let built = Sink(converter: try AudioClip.Converter(from: format))
                 try AudioHardwareError.check(
                     AudioDeviceCreateIOProcIDWithBlock(&created, device, queue, built.ioBlock()),
@@ -217,12 +210,11 @@ final class HALInput: PreparedInput {
 
             self.device = device
             self.sink = sink
-            self.format = format
             self.layout = layout
             self.queue = queue
             self.procID = created!
             self.watches = registered
-            input = MicrophoneInput(device: device, name: Result { () throws(AudioHardwareError) in try HALInput.name(of: device) }, sampleRate: format.sampleRate, channels: layout.channels)
+            input = MicrophoneInput(device: device, name: Result { () throws(AudioHardwareError) in try HALInput.name(of: device) }, sampleRate: layout.sampleRate, channels: layout.channels)
         }
 
         /// What a press hands its audio over through: a delivery whose slices are as large as
@@ -257,10 +249,9 @@ final class HALInput: PreparedInput {
                 AudioHardwareError.inputUnavailable
             )
             let slice = Int(range.mMaximum)
-            let frames = max(2 * slice, Int(format.sampleRate * HALInput.backlog))
+            let frames = max(2 * slice, Int(layout.sampleRate * HALInput.backlog))
             return try SliceDelivery(
-                SliceRing(channels: layout.channels, frames: frames, entries: frames / max(Int(range.mMinimum), 1) + 1),
-                layout: layout,
+                SliceRing(layout, frames: frames, entries: frames / max(Int(range.mMinimum), 1) + 1),
                 slice: slice,
                 converter: sink.converter,
                 appending: appending,

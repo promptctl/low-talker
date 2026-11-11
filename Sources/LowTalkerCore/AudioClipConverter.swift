@@ -16,6 +16,8 @@ extension AudioClip {
         /// The most the converter has been seen to ask for at once; a smaller piece
         /// would only mean more asks.
         public static let pieceFrames: AVAudioFrameCount = 4_096
+        /// What it converts from.
+        public var source: AVAudioFormat { converter.inputFormat }
         private let converter: AVAudioConverter
         /// What the converter is handed per ask, in the source format.
         private let piece: AVAudioPCMBuffer
