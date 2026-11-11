@@ -8,7 +8,8 @@ import LowTalkerCore
 /// listening, with what the engine has read of the press so far, then
 /// transcribing, then gone once the press's outcome is reported - unless an insert failed, and
 /// then it says why and holds the words until a cursor takes them, the person places them with
-/// the Insert button below it, or dismisses them with the circle on its corner.
+/// the Insert button below it, or dismisses them with the circle on its corner, which also stops a
+/// press still listening, as Escape does.
 ///
 /// It never takes focus from the app the words are going to. A borderless panel cannot become
 /// key, and a non-activating one is ordered in without activating this app, so a click on the
@@ -29,11 +30,11 @@ final class HUD {
     /// The side of the circle's panel, which is centred on the circle.
     private static let circleSide: CGFloat = 24
 
-    private let dismiss: @MainActor () -> Void
+    private let circleClicked: @MainActor () -> Void
     private let insert: @MainActor () -> Void
 
-    init(dismiss: @escaping @MainActor () -> Void, insert: @escaping @MainActor () -> Void) {
-        self.dismiss = dismiss
+    init(circleClicked: @escaping @MainActor () -> Void, insert: @escaping @MainActor () -> Void) {
+        self.circleClicked = circleClicked
         self.insert = insert
     }
 
@@ -139,14 +140,14 @@ final class HUD {
     private lazy var heardHeight = height(Array(repeating: "…", count: Self.heardLines).joined(separator: "\n"))
 
     private lazy var close: FirstClick = {
-        let close = FirstClick { [unowned self] in dismiss() }
+        let close = FirstClick { [unowned self] in circleClicked() }
         close.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Dismiss")?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
                 .applying(.init(paletteColors: [.white, .darkGray])))
         close.isBordered = false
         close.imagePosition = .imageOnly
-        close.setAccessibilityLabel("Dismiss the held words")
-        close.toolTip = "Dismiss the held words. Bring them back from the \(AppIdentity.displayName) menu."
+        close.setAccessibilityLabel("Dismiss the held words, and cancel a dictation still listening")
+        close.toolTip = "Dismiss the held words. Bring them back from the \(AppIdentity.displayName) menu. A dictation still listening is cancelled, as Escape cancels it, and what it typed is taken back."
         return close
     }()
 
@@ -159,13 +160,20 @@ final class HUD {
         return place
     }()
 
-    /// A key put the panel away, so it stays away whatever the activity says until a press starts.
-    private var dismissedByKey = false
+    /// The person put the panel away, with Escape or the circle, so it stays away whatever the
+    /// activity says until a press starts or they ask for the dismissed words back.
+    private var dismissed = false
 
-    /// Puts the panel away at once, whatever it shows, until the next press starts.
-    func dismissByKey() {
-        dismissedByKey = true
+    /// Puts the panel away at once, whatever it shows, until the next press starts or
+    /// `offerAgain` is called.
+    func dismiss() {
+        dismissed = true
         hide()
+    }
+
+    /// The person asked for the dismissed words back, so the panel shows what is held again.
+    func offerAgain() {
+        dismissed = false
     }
 
     /// `insertable` is whether a loop is listening to insert what is held through, without which
@@ -173,10 +181,10 @@ final class HUD {
     func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
         // A press starts as listening or refused, and either one is new words to show.
         switch activity {
-        case .listening, .refused: dismissedByKey = false
+        case .listening, .refused: dismissed = false
         case .idle, .transcribing: break
         }
-        guard !dismissedByKey else { return hide() }
+        guard !dismissed else { return hide() }
         // A press on its way carries the words a cursor is offered in its own insert, so only a
         // panel with nothing on its way asks for a click, and only for those words: not those
         // that may have landed. Insert is offered once the press is closed, since an ask is

@@ -51,24 +51,6 @@ let server: IMKServer = {
     return server
 }()
 
-/// The app holding Secure Event Input, by name, or nil when nobody holds it.
-///
-/// Read from the window server's session, which names the holder's process rather than only
-/// saying that someone holds it - the name is what the log line needs, since the fix is in
-/// that app's own menu. A holder whose process has no name is still a holder, and is named
-/// by its pid rather than read as none. [LAW:no-silent-failure]
-func secureInputHolder() -> String? {
-    // A session that cannot be read says nothing about secure input, which is not the same
-    // as saying nobody holds it: said by name, and the insert goes ahead, since the client's
-    // own answer is still the account of whether the words landed. [LAW:no-silent-failure]
-    guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else {
-        logger.error("the window server's session could not be read, so whether an app holds secure keyboard entry is unknown")
-        return nil
-    }
-    guard let pid = session["kCGSSessionSecureInputPID"] as? pid_t, pid != 0 else { return nil }
-    return NSRunningApplication(processIdentifier: pid)?.localizedName ?? "process \(pid)"
-}
-
 /// Whether this input method's source is the one in use, read from the text input system.
 /// No current source, or one that names no identifier, is not this one.
 func isTheSelectedSource() -> Bool {
@@ -120,7 +102,6 @@ let insertions = Task.detached { () -> InsertionPort? in
             let placed = committer.insert(request) {
                 FocusedClient.shared.inFront(for: request.destination,
                                              whileInFrontIs: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-                                             secureInputHeldBy: secureInputHolder(),
                                              selected: isTheSelectedSource(),
                                              screens: NSScreen.screens.map(\.frame))
             }

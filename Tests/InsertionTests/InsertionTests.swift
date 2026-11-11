@@ -18,7 +18,6 @@ import Testing
         .refused(.cursorIsInAnotherApp),
         .refused(.dictationIsInAnotherApp),
         .refused(.requestWasNotReadable),
-        .refused(.secureInputIsOn),
         .refused(.senderIsNotThisInstallationsApp),
         .refused(.inputMethodIsBusy),
         .notYetTaken(characters: 5, into: "com.example.editor"),

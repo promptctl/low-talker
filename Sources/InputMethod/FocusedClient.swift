@@ -153,8 +153,7 @@ public final class FocusedClient {
     /// reading, and it is here because committing into a window the person has left is the
     /// one outcome worse than refusing.
     ///
-    /// Which app is in front, which app holds secure input, whether this source is selected
-    /// and where the screens are arrive
+    /// Which app is in front, whether this source is selected and where the screens are arrive
     /// as values rather than being read here, so the whole of this decision is testable
     /// without a window server and the one reading of the workspace happens where the other
     /// effects are. [LAW:effects-at-boundaries]
@@ -163,11 +162,6 @@ public final class FocusedClient {
     /// dictation's first go only to the app those went to, so a person who moved on mid-press
     /// is refused rather than typed into, and told that they moved - whatever the app they
     /// moved to holds, which is not where the words were going anyway.
-    ///
-    /// Then secure input: while any app holds Secure Event Input macOS hands no input method
-    /// a client, and a cursor still held from before it came on is one the text input system
-    /// has stopped routing to - so no commit is attempted and the refusal names the thing to
-    /// fix. [LAW:no-silent-failure]
     ///
     /// Then the input source: with another one selected the text input system hands this
     /// input method no client, so the cursor last held is one it has stopped routing to. The
@@ -179,14 +173,13 @@ public final class FocusedClient {
     /// So the client's own answer is asked, once and only of the one cursor the words would
     /// go to, and the log line names that answer rather than asking again.
     /// [LAW:no-silent-failure] [LAW:one-source-of-truth]
-    public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?,
-                        selected: Bool, screens: [CGRect]) -> InFront {
+    public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, selected: Bool,
+                        screens: [CGRect]) -> InFront {
         func seen(_ field: FieldAnswer?, _ cursor: Result<Client, Refusal>) -> InFront {
-            InFront(frontmost: frontmost, secureInputHolder: holder, selected: selected, cursorApplication: self.focus?.application,
+            InFront(frontmost: frontmost, selected: selected, cursorApplication: self.focus?.application,
                     field: field, screens: screens, cursor: cursor)
         }
         guard destination.admits(frontmost) else { return seen(nil, .failure(.dictationIsInAnotherApp)) }
-        guard holder == nil else { return seen(nil, .failure(.secureInputIsOn)) }
         guard selected else { return seen(nil, .failure(.inputSourceIsNotSelected)) }
         guard let focus else { return seen(nil, .failure(.noTextFieldHasFocus)) }
         guard focus.application == frontmost else { return seen(nil, .failure(.cursorIsInAnotherApp)) }
@@ -195,8 +188,7 @@ public final class FocusedClient {
     }
 }
 
-/// What an insert saw on the main actor: the app in front, the app holding secure input,
-/// whether this source was selected, the cursor held, what its client answered about its field, and the decision made from
+/// What an insert saw on the main actor: the app in front, whether this source was selected, the cursor held, what its client answered about its field, and the decision made from
 /// them.
 ///
 /// The app in front is named because the refusal that matters most is the one where it is
@@ -207,7 +199,6 @@ public final class FocusedClient {
 /// caret was too. [LAW:no-silent-failure] [LAW:nothing-unseen]
 public struct InFront: CustomStringConvertible {
     let frontmost: String?
-    let secureInputHolder: String?
     let selected: Bool
     let cursorApplication: String?
     /// Asked only of the cursor the words would go to, so absent for every refusal decided
@@ -220,7 +211,6 @@ public struct InFront: CustomStringConvertible {
         "with \(frontmost ?? "nothing") in front and "
             + (cursorApplication.map { "the cursor in \($0)" } ?? "no cursor")
             + (field.map(said) ?? "")
-            + (secureInputHolder.map { ", secure input held by \($0)" } ?? "")
             + (selected ? "" : ", another input source selected")
     }
 

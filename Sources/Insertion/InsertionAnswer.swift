@@ -135,13 +135,6 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// because that is how an input method from then refuses a request it cannot read, and
     /// the app has to read that refusal as one rather than as an answer it cannot read.
     case requestWasNotReadable = "requestWasNotText"
-    /// Some app holds Secure Event Input - Secure Keyboard Entry in Terminal or iTerm2, or a
-    /// password field - and while it does, macOS switches every input method off. Its own
-    /// reason and not `noTextFieldHasFocus`, because it is fixed somewhere else entirely: not
-    /// by clicking into a text field, which is what that one asks for, but in the app that
-    /// holds it. Measured on 2026-09-22: iTerm2 with Secure Keyboard Entry on greys this
-    /// input method out of the Input menu and it is never handed a client.
-    case secureInputIsOn
     /// Another input source is selected, so the text input system hands this input method
     /// no client to type into. Its own reason and not `noTextFieldHasFocus`, because the fix
     /// is the Input menu and not a click into a field, and because selecting this source
@@ -170,7 +163,6 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
         case .cursorIsInAnotherApp: "WARNING: The cursor is in an app that is not in front. Your dictation was not inserted."
         case .dictationIsInAnotherApp: "WARNING: You moved to another app while dictating."
         case .requestWasNotReadable: "WARNING: The input method was asked something it could not read. Nothing was inserted."
-        case .secureInputIsOn: "WARNING: An app has secure keyboard entry on, and macOS turns input methods off while it does. Your dictation was not inserted."
         case .inputSourceIsNotSelected:
             "WARNING: \(AppIdentity.displayName) is not the selected input source, so it cannot type. Your dictation was not inserted; select \(AppIdentity.displayName) in the Input menu and it is offered again."
         case .senderIsNotThisInstallationsApp:
