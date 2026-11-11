@@ -69,8 +69,8 @@ public final class WordBox {
     /// The person put the dictation away, with Escape or the circle: the press the box shows,
     /// open or on its way, is cancelled through `steering`, the held words no cursor has taken
     /// are let go, and the box is put away until a press opens or the dismissed words are
-    /// brought back. The words the press already
-    /// put at the cursor are taken back by the press's own path.
+    /// brought back. The words the press already put at the cursor are taken back by the press's
+    /// own path.
     /// [LAW:single-enforcer] One dismissal, whichever way it was asked for, so the circle cannot
     /// let go of the words and leave the microphone open. `hold` is handed in because the hold
     /// shows the box from its own start, before a box built over it could be. Dismissed first,

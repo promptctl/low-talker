@@ -67,11 +67,11 @@ public struct KeySteering: Sendable {
     /// never that and the press before it.
     @MainActor public func escape() {
         let steered = hotkey.steer(.cancel)
-        let onTheirWay = switch steered {
+        let pastTheDetector = switch steered {
         case .ended, .chordDown: 0
         case .nothingOpen: dictation.cancel()
         }
-        Self.log.debug("escape: \(String(describing: steered), privacy: .public), \(onTheirWay) presses on their way cancelled")
+        Self.log.debug("escape: \(String(describing: steered), privacy: .public), \(pastTheDetector) presses past the detector cancelled")
     }
 
     /// [LAW:no-silent-failure] An answer the kernel would not take is said, so a Return the input

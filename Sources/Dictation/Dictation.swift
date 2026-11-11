@@ -172,7 +172,7 @@ public final class Dictation {
         enum Phase {
             case open
             /// The key is down and its audio already lacks speech, so it commits nothing more. A
-            /// loss never heals, so a press that has one never ends released.
+            /// loss never heals (`AudioCapture.missing`), so a press that has one never ends released.
             case lost
             case ended(Ending)
 
@@ -389,19 +389,25 @@ public final class Dictation {
         }
 
         /// The person threw the press away with Escape, whether its key is down or it is on its
-        /// way: it commits nothing more, and whatever reads its ending next reads cancelled.
-        func cancel() {
-            enter { _ in .ended(.cancelled) }
+        /// way: it commits nothing more, and whatever reads its ending next reads cancelled. Says
+        /// whether this threw it away, and not an Escape before it.
+        func cancel() -> Bool {
+            switch enter({ _ in .ended(.cancelled) }) {
+            case .ended(.cancelled): false
+            case .open, .lost, .ended: true
+            }
         }
 
         /// Moves the press to the phase `next` makes of the one it is in, in one locked step,
-        /// and ends its commits when it no longer commits.
-        private func enter(_ next: (Phase) -> Phase) {
-            let commits = state.withLock { state in
-                state.phase = next(state.phase)
-                return state.phase.commits
+        /// and ends its commits when it no longer commits. Returns the phase it left.
+        @discardableResult private func enter(_ next: (Phase) -> Phase) -> Phase {
+            let (left, commits) = state.withLock { state in
+                let left = state.phase
+                state.phase = next(left)
+                return (left, state.phase.commits)
             }
             if !commits { wake.finish() }
+            return left
         }
     }
 
@@ -597,17 +603,17 @@ public final class Dictation {
     /// detector holds no press open: the press whose ending is still in delivery, or with none
     /// open every press on its way, which the box shows as one Transcribing. A refused press shows
     /// its refusal, so there is nothing to throw away. What each put at the cursor is taken back,
-    /// and nothing of it is held, by its own path. Says how many presses it threw away.
+    /// and nothing of it is held, by its own path. Says how many presses it threw away that no
+    /// Escape had before.
     /// [LAW:one-source-of-truth] Chosen off `press`, as `activity` is, so an Escape throws away
     /// what the box was showing and nothing else.
-    public func cancel() -> Int {
+    func cancel() -> Int {
         let shown: [Streaming] = switch press {
         case .down(_, let open): [open.streaming]
         case .refused: []
         case .up, .blocked: unreported
         }
-        for streaming in shown { streaming.cancel() }
-        return shown.count
+        return shown.map { $0.cancel() }.filter { $0 }.count
     }
 
     /// Tells `showing` the activity when it differs from what it last heard. Every change

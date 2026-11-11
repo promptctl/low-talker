@@ -274,15 +274,16 @@ private struct BadBuffer: Error {}
     }
 
     /// An Escape that reaches the loop before the key-up it follows is delivered still cancels the
-    /// press: the key-up's release does not undo it.
+    /// press: the detector has let it go, so the loop throws it away, and the key-up's release does
+    /// not undo it.
     @Test(.timeLimit(.minutes(1))) func aPressCancelledBeforeItsReleaseIsDeliveredStaysCancelled() async throws {
         let loop = try await Loop()
         loop.chord(.down, atMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
 
-        #expect(loop.rig.dictation.cancel() == 1)
         loop.chord(.up, atMilliseconds: 400)
+        loop.escapeTheBox()
         await loop.delivered()
 
         _ = try #require(await loop.rig.report().cancelled)
