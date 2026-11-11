@@ -36,16 +36,6 @@ public nonisolated struct SteeringDecision: Equatable, Sendable, CustomStringCon
     }
 }
 
-/// The questions a held key asks the app, as the gate asks them: `Asker` is the real one, a test's
-/// is a fake with no port and no app. [LAW:decomposition]
-public nonisolated protocol SteeringAsking: Sendable {
-    func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
-    func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
-    func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered>
-}
-
-extension Asker: SteeringAsking {}
-
 /// Holds a Return in `didCommand(by:)` while the app is asked what it means for the dictation, and keeps an
 /// Escape while the app's word box is open.
 ///
@@ -106,13 +96,13 @@ public nonisolated final class SteeringGate: Sendable {
     public struct Unconnected: SteeringAsking {
         public init() {}
         public func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> {
-            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+            .failure(.unconnected)
         }
         public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> {
-            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+            .failure(.unconnected)
         }
         public func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> {
-            .failure(.nobodyIsListening(port: "no app has been connected yet"))
+            .failure(.unconnected)
         }
     }
 
@@ -166,7 +156,10 @@ public nonisolated final class SteeringGate: Sendable {
     /// Whether an app that is not there, which is how an app that is not running looks from here
     /// and is as ordinary as a key typed with it off.
     private static func isAbsence(_ why: NotAnswered) -> Bool {
-        if case .nobodyIsListening = why { true } else { false }
+        switch why {
+        case .wire(.nobodyIsListening), .unconnected: true
+        case .wire, .unverifiable: false
+        }
     }
 
     private static func decide(_ asker: any SteeringAsking, at timestamp: TimeInterval, question: Duration, ceiling: Duration) -> SteeringDecision {

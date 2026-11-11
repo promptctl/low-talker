@@ -50,7 +50,7 @@ import Testing
     @Test func nobodyListeningIsSaidSo() {
         let name = aPortNobodyElseUses()
         let asker = Asker(portName: name, answerer: .success(.adHoc(cdhash: "00")))
-        #expect(asker.owed(at: 1, within: Self.bound) == .failure(.nobodyIsListening(port: name)))
+        #expect(asker.owed(at: 1, within: Self.bound) == .failure(.wire(.nobodyIsListening(port: name))))
     }
 
     /// A question the app drops is an app that has let go of the Return, and the asker hears that
@@ -64,7 +64,7 @@ import Testing
         // The right is let go of the moment the question's holder is, answered or not.
         _ = await questions.first { @Sendable _ in true }
 
-        #expect(await asking == .failure(.abandoned))
+        #expect(await asking == .failure(.wire(.abandoned(port: name))))
         withExtendedLifetime(port) {}
     }
 
@@ -77,7 +77,7 @@ import Testing
 
         async let asking = onAThreadOfItsOwn { asker.settled(at: 1, within: .milliseconds(100)) }
         let asked = try #require(await questions.first { @Sendable _ in true })
-        #expect(await asking == .failure(.silent(after: .milliseconds(100))))
+        #expect(await asking == .failure(.wire(.noAnswer(port: name, after: .milliseconds(100)))))
 
         #expect(asked.reply.send(Settlement.landed) == .delivered)
         withExtendedLifetime(port) {}
@@ -91,7 +91,7 @@ import Testing
         let (port, arrivals, _) = try hostNoticesAndQuestions(name: name, senders: someoneElse)
         let asker = try Self.asker(name)
 
-        #expect(await onAThreadOfItsOwn { asker.owed(at: 1, within: Self.bound) } == .failure(.abandoned))
+        #expect(await onAThreadOfItsOwn { asker.owed(at: 1, within: Self.bound) } == .failure(.wire(.abandoned(port: name))))
         guard case .told(let said)? = await arrivals.first(where: { @Sendable _ in true }) else {
             Issue.record("the port heard a sender it was not told to hear")
             return
@@ -112,7 +112,7 @@ import Testing
         let asked = try #require(await questions.first { @Sendable _ in true })
         #expect(asked.reply.send(Owing.nothing) == .delivered)
 
-        guard case .failure(.notBelieved) = await asking else {
+        guard case .failure(.wire(.answeredByAStranger)) = await asking else {
             Issue.record("an answer from a stranger was believed")
             return
         }

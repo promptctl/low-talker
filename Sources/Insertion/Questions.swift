@@ -8,7 +8,7 @@ import os
 /// answer to its first question, which both keys ask. [LAW:types-are-the-program] Two values and
 /// no third: an app that said nothing has admitted nothing, and that is the asker's to read, not
 /// a case here.
-public enum Owing: String, Codable, Sendable {
+public enum Owing: String, Codable, Sendable, CaseIterable {
     /// No press is open and no word is on its way to a cursor.
     case nothing
     /// A press is open, or its words are not all acknowledged yet.
@@ -17,14 +17,14 @@ public enum Owing: String, Codable, Sendable {
 
 /// How a debt the app admitted to ended, the answer to the second question: every insert it
 /// had accepted before the Return is acknowledged, or the words did not all reach a cursor.
-public enum Settlement: String, Codable, Sendable {
+public enum Settlement: String, Codable, Sendable, CaseIterable {
     case landed
     case notLanded
 }
 
 /// Whether the app's word box is open: the answer to whether an Escape is the app's to cancel with.
 /// [LAW:types-are-the-program] Two values: the box is open, or it is not.
-public enum PanelState: String, Codable, Sendable {
+public enum PanelState: String, Codable, Sendable, CaseIterable {
     case shut
     case shown
 }
@@ -88,32 +88,29 @@ public final class Reply: Answering {
 /// Why a question came back with no answer from this installation's app. Each is a fact the
 /// asker can act on; none is an answer. [LAW:types-are-the-program]
 public enum NotAnswered: Error, Equatable, Sendable, CustomStringConvertible {
-    /// No app is listening on the name: the app is not running.
-    case nobodyIsListening(port: String)
+    /// The wire did not carry the question and its answer, failing it as it fails an insert.
+    case wire(WireFailure)
     /// This process cannot say who the app's signature must be, so no answer could be
-    /// believed.
+    /// believed, and nothing was asked.
     case unverifiable(PeerIdentity.Unreadable)
-    /// Nothing arrived within the bound, whether the question went unheard or the answer
-    /// was never made.
-    case silent(after: Duration)
-    /// The app dropped the question: it quit, or let go of the right to answer.
-    case abandoned
-    /// Someone answered who is not this installation's app.
-    case notBelieved(PeerIdentity.NotAdmitted)
-    case notReadable(bytes: Int)
-    case failed(port: String, status: kern_return_t)
+    /// No app has been connected to ask yet, so nothing was asked.
+    case unconnected
 
     public var description: String {
         switch self {
-        case .nobodyIsListening(let port): "nothing is listening on \(port)"
+        case .wire(let failure): "\(failure)"
         case .unverifiable(let why): "no answer can be believed, because this process cannot say who the app is: \(why)"
-        case .silent(let bound): "no answer came within \(bound)"
-        case .abandoned: "the app dropped the question unanswered"
-        case .notBelieved(let why): "an answer came from someone who is not this installation's app: \(why)"
-        case .notReadable(let bytes): "an answer of \(bytes) bytes is not one this input method knows"
-        case let .failed(port, status): "a question could not be asked on \(port): \(Mach.describe(status))"
+        case .unconnected: "no app has been connected yet"
         }
     }
+}
+
+/// The questions a held key asks the app: `Asker` is the real one, `FakeApp` the one a test asks,
+/// and `QuestionsContract` holds the two to the same answers. [LAW:decomposition]
+public protocol SteeringAsking: Sendable {
+    func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
+    func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
+    func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered>
 }
 
 /// The input method's end of the questions: one round trip to the app per question, answered
@@ -128,7 +125,7 @@ public enum NotAnswered: Error, Equatable, Sendable, CustomStringConvertible {
 /// The answerer is checked before its bytes are read, as the app checks the input method: a
 /// name anyone can compute is a name anyone can register first, and a process holding it could
 /// otherwise make every Return typed anywhere wait. [LAW:single-enforcer]
-public struct Asker: Sendable {
+public struct Asker: SteeringAsking {
     private let portName: String
     private let answerer: Result<PeerIdentity, PeerIdentity.Unreadable>
 
@@ -161,32 +158,10 @@ public struct Asker: Sendable {
     private func ask<Answer>(_ id: mach_msg_id_t, _ payload: Data, within bound: Duration, read: (Data) -> Answer?) -> Result<Answer, NotAnswered> {
         let answerer: PeerIdentity
         do throws(PeerIdentity.Unreadable) { answerer = try self.answerer.get() } catch { return .failure(.unverifiable(error)) }
-        var remote = mach_port_t()
-        guard lt_bootstrap_look_up(portName, &remote) == KERN_SUCCESS else { return .failure(.nobodyIsListening(port: portName)) }
-        defer { mach_port_deallocate(mach_task_self_, remote) }
-        let reply: ReceiveRight
-        do throws(ReceiveRight.NotAllocated) { reply = try ReceiveRight(sendable: false) } catch { return .failure(.failed(port: portName, status: error.status)) }
-        let sent = Mach.send(
-            payload, id: id, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
-            replyTo: reply.port, timeout: bound)
-        switch sent {
-        case MACH_MSG_SUCCESS: break
-        case MACH_SEND_TIMED_OUT: return .failure(.silent(after: bound))
-        case MACH_SEND_INVALID_DEST: return .failure(.nobodyIsListening(port: portName))
-        default: return .failure(.failed(port: portName, status: sent))
-        }
-        let received: Mach.Received
-        switch Mach.receive(on: reply.port, timeout: bound) {
-        case .received(let arrived): received = arrived
-        case .failed(MACH_RCV_TIMED_OUT): return .failure(.silent(after: bound))
-        case .failed(let status): return .failure(.failed(port: portName, status: status))
-        }
-        received.discardReply()
-        guard received.id != Mach.answerAbandoned else { return .failure(.abandoned) }
-        do throws(PeerIdentity.NotAdmitted) { try answerer.admits(received.sender) } catch { return .failure(.notBelieved(error)) }
-        guard let payload = received.payload, let answer = read(payload) else {
-            return .failure(.notReadable(bytes: received.payload?.count ?? 0))
-        }
-        return .success(answer)
+        do throws(WireFailure) {
+            let said = try Exchange(portName: portName, answerer: answerer).roundTrip(payload, id: id, within: bound)
+            guard let answer = read(said) else { throw .notReadable(port: portName, bytes: said.count) }
+            return .success(answer)
+        } catch { return .failure(.wire(error)) }
     }
 }

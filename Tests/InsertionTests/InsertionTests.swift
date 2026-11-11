@@ -382,7 +382,7 @@ private let anEditor = "com.example.editor"
         let us = try OwnProcess.identity()
         let elsewhere = PeerIdentity.adHoc(cdhash: String(repeating: "0", count: 40))
         let asking = InputMethodInserter(portName: name, timeout: aBudgetTheRunnerCannotSpend, answerer: .success(elsewhere))
-        await #expect(throws: InsertFailure.unreachable(.answeredByAStranger(port: name, pid: getpid(), because: .someoneElse(us), required: elsewhere, words: .notSent))) {
+        await #expect(throws: InsertFailure.unreachable(Unreachable(.answeredByAStranger(port: name, pid: getpid(), because: .someoneElse(us), required: elsewhere), at: .greeting))) {
             try await asking.insert("hello", into: .cursorInFront)
         }
         #expect(seen.text == nil)
@@ -481,9 +481,26 @@ private let anEditor = "com.example.editor"
 /// `answeredByAStranger`, which is a question of who answered and is held with the others
 /// like it, in `SenderTests`.
 @Suite struct UnreachableTests {
+    /// The words may be at the cursor only when the words message reached the far end's queue: a
+    /// greeting's failure sent none, and a words message the kernel never queued sent none either.
+    @Test(arguments: [
+        (WireFailure.nobodyIsListening(port: "p"), Unreachable.Step.words, Words.notSent),
+        (.notTaken(port: "p", after: .seconds(1)), .words, .notSent),
+        (.failedToSend(port: "p", status: KERN_FAILURE), .words, .notSent),
+        (.noAnswer(port: "p", after: .seconds(1)), .words, .mayHaveLanded),
+        (.abandoned(port: "p"), .words, .mayHaveLanded),
+        (.failedToReceive(port: "p", status: KERN_FAILURE), .words, .mayHaveLanded),
+        (.notReadable(port: "p", bytes: 3), .words, .mayHaveLanded),
+        (.noAnswer(port: "p", after: .seconds(1)), .greeting, .notSent),
+        (.abandoned(port: "p"), .greeting, .notSent),
+    ])
+    func theWordsMayHaveLandedOnlyOnceTheWordsWereQueued(wire: WireFailure, step: Unreachable.Step, words: Words) {
+        #expect(Unreachable(wire, at: step).words == words)
+    }
+
     @Test func nothingListeningIsSaidByName() async {
         let name = aPortNobodyElseUses()
-        await #expect(throws: InsertFailure.unreachable(.nothingIsListening(port: name))) {
+        await #expect(throws: InsertFailure.unreachable(Unreachable(.nobodyIsListening(port: name), at: .greeting))) {
             try await inserter(name, timeout: .seconds(1)).insert("hello", into: .cursorInFront)
         }
     }
@@ -523,7 +540,7 @@ private let anEditor = "com.example.editor"
         }
         #expect(filled, "the queue behind the port never filled, so no send timeout can be asked for")
 
-        await #expect(throws: InsertFailure.unreachable(.requestWasNotTaken(port: name, after: budget / 4))) {
+        await #expect(throws: InsertFailure.unreachable(Unreachable(.notTaken(port: name, after: budget / 4), at: .greeting))) {
             try await inserter(name, timeout: budget).insert("hello", into: .cursorInFront)
         }
         withExtendedLifetime(port) {}
@@ -577,7 +594,7 @@ private let anEditor = "com.example.editor"
         // otherwise fail it in the greeting. The five seconds this case does spend are the
         // last receive, which is the wait under test.
         let timeout = Duration.seconds(20)
-        await #expect(throws: InsertFailure.unreachable(.answerDidNotArrive(port: name, after: timeout / 4))) {
+        await #expect(throws: InsertFailure.unreachable(Unreachable(.noAnswer(port: name, after: timeout / 4), at: .words))) {
             try await inserter(name, timeout: timeout).insert("hello", into: .cursorInFront)
         }
         withExtendedLifetime(port) {}
@@ -596,7 +613,7 @@ private let anEditor = "com.example.editor"
         }
 
         let timeout = Duration.seconds(4)
-        await #expect(throws: InsertFailure.unreachable(.didNotSayWhoItIs(port: name, after: timeout / 4))) {
+        await #expect(throws: InsertFailure.unreachable(Unreachable(.noAnswer(port: name, after: timeout / 4), at: .greeting))) {
             try await inserter(name, timeout: timeout).insert("hello", into: .cursorInFront)
         }
         withExtendedLifetime(port) {}
@@ -615,7 +632,7 @@ private let anEditor = "com.example.editor"
             words.discardReply()
         }.start()
 
-        await #expect(throws: InsertFailure.unreachable(.answerWasAbandoned(port: name))) {
+        await #expect(throws: InsertFailure.unreachable(Unreachable(.abandoned(port: name), at: .words))) {
             try await inserter(name).insert("hello", into: .cursorInFront)
         }
         withExtendedLifetime(right) {}
@@ -625,14 +642,14 @@ private let anEditor = "com.example.editor"
     /// only thing that fixes it. Never mistaken for a refusal: a refusal is a fact about
     /// the cursor, and this is a fact about the build. Said with where the words were: an
     /// unreadable greeting stopped them, an unreadable answer to them came after they went.
-    @Test(arguments: [(Wire.greeting, Words.notSent), (Wire.insert, Words.mayHaveLanded)])
-    func anAnswerNobodyCanReadIsSaidByName(garbled: mach_msg_id_t, words: Words) async throws {
+    @Test(arguments: [(Wire.greeting, Unreachable.Step.greeting), (Wire.insert, .words)])
+    func anAnswerNobodyCanReadIsSaidByName(garbled: mach_msg_id_t, step: Unreachable.Step) async throws {
         let name = aPortNobodyElseUses()
         let port = try InsertionPort(portName: name, queue: DispatchQueue(label: name), told: { _ in }) {
             $0.id == garbled ? Data("nonsense".utf8) : Wire.said(aBuild)
         }
 
-        await #expect(throws: InsertFailure.unreachable(.answerWasNotReadable(port: name, bytes: 8, words: words))) {
+        await #expect(throws: InsertFailure.unreachable(Unreachable(.notReadable(port: name, bytes: 8), at: step))) {
             try await inserter(name).insert("hello", into: .cursorInFront)
         }
         withExtendedLifetime(port) {}

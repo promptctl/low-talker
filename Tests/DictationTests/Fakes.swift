@@ -3,6 +3,7 @@ import Dictation
 import Dispatch
 import Grants
 import Insertion
+import InsertionFakes
 import LowTalkerCore
 import Synchronization
 import TestProbes
@@ -203,105 +204,5 @@ final class FakeTranscriber: Transcriber {
         heard.withLock { $0.append(clip) }
         moved()
         return Transcription(transcript: try await answer(clip), quiet: quiet)
-    }
-}
-
-/// An input method that records every text it put at the cursor, answers that it reached
-/// the app it is told, refuses an insert bound to another app as the real one does, and
-/// refuses or holds an insert when a test says so. One fake for every
-/// behavior, since each is a value. [LAW:composability]
-///
-/// Asked on a thread of the executor's choosing: `Inserter`'s awaited overload puts the
-/// blocking call on a thread of its own, which is also what lets a held insert block here
-/// without holding the main actor.
-final class FakeInputMethod: Inserter, Sendable {
-    private struct State {
-        var inserted: [String] = []
-        var into = "com.apple.TextEdit"
-        var refusal: InsertFailure?
-        var gate: DispatchSemaphore?
-        var holding = 0
-        var asked = 0
-        /// What the app's document holds: every insert's text in order, less the text a take-back
-        /// replaced, so what a cancel leaves in the field is read off it.
-        var field = ""
-        var takeBacks: [String] = []
-        var takeBackRefusal: InsertFailure?
-        /// An insert that fails as the app not answering, whose words landed anyway.
-        var landingDespiteFailure = false
-    }
-
-    private let state = Mutex(State())
-    /// A test's signal, set by the Rig, moved whenever this fake's state changes so a test
-    /// awaits the change instead of polling for it. [LAW:no-ambient-temporal-coupling]
-    private let onChange = Mutex<Changes?>(nil)
-    func noting(_ changes: Changes) { onChange.withLock { $0 = changes } }
-    private func moved() { onChange.withLock { $0 }?.note() }
-
-    /// Every text put at the cursor, in order. A held insert is not in it until it is let go.
-    var inserted: [String] { state.withLock { $0.inserted } }
-    /// The document the inserts went into, as it stands: what a cancel is read against.
-    var field: String { state.withLock { $0.field } }
-    /// The texts every request to take words back named, answered or refused.
-    var takeBacks: [String] { state.withLock { $0.takeBacks } }
-    /// Every take-back from now on is refused with `refusal`, or none is when it is nil.
-    func refusingTakeBack(_ refusal: InsertFailure?) { state.withLock { $0.takeBackRefusal = refusal } }
-    /// An insert refused with a failure that may have landed lands in the document anyway, which is
-    /// what the failure means: the words are somewhere nobody was told.
-    func landingDespiteFailure(_ lands: Bool = true) { state.withLock { $0.landingDespiteFailure = lands } }
-    /// How many inserts are held at the gate now.
-    var holding: Int { state.withLock { $0.holding } }
-    /// How many inserts it was asked for, answered or refused.
-    var asked: Int { state.withLock { $0.asked } }
-
-    /// The app the next inserts say they reached.
-    func reaching(_ app: BundleID) { state.withLock { $0.into = app.rawValue } }
-    /// Every insert from now on is refused with `refusal`, or none is when it is nil.
-    func refusing(_ refusal: InsertFailure?) { state.withLock { $0.refusal = refusal } }
-    /// Every insert from now on waits until `letGo`, the way a real one waits for the app to
-    /// answer - held at a gate rather than for a duration. [LAW:no-ambient-temporal-coupling]
-    func hold() { state.withLock { $0.gate = DispatchSemaphore(value: 0) } }
-    /// Lets the held insert through, and holds none after it.
-    func letGo() {
-        let gate = state.withLock { state in
-            defer { state.gate = nil }
-            return state.gate
-        }
-        gate?.signal()
-    }
-
-    func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
-        // Every exit - the text landing, a refusal thrown, a take-back - moves the signal, so a
-        // test awaits the insert resolving. The hold below moves it separately, before it blocks.
-        defer { moved() }
-        let (text, destination) = (request.text, request.destination)
-        state.withLock { $0.asked += 1 }
-        if let gate = state.withLock({ $0.gate }) {
-            state.withLock { $0.holding += 1 }
-            moved()
-            gate.wait()
-            state.withLock { $0.holding -= 1 }
-        }
-        return try state.withLock { state throws(InsertFailure) in
-            // A request that replaces text is a take-back: refused unless the document ends in
-            // exactly those words, as the real input method reads the field before it changes it.
-            if !request.replacing.isEmpty {
-                state.takeBacks.append(request.replacing)
-                if let refusal = state.takeBackRefusal { throw refusal }
-                guard destination.admits(state.into) else { throw .refused(.dictationIsInAnotherApp) }
-                guard state.field.utf16.count >= request.replacing.utf16.count,
-                      state.field.utf16.suffix(request.replacing.utf16.count).elementsEqual(request.replacing.utf16) else { throw .refused(.wordsCannotBeTakenBack) }
-                state.field = String(decoding: Array(state.field.utf16.dropLast(request.replacing.utf16.count)), as: UTF16.self)
-                return Inserted(characters: 0, into: state.into)
-            }
-            if let refusal = state.refusal {
-                if state.landingDespiteFailure, refusal.wordsMayHaveLanded { state.field += text }
-                throw refusal
-            }
-            guard destination.admits(state.into) else { throw .refused(.dictationIsInAnotherApp) }
-            state.inserted.append(text)
-            state.field += text
-            return Inserted(characters: text.count, into: state.into)
-        }
     }
 }

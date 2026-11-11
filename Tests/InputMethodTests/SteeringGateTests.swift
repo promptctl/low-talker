@@ -2,6 +2,7 @@ import Foundation
 @testable import InputMethod
 import InputMethodFakes
 import Insertion
+import InsertionFakes
 import os
 import Testing
 
@@ -10,17 +11,6 @@ import Testing
 /// chooses; what is held is the verdict, and for the case that matters most, that the words are
 /// committed before the Return is let through.
 @Suite struct SteeringGateTests {
-    /// The app as the gate asks it, answering each question with what the case gave it.
-    private struct App: SteeringAsking {
-        var owing: @Sendable () -> Result<Owing, NotAnswered> = { .success(.words) }
-        var settling: @Sendable () -> Result<Settlement, NotAnswered> = { .success(.landed) }
-        var panelling: @Sendable () -> Result<PanelState, NotAnswered> = { .success(.shut) }
-
-        func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { owing() }
-        func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { settling() }
-        func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> { panelling() }
-    }
-
     /// A list that a thread other than the test's appends to.
     private final class Log: Sendable {
         private let lines = OSAllocatedUnfairLock(initialState: [String]())
@@ -39,7 +29,7 @@ import Testing
     @MainActor
     @Test func nothingOwedPassesAtOnceAndTheSecondQuestionIsNotAsked() {
         let asked = Log()
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(
             owing: { asked.add("owing"); return .success(.nothing) },
             settling: { asked.add("settled"); return .success(.landed) }))
 
@@ -57,7 +47,7 @@ import Testing
         let turns = MainTurns()
         let committer = Committer(bound: Self.farOff, turns: turns) { _ in }
         let order = Log()
-        let gate = SteeringGate(turns: turns, ceiling: Self.farOff, asking: App(settling: {
+        let gate = SteeringGate(turns: turns, ceiling: Self.farOff, asking: FakeApp(owing: { .success(.words) }, settling: {
             let placed = committer.insert(InsertRequest("the tail", into: .cursorInFront)) { Self.inFront(cursor) }
             order.add("the app was answered \(placed.answer)")
             return .success(.landed)
@@ -75,15 +65,15 @@ import Testing
 
     @MainActor
     @Test func wordsThatDidNotAllLandKeepTheReturn() {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .success(.notLanded) }))
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
         #expect(gate.verdict(at: 1).verdict == .keep)
     }
 
     /// A debt the app admitted and then did not settle is not a debt that was settled.
     @MainActor
-    @Test(arguments: [NotAnswered.silent(after: .seconds(5)), .abandoned, .notReadable(bytes: 3)])
+    @Test(arguments: [NotAnswered.wire(.noAnswer(port: "p", after: .seconds(5))), .wire(.notTaken(port: "p", after: .seconds(5))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 3))])
     func aDebtTheAppAdmittedAndDidNotSettleKeepsTheReturn(why: NotAnswered) {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .failure(why) }))
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(owing: { .success(.words) }, settling: { .failure(why) }))
         #expect(gate.verdict(at: 1).verdict == .keep)
     }
 
@@ -91,10 +81,10 @@ import Testing
     /// reached, or cannot say, has admitted none, and the Return passes as it would with no
     /// LowTalker at all.
     @MainActor
-    @Test(arguments: [NotAnswered.nobodyIsListening(port: "p"), .silent(after: .milliseconds(100)), .abandoned, .notReadable(bytes: 0)])
+    @Test(arguments: [NotAnswered.wire(.nobodyIsListening(port: "p")), .wire(.notTaken(port: "p", after: .milliseconds(100))), .wire(.noAnswer(port: "p", after: .milliseconds(100))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 0))])
     func anAppThatAdmitsNoDebtLetsTheReturnPass(why: NotAnswered) {
         let asked = Log()
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(
             owing: { .failure(why) }, settling: { asked.add("settled"); return .success(.notLanded) }))
 
         #expect(gate.verdict(at: 1).verdict == .pass)
@@ -107,7 +97,7 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func aDebtNotSettledByTheCeilingKeepsTheReturnAtTheCeiling() {
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
-        let gate = SteeringGate(ceiling: .milliseconds(20), asking: App(settling: { release.wait(); return .success(.landed) }))
+        let gate = SteeringGate(ceiling: .milliseconds(20), asking: FakeApp(owing: { .success(.words) }, settling: { release.wait(); return .success(.landed) }))
 
         let started = ContinuousClock.now
         let decided = gate.verdict(at: 1)
@@ -123,14 +113,14 @@ import Testing
         let release = DispatchSemaphore(value: 0)
         let earlierAnswered = DispatchSemaphore(value: 0)
         // Long enough for the second Return's handshake with the first's thread under a loaded suite.
-        let gate = SteeringGate(ceiling: .milliseconds(500), asking: App(settling: {
+        let gate = SteeringGate(ceiling: .milliseconds(500), asking: FakeApp(owing: { .success(.words) }, settling: {
             release.wait()
             defer { earlierAnswered.signal() }
             return .success(.notLanded)
         }))
         #expect(gate.verdict(at: 1).verdict == .keep)
 
-        gate.connect(App(settling: {
+        gate.connect(FakeApp(owing: { .success(.words) }, settling: {
             release.signal()
             earlierAnswered.wait()
             return .success(.landed)
@@ -149,22 +139,22 @@ import Testing
     /// An Escape is kept while the app's word box is open, since the app cancels the press with it.
     @MainActor
     @Test func anEscapeWhileTheBoxIsOpenIsKept() {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shown) }))
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(panelling: { .success(.shown) }))
         #expect(gate.escapeVerdict(at: 1).verdict == .keep)
     }
 
     /// An Escape with the box shut is the app in front's, as typed.
     @MainActor
     @Test func anEscapeWithTheBoxShutPasses() {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shut) }))
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(panelling: { .success(.shut) }))
         #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 
     /// An app that does not say whether its box is open has said nothing, so the Escape passes.
     @MainActor
-    @Test(arguments: [NotAnswered.nobodyIsListening(port: "port"), .silent(after: .milliseconds(100)), .abandoned])
+    @Test(arguments: [NotAnswered.wire(.nobodyIsListening(port: "port")), .wire(.noAnswer(port: "p", after: .milliseconds(100))), .wire(.abandoned(port: "p"))])
     func anEscapeTheAppDoesNotAnswerForPasses(why: NotAnswered) {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .failure(why) }))
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(panelling: { .failure(why) }))
         #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 
