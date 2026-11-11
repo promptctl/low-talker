@@ -122,8 +122,7 @@ let package = Package(
         // `make test` the way App/LowTalker's sources are.
         .target(name: "InputMethod", dependencies: ["Insertion", "Identity", "GrammaticalNumber"], swiftSettings: inputMethodIsolation),
         // The one fake of the input method's text client port, answering as the measured
-        // clients do, and the port's contract stated so it runs against the fake and against a
-        // real client alike. Beside the port and depending only on it; in no product, and never
+        // clients do, and the port's contract it is held to. Beside the port and depending only on it; in no product, and never
         // copied into a bundle. [LAW:one-source-of-truth]
         .target(name: "InputMethodFakes", dependencies: ["InputMethod"], swiftSettings: inputMethodIsolation),
         .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "InputMethodFakes", "Insertion", "Identity", "TestProbes"]),
@@ -169,6 +168,7 @@ let package = Package(
         // insertion-probe it is in no product, and project.yml never copies it into a bundle,
         // so nothing a person installs runs it. [LAW:one-way-deps]
         .executableTarget(name: "model-tool", dependencies: ["ModelInstall", "LowTalkerCore", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
+        .testTarget(name: "ModelToolTests", dependencies: ["model-tool", "ModelInstall", "LowTalkerCore"]),
         .testTarget(
             name: "ModelInstallTests",
             dependencies: [

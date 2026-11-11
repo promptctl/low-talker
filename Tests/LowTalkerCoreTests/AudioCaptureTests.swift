@@ -1423,6 +1423,30 @@ private struct Authorized: MicrophoneAuthority {
         #expect(capture.endSession(next) == .whole(AudioClip(samples: [6, 7])))
     }
 
+    /// The same press under `open`: the key-up moves the held microphone off the fallback to
+    /// the later default, rather than holding one the person stopped choosing.
+    @Test(arguments: UnplugReports.allCases)
+    func anOpenPressCutOverToAFallbackMovesTheHeldMicrophoneToTheLaterDefaultAtTheKeyUp(_ order: UnplugReports) async throws {
+        let hardware = FakeHardware()
+        let capture = AudioCapture(hardware: hardware, startingAt: origin)
+        let session = try await opened(capture, atRest: .open)
+        hardware.engines[0].appending([1, 2], origin)
+
+        try unplugTheDefaultInput(hardware, reportedIn: order)
+        #expect(hardware.engines.count == 2)
+        hardware.engines[1].appending([3, 4], after(2))
+
+        try hardware.changeDefaultInput()
+        #expect(hardware.engines.count == 2)
+        hardware.engines[1].appending([5], after(4))
+        #expect(try capture.endSession(session) == .partial(AudioClip(samples: [1, 2, 3, 4, 5]), lost: loss(interrupted: true)))
+
+        #expect(hardware.engines.count == 3)
+        #expect(hardware.engines[1].disposed)
+        #expect(!hardware.engines[2].disposed)
+        #expect(hardware.engines[2].readying == 3)
+    }
+
     /// With nobody pressing, both reports reach code that acts at once, so neither ordering
     /// can hide behind a key-up: the second report used to replace a held engine already on
     /// the new default, a second swap and a second splice for one unplug.

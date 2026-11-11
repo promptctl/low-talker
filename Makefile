@@ -153,7 +153,6 @@ model-tool:
 	swift build --product model-tool
 	@echo "$(MODEL_TOOL)"
 
-
 # The speech gate replayed over the bench, with transients inserted, talk mixed under it and
 # rooms of every level, reported against master's gate. `gate-replay-baseline` records the
 # tree's rows as that baseline: on master, or as a gate change's last commit, so the committed
