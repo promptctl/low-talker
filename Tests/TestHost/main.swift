@@ -15,7 +15,7 @@ import AppKit
 /// `{"id":n,"hold":"<field>","text":"...","selection":[location,length],"maxLength":m|null}`
 /// gives the field keyboard focus and sets it up; `{"id":n,"read":"<field>"}` touches nothing.
 /// Standard output carries one event per line: `ready` once every page has loaded, naming the
-/// fields; `field`, the field's whole state read from the field (`Events.field`), with
+/// fields and, under `keepsMaxLength`, those a hold may give a maxLength; `field`, the field's whole state read from the field (`Events.field`), with
 /// `"answers": n` once command n has taken effect, exactly once per command, and
 /// `"answers": null` on every change, whatever made it; `active` when the app becomes or stops
 /// being active; `error` before exiting 2. The end of standard input quits it, so it lives as long

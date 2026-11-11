@@ -16,7 +16,9 @@ struct Reading {
 /// Standard output, one JSON object per line: the only thing the host writes there.
 /// [LAW:single-enforcer]
 enum Events {
-    static func ready() { emit(["event": "ready", "fields": Field.allCases.map(\.rawValue)]) }
+    static func ready() {
+        emit(["event": "ready", "fields": Field.allCases.map(\.rawValue), "keepsMaxLength": Field.allCases.filter(\.keepsMaxLength).map(\.rawValue)])
+    }
 
     /// `answering` is the id of the command the reading answers, once that command has taken
     /// effect, or nil for a reading pushed on a change, whatever made the change. Keys reach the

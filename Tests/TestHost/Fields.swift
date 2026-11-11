@@ -92,8 +92,18 @@ final class WebField: NSObject, HostedField, WKNavigationDelegate, WKScriptMessa
         }
     }
 
+    // A page fails before it commits, after, or with the process that draws it: each leaves the
+    // field gone, and the host says so rather than wait on it. [LAW:no-silent-failure]
+    nonisolated func webView(_: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError error: any Error) {
+        MainActor.assumeIsolated { Events.fail("the page of \(field.rawValue) did not load: \(error)") }
+    }
+
     nonisolated func webView(_: WKWebView, didFail _: WKNavigation!, withError error: any Error) {
         MainActor.assumeIsolated { Events.fail("the page of \(field.rawValue) did not load: \(error)") }
+    }
+
+    nonisolated func webViewWebContentProcessDidTerminate(_: WKWebView) {
+        MainActor.assumeIsolated { Events.fail("the web content process of \(field.rawValue) ended") }
     }
 
     nonisolated func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {

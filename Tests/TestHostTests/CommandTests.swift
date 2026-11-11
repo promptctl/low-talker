@@ -24,6 +24,11 @@ struct CommandTests {
     @Test(arguments: [
         (#"{"id":1,"read":"notes"}"#, "names no field"),
         (#"{"read":"input"}"#, "names no id"),
+        (#"{"id":true,"read":"input"}"#, "names no id"),
+        (#"{"id":1,"hold":"input","text":"","selection":[9223372036854775807,1]}"#, "selection"),
+        (#"{"id":1,"hold":"input","text":"a","selection":[1,9223372036854775807]}"#, "selection"),
+        (#"{"id":1,"hold":"input","text":"a","selection":[false,true]}"#, "selection"),
+        (#"{"id":1,"hold":"input","text":"","selection":[0,0],"maxLength":true}"#, "maxLength"),
         (#"{"id":1,"focus":"text-view"}"#, "names no command"),
         (#"{"id":1,"hold":"input","text":"","selection":[0,0],"read":"input"}"#, "names more than one command"),
         (#"{"id":1,"hold":"input","text":"alpha"}"#, "selection"),

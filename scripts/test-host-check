@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Checks the test host on this Mac: for each of its fields, empties it, brings the host to the
 front, types into it with vhid, moves the caret back one, and reads back what the field holds,
-which is what was typed or, with a maxLength of 10 on a web field, as much of it as fits.
+which is what was typed or, with a maxLength of 10 on each field that keeps one, as much of it
+as fits.
 
     scripts/test-host-check [bundle]        (default .build/TestHost.app, from `make test-host`)
 
@@ -18,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from testhost import Host, HostError  # noqa: E402
+from testhost import Host, HostError, NoAnswer  # noqa: E402
 
 TYPED = "alpha bravo"
 
@@ -33,20 +34,21 @@ def main() -> int:
     failed = False
     try:
         with Host(bundle) as host:
-            for name, max_length in [(name, None) for name in host.fields] + [(name, 10) for name in host.fields if name != "text-view"]:
+            for name, max_length in [(name, None) for name in host.fields] + [(name, 10) for name in host.keeps_max_length]:
                 kept = TYPED if max_length is None else TYPED[:max_length]
+                caret = [units(kept) - 1, 0]
                 host.hold(name, "", (0, 0), max_length)
                 host.front()
                 subprocess.run(["vhid", "type", "--into", "test-host", TYPED], check=True, stdout=subprocess.DEVNULL)
-                # The last key moves the caret back one: a state only it makes, so once it is seen
-                # no key is still on its way, whatever the field kept.
+                # The last key moves the caret back one, a state only it makes: once the field
+                # shows it, no key is still on its way. A field that never shows it is judged on
+                # what it holds when the wait runs out.
                 subprocess.run(["vhid", "press", "--into", "test-host", "left"], check=True, stdout=subprocess.DEVNULL)
                 try:
-                    host.change(name, lambda event: event["text"] and event["selection"] == [units(event["text"]) - 1, 0])
-                except HostError as error:
-                    print(f"note {name}: {error} while waiting for the caret to move back")
+                    host.change(name, lambda event: event["text"] == kept and event["selection"] == caret)
+                except NoAnswer as error:
+                    print(f"note {name}: {error} while waiting for {kept!r} with the caret at {caret[0]}")
                 held = host.read(name)
-                caret = [units(kept) - 1, 0]
                 passed = held["text"] == kept and held["selection"] == caret and held["focused"] and held["active"]
                 failed |= not passed
                 print(f"{'pass' if passed else 'fail'} {name}, maxLength {max_length}: holds {held['text']!r}, "
