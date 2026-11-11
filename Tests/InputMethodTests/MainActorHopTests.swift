@@ -1,6 +1,5 @@
 import Foundation
 @testable import InputMethod
-import os
 import TestProbes
 import Testing
 
@@ -20,20 +19,18 @@ import Testing
     }
 
     /// Called from another thread, the body still runs on the main thread, with the argument
-    /// it was handed, before the call returns.
+    /// it was handed, before the call returns with the body's answer.
     @Test(.timeLimit(.minutes(1))) func aCallbackFromAnotherThreadRunsOnTheMainThreadBeforeReturning() async throws {
         let since = Date.now
-        let seen = OSAllocatedUnfairLock<(onMain: Bool, argument: Int)?>(initialState: nil)
-        await withCheckedContinuation { done in
+        let answer = await withCheckedContinuation { done in
             Thread.detachNewThread {
-                onMainActor("MainActorHopTests.offThread", 7) { argument in
-                    seen.withLock { $0 = (Thread.isMainThread, argument) }
-                }
-                done.resume()
+                done.resume(returning: onMainActor("MainActorHopTests.offThread", 7) { argument in
+                    (onMain: Thread.isMainThread, argument: argument)
+                })
             }
         }
-        #expect(seen.withLock { $0?.onMain } == true)
-        #expect(seen.withLock { $0?.argument } == 7)
+        #expect(answer.onMain)
+        #expect(answer.argument == 7)
         let said = try await Self.lines(since: since).filter { $0.hasPrefix("MainActorHopTests.offThread ") }
         #expect(said.count == 1)
         #expect(said.allSatisfy { $0.hasPrefix("MainActorHopTests.offThread reached the main actor from another thread, after waiting ") })
