@@ -1560,7 +1560,9 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold(speaking: [4])
         _ = await rig.report()
         rig.hold.dismiss()
-        #expect(rig.hold.state == HoldState(dismissed: .unplaced(part(" b", "\(Refusal.noTextFieldHasFocus)"))))
+        let latest = HoldState(dismissed: .unplaced(part(" b", "\(Refusal.noTextFieldHasFocus)")))
+        #expect(rig.hold.dismissed == latest.dismissed)
+        #expect(rig.store.state == latest)
     }
 
     /// Words dismissed while an insert carrying them is on its way are kept, as an end of the

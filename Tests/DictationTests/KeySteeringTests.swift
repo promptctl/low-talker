@@ -245,6 +245,95 @@ private struct BadBuffer: Error {}
         #expect(loop.rig.store.kept == nil)
     }
 
+    /// The two ways an Escape reaches the press it throws away: the detector ends one it holds
+    /// open, and the loop hears of it a main-queue turn later, or the loop throws away one on its
+    /// way at once.
+    enum EscapedPress: CaseIterable, Sendable {
+        case latched
+        case released
+    }
+
+    /// A press whose word no cursor took, under a person's earlier dismissal, held by the gate
+    /// `final` waits on. More speech into it confirms a second word.
+    private func pressHoldingItsRefusedWord(_ press: EscapedPress, keeping store: FakeHeldStore, final: Gate) async throws -> Loop {
+        let loop = try await Loop(hearing: FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 5 ? " hello there" : samples.count >= 2 ? " hello" : "")
+        }) { _ in
+            await final.wait()
+            return Transcript(typed: " hello there")
+        }, refusing: .refused(.noTextFieldHasFocus), keeping: store)
+        switch press {
+        case .latched: await loop.latchedPress()
+        case .released: await loop.release(speaking: [1, 2, 3])
+        }
+        await loop.rig.until { loop.rig.hold.held?.allWords.line.contains("hello") == true }
+        return loop
+    }
+
+    /// The case low-dictation-keys-652.fxl exists for: an Escape dismisses what is held before it
+    /// reaches the press it throws away, so when that press's words were all that was held, the
+    /// Escape dismissed nothing, and the person's earlier dismissal is still theirs to bring back.
+    @Test(.timeLimit(.minutes(1)), arguments: EscapedPress.allCases)
+    func anEscapeOverOnlyItsPressWordsLeavesTheEarlierDismissal(_ press: EscapedPress) async throws {
+        let earlier = Held.unplaced(part(" before", "\(Refusal.noTextFieldHasFocus)"))
+        let final = Gate()
+        let loop = try await pressHoldingItsRefusedWord(press, keeping: FakeHeldStore(dismissed: earlier), final: final)
+
+        loop.escapeTheBox()
+        await loop.delivered()
+        final.open()
+
+        let cancelled = try #require(await loop.rig.report().cancelled)
+        #expect(cancelled.forgotten == 1)
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.hold.dismissed == earlier)
+    }
+
+    /// And when the press's held word is in an insert on its way at the Escape: the insert lands,
+    /// the press takes the word back out of the field, and the earlier dismissal is still there.
+    @Test(.timeLimit(.minutes(1)), arguments: EscapedPress.allCases)
+    func anEscapeOverItsPressWordsAnInsertCarriesLeavesTheEarlierDismissal(_ press: EscapedPress) async throws {
+        let earlier = Held.unplaced(part(" before", "\(Refusal.noTextFieldHasFocus)"))
+        let final = Gate()
+        let loop = try await pressHoldingItsRefusedWord(press, keeping: FakeHeldStore(dismissed: earlier), final: final)
+        loop.rig.inputMethod.refusing(nil)
+        loop.rig.inputMethod.hold()
+        switch press {
+        case .latched: loop.rig.speak([4, 5])
+        case .released: final.open()
+        }
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+
+        loop.escapeTheBox()
+        await loop.delivered()
+        loop.rig.inputMethod.letGo()
+        final.open()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.hold.dismissed == earlier)
+        #expect(loop.rig.store.state == HoldState(dismissed: earlier))
+    }
+
+    /// Words held there that the press did not say are dismissed by the Escape, as any dismissal
+    /// does, in place of the earlier one.
+    @Test(.timeLimit(.minutes(1)), arguments: EscapedPress.allCases)
+    func anEscapeDismissesTheWordsItsPressDidNotSay(_ press: EscapedPress) async throws {
+        let earlier = Held.unplaced(part(" before", "\(Refusal.noTextFieldHasFocus)"))
+        let kept = Held.unplaced(part(" kept", "\(Refusal.noTextFieldHasFocus)"))
+        let final = Gate()
+        let loop = try await pressHoldingItsRefusedWord(press, keeping: FakeHeldStore(keeping: kept, dismissed: earlier), final: final)
+
+        loop.escapeTheBox()
+        await loop.delivered()
+        final.open()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.hold.dismissed?.allWords == kept.allWords)
+    }
+
     /// An Escape throws away the press whose key-up is still in delivery, and the box then shows
     /// the press before it, still on its way, as Transcribing: a second Escape throws that one away.
     @Test(.timeLimit(.minutes(1))) func aSecondEscapeThrowsAwayWhatTheFirstLeftShown() async throws {
