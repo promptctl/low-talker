@@ -54,7 +54,7 @@ APP := $(PRODUCTS)/LowTalker.app
 INPUT_METHOD := $(PRODUCTS)/LowTalker Input Method.app
 XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 
-.PHONY: app package install run variants test test-watchdog model-tool sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure
+.PHONY: app package install run variants test test-watchdog model-tool test-host sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure
 
 # Regeneration is unconditional: xcodegen is idempotent and sub-second, and a
 # timestamp rule cannot see removed sources or in-place rewrites of the project.
@@ -150,6 +150,19 @@ MODEL_TOOL := .build/debug/model-tool
 model-tool:
 	swift build --product model-tool
 	@echo "$(MODEL_TOOL)"
+
+# The test host (Tests/TestHost) in a bundle of its own, ad-hoc signed: macOS names a client's
+# app only when the process runs out of a bundle, and the input method takes no cursor from a
+# client that names none. scripts/testhost.py runs it. Prints its path.
+TEST_HOST := .build/TestHost.app
+test-host:
+	swift build --product test-host
+	rm -rf "$(TEST_HOST)"
+	mkdir -p "$(TEST_HOST)/Contents/MacOS"
+	cp "$$(swift build --show-bin-path)/test-host" "$(TEST_HOST)/Contents/MacOS/test-host"
+	cp Tests/TestHost/Info.plist "$(TEST_HOST)/Contents/Info.plist"
+	codesign --force --sign - "$(TEST_HOST)"
+	@echo "$(TEST_HOST)"
 
 # The speech gate replayed over the bench, with transients inserted, talk mixed under it and
 # rooms of every level, reported against master's gate. `gate-replay-baseline` records the
