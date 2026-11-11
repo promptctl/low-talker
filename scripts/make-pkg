@@ -2,7 +2,7 @@
 # Packs an app and the input method built with it into the signed installer package a person
 # installs: the app into /Applications and the input method into /Library/Input Methods.
 #
-#   scripts/make-pkg <path to .app> <path to input method .app> <output directory>
+#   scripts/make-pkg <app> <its .entitlements> <input method> <its .entitlements> <output directory>
 #     # prints <output directory>/<app name>-<offline or network>.pkg
 #
 # A package and not a disk image, and the package and not the app installs the input method,
@@ -17,10 +17,12 @@
 # made. [LAW:one-type-per-behavior] The holder is scripts/developer-id's.
 set -euo pipefail
 
-usage="usage: scripts/make-pkg <path to .app> <path to input method .app> <output directory>"
+usage="usage: scripts/make-pkg <app> <its .entitlements> <input method> <its .entitlements> <output directory>"
 app=${1:?$usage}
-input_method=${2:?$usage}
-out=${3:?$usage}
+app_entitlements=${2:?$usage}
+input_method=${3:?$usage}
+input_method_entitlements=${4:?$usage}
+out=${5:?$usage}
 source "$(dirname "$0")/developer-id"
 identity="Developer ID Installer: $developer_id"
 
@@ -47,9 +49,10 @@ input_method_id=$(plist "$input_method" CFBundleIdentifier)
 [[ $input_method_id == *low-talker.* ]] || fail "$input_method_id does not name low-talker, so no older input method can be told by it"
 family="${input_method_id%%low-talker.*}low-talker."
 # Which build this is, read off the app's signature and never taken as an argument, so the
-# package's name is what the app carries; and no package is made of a bundle that could reach
-# the network or carries a program but its own. All three are scripts/variant's.
-variant=$("$(dirname "$0")/variant" "$app" "$input_method")
+# package's name is what the app carries; and no package is made of a bundle signed with
+# anything but what project.yml declares for it, or carrying a program but its own. All three
+# are scripts/variant's.
+variant=$("$(dirname "$0")/variant" "$app" "$app_entitlements" "$input_method" "$input_method_entitlements")
 echo "make-pkg: $app is the $variant build" >&2
 # Where the two land. InstalledInputMethod.systemDirectory is the app's reading of the second.
 app_path="/Applications/$(basename "$app")"

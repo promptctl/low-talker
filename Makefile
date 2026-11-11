@@ -48,10 +48,12 @@ MODEL_SOURCE := $(HOME)/Library/Application Support/low-talker/hub
 # target below reads them, so a renamed product breaks in one place.
 #
 # The app is built beside its input method, which the scheme builds with it and the package
-# installs apart from it.
+# installs apart from it. Each is signed with the entitlements xcodegen writes for it.
 SCHEME := LowTalker
 APP := $(PRODUCTS)/LowTalker.app
+APP_ENTITLEMENTS := App/Generated/LowTalker.entitlements
 INPUT_METHOD := $(PRODUCTS)/LowTalker Input Method.app
+INPUT_METHOD_ENTITLEMENTS := App/Generated/LowTalker-InputMethod.entitlements
 XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 
 .PHONY: app package install run variants test test-watchdog model-tool test-host sbom check-sbom check-licenses clean signing-identity gate-replay gate-replay-baseline gate-replay-measure
@@ -112,7 +114,7 @@ app: $(BUNDLED_MODEL_STORE) $(if $(SIGNING_IDENTITY),,signing-identity)
 # build included, since the text input system lists an input method only from the standard
 # folders and the app puts nothing there itself. scripts/sign-release builds this same
 # target under the Developer ID identity. [LAW:one-type-per-behavior]
-MAKE_PKG = scripts/make-pkg "$(APP)" "$(INPUT_METHOD)" "$(PRODUCTS)"
+MAKE_PKG = scripts/make-pkg "$(APP)" "$(APP_ENTITLEMENTS)" "$(INPUT_METHOD)" "$(INPUT_METHOD_ENTITLEMENTS)" "$(PRODUCTS)"
 
 package: app
 	$(MAKE_PKG)

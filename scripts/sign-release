@@ -63,8 +63,8 @@ fail() {
 
 # What the notary service refuses, asked of one binary: no Developer ID signature from the
 # team, no Hardened Runtime, or no secure timestamp. The get-task-allow entitlement it also
-# refuses is scripts/variant's, which make-pkg ran first and which refuses every key it does
-# not name. [LAW:single-enforcer]
+# refuses is in no set project.yml declares, and scripts/variant, which make-pkg ran first,
+# refuses a bundle signed with anything but its declared set. [LAW:single-enforcer]
 check() {
   local binary=$1 signature
   signature=$(codesign -dvv "$binary" 2>&1)
