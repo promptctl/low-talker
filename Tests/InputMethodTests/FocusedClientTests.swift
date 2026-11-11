@@ -360,22 +360,58 @@ import Testing
         #expect(told.arrivals == [Self.textEdit, Self.textEdit])
     }
 
-    /// A deactivation removes only its own controller's cursor, in either order: an orphan's late
-    /// deactivation never takes the cursor of the controller that replaced it, and the controller
-    /// that replaced its own cursor removes it when it leaves.
-    @Test func aDeactivationRemovesOnlyItsOwnControllersCursor() throws {
+    /// A deactivation removes only its own controller's cursor, in either order, while both are
+    /// live: an orphan's late deactivation never takes the cursor of the controller that replaced
+    /// it, and the controller that replaced it never takes the orphan's.
+    @Test(arguments: [true, false])
+    func aDeactivationRemovesOnlyItsOwnControllersCursor(orphanLeavesFirst: Bool) throws {
         let orphan = Controller()
         let replacement = Controller()
         let client = FocusedClient { _ in }
+        let old = try FakeTextInputClient(in: Self.textEdit).cursor()
         let current = try FakeTextInputClient(in: Self.textEdit).cursor()
-        try client.took(FakeTextInputClient(in: Self.textEdit).cursor(), by: orphan)
+        client.took(old, by: orphan)
         client.took(current, by: replacement)
-        client.typedInto(replacement)
-        client.left(orphan)
-        #expect(try cursor(client, whileInFrontIs: Self.textEdit).get() === current)
 
-        client.left(replacement)
-        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
+        client.left(orphanLeavesFirst ? orphan : replacement)
+        #expect(try cursor(client, whileInFrontIs: Self.textEdit).get() === (orphanLeavesFirst ? current : old))
+    }
+
+    /// A key settles which window has the keyboard, and the window it ruled out is not lost for
+    /// it: once the person moves there and types, that key is the same proof, whether or not
+    /// macOS activates its client again first.
+    @Test func aKeyIntoACursorAnotherKeyRuledOutMakesItTheCursor() throws {
+        let told = Told()
+        let (key, window) = (Controller(), Controller())
+        let there = try FakeTextInputClient(in: Self.textEdit).cursor()
+        try told.client.took(FakeTextInputClient(in: Self.textEdit).cursor(), by: key)
+        told.client.took(there, by: window)
+        told.client.typedInto(key)
+        told.client.left(key)
+        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+
+        told.client.typedInto(window)
+        #expect(try cursor(told.client, whileInFrontIs: Self.textEdit).get() === there)
+        #expect(told.arrivals == [Self.textEdit, Self.textEdit, Self.textEdit])
+    }
+
+    /// An overlay of another app activates a client and leaves, and macOS need not activate the
+    /// window behind it again: the cursor there is ruled out but held, and a key typed into it
+    /// makes it the cursor and offers the words again.
+    @Test func aKeyIntoACursorAnotherAppRuledOutMakesItTheCursor() throws {
+        let told = Told()
+        let (editor, overlay) = (Controller(), Controller())
+        let there = try FakeTextInputClient(in: Self.textEdit).cursor()
+        told.client.took(there, by: editor)
+        try told.client.took(FakeTextInputClient(in: "com.apple.Spotlight").cursor(), by: overlay)
+        told.client.left(overlay)
+        #expect(told.client.holding(editor) == "holding \(there), not live")
+        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+
+        told.client.typedInto(editor)
+        #expect(told.client.holding(editor) == "holding \(there)")
+        #expect(try cursor(told.client, whileInFrontIs: Self.textEdit).get() === there)
+        #expect(told.arrivals == [Self.textEdit, "com.apple.Spotlight", Self.textEdit])
     }
 
     /// Focus is in one app at a time, so a client activating in another app ends every cursor
@@ -392,8 +428,8 @@ import Testing
         #expect(throws: Refusal.cursorIsInAnotherApp) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
     }
 
-    /// A key that reaches a controller holding no live cursor - one deactivated, or past its
-    /// memory ceiling - says nothing about the cursors that are, and changes nothing.
+    /// A key that reaches a controller holding no cursor - one deactivated, or that never had a
+    /// client it could use - says nothing about the cursors that are, and changes nothing.
     @Test func aKeyIntoAControllerHoldingNoCursorChangesNothing() throws {
         let told = Told()
         try told.client.took(FakeTextInputClient(in: Self.textEdit).cursor())
