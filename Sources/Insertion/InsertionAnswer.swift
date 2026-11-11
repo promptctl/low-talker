@@ -299,8 +299,9 @@ public struct Unreachable: Error, Equatable, Sendable, InsertWarning {
     public var reason: String {
         switch (wire, step) {
         // A greeting dropped unanswered went before any words did, which is a far end not answering.
-        case let (.nobodyIsListening(port), _), let (.abandoned(port), .greeting):
+        case let (.nobodyIsListening(port), .greeting), let (.abandoned(port), .greeting):
             "No input method is answering on \(port); it is not installed or not selected."
+        case let (.nobodyIsListening(port), .words): "The input method on \(port) said who it is and went away before the words were sent."
         case let (.notTaken(port, after), _): "The input method on \(port) did not take the request within \(after)."
         case let (.noAnswer(port, after), .greeting): "The input method on \(port) did not say who it is within \(after)."
         case let (.noAnswer(port, after), .words): "The input method on \(port) took the request but did not answer within \(after)."

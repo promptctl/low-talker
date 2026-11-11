@@ -71,7 +71,7 @@ import Testing
 
     /// A debt the app admitted and then did not settle is not a debt that was settled.
     @MainActor
-    @Test(arguments: [NotAnswered.wire(.noAnswer(port: "p", after: .seconds(5))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 3))])
+    @Test(arguments: [NotAnswered.wire(.noAnswer(port: "p", after: .seconds(5))), .wire(.notTaken(port: "p", after: .seconds(5))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 3))])
     func aDebtTheAppAdmittedAndDidNotSettleKeepsTheReturn(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(owing: { .success(.words) }, settling: { .failure(why) }))
         #expect(gate.verdict(at: 1).verdict == .keep)
@@ -81,7 +81,7 @@ import Testing
     /// reached, or cannot say, has admitted none, and the Return passes as it would with no
     /// LowTalker at all.
     @MainActor
-    @Test(arguments: [NotAnswered.wire(.nobodyIsListening(port: "p")), .wire(.noAnswer(port: "p", after: .milliseconds(100))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 0))])
+    @Test(arguments: [NotAnswered.wire(.nobodyIsListening(port: "p")), .wire(.notTaken(port: "p", after: .milliseconds(100))), .wire(.noAnswer(port: "p", after: .milliseconds(100))), .wire(.abandoned(port: "p")), .wire(.notReadable(port: "p", bytes: 0))])
     func anAppThatAdmitsNoDebtLetsTheReturnPass(why: NotAnswered) {
         let asked = Log()
         let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(

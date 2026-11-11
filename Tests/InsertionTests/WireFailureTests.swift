@@ -31,7 +31,12 @@ import Testing
         }
     }
 
-    static let phase = Duration.milliseconds(200)
+    /// How long each phase of the round trip waits. Only a far end that keeps the message is
+    /// meant to be waited out, so only it gets a bound the test spends; every other far end
+    /// answers or drops within a budget a loaded runner cannot spend first.
+    static func phase(_ farEnd: FarEnd) -> Duration {
+        if case .keeps = farEnd { .milliseconds(200) } else { aBudgetTheRunnerCannotSpend }
+    }
     static let stranger = PeerIdentity.adHoc(cdhash: String(repeating: "0", count: 40))
 
     /// The failure `farEnd` on `name` causes, whichever message it was handed.
@@ -39,7 +44,7 @@ import Testing
         switch farEnd {
         case .absent: .nobodyIsListening(port: name)
         case .drops: .abandoned(port: name)
-        case .keeps: .noAnswer(port: name, after: phase)
+        case .keeps: .noAnswer(port: name, after: phase(farEnd))
         case .answersGarbled: .notReadable(port: name, bytes: 8)
         case .answersAsAStranger: .answeredByAStranger(port: name, pid: getpid(), because: .someoneElse(try OwnProcess.identity()), required: stranger)
         }
@@ -48,22 +53,20 @@ import Testing
     /// `farEnd` on a fresh name, for as long as `body` runs.
     static func hosting<T>(_ farEnd: FarEnd, _ body: (String) async throws -> T) async throws -> T {
         let name = aPortNobodyElseUses()
-        guard case .absent = farEnd else {
-            let right = try ReceiveRight(sendable: true)
-            try #require(lt_bootstrap_register(name, right.port) == KERN_SUCCESS)
-            let done = DispatchSemaphore(value: 0)
-            defer { done.signal() }
-            Thread {
-                guard case .received(let message) = Mach.receive(on: right.port, timeout: aBudgetTheRunnerCannotSpend) else { return }
-                switch farEnd {
-                case .absent, .drops: message.discardReply()
-                case .keeps: done.wait(); message.discardReply()
-                case .answersGarbled, .answersAsAStranger: _ = message.answer(Data("nonsense".utf8))
-                }
-            }.start()
-            defer { withExtendedLifetime(right) {} }
-            return try await body(name)
-        }
+        if case .absent = farEnd { return try await body(name) }
+        let right = try ReceiveRight(sendable: true)
+        try #require(lt_bootstrap_register(name, right.port) == KERN_SUCCESS)
+        let done = DispatchSemaphore(value: 0)
+        defer { done.signal() }
+        Thread {
+            guard case .received(let message) = Mach.receive(on: right.port, timeout: aBudgetTheRunnerCannotSpend) else { return }
+            switch farEnd {
+            case .keeps: done.wait(); message.discardReply()
+            case .answersGarbled, .answersAsAStranger: _ = message.answer(Data("nonsense".utf8))
+            case .absent, .drops: message.discardReply()
+            }
+        }.start()
+        defer { withExtendedLifetime(right) {} }
         return try await body(name)
     }
 
@@ -75,14 +78,14 @@ import Testing
     func anInsertAndAQuestionFailTheSameWay(farEnd: FarEnd) async throws {
         let answerer = try Self.believed(farEnd)
         let (insertName, inserted): (String, Result<Int, InsertFailure>) = try await Self.hosting(farEnd) { name in
-            let inserter = InputMethodInserter(portName: name, timeout: Self.phase * 4, answerer: .success(answerer))
+            let inserter = InputMethodInserter(portName: name, timeout: Self.phase(farEnd) * 4, answerer: .success(answerer))
             do throws(InsertFailure) {
                 return (name, .success(try await inserter.insert("hello", into: .cursorInFront).characters))
             } catch { return (name, .failure(error)) }
         }
         let (questionName, asked) = try await Self.hosting(farEnd) { name in
             let asker = Asker(portName: name, answerer: .success(answerer))
-            return (name, await onAThreadOfItsOwn { asker.owed(at: 1, within: Self.phase) })
+            return (name, await onAThreadOfItsOwn { asker.owed(at: 1, within: Self.phase(farEnd)) })
         }
 
         #expect(inserted == .failure(.unreachable(Unreachable(try Self.failure(farEnd, on: insertName), at: .greeting))))

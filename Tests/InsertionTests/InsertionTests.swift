@@ -481,6 +481,23 @@ private let anEditor = "com.example.editor"
 /// `answeredByAStranger`, which is a question of who answered and is held with the others
 /// like it, in `SenderTests`.
 @Suite struct UnreachableTests {
+    /// The words may be at the cursor only when the words message reached the far end's queue: a
+    /// greeting's failure sent none, and a words message the kernel never queued sent none either.
+    @Test(arguments: [
+        (WireFailure.nobodyIsListening(port: "p"), Unreachable.Step.words, Words.notSent),
+        (.notTaken(port: "p", after: .seconds(1)), .words, .notSent),
+        (.failedToSend(port: "p", status: KERN_FAILURE), .words, .notSent),
+        (.noAnswer(port: "p", after: .seconds(1)), .words, .mayHaveLanded),
+        (.abandoned(port: "p"), .words, .mayHaveLanded),
+        (.failedToReceive(port: "p", status: KERN_FAILURE), .words, .mayHaveLanded),
+        (.notReadable(port: "p", bytes: 3), .words, .mayHaveLanded),
+        (.noAnswer(port: "p", after: .seconds(1)), .greeting, .notSent),
+        (.abandoned(port: "p"), .greeting, .notSent),
+    ])
+    func theWordsMayHaveLandedOnlyOnceTheWordsWereQueued(wire: WireFailure, step: Unreachable.Step, words: Words) {
+        #expect(Unreachable(wire, at: step).words == words)
+    }
+
     @Test func nothingListeningIsSaidByName() async {
         let name = aPortNobodyElseUses()
         await #expect(throws: InsertFailure.unreachable(Unreachable(.nobodyIsListening(port: name), at: .greeting))) {

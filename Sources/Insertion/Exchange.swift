@@ -58,7 +58,7 @@ public enum WireFailure: Error, Equatable, Sendable, CustomStringConvertible {
 /// as this one's. The answerer is checked before its bytes are returned: a name anyone can
 /// compute is a name anyone can register first.
 package final class Exchange {
-    package let portName: String
+    private let portName: String
     private let remote: mach_port_t
     private let reply: ReceiveRight
     private let answerer: PeerIdentity

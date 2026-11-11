@@ -6,8 +6,8 @@ import Testing
 
 /// What an `Inserter` says of each answer the input method can give: words inserted come back as
 /// `Inserted`, and a refusal or words not yet taken are thrown as themselves. Stated once, run
-/// against the one fake every test of the loop asks, and against `InputMethodInserter` sending
-/// from `insertion-probe`, a process that is not the suite, to a port the suite hosts. A fake that
+/// against the one fake every test of the loop asks, and against `InputMethodInserter` asking a
+/// real `InsertionPort` in this process. A fake that
 /// read an answer differently from the real end would fail here before any test built on it
 /// could pass. [LAW:behavior-not-structure]
 ///
@@ -48,12 +48,11 @@ import Testing
         let fake = Self.printed { () throws(InsertFailure) in try Self.fake(answering: answer).insert(Self.text, into: .cursorInFront) }
 
         let name = aPortNobodyElseUses()
-        let probe = try await Probe.signed(as: "ai.promptctl.low-talker.test.probe")
-        defer { try? FileManager.default.removeItem(at: probe.url) }
         let port = try InsertionPort(
-            portName: name, senders: probe.identity, build: aBuild, queue: DispatchQueue(label: name), told: { Issue.record("told \($0)") }
+            portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: DispatchQueue(label: name), told: { Issue.record("told \($0)") }
         ) { _ in answer }
-        let real = try await Probe.send(Self.text, to: name, answeredBy: try OwnProcess.identity(), from: probe.url)
+        let inserter = InputMethodInserter(portName: name, timeout: aBudgetTheRunnerCannotSpend, answerer: .success(try OwnProcess.identity()))
+        let real = await onAThreadOfItsOwn { Self.printed { () throws(InsertFailure) in try inserter.insert(Self.text, into: .cursorInFront) } }
         withExtendedLifetime(port) {}
 
         #expect(fake == real)

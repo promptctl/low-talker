@@ -2,8 +2,8 @@ import Foundation
 import Insertion
 
 /// The app as the input method's gate asks it, answering each question with what the test gave
-/// it, and with no port and no app. The one `SteeringAsking` fake: `QuestionsContract` holds it
-/// to the answers `Asker` reads from a real app. [LAW:one-type-per-behavior]
+/// it, and with no port and no app. The one `SteeringAsking` fake. It reads nothing, so it has no
+/// reading of its own to hold to `Asker`'s. [LAW:one-type-per-behavior]
 ///
 /// An app that is asked nothing in particular owes nothing, has settled, and has its box shut,
 /// which is the app on any key typed while no one is dictating.
