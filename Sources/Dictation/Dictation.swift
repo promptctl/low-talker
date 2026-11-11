@@ -85,7 +85,7 @@ public final class Dictation {
             /// The chord was a typed key's modifier, so the press was never dictation and
             /// nothing heard past its inserts is held or shown. `landed` is how many of its words were committed
             /// while the chord was down, `standing` how many are in its inserts that may have
-            /// landed, which stand in the hold, and `discarded` how many heard after them were dropped.
+            /// landed, and `discarded` how many heard after them were dropped.
             case usedAsModifier(landed: Int, standing: Int, discarded: Int)
             /// The person threw the press away with Escape: what it put at the cursor was taken
             /// back and nothing of it is held, offered or shown. A press whose words could not all
@@ -1257,7 +1257,8 @@ public struct PressStopped: Accounted {
     public let landed: Int
     /// The words in its inserts that may have landed, which stand in the hold.
     public let standing: Int
-    /// The words the hold offers when it stopped.
+    /// Its words the hold offers when it stopped: earlier ones no insert of it carried are told
+    /// by the press that left them.
     public let held: Int
     public let cause: any Accounted
 
@@ -1314,7 +1315,7 @@ extension Dictation {
         public init(_ failure: any Accounted) { self.failure = failure }
 
         /// Which failure it is, by its type's name; a stopped press's names what stopped it too, as
-        /// `PressStopped(PressLapsed)`, so a cut reads apart from a refusal. [LAW:nothing-unseen]
+        /// `PressStopped(PressLapsed)`, so the log tells one cause from another. [LAW:nothing-unseen]
         public var kind: String { Self.kind(of: failure) }
 
         private static func kind(of failure: any Accounted) -> String {
