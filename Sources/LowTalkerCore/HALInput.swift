@@ -162,7 +162,7 @@ final class HALInput: PreparedInput {
                 // The ring mixes every render down to one channel, so the converter only
                 // resamples, whatever the device's channel count.
                 guard let format = SliceRing.format(sampleRate: layout.sampleRate) else {
-                    throw AudioClipError.unconvertibleFormat(sampleRate: layout.sampleRate, channels: 1)
+                    throw AudioClipError.unconvertibleFormat(sampleRate: layout.sampleRate, channels: UInt32(layout.channels))
                 }
                 let built = Sink(converter: try AudioClip.Converter(from: format))
                 try AudioHardwareError.check(

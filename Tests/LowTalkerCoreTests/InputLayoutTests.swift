@@ -53,11 +53,6 @@ import Testing
         #expect(layout.sampleRate == 48_000)
     }
 
-    @Test func eachBuffersFirstChannelIsWhereTheRingTakesIt() throws {
-        let layout = try InputLayout.parse([Self.stream(channels: 1), Self.stream(channels: 2)]).get()
-        #expect(layout.offsets == [0, 1])
-    }
-
     @Test func noInputStreamIsRefused() {
         #expect(InputLayout.parse([]) == .failure(.noStream))
     }
@@ -203,12 +198,14 @@ import Testing
     /// A render of `layout` whose channel `channel` of `frame` holds `value(channel, frame)`.
     static func render(_ layout: InputLayout, frames: Int, _ value: (Int, Int) -> Float) -> List {
         let list = List(layout.buffers.map { ($0, $0 * frames) })
+        var first = 0
         for (index, width) in layout.buffers.enumerated() {
             for frame in 0..<frames {
                 for lane in 0..<width {
-                    list.pointer[index].mData!.assumingMemoryBound(to: Float.self)[frame * width + lane] = value(layout.offsets[index] + lane, frame)
+                    list.pointer[index].mData!.assumingMemoryBound(to: Float.self)[frame * width + lane] = value(first + lane, frame)
                 }
             }
+            first += width
         }
         return list
     }
@@ -231,31 +228,15 @@ import Testing
         }
     }
 
-    /// Channels that carry one signal, as a stereo microphone's do, are heard as it.
-    @Test func channelsCarryingOneSignalAreHeardAsIt() {
-        let ring = SliceRing(InputLayout(buffers: [2], sampleRate: 48_000), frames: 8, entries: 4)
-        Self.push(ring, frames: 3) { _, frame in Float(frame + 1) / 4 }
-        #expect(Self.popped(ring, frames: 8) == [0.25, 0.5, 0.75])
-    }
-
-    /// Digital silence on every channel is heard as silence.
-    @Test func silenceOnEveryChannelIsHeardAsSilence() {
-        let ring = SliceRing(InputLayout(buffers: [4], sampleRate: 48_000), frames: 8, entries: 4)
-        Self.push(ring, frames: 4) { _, _ in 0 }
-        #expect(Self.popped(ring, frames: 8) == [0, 0, 0, 0])
-    }
-
-    /// A voice that moves from one channel to another fades across the render it moved in, from
-    /// the channel it left to the one it reached, rather than stepping at the render's edge.
-    @Test func aVoiceThatMovesChannelFadesAcrossTheRender() {
+    /// Every channel is heard at one gain, however loud the others are: a hum on an idle channel
+    /// is as loud in the pauses as under the speech, so the room `Utterance` reads between words
+    /// is the room, and a word is heard whole from its first frame.
+    @Test func everyChannelIsHeardAtOneGainHoweverLoudTheOthers() {
         let ring = SliceRing(InputLayout(buffers: [1, 1], sampleRate: 48_000), frames: 8, entries: 4)
-        Self.push(ring, frames: 4) { channel, _ in channel == 0 ? 1 : 0 }
-        #expect(Self.popped(ring, frames: 8) == [1, 1, 1, 1])
-        Self.push(ring, frames: 4) { channel, _ in channel == 1 ? 1 : 0 }
-        let faded = Self.popped(ring, frames: 8)
-        for (sample, expected) in zip(faded, [0, 0.25, 0.5, 0.75] as [Float]) {
-            #expect(abs(sample - expected) < 1e-6, "\(faded)")
-        }
+        Self.push(ring, frames: 4) { channel, _ in channel == 1 ? 0.25 : 0 }
+        #expect(Self.popped(ring, frames: 8) == [0.25, 0.25, 0.25, 0.25])
+        Self.push(ring, frames: 4) { channel, _ in channel == 1 ? 0.25 : 0.5 }
+        #expect(Self.popped(ring, frames: 8) == [0.75, 0.75, 0.75, 0.75])
     }
 
     /// A device of any channel count is heard at the voice's level once converted, an audio

@@ -32,10 +32,8 @@ final class SliceRing: @unchecked Sendable {
 
     /// Frames the ring holds.
     let capacity: Int
-    /// The shape of the renders it is pushed.
-    var layout: InputLayout { downmix.layout }
-    /// What every push is heard as: one channel, so the ring holds what the pipeline hears.
-    private let downmix: Downmix
+    /// The shape of the renders it is pushed, each held as the one channel it is heard as.
+    let layout: InputLayout
     private let samples: UnsafeMutablePointer<Float>
     private let entries: UnsafeMutablePointer<Entry>
     private let entryCapacity: Int
@@ -53,7 +51,7 @@ final class SliceRing: @unchecked Sendable {
     /// A ring for renders of `layout`.
     init(_ layout: InputLayout, frames capacity: Int, entries entryCapacity: Int) {
         precondition(layout.channels > 0 && capacity > 0 && entryCapacity > 0, "a ring holds something")
-        downmix = Downmix(layout)
+        self.layout = layout
         self.capacity = capacity
         self.entryCapacity = entryCapacity
         samples = .allocate(capacity: capacity)
@@ -80,9 +78,8 @@ final class SliceRing: @unchecked Sendable {
             return drop()
         }
         guard let slot = claim() else { return drop() }
-        let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         let at = start % capacity
-        downmix.mix(list, frames: frames, into: samples + at, min(frames, capacity - at), then: samples)
+        layout.mix(list, frames: frames, into: samples + at, min(frames, capacity - at), then: samples)
         framesPushed = start + frames
         publish(.slice(frames: frames, stamp: stamp), at: slot)
     }

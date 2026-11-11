@@ -1,3 +1,4 @@
+import Accelerate
 import CoreAudio
 
 /// What a device's IOProc hands over, as a shape: how many buffers there are, how many
@@ -15,24 +16,9 @@ import CoreAudio
 struct InputLayout: Sendable, Equatable {
     /// The channels of each buffer, in the order the IOProc is handed them.
     let buffers: [Int]
-    /// The first channel each buffer's frames take in the planar ring, so a render does not
-    /// add them up.
-    let offsets: [Int]
     let sampleRate: Double
 
     var channels: Int { buffers.reduce(0, +) }
-
-    init(buffers: [Int], sampleRate: Double) {
-        self.buffers = buffers
-        self.sampleRate = sampleRate
-        var offsets: [Int] = []
-        var next = 0
-        for channels in buffers {
-            offsets.append(next)
-            next += channels
-        }
-        self.offsets = offsets
-    }
 
     /// The shape of what a device offers, from the virtual format of each of its input
     /// streams in stream order: what the HAL presents to a client, as opposed to what the
@@ -57,6 +43,30 @@ struct InputLayout: Sendable, Equatable {
         }
         guard !buffers.isEmpty else { return .failure(.noChannels) }
         return .success(InputLayout(buffers: buffers, sampleRate: first.mSampleRate))
+    }
+
+    /// The one channel a render of this shape is heard as: the sum of its channels, `frames` of
+    /// them, `count` into `first` and the rest into `rest`. Reads only what `verdict` has held
+    /// the list to, so it allocates nothing and runs on the IO thread.
+    ///
+    /// A sum, so a voice on any one channel, as an audio interface or a loopback carries it, is
+    /// heard at its own level, and channels that carry one signal, as a stereo microphone's do,
+    /// are heard at twice it. A mean puts a voice on one channel of sixteen under
+    /// `Utterance.audible`, and it is AVAudioConverter's downmix, which given a channel layout
+    /// for more than two channels mixes them to silence (low-reliability-z2z.n4b). Fixed rather
+    /// than weighted by each channel's level, which moves the gain with the speech and the
+    /// room `Utterance` measures between words with it.
+    func mix(_ list: UnsafePointer<AudioBufferList>, frames: Int, into first: UnsafeMutablePointer<Float>, _ count: Int, then rest: UnsafeMutablePointer<Float>) {
+        first.update(repeating: 0, count: count)
+        rest.update(repeating: 0, count: frames - count)
+        let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
+        for (index, width) in buffers.enumerated() {
+            let source = list[index].mData!.assumingMemoryBound(to: Float.self)
+            for lane in 0..<width {
+                vDSP_vadd(source + lane, vDSP_Stride(width), first, 1, first, 1, vDSP_Length(count))
+                vDSP_vadd(source + lane + count * width, vDSP_Stride(width), rest, 1, rest, 1, vDSP_Length(frames - count))
+            }
+        }
     }
 
     /// What one render's buffer list comes to against this shape.
