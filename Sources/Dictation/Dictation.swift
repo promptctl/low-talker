@@ -1038,9 +1038,9 @@ public final class Dictation {
         if case .cancelled = heard.ending { return try await cancel(heard) }
         let decoded = await heard.decode.value
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
-        // words are already at the cursor, and how many may be.
+        // words are already at the cursor, how many may be, and how many the hold offers.
         func stopped(_ cause: any Accounted) -> Failed {
-            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, cause: cause))
+            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: hold.held?.offered?.words.words.count ?? 0, cause: cause))
         }
         switch heard.ending {
         case .released(let press, let keyUp, let delivery):
@@ -1234,7 +1234,7 @@ public struct AudioKept: WordFree {
 
 /// A press that stopped after it began: an insert refused, the engine failed, or what was
 /// left at key-up would not go in. The words before it are at the cursor, those in inserts that
-/// may have landed stand, and the ones an insert failed on are held until a cursor takes them.
+/// may have landed stand, and the rest the hold offers until a cursor takes them.
 /// [LAW:no-silent-failure]
 ///
 /// Its description is the person's, and carries any words its cause read; the log reads its
@@ -1244,6 +1244,8 @@ public struct PressStopped: Accounted {
     public let landed: Int
     /// The words in its inserts that may have landed, which stand in the hold.
     public let standing: Int
+    /// The words the hold offers when it stopped.
+    public let held: Int
     public let cause: any Accounted
 
     /// What the hold shows beside the words the passes during the hold read, when the decode failed.
@@ -1260,20 +1262,22 @@ public struct PressStopped: Accounted {
     /// Whether any of its words are or may be at a cursor.
     var reached: Bool { landed + standing > 0 }
 
-    /// What became of its words, once any are or may be at a cursor: one account of each.
+    /// What became of its words, once any are or may be at a cursor: one account of each. Before
+    /// then, the cause's own fate is that account.
     var told: String {
-        switch (landed, standing) {
-        case (0, 0): ""
-        case (_, 0): " \(landed) words of your dictation were inserted before it; the rest were not."
-        case (0, _): " \(standing) words of your dictation may have been inserted; do not dictate them again. Any others were not."
-        case (_, _): " \(landed) words of your dictation were inserted before it, and \(standing) more may have been; do not dictate those again. Any others were not."
-        }
+        guard reached else { return "" }
+        let fates = [
+            (landed, "words of your dictation were inserted before it."),
+            (standing, "words may have been inserted; do not dictate them again."),
+            (held, "words are held."),
+        ]
+        return fates.filter { $0.0 > 0 }.map { " \($0.0) \($0.1)" }.joined()
     }
 
     public var description: String { stoppedBy + told }
     /// What it left at the cursor, which is counts, and then the cause's account.
     public var account: Account {
-        Account(facts: "\(landed) words inserted and \(standing) that may have been inserted before: \(cause.account.facts)", dictated: cause.account.dictated)
+        Account(facts: "\(landed) words inserted, \(standing) that may have been, \(held) held, before: \(cause.account.facts)", dictated: cause.account.dictated)
     }
 }
 

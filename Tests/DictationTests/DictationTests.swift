@@ -372,8 +372,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
         #expect(stopped.cause as? InsertFailure == .refused(.cursorIsInAnotherApp))
-        #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) 1 words of your dictation were inserted before it; the rest were not.")
-        #expect("\(stopped)".hasSuffix("1 words of your dictation were inserted before it; the rest were not."))
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) 1 words of your dictation were inserted before it. 2 words are held.")
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held == .unplaced(part(" there friend", "\(Refusal.cursorIsInAnotherApp)")))
     }
@@ -418,14 +417,14 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
         #expect(stopped.cause as? InsertFailure == .refused(.dictationIsInAnotherApp))
-        #expect(failureLine(stopped) == "WARNING: \(Refusal.dictationIsInAnotherApp.reason) 1 words of your dictation were inserted before it; the rest were not.")
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.dictationIsInAnotherApp.reason) 1 words of your dictation were inserted before it. 2 words are held.")
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held?.words == Transcript(typed: " there friend"))
     }
 
     /// A press stopped after some of its words landed says one thing about each word: those
     /// inserted before what stopped it, those in inserts that may have landed, mid-press and at
-    /// key-up alike, and the rest, which were not. What stopped it gives its reason alone, since
+    /// key-up alike, and those held. What stopped it gives its reason alone, since
     /// its fate would be about the same words; the hold keeps the whole warning beside them.
     @Test(arguments: failedInserts)
     func aPressStoppedAfterWordsLandedTellsEachWordOnce(failed: FailedInsert) async throws {
@@ -442,8 +441,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         let told = failed.mayHaveLanded
-            ? "1 words of your dictation were inserted before it, and 2 more may have been; do not dictate those again. Any others were not."
-            : "1 words of your dictation were inserted before it; the rest were not."
+            ? "1 words of your dictation were inserted before it. 2 words may have been inserted; do not dictate them again."
+            : "1 words of your dictation were inserted before it. 2 words are held."
         #expect("\(stopped)" == "WARNING: \(failed.failure.reason) \(told)")
         #expect(failureLine(stopped) == "\(stopped)")
         let rest = part(" there friend", "\(failed.failure)")
@@ -529,7 +528,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(engineFailed(stopped.cause, with: NoEngine.self))
         #expect(stopped.landed == 2)
-        #expect(failureLine(stopped) == "Your last dictation stopped: NoEngine(). 2 words of your dictation were inserted before it; the rest were not.")
+        #expect(failureLine(stopped) == "Your last dictation stopped: NoEngine(). 2 words of your dictation were inserted before it.")
     }
 
     /// [LAW:no-silent-failure] A press whose microphone opened after the words it was pressed
@@ -1740,7 +1739,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold()
         guard case .failed(let failed) = await rig.report() else { Issue.record("expected the press to fail"); return }
         #expect(failed.kind == "PressStopped")
-        #expect(failed.failure.account == Account(facts: "0 words inserted and 0 that may have been inserted before: NoEngine()"))
+        #expect(failed.failure.account == Account(facts: "0 words inserted, 0 that may have been, 0 held, before: NoEngine()"))
     }
 
     /// The hold is the app's, not the loop's: a loop rebuilt over a new config offers what
