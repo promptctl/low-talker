@@ -1,6 +1,7 @@
 import AppKit
 import Bench
 import Dictation
+import GrammaticalNumber
 import Identity
 import Grants
 import InputSource
@@ -70,12 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(text, forType: .string) {
-            sessions.notice("copied \(text.count, privacy: .public) characters of held words, and dismissed them")
+            sessions.notice("copied \(counted(text.count, "character", "characters"), privacy: .public) of held words, and dismissed them")
             // The words are the person's to paste now. Held, the next press would type them ahead
             // of its own, beside the paste; dismissed, the box closes and the menu brings them back.
             hold.dismiss()
         } else {
-            sessions.error("the pasteboard refused \(text.count, privacy: .public) characters of held words")
+            sessions.error("the pasteboard refused \(counted(text.count, "character", "characters"), privacy: .public) of held words")
         }
     })
     /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
@@ -1147,9 +1148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ErrorRow(text, copyingTo: .general) { [menuBarLog] copied in
             // [LAW:nothing-unseen] The count, not the text: a failure line can carry dictated words.
             if copied.taken {
-                menuBarLog.notice("menu: copied the \(line.rawValue, privacy: .public) error row, \(copied.characters, privacy: .public) characters")
+                menuBarLog.notice("menu: copied the \(line.rawValue, privacy: .public) error row, \(counted(copied.characters, "character", "characters"), privacy: .public)")
             } else {
-                menuBarLog.error("menu: the pasteboard refused the \(line.rawValue, privacy: .public) error row's \(copied.characters, privacy: .public) characters")
+                menuBarLog.error("menu: the pasteboard refused the \(line.rawValue, privacy: .public) error row's \(counted(copied.characters, "character", "characters"), privacy: .public)")
             }
         }
     }

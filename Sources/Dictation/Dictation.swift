@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 import Insertion
 import LowTalkerCore
 import Synchronization
@@ -1175,11 +1176,10 @@ public struct CancelLeftWords: WordFree {
     public let cancelled: Cancelled
 
     public var description: String {
-        let there = "in \(app.rawValue), and nothing more was done to"
         let stay = cause.wordsMayHaveLanded
-            ? counted(left, "of its words may have been taken back, or may still be \(there) it", "of its words may have been taken back, or may still be \(there) them")
-            : counted(left, "of its words is still \(there) it", "of its words are still \(there) them")
-        return "WARNING: You cancelled a dictation, but \(stay). \(cause.reason) (\(cancelled))"
+            ? "\(left) of its words may have been taken back, or may still be"
+            : counted(left, "of its words is still", "of its words are still")
+        return "WARNING: You cancelled a dictation, but \(stay) in \(app.rawValue), and nothing more was done. \(cause.reason) (\(cancelled))"
     }
 }
 

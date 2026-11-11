@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 
 /// The settings the app runs on: the model the engine loads, what the microphone does
 /// between presses, the modes a chord can start, and where the transcription server

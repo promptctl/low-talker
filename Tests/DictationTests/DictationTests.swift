@@ -432,11 +432,17 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// inserted before what stopped it, those in inserts that may have landed, mid-press and at
     /// key-up alike, and those held. What stopped it gives its reason alone, since
     /// its fate would be about the same words; the hold keeps the whole warning beside them.
-    @Test(arguments: failedInserts)
-    func aPressStoppedAfterWordsLandedTellsEachWordOnce(failed: FailedInsert) async throws {
+    /// Each is told for one word past the commit and for two, so each agrees with its count.
+    @Test(arguments: failedInserts, [
+        (decode: "hello there", mayHaveLanded: "1 word may have been inserted; do not dictate it again.", held: "1 word is held", offered: "it is"),
+        (decode: "hello there friend", mayHaveLanded: "2 words may have been inserted; do not dictate them again.", held: "2 words are held", offered: "they are"),
+    ])
+    func aPressStoppedAfterWordsLandedTellsEachWordOnce(
+        failed: FailedInsert, past: (decode: String, mayHaveLanded: String, held: String, offered: String)
+    ) async throws {
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
-        }) { _ in Transcript(typed: "hello there") }
+        }) { _ in Transcript(typed: past.decode) }
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -447,11 +453,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         let told = failed.mayHaveLanded
-            ? "1 word of your dictation was inserted before it. 1 word may have been inserted; do not dictate it again. No others were inserted or held."
-            : "1 word of your dictation was inserted before it. 1 word is held\(failed.failure.remedy.map { "; \($0) and it is offered again" } ?? ""). No others were inserted or held."
+            ? "1 word of your dictation was inserted before it. \(past.mayHaveLanded) No others were inserted or held."
+            : "1 word of your dictation was inserted before it. \(past.held)\(failed.failure.remedy.map { "; \($0) and \(past.offered) offered again" } ?? ""). No others were inserted or held."
         #expect("\(stopped)" == "WARNING: \(failed.failure.reason) \(told)")
         #expect(failureLine(stopped) == "\(stopped)")
-        let rest = part(" there", "\(failed.failure)")
+        let rest = part(String(past.decode.dropFirst("hello".count)), "\(failed.failure)")
         #expect(rig.hold.held == (failed.mayHaveLanded ? .unaccounted(rest) : .unplaced(rest)))
     }
 
@@ -1580,7 +1586,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func theHoldsReadoutCountsWords() {
         #expect("\(HoldState())" == "nothing; dismissed: nothing")
         let state = HoldState(held: .unplaced(part(" there friend", "refused"), unaccounted: part("hello", "sent")), dismissed: .unaccounted(part("a", "u")))
-        #expect("\(state)" == "3 words, 1 of them may have been typed, sent refused; dismissed: 1 word")
+        #expect("\(state)" == "3 words, 1 of which may have been typed, sent refused; dismissed: 1 word")
     }
 
     /// Words dismissed while an insert carrying them is on its way stay dismissed when that

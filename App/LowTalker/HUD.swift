@@ -1,5 +1,6 @@
 import AppKit
 import Dictation
+import GrammaticalNumber
 import Identity
 import LowTalkerCore
 

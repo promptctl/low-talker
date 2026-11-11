@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 import LowTalkerCore
 import WhisperKit
 

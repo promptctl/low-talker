@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 
 /// Turns an utterance into a Transcription. The engine behind it is a config choice:
 /// WhisperKit first, with Parakeet and Apple's SpeechAnalyzer behind the same seam.

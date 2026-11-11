@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 
 /// Where a commit that takes back words puts its replacement range, and the proof that the words
 /// are still there to take.
@@ -29,8 +30,8 @@ nonisolated enum Replacement {
         var description: String {
             switch self {
             case .noSelection: "the client reports no selection"
-            case .textIsSelected(let length): "\(length) characters are selected, so the caret is not where the words ended"
-            case let .fewerBefore(caret, needed): "only \(caret) characters precede the caret, and the words are \(needed) long"
+            case .textIsSelected(let length): "\(counted(length, "character is", "characters are")) selected, so the caret is not where the words ended"
+            case let .fewerBefore(caret, needed): "only \(counted(caret, "character precedes", "characters precede")) the caret, and the words are \(needed) long"
             case .unreadable: "the client would not say what precedes the caret"
             case .differs: "what precedes the caret is not the words"
             }

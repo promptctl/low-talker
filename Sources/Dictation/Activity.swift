@@ -1,3 +1,4 @@
+import GrammaticalNumber
 import LowTalkerCore
 
 extension Dictation {

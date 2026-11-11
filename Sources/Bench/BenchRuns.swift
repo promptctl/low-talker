@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 import LowTalkerCore
 import os
 
@@ -123,10 +124,10 @@ public final class BenchRuns {
     /// How a run ended, in the words its last log line and the window say it.
     public static func describe(_ ending: BenchEnding, rows: Int) -> String {
         switch ending {
-        case .finished: "finished, \(rows) rows"
-        case .stopped(.cancelled): "cancelled after \(rows) rows"
-        case .stopped(.forPress): "stopped for a dictation after \(rows) rows"
-        case .failed(let reason): "failed after \(rows) rows: \(reason)"
+        case .finished: "finished, \(counted(rows, "row", "rows"))"
+        case .stopped(.cancelled): "cancelled after \(counted(rows, "row", "rows"))"
+        case .stopped(.forPress): "stopped for a dictation after \(counted(rows, "row", "rows"))"
+        case .failed(let reason): "failed after \(counted(rows, "row", "rows")): \(reason)"
         }
     }
 

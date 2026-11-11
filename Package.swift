@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "LowTalkerCore", targets: ["LowTalkerCore"]),
         .library(name: "Grants", targets: ["Grants"]),
         .library(name: "Identity", targets: ["Identity"]),
+        .library(name: "GrammaticalNumber", targets: ["GrammaticalNumber"]),
         .library(name: "Onboarding", targets: ["Onboarding"]),
         .library(name: "MenuBarPresence", targets: ["MenuBarPresence"]),
         .library(name: "StatusMenu", targets: ["StatusMenu"]),
@@ -38,6 +39,11 @@ let package = Package(
         // [LAW:one-way-deps]
         .target(name: "Identity"),
         .testTarget(name: "IdentityTests", dependencies: ["Identity", "Insertion"]),
+        // A count told with its noun in the number the count takes. It depends on nothing, so
+        // every library that tells a person a count, the input method's included, tells it
+        // through this one rule. [LAW:one-way-deps]
+        .target(name: "GrammaticalNumber"),
+        .testTarget(name: "GrammaticalNumberTests", dependencies: ["GrammaticalNumber"]),
         // The Text Input Sources framework as this program uses it: where the
         // input source stands on this Mac, the steps that put it there, and the input method's
         // process kept running through LaunchServices. It links only
@@ -56,6 +62,7 @@ let package = Package(
             dependencies: [
                 "Identity",
                 "Grants",
+                "GrammaticalNumber",
                 // The app's end of the hotkey port, which the input method tells each cursor
                 // arrival to.
                 "Insertion",
@@ -108,12 +115,12 @@ let package = Package(
         // Its own target rather than app code so the loop runs under `swift test`; the
         // app links it and hands over the real microphone, engine and inserter - the input
         // method in the app, a fake in a test. [LAW:decomposition] [LAW:composability]
-        .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion"]),
+        .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber"]),
         .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "Grants", "Insertion", "TestProbes"]),
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
-        .target(name: "InputMethod", dependencies: ["Insertion", "Identity"], swiftSettings: inputMethodIsolation),
+        .target(name: "InputMethod", dependencies: ["Insertion", "Identity", "GrammaticalNumber"], swiftSettings: inputMethodIsolation),
         // The one fake of the input method's text client port, answering as the measured
         // clients do, and the port's contract stated so it runs against the fake and against a
         // real client alike. Beside the port and depending only on it; in no product, and never
@@ -126,7 +133,7 @@ let package = Package(
         // InputMethodKit, because the app is one of its two callers and the app has no
         // business linking the text input system.
         // [LAW:one-way-deps]
-        .target(name: "Insertion", dependencies: ["Identity", "DarwinCalls"]),
+        .target(name: "Insertion", dependencies: ["Identity", "DarwinCalls", "GrammaticalNumber"]),
         // The bootstrap calls the SDK keeps from Swift, the Mach macros Swift cannot import
         // and the kernel's code signing call, each passed through by a line of C and nothing
         // more.
@@ -156,7 +163,7 @@ let package = Package(
         // The bench: its options, flags, table, the folders a person picked for it, and the
         // one run at a time the app's window and `LowTalker --bench` start. Beneath the app;
         // the engine it loads is the core's, read in place, never installed.
-        .target(name: "Bench", dependencies: ["LowTalkerCore", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
+        .target(name: "Bench", dependencies: ["LowTalkerCore", "GrammaticalNumber", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
         .testTarget(name: "BenchTests", dependencies: ["Bench", "LowTalkerCore", "TestProbes"]),
         // The write side of the model store: fetching from huggingface.co or a published
         // base, copying from another store, packing one to publish. Beneath `model-tool`
@@ -164,7 +171,7 @@ let package = Package(
         // The app links the core and loads the store its bundle carries, read-only, so the
         // graph and not the call sites is what says the app cannot download;
         // `AppLinksNoInstallerTests` reads this graph for that. [LAW:one-way-deps]
-        .target(name: "ModelInstall", dependencies: ["LowTalkerCore", .product(name: "WhisperKit", package: "argmax-oss-swift")]),
+        .target(name: "ModelInstall", dependencies: ["LowTalkerCore", "GrammaticalNumber", .product(name: "WhisperKit", package: "argmax-oss-swift")]),
         // What the build runs to name, check, fetch and pack the model a bundle carries. Like
         // insertion-probe it is in no product, and project.yml never copies it into a bundle,
         // so nothing a person installs runs it. [LAW:one-way-deps]

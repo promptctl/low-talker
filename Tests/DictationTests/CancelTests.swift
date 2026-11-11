@@ -352,7 +352,7 @@ import TestProbes
         let left = try #require(await rig.report().failure as? CancelLeftWords)
 
         #expect(left.left == 1)
-        #expect(failureLine(left).hasPrefix("WARNING: You cancelled a dictation, but 1 of its words is still in com.apple.TextEdit, and nothing more was done to it. "))
+        #expect(failureLine(left).hasPrefix("WARNING: You cancelled a dictation, but 1 of its words is still in com.apple.TextEdit, and nothing more was done. "))
         #expect(rig.inputMethod.field == " hello")
         #expect(rig.hold.held == nil)
     }
@@ -369,7 +369,7 @@ import TestProbes
         let left = try #require(await rig.report().failure as? CancelLeftWords)
 
         #expect(rig.inputMethod.takeBacks == [" hello"])
-        #expect("\(left)".hasPrefix("WARNING: You cancelled a dictation, but 1 of its words may have been taken back, or may still be in com.apple.TextEdit, and nothing more was done to it. "))
+        #expect("\(left)".hasPrefix("WARNING: You cancelled a dictation, but 1 of its words may have been taken back, or may still be in com.apple.TextEdit, and nothing more was done. "))
     }
 
     /// A take-back is not an insert, so a failed one says why, and what became of the words in the
@@ -388,7 +388,7 @@ import TestProbes
         let line = failureLine(left)
         #expect(line.hasPrefix("WARNING: You cancelled a dictation, but 1 of its words "))
         #expect(line.contains(failure.reason), "\(line)")
-        for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "land if"] {
+        for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "if it recovers"] {
             #expect(!line.contains(fate), "\(line)")
         }
     }

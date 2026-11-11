@@ -82,6 +82,9 @@ targets:
       # The grants the menu reads, beneath both the core and the setup list.
       - package: low-talker
         product: Grants
+      # The one rule a count a person reads is told by, in the panel, the setup page and the log.
+      - package: low-talker
+        product: GrammaticalNumber
       # The list of what must hold before low-talker can type, which the menu shows and the
       # guided setup walks. One list, two views. [LAW:one-source-of-truth]
       - package: low-talker
