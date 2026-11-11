@@ -272,8 +272,8 @@ func part(_ typed: String, _ warning: String) -> Held.Part {
 private let port = "ai.promptctl.low-talker.test.insert"
 private let stranger = PeerIdentity.signed(identifier: "someone.else", certificate: String(repeating: "0", count: 40))
 
-/// Every refusal, every way the channel fails, words not yet taken, and an answerer this end
-/// could not name.
+/// Every refusal, a later build's included, every way the channel fails, words not yet taken,
+/// and an answerer this end could not name.
 let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure: .refused($0), mayHaveLanded: false) } + [
     FailedInsert(failure: .unreachable(.nothingIsListening(port: port)), mayHaveLanded: false),
     FailedInsert(failure: .unreachable(.requestWasNotTaken(port: port, after: .seconds(1))), mayHaveLanded: false),
@@ -288,8 +288,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     FailedInsert(failure: .unreachable(.answerWasNotReadable(port: port, bytes: 3, words: .mayHaveLanded)), mayHaveLanded: true),
     FailedInsert(failure: .notYetTaken(NotYetTaken(characters: 11, into: "com.apple.TextEdit")), mayHaveLanded: true),
     FailedInsert(failure: .answererUnreadable(.noCertificate), mayHaveLanded: false),
-    FailedInsert(failure: .buildMismatch(BuildMismatch(app: Build(number: "9", revision: "app"), inputMethod: Build(number: "9", revision: "other"))!), mayHaveLanded: false),
-    FailedInsert(failure: .buildMismatch(BuildMismatch(app: Build(number: "9", revision: "app"), inputMethod: nil)!), mayHaveLanded: false),
+    FailedInsert(failure: .refusedForAnUnknownReason("aReasonFromALaterBuild"), mayHaveLanded: false),
 ]
 
 @MainActor

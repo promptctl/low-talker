@@ -128,13 +128,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// This app's build, read off its bundle at launch, so it is the build that is running and
-    /// not one an install has since put on disk. Words go only to an input method of the
-    /// same one. The build refuses to make a bundle without it, so its absence is a bundle
-    /// this project did not make.
+    /// not one an install has since put on disk. The log names it beside the input method's.
+    /// The build refuses to make a bundle without it, so its absence is a bundle this project
+    /// did not make.
     private let build: Build = Build(of: .main) ?? { preconditionFailure("the app bundle carries no build number or source revision; it was not built by `make app`") }()
 
-    /// The input method's process and the build it last said, which together are the one
-    /// source of what the status line says of it. [LAW:one-source-of-truth]
+    /// The input method's process, the one source of what the status line says of it, and the
+    /// build it last said, which the log names. [LAW:one-source-of-truth]
     private lazy var inputMethod = InputMethodWatch(app: build)
 
     private func showHotkeyStatus(_ status: HotkeyStatus) {
@@ -394,7 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The words cross to the input method, which commits them at the cursor through the
         // text input system. Awaited because the inserter reads this process's own signature
         // off the main actor to know who may answer; see `signedLikeThisProcess`.
-        let inserter = await InputMethodInserter(build: build)
+        let inserter = await InputMethodInserter()
         let dictation = Dictation(
             capture: capture,
             // Asked at key-down, so a press after a failed load is refused before the person
@@ -490,15 +490,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hud.dismiss()
     }
 
-    /// The line says how to press only while an input method that can type the words is
-    /// running: one of this app's build, or one that has not said its build yet, whose
-    /// greeting the inserter checks before any words go. `InputMethodWatch` decides when the
-    /// line is written and when the log hears it.
+    /// The line says how to press only while an input method is running to type the words,
+    /// of whatever build. `InputMethodWatch` decides when the line is written and when the
+    /// log hears it.
     private func showInputMethod(_ showing: InputMethodWatch.Showing) {
         if showing.isNew { log.notice("input method: \(showing.standing, privacy: .public)") }
         let status: HotkeyStatus = switch showing.standing {
         case .running: .listening(listeningStatus)
-        case .otherBuild(_, let mismatch): .off("\(mismatch.facts); \(BuildMismatch.fix)")
         case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
         case .overMemoryCeiling(_, let overrun):
             .off("the input method is ending itself, \(overrun); \(AppIdentity.displayName) will start it again")

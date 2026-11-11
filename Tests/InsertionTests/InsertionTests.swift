@@ -70,9 +70,54 @@ import Testing
         #expect(Wire.answer(of: Data(#"{"refused":{"_0":"noClientHasFocus"}}"#.utf8)) == .refused(.noTextFieldHasFocus))
     }
 
+    /// A request is done only when read whole: one carrying a field, a destination or a value
+    /// this build does not know, at any depth, is no request, rather than done as the part this
+    /// build knows. A later app's request is refused, and its words held, never misread.
+    @Test(arguments: [
+        #"{"text":"hello","destination":{"cursorInFront":{}},"aLaterField":true}"#,
+        #"{"text":"hello","destination":{"cursorInFront":{"aLaterField":true}}}"#,
+        #"{"text":"hello","destination":{"app":{"_0":"com.example.editor","aLaterField":true}}}"#,
+        #"{"text":"hello","destination":{"aLaterDestination":{}}}"#,
+    ])
+    func aRequestCarryingWhatThisBuildDoesNotKnowIsNotARequest(json: String) {
+        #expect(Wire.request(of: Data([Wire.requestMark]) + Data(json.utf8)) == nil)
+    }
+
+    /// A field at its default is left out, so an ordinary insert is the same bytes to an input
+    /// method from before a field as to one that knows it, and a request from before a field
+    /// reads as its default. Pinned to the bytes, because those are what another build reads.
+    @Test func aFieldAtItsDefaultIsLeftOutAndAnAbsentOneReadsAsItsDefault() throws {
+        let written = try JSONSerialization.jsonObject(with: Wire.request(InsertRequest("hello", into: .cursorInFront)).dropFirst()) as? [String: Any]
+        #expect(written.map { $0.keys.sorted() } == ["destination", "text"])
+        let before = Data([Wire.requestMark]) + Data(#"{"text":"hello","destination":{"cursorInFront":{}}}"#.utf8)
+        #expect(Wire.request(of: before) == InsertRequest("hello", into: .cursorInFront))
+    }
+
+    /// An input method from before requests were read whole passes over a field it does not
+    /// know, so it would do a request to take words back as one to insert nothing. It reads
+    /// only requests marked 0xFF, which this build never sends, so it refuses every request this
+    /// build writes. Pinned to the byte, because that byte is what a build from then reads.
+    @Test func anInputMethodFromBeforeRequestsWereReadWholeIsSentNothingItCouldMisread() {
+        #expect(Wire.request(InsertRequest("", into: .app(anEditor), replacing: "hello")).first != 0xFF)
+        #expect(Wire.request(InsertRequest("hello", into: .cursorInFront)).first != 0xFF)
+    }
+
+    /// An input method of a later build may refuse for a reason this one has no name for. The
+    /// reason is read, so the refusal stays one; bytes that are no refusal name no reason.
+    @Test func aRefusalForAReasonThisBuildDoesNotKnowNamesItsReason() {
+        #expect(Wire.answer(of: aLaterRefusal) == nil)
+        #expect(Wire.refusalReason(of: aLaterRefusal) == "aReasonFromALaterBuild")
+        #expect(Wire.refusalReason(of: Wire.answer(.refused(.noTextFieldHasFocus))) == "noClientHasFocus")
+        #expect(Wire.refusalReason(of: Wire.answer(.inserted(characters: 1, into: anEditor))) == nil)
+        #expect(Wire.refusalReason(of: Data("nonsense".utf8)) == nil)
+        #expect(Wire.refusalReason(of: Data(#"{"refused":{"_0":"aReasonFromALaterBuild"},"inserted":{"_0":"x"}}"#.utf8)) == nil)
+    }
+
     @Test func bytesThatAreNotARequestAreNotARequest() {
         #expect(Wire.request(of: Data([0xFF, 0xFE, 0xFD])) == nil)
         #expect(Wire.request(of: Data("hello".utf8)) == nil)
+        #expect(Wire.request(of: Data([Wire.requestMark]) + Data("hello".utf8)) == nil)
+        #expect(Wire.request(of: Data([Wire.requestMark])) == nil)
     }
 
     @Test func nonsenseIsNotAnAnswer() {
@@ -82,20 +127,20 @@ import Testing
     /// A greeting is answered with the build, or with nothing by an input method from before
     /// builds were compared, or with the refusal a port gives a sender it turns away.
     @Test func aGreetingsAnswerIsABuildNoneOrARefusal() {
-        #expect(Wire.greeting(of: Wire.said(aBuild)) == .admitted(by: aBuild))
-        #expect(Wire.greeting(of: Wire.said(nil)) == .admitted(by: nil))
-        #expect(Wire.greeting(of: Data()) == .admitted(by: nil))
+        #expect(Wire.greeting(of: Wire.said(aBuild)) == .admitted)
+        #expect(Wire.greeting(of: Wire.said(nil)) == .admitted)
+        #expect(Wire.greeting(of: Data()) == .admitted)
         #expect(Wire.greeting(of: Wire.answer(.refused(.senderIsNotThisInstallationsApp))) == .refused(.senderIsNotThisInstallationsApp))
         #expect(Wire.greeting(of: Wire.answer(.inserted(characters: 1, into: "com.example.editor"))) == nil)
         #expect(Wire.greeting(of: Data("nonsense".utf8)) == nil)
     }
 
     /// Every later app reads the build an input method of this one says, and one it cannot
-    /// read is an answer nobody could read rather than a mismatch. Pinned to the bytes for
+    /// read is an answer nobody could read rather than an admission. Pinned to the bytes for
     /// the same reason as the refusals above.
     @Test func aBuildIsSaidInBytesEveryLaterBuildReads() throws {
         let build = Build(number: "9", revision: "0123456789ab")
-        #expect(Wire.greeting(of: Data(#"{"number":"9","revision":"0123456789ab"}"#.utf8)) == .admitted(by: build))
+        #expect(Wire.greeting(of: Data(#"{"number":"9","revision":"0123456789ab"}"#.utf8)) == .admitted)
         #expect(try JSONSerialization.jsonObject(with: Wire.said(build)) as? [String: String] == ["number": "9", "revision": "0123456789ab"])
     }
 
@@ -119,6 +164,10 @@ import Testing
 /// fact about the machine rather than five. [LAW:one-source-of-truth] The cases that ARE
 /// timing under test set their own budget and say so.
 let aBudgetTheRunnerCannotSpend = Duration.seconds(20)
+
+/// A refusal as an input method of a later build might answer it, for a reason this build has
+/// no name for.
+private let aLaterRefusal = Data(#"{"refused":{"_0":"aReasonFromALaterBuild"}}"#.utf8)
 
 /// The app a hosted double says it committed into. Any name at all: what crosses the wire is
 /// what the far end said, and no case here is about which app that was.
@@ -230,7 +279,7 @@ private let anEditor = "com.example.editor"
 
         // Sent by hand, because no `Inserter` can put bytes that are not a request onto the wire,
         // and on a thread of its own for the reason the suite doc gives.
-        let answer = try await onAThreadOfItsOwn { try roundTrip(Data([0xFF, 0xFE]), to: name) }
+        let answer = try await onAThreadOfItsOwn { try roundTrip(Data([Wire.requestMark]) + Data("hello".utf8), to: name) }
         #expect(Wire.answer(of: answer) == .refused(.requestWasNotReadable))
         withExtendedLifetime(port) {}
     }
@@ -332,7 +381,7 @@ private let anEditor = "com.example.editor"
 
         let us = try OwnProcess.identity()
         let elsewhere = PeerIdentity.adHoc(cdhash: String(repeating: "0", count: 40))
-        let asking = InputMethodInserter(portName: name, timeout: aBudgetTheRunnerCannotSpend, answerer: .success(elsewhere), build: aBuild)
+        let asking = InputMethodInserter(portName: name, timeout: aBudgetTheRunnerCannotSpend, answerer: .success(elsewhere))
         await #expect(throws: InsertFailure.unreachable(.answeredByAStranger(port: name, pid: getpid(), because: .someoneElse(us), required: elsewhere, words: .notSent))) {
             try await asking.insert("hello", into: .cursorInFront)
         }
@@ -340,11 +389,11 @@ private let anEditor = "com.example.editor"
         withExtendedLifetime(port) {}
     }
 
-    /// An input method of another build is never sent the words, whether it is a build
-    /// between the same two releases, which only the revision tells apart, or one from before
-    /// builds were compared, which answers the greeting with nothing.
-    @Test(arguments: [Optional(Build(number: aBuild.number, revision: "ba9876543210")), nil])
-    func anInputMethodOfAnotherBuildNeverHearsTheWords(said: Build?) async throws {
+    /// An input method of another build takes the words, whether it is a build between the
+    /// same two releases, which only the revision tells apart, another release, or one from
+    /// before builds were compared, which answers the greeting with nothing.
+    @Test(arguments: [Optional(Build(number: aBuild.number, revision: "ba9876543210")), Build(number: "0", revision: aBuild.revision), nil])
+    func anInputMethodOfAnotherBuildTakesTheWords(said: Build?) async throws {
         let name = aPortNobodyElseUses()
         let seen = Seen()
         let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: said, queue: DispatchQueue(label: name), told: { _ in }) { request in
@@ -352,16 +401,31 @@ private let anEditor = "com.example.editor"
             return .inserted(characters: request.text.count, into: anEditor)
         }
 
-        let mismatch = try #require(BuildMismatch(app: aBuild, inputMethod: said))
-        await #expect(throws: InsertFailure.buildMismatch(mismatch)) { try await inserter(name).insert("hello", into: .cursorInFront) }
-        #expect(seen.text == nil)
+        #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(characters: 5, into: anEditor))
+        #expect(seen.text == "hello")
+        withExtendedLifetime(port) {}
+    }
+
+    /// An input method of a later build refusing for a reason this one does not know has
+    /// refused, at the greeting or at the words, so the words are held to be offered again,
+    /// never taken for words that may have landed.
+    @Test(arguments: [false, true])
+    func aRefusalForAReasonThisBuildDoesNotKnowHoldsTheWords(atTheGreeting: Bool) async throws {
+        let name = aPortNobodyElseUses()
+        let port = try InsertionPort(portName: name, queue: DispatchQueue(label: name), told: { _ in }) { request in
+            request.id == Wire.greeting && !atTheGreeting ? Wire.said(aBuild) : aLaterRefusal
+        }
+
+        let refused = InsertFailure.refusedForAnUnknownReason("aReasonFromALaterBuild")
+        await #expect(throws: refused) { try await inserter(name).insert("hello", into: .cursorInFront) }
+        #expect(!refused.wordsMayHaveLanded)
         withExtendedLifetime(port) {}
     }
 
     /// A build that cannot say who its input method is says so on each insert, rather than
     /// sending to whoever answers.
     @Test func anInserterThatCannotNameItsInputMethodSaysSo() async {
-        let asking = InputMethodInserter(portName: aPortNobodyElseUses(), timeout: .seconds(1), answerer: .failure(.noCertificate), build: aBuild)
+        let asking = InputMethodInserter(portName: aPortNobodyElseUses(), timeout: .seconds(1), answerer: .failure(.noCertificate))
         await #expect(throws: InsertFailure.answererUnreadable(.noCertificate)) { try await asking.insert("hello", into: .cursorInFront) }
     }
 }

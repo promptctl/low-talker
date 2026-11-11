@@ -22,11 +22,11 @@ func hostInsertion(name: String, answer: @escaping @Sendable (InsertRequest) -> 
 
 /// The app's end, believing only this process.
 func inserter(_ name: String, timeout: Duration = aBudgetTheRunnerCannotSpend) throws -> InputMethodInserter {
-    InputMethodInserter(portName: name, timeout: timeout, answerer: .success(try OwnProcess.identity()), build: aBuild)
+    InputMethodInserter(portName: name, timeout: timeout, answerer: .success(try OwnProcess.identity()))
 }
 
-/// The build the suite plays on both ends. Any values at all: what is under test is that the
-/// two ends agree or do not, never which build either is.
+/// The build the suite plays on both ends. Any values at all: no case here turns on which
+/// build either end is.
 let aBuild = Build(number: "1", revision: "0123456789ab")
 
 /// Sends `payload` to the port on `name` by hand and returns the bytes it answered, for the
@@ -107,8 +107,7 @@ enum Probe {
     ) async throws -> String {
         let probe = try url ?? self.url()
         let answering = String(decoding: try JSONEncoder().encode(answerer), as: UTF8.self)
-        let playing = String(decoding: try JSONEncoder().encode(aBuild), as: UTF8.self)
-        return try await onAThreadOfItsOwn { try run(probe, [name, answering, playing, text]) }
+        return try await onAThreadOfItsOwn { try run(probe, [name, answering, text]) }
     }
 
     /// Runs `executable` to completion and returns what it printed, trimmed. Blocking: call

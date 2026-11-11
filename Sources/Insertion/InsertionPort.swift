@@ -81,9 +81,10 @@ public final class InsertionPort: Sendable {
                 told(.turnedAway(pid: request.sender.pid, because: error, required: senders))
                 return Wire.answer(.refused(.senderIsNotThisInstallationsApp))
             }
-            // The greeting is answered with the build: the sender has been admitted, and it
-            // decides whether this build is one to send its words to. The input method keeps no
-            // copy of the app's state; it asks for each thing it needs. [LAW:single-enforcer]
+            // The greeting is answered with the build: the sender has been admitted. An app from
+            // before builds of either end took each other's words compares it with its own.
+            // The input method keeps no copy of the app's state; it asks for each thing it
+            // needs. [LAW:single-enforcer]
             guard request.id != Wire.greeting else { return Wire.said(build) }
             // Bytes that are not a request are answered, never dropped: a sender that hears
             // nothing waits out its timeout and learns nothing. [LAW:no-silent-failure]
