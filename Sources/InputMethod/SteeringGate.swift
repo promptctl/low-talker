@@ -71,11 +71,9 @@ extension Asker: SteeringAsking {}
 /// is every app's: the longest the app itself waits on any one insert, and not a guess at how fast
 /// the engine decodes.
 ///
-/// [LAW:no-shared-mutable-globals] Shared because `IMKServer` builds controllers out of a class
-/// name, so there is no constructor of ours to hand one to; its one mutable fact is the app asker,
-/// connected once by the process's entry point once the app's signature has been read.
+/// Its one mutable fact is the app asker, connected once by the process's entry point once the
+/// app's signature has been read. The shipped process's gate is `Steering.process.gate`.
 public nonisolated final class SteeringGate: Sendable {
-    public static let shared = SteeringGate()
 
     /// The longest a key is held: what the app itself waits on an insert.
     /// `SteeringGateTests` holds it equal to that.

@@ -36,9 +36,9 @@ public nonisolated struct Steering: Sendable {
         (self.gate, self.perform) = (gate, perform)
     }
 
-    /// The shipped process's: the shared gate the entry point connects, the system beep, and the
-    /// app's notices.
-    public static let process = Steering(gate: .shared) { effect in
+    /// The shipped process's: the gate the entry point connects and drains commits through, the
+    /// system beep, and the app's notices.
+    public static let process = Steering(gate: SteeringGate()) { effect in
         switch effect {
         case .beep: NSSound.beep()
         case .tellTheApp: Notices.shared.keyTyped(.escape)

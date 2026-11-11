@@ -109,16 +109,15 @@ public final class DictationInputController: IMKInputController, InputController
 
     /// The key-binding style: the text input system binds each key-down to an action and asks here
     /// for that action. Return is bound to `insertNewline:`, which is held for the words the app owes
-    /// and kept when the gate keeps it. Escape is bound to `cancelOperation:`: it is reported to the
-    /// app, which cancels the open press and closes the panel, and it is kept while the panel is
-    /// shown. Every other action is declined.
+    /// and kept when the gate keeps it. Escape is bound to `cancelOperation:`: while the panel is
+    /// shown it is kept and told to the app, which cancels the open press and closes the panel. Every other action is declined.
     ///
     /// Overridden with an optional selector, as IMK may call with none.
     nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {
         // IMK hands the command while the key is still down, so the modifiers held as it arrives are
         // the key's own. Read before the hop, which can wait out a Return the main thread is holding,
         // and handed on as a value: a read of the window server's modifier state, not a call on the
-        // client, so off the main actor is where it belongs. The moment it was typed is read beside
+        // client, so off the main actor is where it belongs. The moment IMK handed it over is read beside
         // them, the moment the app's questions are asked about. [LAW:effects-at-boundaries]
         didCommand(by: selector, holding: NSEvent.modifierFlags, typedAt: ProcessInfo.processInfo.systemUptime)
     }

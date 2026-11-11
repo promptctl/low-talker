@@ -110,7 +110,9 @@ import Testing
         let gate = SteeringGate(ceiling: .milliseconds(20), asking: App(settling: { release.wait(); return .success(.landed) }))
 
         let started = ContinuousClock.now
-        #expect(gate.verdict(at: 1).verdict == .keep)
+        let decided = gate.verdict(at: 1)
+        #expect(decided.verdict == .keep)
+        #expect(decided.because.contains("had not answered"), "\(decided)")
         #expect(ContinuousClock.now - started >= .milliseconds(20))
     }
 
@@ -120,7 +122,8 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func anEarlierReturnsLateAnswerIsNotTheNextOnes() {
         let release = DispatchSemaphore(value: 0)
         let earlierAnswered = DispatchSemaphore(value: 0)
-        let gate = SteeringGate(ceiling: .milliseconds(20), asking: App(settling: {
+        // Long enough for the second Return's handshake with the first's thread under a loaded suite.
+        let gate = SteeringGate(ceiling: .milliseconds(500), asking: App(settling: {
             release.wait()
             defer { earlierAnswered.signal() }
             return .success(.notLanded)
