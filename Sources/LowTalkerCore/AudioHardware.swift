@@ -86,12 +86,14 @@ public struct MicrophoneInput: Sendable, Equatable, CustomStringConvertible {
     public let name: Result<String, AudioHardwareError>
     public let sampleRate: Double
     public let channels: Int
+    public let heard: HeardChannels
 
-    public init(device: AudioObjectID, name: Result<String, AudioHardwareError>, sampleRate: Double, channels: Int) {
+    public init(device: AudioObjectID, name: Result<String, AudioHardwareError>, sampleRate: Double, channels: Int, heard: HeardChannels) {
         self.device = device
         self.name = name
         self.sampleRate = sampleRate
         self.channels = channels
+        self.heard = heard
     }
 
     public var description: String {
@@ -99,7 +101,7 @@ public struct MicrophoneInput: Sendable, Equatable, CustomStringConvertible {
         case .success(let name): "\"\(name)\""
         case .failure(let error): "an input whose name is unknown (\(error))"
         }
-        return "\(named) (device \(device), \(Int(sampleRate)) Hz, \(channels) channel\(channels == 1 ? "" : "s"))"
+        return "\(named) (device \(device), \(Int(sampleRate)) Hz, \(channels) channel\(channels == 1 ? "" : "s"), \(heard))"
     }
 }
 

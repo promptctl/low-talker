@@ -120,8 +120,7 @@ final class HALInput: PreparedInput {
     /// what `Elsewhere` hands back, and the IOProc's own calls are CoreAudio's to serialize.
     private final class Reach: @unchecked Sendable {
         let sink: Sink
-        /// What each press's ring and converter are built in: planar float at the device's
-        /// rate, one channel per channel of the layout.
+        /// What each press's ring and converter are built in: the layout's heard channels.
         let format: AVAudioFormat
         /// The shape of what the IOProc is handed, read when this was readied.
         let layout: InputLayout
@@ -163,23 +162,11 @@ final class HALInput: PreparedInput {
             do {
                 layout = try HALInput.layout(of: device)
 
-                // Float samples, one buffer per channel: the shape `AudioClip.Converter` reads
-                // and the shape the ring is read back in. `SliceRing` makes it out of whatever
-                // the layout's buffers are, so nothing here has to know how the device lays its
-                // channels out.
-                var client = AudioStreamBasicDescription(
-                    mSampleRate: layout.sampleRate,
-                    mFormatID: kAudioFormatLinearPCM,
-                    mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
-                    mBytesPerPacket: UInt32(MemoryLayout<Float>.size),
-                    mFramesPerPacket: 1,
-                    mBytesPerFrame: UInt32(MemoryLayout<Float>.size),
-                    mChannelsPerFrame: UInt32(layout.channels),
-                    mBitsPerChannel: UInt32(MemoryLayout<Float>.size * 8),
-                    mReserved: 0
-                )
-                guard let described = AVAudioFormat(streamDescription: &client) else {
-                    throw AudioClipError.unconvertibleFormat(sampleRate: client.mSampleRate, channels: client.mChannelsPerFrame)
+                // The shape `AudioClip.Converter` reads and the ring is read back in. `SliceRing`
+                // makes it out of whatever the layout's buffers are, so nothing here has to know
+                // how the device lays its channels out.
+                guard let described = layout.format else {
+                    throw AudioClipError.unconvertibleFormat(sampleRate: layout.sampleRate, channels: UInt32(layout.heard.count))
                 }
                 format = described
 
@@ -206,6 +193,11 @@ final class HALInput: PreparedInput {
                 // the same way every other claim about preparing is: by reading the device back.
                 registered.append(try HALInput.watch(device, kAudioDevicePropertyDeviceIsAlive, scope: kAudioObjectPropertyScopeGlobal, onStale))
                 registered.append(try HALInput.watch(device, kAudioDevicePropertyStreamFormat, scope: kAudioObjectPropertyScopeInput, onStale))
+                // The channels it is heard on, which a person can name again under it. A device
+                // that publishes none has nothing to watch.
+                if case .named = layout.heardChannels.stereo {
+                    registered.append(try HALInput.watch(device, kAudioDevicePropertyPreferredChannelsForStereo, scope: kAudioObjectPropertyScopeInput, onStale))
+                }
 
                 // [LAW:parse-dont-validate] The border between a microphone reached and a
                 // microphone taken. Everything above claims to cross it without opening a
@@ -234,7 +226,7 @@ final class HALInput: PreparedInput {
             self.queue = queue
             self.procID = created!
             self.watches = registered
-            input = MicrophoneInput(device: device, name: Result { () throws(AudioHardwareError) in try HALInput.name(of: device) }, sampleRate: format.sampleRate, channels: layout.channels)
+            input = MicrophoneInput(device: device, name: Result { () throws(AudioHardwareError) in try HALInput.name(of: device) }, sampleRate: format.sampleRate, channels: layout.channels, heard: layout.heardChannels)
         }
 
         /// What a press hands its audio over through: a delivery whose slices are as large as
@@ -271,7 +263,7 @@ final class HALInput: PreparedInput {
             let slice = Int(range.mMaximum)
             let frames = max(2 * slice, Int(format.sampleRate * HALInput.backlog))
             return try SliceDelivery(
-                SliceRing(channels: layout.channels, frames: frames, entries: frames / max(Int(range.mMinimum), 1) + 1),
+                SliceRing(channels: layout.heard.count, frames: frames, entries: frames / max(Int(range.mMinimum), 1) + 1),
                 layout: layout,
                 slice: slice,
                 format: format,
@@ -634,10 +626,24 @@ final class HALInput: PreparedInput {
             try AudioHardwareError.check(AudioObjectGetPropertyData(stream, &address, 0, nil, &size, &format), AudioHardwareError.inputUnavailable)
             formats.append(format)
         }
-        switch InputLayout.parse(formats) {
+        switch InputLayout.parse(formats, stereo: stereo(of: device)) {
         case .success(let layout): return layout
         case .failure(let why): throw AudioHardwareError.unsupportedInput(device: device, why: why)
         }
+    }
+
+    /// The channels `device` names for stereo input, or what CoreAudio answered instead: a
+    /// device is free not to publish them, and is heard on its first channels then.
+    private nonisolated static func stereo(of device: AudioObjectID) -> StereoChannels {
+        var pair: (UInt32, UInt32) = (0, 0)
+        var size = UInt32(MemoryLayout<(UInt32, UInt32)>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyPreferredChannelsForStereo,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &pair)
+        return status == noErr ? .named(Int(pair.0), Int(pair.1)) : .unpublished(status)
     }
 
     /// Gives back an IOProc: stopped, then destroyed. [LAW:single-enforcer] Both ways one

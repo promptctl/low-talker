@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreAudio
 
 /// What a device's IOProc hands over, as a shape: how many buffers there are, how many
@@ -15,29 +16,42 @@ import CoreAudio
 struct InputLayout: Sendable, Equatable {
     /// The channels of each buffer, in the order the IOProc is handed them.
     let buffers: [Int]
-    /// The first channel each buffer's frames take in the planar ring, so a render does not
-    /// add them up.
-    let offsets: [Int]
     let sampleRate: Double
+    /// Which of the device's channels are heard, and why those.
+    let heardChannels: HeardChannels
+    /// Where each heard channel is in a render, in the order the ring holds them.
+    let heard: [Lane]
+
+    /// A channel's place in a render: its buffer, and its lane among that buffer's interleaved
+    /// channels.
+    struct Lane: Sendable, Equatable {
+        let buffer: Int
+        let lane: Int
+    }
 
     var channels: Int { buffers.reduce(0, +) }
 
-    init(buffers: [Int], sampleRate: Double) {
+    init(buffers: [Int], sampleRate: Double, stereo: StereoChannels) {
         self.buffers = buffers
         self.sampleRate = sampleRate
-        var offsets: [Int] = []
-        var next = 0
-        for channels in buffers {
-            offsets.append(next)
-            next += channels
-        }
-        self.offsets = offsets
+        heardChannels = HeardChannels(of: buffers.reduce(0, +), stereo: stereo)
+        let lanes = buffers.enumerated().flatMap { buffer, width in (0..<width).map { Lane(buffer: buffer, lane: $0) } }
+        heard = heardChannels.channels.map { lanes[$0 - 1] }
+    }
+
+    /// What the heard channels are popped in and converted from: float samples at the device's
+    /// rate, one buffer per heard channel. At most two, which is what lets AVAudioFormat
+    /// describe it whatever the device's channel count; past two it describes none without a
+    /// channel layout, and given one AVAudioConverter mixes it to silence
+    /// (low-reliability-z2z.n4b).
+    var format: AVAudioFormat? {
+        AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: AVAudioChannelCount(heard.count), interleaved: false)
     }
 
     /// The shape of what a device offers, from the virtual format of each of its input
-    /// streams in stream order: what the HAL presents to a client, as opposed to what the
-    /// hardware stores.
-    static func parse(_ streams: [AudioStreamBasicDescription]) -> Result<InputLayout, InputRefusal> {
+    /// streams in stream order, what the HAL presents to a client as opposed to what the
+    /// hardware stores, and the channels it names for stereo.
+    static func parse(_ streams: [AudioStreamBasicDescription], stereo: StereoChannels) -> Result<InputLayout, InputRefusal> {
         guard let first = streams.first else { return .failure(.noStream) }
         var buffers: [Int] = []
         for stream in streams {
@@ -56,7 +70,7 @@ struct InputLayout: Sendable, Equatable {
             }
         }
         guard !buffers.isEmpty else { return .failure(.noChannels) }
-        return .success(InputLayout(buffers: buffers, sampleRate: first.mSampleRate))
+        return .success(InputLayout(buffers: buffers, sampleRate: first.mSampleRate, stereo: stereo))
     }
 
     /// What one render's buffer list comes to against this shape.
@@ -160,6 +174,43 @@ public enum InputRefusal: Error, Equatable, Sendable, CustomStringConvertible {
         case .bigEndian: "its input samples are big-endian"
         case .mixedSampleRates(let a, let b): "its input streams run at different sample rates (\(a) and \(b) Hz)"
         case .noChannels: "its input carries no channels"
+        }
+    }
+}
+
+/// The channels a device names for stereo input (`kAudioDevicePropertyPreferredChannelsForStereo`),
+/// numbered from 1 as CoreAudio numbers them, or what CoreAudio answered when asked for them.
+public enum StereoChannels: Sendable, Equatable {
+    case named(Int, Int)
+    case unpublished(OSStatus)
+}
+
+/// Which channels of a device are heard, numbered from 1: the two it names for stereo, or the
+/// one a mono device names twice. A device that names none it has is heard on its first one or
+/// two rather than refused, because a refused device fails every press. AVAudioConverter mixes
+/// two as it mixes any stereo input, half of each (measured), so a mono or stereo device is
+/// heard as it was before devices wider than two could be.
+public struct HeardChannels: Sendable, Equatable, CustomStringConvertible {
+    public let channels: [Int]
+    public let stereo: StereoChannels
+
+    /// For a device of `count` channels, at least one.
+    public init(of count: Int, stereo: StereoChannels) {
+        self.stereo = stereo
+        channels = switch stereo {
+        case .named(let left, let right) where (1...count).contains(left) && (1...count).contains(right):
+            left == right ? [left] : [left, right]
+        default:
+            Array(1...min(2, count))
+        }
+    }
+
+    public var description: String {
+        let heard = channels.count == 1 ? "heard on channel \(channels[0])" : "heard on channels \(channels[0]) and \(channels[1])"
+        return switch stereo {
+        case .named(let left, let right) where Set([left, right]) == Set(channels): heard
+        case .named(let left, let right): "\(heard), its first: it names channels \(left) and \(right) for stereo"
+        case .unpublished(let status): "\(heard), its first: it names no channels for stereo (status \(status))"
         }
     }
 }

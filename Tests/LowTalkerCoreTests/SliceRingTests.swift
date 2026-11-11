@@ -22,7 +22,7 @@ import Testing
     }
 
     /// One channel, one buffer: what `slice` builds.
-    static let mono = InputLayout(buffers: [1], sampleRate: 16_000)
+    static let mono = InputLayout(buffers: [1], sampleRate: 16_000, stereo: .named(1, 1))
 
     static func stamp(_ ticks: UInt64, valid: Bool = true) -> AudioTimeStamp {
         var stamp = AudioTimeStamp()
