@@ -138,6 +138,7 @@ targets:
     # than a promise. Measured under it on 2026-09-28, the app launches, loads its carried
     # model, captures the microphone and reads its input source with nothing more; with no
     # network entitlement, connect() and getaddrinfo are refused as `network-outbound`.
+    # `scripts/variant` refuses to package a signed app outside it.
     #
     # com.apple.security.files.user-selected.read-only: the Benchmark window's Choose…
     # buttons, without it, show nothing, and AppKit logs "Unable to display open panel: your
@@ -338,7 +339,8 @@ targets:
     # network. It registers two names and nothing else - the text input system's connection
     # and the insert port the app sends to - and looks up one, the app's hotkey port, and a
     # sandboxed process may register or look up only the names listed here.
-    # `InputMethodEntitlementsTests` holds all three to `AppIdentity`'s.
+    # `InputMethodEntitlementsTests` holds these, and nothing beside them, to `AppIdentity`'s
+    # names; `scripts/variant` holds the signed bundle sandboxed with no network key.
     entitlements:
       path: App/Generated/LowTalker-InputMethod.entitlements
       properties:

@@ -12,14 +12,10 @@
     "model's `licenseFile` is in this repository, since Hugging Face repos ship none. A",
     "vendored component's `version` names the file to read it from and a regular expression",
     "whose first group is the version (and second, if any, the revision), so a re-vendoring",
-    "moves the SBOM.",
-    "`silentOnTheWireAt` is the revision of a package that can reach the network which",
-    "scripts/wire-check last watched through a launch and a dictation and found silent; a",
-    "Package.resolved pinning any other revision of it fails the build until that is re-run."
+    "moves the SBOM."
   ],
   "packages": {
     "argmax-oss-swift": {
-      "silentOnTheWireAt": "1e2a163736dfa5a198e637ae44c114e1c6d5cc2d",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "vendored": [

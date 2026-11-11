@@ -1,23 +1,52 @@
 #!/usr/bin/env bash
-# Which build an app is, from the entitlements plist on stdin, as
-# `codesign -d --entitlements - --xml <app>` prints it: `offline` when it carries none of the
-# sandbox's network keys, `network` when it carries the server key alone, set true. Any other
-# set is a build neither variant makes, and fails naming the keys.
+# Which build a signed app is, read off its signature with the input method built beside it:
+# `offline` when the app carries none of the sandbox's network keys, `network` when it carries
+# the server key alone, set true. Any other set is a build neither variant makes, and fails
+# naming the keys.
 #
-#   codesign -d --entitlements - --xml <app> | scripts/variant    # prints offline or network
+#   scripts/variant <app> <input method>    # prints offline or network
 #
 # The Makefile's VARIANT decides which set a build signs in; this reads the answer back off the
 # signature, so a package named for it cannot say offline over an app that may accept
 # connections. [LAW:one-source-of-truth]
+#
+# It is also where "neither process can open an outbound connection" is held. Under App Sandbox
+# without com.apple.security.network.client, connect() and getaddrinfo are refused (project.yml
+# records the measurement), so both bundles must be sandboxed and neither may carry that key.
+# Read off what is signed, because every way to add an entitlement - project.yml, a setting on
+# the xcodebuild command line, an xcconfig - ends there. The input method is the same bytes in
+# both builds and never listens, so it carries no network key at all. [LAW:single-enforcer]
 set -euo pipefail
 
-network=$(plutil -convert json -o - - \
-  | jq -c '[to_entries[] | select(.key | startswith("com.apple.security.network.")) | [.key, .value]]')
-case "$network" in
-  '[]') echo offline ;;
-  '[["com.apple.security.network.server",true]]') echo network ;;
-  *)
-    echo "variant: the network entitlements $network are neither the offline nor the network build's" >&2
-    exit 1
-    ;;
+usage="usage: scripts/variant <path to .app> <path to input method .app>"
+app=${1:?$usage}
+input_method=${2:?$usage}
+
+fail() {
+  echo "variant: $1" >&2
+  exit 1
+}
+
+# The sandbox key and every network key a bundle's signature carries, as the one line the
+# judgements below match.
+carries() {
+  local signed
+  signed=$(codesign -d --entitlements - --xml "$1") || fail "$1 is not signed"
+  # codesign answers a signature with no entitlements with nothing at all, and exits 0.
+  [[ -n $signed ]] || fail "$1 is signed with no entitlements, so it runs outside the sandbox"
+  plutil -convert json -o - - <<<"$signed" | jq -c '{
+    sandbox: .["com.apple.security.app-sandbox"],
+    network: [to_entries[] | select(.key | startswith("com.apple.security.network.")) | [.key, .value]]
+  }'
+}
+
+input_method_carries=$(carries "$input_method")
+[[ $input_method_carries == '{"sandbox":true,"network":[]}' ]] \
+  || fail "the input method $input_method carries $input_method_carries; in either build it is sandboxed with no network key"
+
+app_carries=$(carries "$app")
+case "$app_carries" in
+  '{"sandbox":true,"network":[]}') echo offline ;;
+  '{"sandbox":true,"network":[["com.apple.security.network.server",true]]}') echo network ;;
+  *) fail "$app carries $app_carries, which is neither the offline nor the network build's" ;;
 esac
