@@ -43,20 +43,22 @@ public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
     /// The range every case reads back: the field's first five UTF-16 units.
     public static let readRange = NSRange(location: 0, length: 5)
 
-    public var description: String { "\(profile), \(act) into \(holding.debugDescription)" + (maxLength.map { " (maxlength \($0))" } ?? "") }
+    public var description: String {
+        "\(profile), \(act) into \(holding.debugDescription) with \(selected) selected" + (maxLength.map { " (maxlength \($0))" } ?? "")
+    }
 
     /// Makes the call on `client` and says every way it disagreed with the case; nothing, when it
-    /// agreed. `holds` reads what the field holds once the call is made.
+    /// agreed. `reading` reads what the field holds once the call is made.
     @MainActor
-    public func disagreements(of client: any TextInputClient, holds: () -> String) -> [String] {
+    public func disagreements(of client: any TextInputClient, reading: () -> String) -> [String] {
         switch act {
         case .read: break
         case let .insert(text, range): client.insertText(text, replacementRange: range)
         }
         let answered = Answers(documentAccess: client.givesDocumentAccess(), selection: client.selectedRange(), text: client.string(in: Self.readRange))
-        let held = holds()
+        let held = reading()
         return (answered == answers ? [] : ["the client answered \(answered), and the case says \(answers)"])
-            + (held == self.holds ? [] : ["the field holds \(held.debugDescription), and the case says \(self.holds.debugDescription)"])
+            + (held == holds ? [] : ["the field holds \(held.debugDescription), and the case says \(holds.debugDescription)"])
     }
 
     /// The field the case is set up with, as the fake.

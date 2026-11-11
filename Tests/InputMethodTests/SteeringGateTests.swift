@@ -51,9 +51,9 @@ import Testing
     /// is committed by the thread holding it, so the words are in the field before the Return is
     /// let through to the app.
     @MainActor
-    @Test(.timeLimit(.minutes(1))) func wordsOwedAreCommittedBeforeTheReturnPasses() {
+    @Test(.timeLimit(.minutes(1))) func wordsOwedAreCommittedBeforeTheReturnPasses() throws {
         let field = FakeTextInputClient()
-        let cursor = Client(field, inFront: nil)!
+        let cursor = try field.cursor()
         let turns = MainTurns()
         let committer = Committer(bound: Self.farOff, turns: turns) { _ in }
         let order = Log()

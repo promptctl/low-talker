@@ -1,5 +1,6 @@
 import Foundation
 import InputMethod
+import Testing
 
 /// How the client in front of a field answers the input method: one row of what each app's text
 /// client was measured answering over `IMKTextInput` on studious (low-voice-edit-1jf.bem,
@@ -122,8 +123,11 @@ public final class FakeTextInputClient: TextInputClient {
         duringInsert()
         let replaced = range.location == NSNotFound || profile.access == .none ? selection : range
         // No client was measured answering a range past the end of its field, so the fake answers
-        // none: it stops the run, naming the range, rather than guess.
-        precondition(holds(replaced), "insertText into \(profile) holding \(text.utf16.count) units was given \(replaced)")
+        // none: it fails the case that handed it one, naming the range, rather than guess.
+        guard holds(replaced) else {
+            Issue.record("insertText into \(profile) holding \(text.utf16.count) units was given \(replaced), past the field")
+            return
+        }
         var room = maxLength.map { $0 - (text.utf16.count - replaced.length) } ?? .max
         let kept = String(words.prefix { character in
             room -= character.utf16.count

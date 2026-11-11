@@ -27,11 +27,6 @@ import Testing
     /// from a line centered below the display's bottom edge.
     nonisolated private static let typeSelectLine = CGRect(x: 5, y: -13, width: 1, height: 14)
 
-    /// The cursor `activateServer` makes of `field`'s client while `frontmost` is in front.
-    private static func madeCursor(over field: FakeTextInputClient = FakeTextInputClient(), whileInFrontIs frontmost: String? = nil) -> Client {
-        Client(field, inFront: frontmost)!
-    }
-
     /// A client that names no app is no cursor, even with an app in front: its app could never be
     /// compared against the one in front, so it could never be refused for being somewhere else.
     @Test(arguments: [nil, ""])
@@ -48,7 +43,7 @@ import Testing
 
     @Test func theCursorInFrontIsTheOneChosen() throws {
         let client = FocusedClient()
-        let cursor = Self.madeCursor()
+        let cursor = try FakeTextInputClient().cursor()
         client.took(cursor)
 
         #expect(try self.cursor(client).get() === cursor)
@@ -57,9 +52,9 @@ import Testing
     /// A cursor held from before secure input came on is not committed into: macOS has
     /// stopped routing to input methods, and the refusal names what to fix instead of
     /// asking the person to click into a text field they are already in.
-    @Test func secureInputIsRefusedByName() {
+    @Test func secureInputIsRefusedByName() throws {
         let client = FocusedClient()
-        client.took(Self.madeCursor())
+        try client.took(FakeTextInputClient().cursor())
 
         #expect(throws: Refusal.secureInputIsOn) { try cursor(client, secureInputHeldBy: "iTerm2").get() }
     }
@@ -67,22 +62,22 @@ import Testing
     /// Secure input is the reason given even where another refusal about the cursor also
     /// holds: the fix is in the app holding it, and naming the other would send the person
     /// to click into a text field that cannot help.
-    @Test func secureInputIsTheReasonOverEveryRefusalAboutTheCursor() {
+    @Test func secureInputIsTheReasonOverEveryRefusalAboutTheCursor() throws {
         #expect(throws: Refusal.secureInputIsOn) { try cursor(FocusedClient(), secureInputHeldBy: "iTerm2").get() }
         let client = FocusedClient()
-        client.took(Self.madeCursor())
+        try client.took(FakeTextInputClient().cursor())
         #expect(throws: Refusal.secureInputIsOn) { try cursor(client, whileInFrontIs: "com.example.elsewhere", secureInputHeldBy: "iTerm2").get() }
         let typeSelecting = FocusedClient()
-        typeSelecting.took(Self.madeCursor(over: FakeTextInputClient(caretLine: Self.typeSelectLine)))
+        try typeSelecting.took(FakeTextInputClient(caretLine: Self.typeSelectLine).cursor())
         #expect(throws: Refusal.secureInputIsOn) { try cursor(typeSelecting, secureInputHeldBy: "iTerm2").get() }
     }
 
     /// With another input source selected the cursor last held is one the text input system
     /// has deactivated, and the refusal names the Input menu over any refusal about the
     /// cursor, since no field the person clicks into can take the words until it is fixed.
-    @Test func anotherSourceSelectedIsRefusedByName() {
+    @Test func anotherSourceSelectedIsRefusedByName() throws {
         let client = FocusedClient()
-        client.took(Self.madeCursor())
+        try client.took(FakeTextInputClient().cursor())
         #expect(throws: Refusal.inputSourceIsNotSelected) { try cursor(client, selected: false).get() }
         #expect(throws: Refusal.inputSourceIsNotSelected) { try cursor(FocusedClient(), selected: false).get() }
     }
@@ -96,9 +91,9 @@ import Testing
     /// committed into it goes nowhere while the commit answers that it landed: Calculator,
     /// Installer, a page's body text. The client says so itself by giving no document
     /// access, and the words are refused rather than lost. [LAW:no-silent-failure]
-    @Test func aCursorGivingNoDocumentAccessIsRefusedAsNoTextField() {
+    @Test func aCursorGivingNoDocumentAccessIsRefusedAsNoTextField() throws {
         let client = FocusedClient()
-        client.took(Self.madeCursor(over: FakeTextInputClient(in: "com.apple.calculator", .noTextField)))
+        try client.took(FakeTextInputClient(in: "com.apple.calculator", .noTextField).cursor())
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: "com.apple.calculator").get() }
     }
@@ -106,9 +101,9 @@ import Testing
     /// The Finder's desktop and file lists give document access to a type-select buffer in
     /// no window, which takes the words where nobody can see them. Its caret is on no
     /// screen, and that is what refuses it. [LAW:no-silent-failure]
-    @Test func aCaretOnNoScreenIsRefusedAsNoTextField() {
+    @Test func aCaretOnNoScreenIsRefusedAsNoTextField() throws {
         let client = FocusedClient()
-        client.took(Self.madeCursor(over: FakeTextInputClient(in: "com.apple.finder", caretLine: Self.typeSelectLine)))
+        try client.took(FakeTextInputClient(in: "com.apple.finder", caretLine: Self.typeSelectLine).cursor())
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: "com.apple.finder").get() }
     }
@@ -116,7 +111,7 @@ import Testing
     /// Any screen will do: a field on a second display, wherever it is arranged, is a field.
     @Test func aCaretOnAnyScreenIsTaken() throws {
         let client = FocusedClient()
-        let cursor = Self.madeCursor(over: FakeTextInputClient(caretLine: CGRect(x: 2000, y: -300, width: 1, height: 16)))
+        let cursor = try FakeTextInputClient(caretLine: CGRect(x: 2000, y: -300, width: 1, height: 16)).cursor()
         client.took(cursor)
         let below = CGRect(x: 1600, y: -1080, width: 1920, height: 1080)
 
@@ -128,7 +123,7 @@ import Testing
     /// screens, and real fields answer that way between activating and their first answer.
     @Test func aFieldReportingNoCaretIsTaken() throws {
         let client = FocusedClient()
-        let cursor = Self.madeCursor(over: FakeTextInputClient(caretLine: nil))
+        let cursor = try FakeTextInputClient(caretLine: nil).cursor()
         client.took(cursor)
 
         #expect(try self.cursor(client).get() === cursor)
@@ -139,7 +134,7 @@ import Testing
     @Test func theFieldIsTheAnswerAtTheMomentOfTheInsert() throws {
         let client = FocusedClient()
         let field = FakeTextInputClient(in: "com.google.Chrome", .webKitTextArea)
-        let cursor = Self.madeCursor(over: field)
+        let cursor = try field.cursor()
         client.took(cursor)
         #expect(try self.cursor(client, whileInFrontIs: "com.google.Chrome").get() === cursor)
 
@@ -150,10 +145,10 @@ import Testing
     /// The field is a call into the cursor's app, which may be hung, so it is asked only of
     /// the cursor the words would go to, and once: never of one left in an app the person
     /// has moved away from, under secure input, or after the dictation moved apps.
-    @Test func theFieldIsAskedOnceAndOnlyOfTheCursorTheWordsWouldGoTo() {
+    @Test func theFieldIsAskedOnceAndOnlyOfTheCursorTheWordsWouldGoTo() throws {
         let client = FocusedClient()
         let field = FakeTextInputClient(in: "com.apple.TextEdit")
-        client.took(Self.madeCursor(over: field))
+        try client.took(field.cursor())
 
         _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.finder", secureInputHeldBy: nil, selected: true, screens: [Self.display])
         _ = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: "iTerm2", selected: true, screens: [Self.display])
@@ -169,16 +164,16 @@ import Testing
     /// The insert's log line tells the three ways into `noTextFieldHasFocus` apart - no
     /// cursor, a client giving no document access, a caret on no screen - and says where
     /// the caret of a taken insert was.
-    @Test func whatTheInsertSawNamesTheCursorAndWhatItsClientAnswered() {
+    @Test func whatTheInsertSawNamesTheCursorAndWhatItsClientAnswered() throws {
         func seen(_ field: FakeTextInputClient?, inFront frontmost: String? = "com.apple.finder", secureInputHeldBy holder: String? = nil,
-                  selected: Bool = true, screens: [CGRect] = [Self.display]) -> InFront {
+                  selected: Bool = true, screens: [CGRect] = [Self.display]) throws -> InFront {
             let client = FocusedClient()
-            field.map { client.took(Self.madeCursor(over: $0)) }
+            try field.map { try client.took($0.cursor()) }
             return client.inFront(for: .cursorInFront, whileInFrontIs: frontmost, secureInputHeldBy: holder, selected: selected,
                                   screens: screens)
         }
 
-        let none = seen(nil)
+        let none = try seen(nil)
         #expect(throws: Refusal.noTextFieldHasFocus) { try none.cursor.get() }
         #expect(none.description == "with com.apple.finder in front and no cursor")
 
@@ -186,31 +181,31 @@ import Testing
             FakeTextInputClient(in: "com.apple.finder", profile, caretLine: caretLine)
         }
 
-        let noAccess = seen(finder(.noTextField))
+        let noAccess = try seen(finder(.noTextField))
         #expect(throws: Refusal.noTextFieldHasFocus) { try noAccess.cursor.get() }
         #expect(noAccess.description == "with com.apple.finder in front and the cursor in com.apple.finder, which gives no document access")
 
-        let offScreen = seen(finder(caretLine: Self.typeSelectLine))
+        let offScreen = try seen(finder(caretLine: Self.typeSelectLine))
         #expect(throws: Refusal.noTextFieldHasFocus) { try offScreen.cursor.get() }
         #expect(offScreen.description == "with com.apple.finder in front and the cursor in com.apple.finder, its caret line at (5.0, -13.0, 1.0, 14.0), on none of the screens [(0.0, 0.0, 1600.0, 900.0)]")
 
-        let noScreens = seen(finder(caretLine: CGRect(x: 1305, y: 435, width: 1, height: 16)), screens: [])
+        let noScreens = try seen(finder(caretLine: CGRect(x: 1305, y: 435, width: 1, height: 16)), screens: [])
         #expect(throws: Refusal.noTextFieldHasFocus) { try noScreens.cursor.get() }
         #expect(noScreens.description == "with com.apple.finder in front and the cursor in com.apple.finder, its caret line at (1305.0, 435.0, 1.0, 16.0), on none of the screens []")
 
-        let taken = seen(finder(caretLine: CGRect(x: 1305, y: 435, width: 1, height: 16)))
+        let taken = try seen(finder(caretLine: CGRect(x: 1305, y: 435, width: 1, height: 16)))
         #expect((try? taken.cursor.get()) != nil)
         #expect(taken.description == "with com.apple.finder in front and the cursor in com.apple.finder, its caret line at (1305.0, 435.0, 1.0, 16.0)")
 
-        let noCaret = seen(finder(caretLine: nil))
+        let noCaret = try seen(finder(caretLine: nil))
         #expect((try? noCaret.cursor.get()) != nil)
         #expect(noCaret.description == "with com.apple.finder in front and the cursor in com.apple.finder, which reports no caret")
 
-        let securing = seen(finder(.noTextField), inFront: nil, secureInputHeldBy: "iTerm2")
+        let securing = try seen(finder(.noTextField), inFront: nil, secureInputHeldBy: "iTerm2")
         #expect(throws: Refusal.secureInputIsOn) { try securing.cursor.get() }
         #expect(securing.description == "with nothing in front and the cursor in com.apple.finder, secure input held by iTerm2")
 
-        let elsewhere = seen(finder(), selected: false)
+        let elsewhere = try seen(finder(), selected: false)
         #expect(throws: Refusal.inputSourceIsNotSelected) { try elsewhere.cursor.get() }
         #expect(elsewhere.description == "with com.apple.finder in front and the cursor in com.apple.finder, another input source selected")
     }
@@ -219,9 +214,9 @@ import Testing
     /// dictate into TextEdit, quit it, launch it again, and have the words answered
     /// `inserted` into a client whose process no longer exists - the app names would match
     /// and nothing else would object. [LAW:no-silent-failure]
-    @Test func aCursorDiesWithItsApp() {
+    @Test func aCursorDiesWithItsApp() throws {
         let client = FocusedClient()
-        client.took(Self.madeCursor(over: FakeTextInputClient(in: "com.apple.TextEdit")))
+        try client.took(FakeTextInputClient(in: "com.apple.TextEdit").cursor())
         client.applicationQuit("com.apple.TextEdit")
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: "com.apple.TextEdit").get() }
@@ -230,16 +225,16 @@ import Testing
     /// Some other app quitting is not this cursor's business.
     @Test func anotherAppQuittingLeavesTheCursorAlone() throws {
         let client = FocusedClient()
-        let cursor = Self.madeCursor()
+        let cursor = try FakeTextInputClient().cursor()
         client.took(cursor)
         client.applicationQuit("com.apple.Safari")
 
         #expect(try self.cursor(client).get() === cursor)
     }
 
-    @Test func aCursorThatLeavesTakesTheFocusWithIt() {
+    @Test func aCursorThatLeavesTakesTheFocusWithIt() throws {
         let client = FocusedClient()
-        let cursor = Self.madeCursor()
+        let cursor = try FakeTextInputClient().cursor()
         client.took(cursor)
         client.left(cursor)
 
@@ -251,9 +246,9 @@ import Testing
     /// of this input method, and then nothing deactivates the cursor left standing. Held
     /// here and not by a reading - on this Mac every app tried, the Finder's desktop
     /// included, presented a client of its own. [LAW:no-silent-failure]
-    @Test func aCursorLeftBehindInAnotherAppIsRefusedRatherThanInsertedInto() {
+    @Test func aCursorLeftBehindInAnotherAppIsRefusedRatherThanInsertedInto() throws {
         let client = FocusedClient()
-        client.took(Self.madeCursor(over: FakeTextInputClient(in: "com.apple.TextEdit")))
+        try client.took(FakeTextInputClient(in: "com.apple.TextEdit").cursor())
 
         #expect(throws: Refusal.cursorIsInAnotherApp) { try cursor(client, whileInFrontIs: "com.apple.finder").get() }
     }
@@ -261,9 +256,9 @@ import Testing
     /// A dictation's later words go only to the app its first went to. The person who moved
     /// to the Finder mid-press is refused there - the case measured on studious, where the
     /// Finder presents a client and took the rest of a TextEdit dictation.
-    @Test func wordsBoundToAnotherAppAreRefusedAtTheCursorInFront() {
+    @Test func wordsBoundToAnotherAppAreRefusedAtTheCursorInFront() throws {
         let client = FocusedClient()
-        client.took(Self.madeCursor(over: FakeTextInputClient(in: "com.apple.finder")))
+        try client.took(FakeTextInputClient(in: "com.apple.finder").cursor())
 
         #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(client, for: .app("com.apple.TextEdit"), whileInFrontIs: "com.apple.finder").get() }
     }
@@ -271,18 +266,18 @@ import Testing
     /// The person who moved is told they moved, whatever the app they moved to holds: no
     /// cursor of its own, a cursor still standing in the app they left, or secure input.
     /// None of those is where the words were going, so none is the thing to fix.
-    @Test func aMoveIsTheReasonOverWhatTheAppMovedToHolds() {
+    @Test func aMoveIsTheReasonOverWhatTheAppMovedToHolds() throws {
         let bound = Destination.app("com.apple.TextEdit")
         #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(FocusedClient(), for: bound, whileInFrontIs: "com.apple.finder").get() }
         let client = FocusedClient()
-        client.took(Self.madeCursor(over: FakeTextInputClient(in: "com.apple.TextEdit")))
+        try client.took(FakeTextInputClient(in: "com.apple.TextEdit").cursor())
         #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(client, for: bound, whileInFrontIs: "com.apple.finder").get() }
         #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(client, for: bound, whileInFrontIs: "com.apple.finder", secureInputHeldBy: "iTerm2").get() }
     }
 
     @Test func wordsBoundToTheAppInFrontGoToItsCursor() throws {
         let client = FocusedClient()
-        let cursor = Self.madeCursor(over: FakeTextInputClient(in: "com.apple.TextEdit"))
+        let cursor = try FakeTextInputClient(in: "com.apple.TextEdit").cursor()
         client.took(cursor)
 
         #expect(try self.cursor(client, for: .app("com.apple.TextEdit"), whileInFrontIs: "com.apple.TextEdit").get() === cursor)
@@ -294,8 +289,8 @@ import Testing
     /// sitting right there, and nothing would say why. [LAW:no-silent-failure]
     @Test func aCursorLeavingAfterAnotherArrivedDoesNotTakeTheNewOnesFocus() throws {
         let client = FocusedClient()
-        let old = Self.madeCursor()
-        let new = Self.madeCursor()
+        let old = try FakeTextInputClient().cursor()
+        let new = try FakeTextInputClient().cursor()
         client.took(old)
         client.took(new)
         client.left(old)
@@ -309,14 +304,14 @@ import Testing
     private static let installer = "com.apple.installer"
 
     /// The cursor `activateServer` makes of the panel's client while `host` is in front.
-    private func panelCursor(hosted host: String = installer, caretLine: CGRect = FakeTextInputClient.textEditLine) -> Client {
-        Self.madeCursor(over: FakeTextInputClient(in: Self.panelService, caretLine: caretLine), whileInFrontIs: host)
+    private func panelCursor(hosted host: String = installer, caretLine: CGRect = FakeTextInputClient.textEditLine) throws -> Client {
+        try FakeTextInputClient(in: Self.panelService, caretLine: caretLine).cursor(whileInFrontIs: host)
     }
 
     /// The case measured on studious: Installer in front, its Open panel's name field focused.
     @Test func wordsGoToThePanelsFieldWhileItsHostIsInFront() throws {
         let client = FocusedClient()
-        let cursor = panelCursor()
+        let cursor = try panelCursor()
         client.took(cursor)
 
         #expect(try self.cursor(client, whileInFrontIs: Self.installer).get() === cursor)
@@ -324,17 +319,17 @@ import Testing
 
     /// The panel's file list gives document access from a type-select buffer with its caret on
     /// no screen, which is what keeps words out of it now that the panel is in front.
-    @Test func thePanelsFileListIsStillNotAField() {
+    @Test func thePanelsFileListIsStillNotAField() throws {
         let client = FocusedClient()
-        client.took(panelCursor(caretLine: Self.typeSelectLine))
+        try client.took(panelCursor(caretLine: Self.typeSelectLine))
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.installer).get() }
     }
 
     /// A person who left the app the panel belongs to is refused, as for any cursor left behind.
-    @Test func aPanelLeftBehindIsRefusedOnceAnotherAppIsInFront() {
+    @Test func aPanelLeftBehindIsRefusedOnceAnotherAppIsInFront() throws {
         let client = FocusedClient()
-        client.took(panelCursor())
+        try client.took(panelCursor())
 
         #expect(throws: Refusal.cursorIsInAnotherApp) { try cursor(client, whileInFrontIs: "com.apple.Safari").get() }
     }
@@ -343,7 +338,7 @@ import Testing
     /// the cursor reports as that is the host - the service is never in front.
     @Test func laterWordsOfADictationIntoThePanelStillGoToIt() throws {
         let client = FocusedClient()
-        let cursor = panelCursor()
+        let cursor = try panelCursor()
         client.took(cursor)
 
         #expect(try self.cursor(client, for: .app(cursor.application), whileInFrontIs: Self.installer).get() === cursor)
@@ -351,9 +346,9 @@ import Testing
 
     /// The host quitting takes its panel's cursor with it, so the same app relaunched into
     /// front is not committed into through a proxy for a process that is gone.
-    @Test func theHostQuittingClearsThePanelsCursor() {
+    @Test func theHostQuittingClearsThePanelsCursor() throws {
         let client = FocusedClient()
-        client.took(panelCursor())
+        try client.took(panelCursor())
         client.applicationQuit(Self.installer)
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.installer).get() }
