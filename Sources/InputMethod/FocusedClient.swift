@@ -91,11 +91,9 @@ public protocol InputController: AnyObject {}
 /// The clients the text input system has given focus to, and the one thing in this process
 /// that can commit text into them.
 ///
-/// [LAW:no-shared-mutable-globals] One owner with an explicit API, and shared because it
-/// has to be: `IMKServer` builds a controller per client out of the class name in the
-/// bundle's `Info.plist`, so there is no constructor of ours to hand anything to. Every
-/// controller reports focus and typing here, and the insert port asks here; those are the only
-/// doors, and all of them are on the main actor.
+/// [LAW:no-shared-mutable-globals] One owner with an explicit API, one per `InputMethodProcess`.
+/// Every controller reports focus and typing here, and the insert port asks here; those are the
+/// only doors, and all of them are on the main actor.
 ///
 /// Its whole state is each controller's cursor, from its activation until it is deactivated or
 /// ends: a fact macOS owns and this only mirrors. Usually one is live. Two windows of one app can
@@ -110,8 +108,6 @@ public protocol InputController: AnyObject {}
 /// text already inserted - the client is the document, and a second copy of what it holds could
 /// only disagree.
 public final class FocusedClient {
-    public static let shared = FocusedClient(arrived: Notices.shared.cursorArrived(in:))
-
     /// Each controller's cursor, by the controller. Keyed by the controller rather than by the
     /// client's own identifier, because that identifier is minted anew at activation: in this Mac's
     /// log of 2026-11-10 to 11, 64 of 88 controller lives named more than one. A controller
@@ -127,9 +123,10 @@ public final class FocusedClient {
 
     /// Told the app of a cursor that has become the one words go to, so words no cursor took are
     /// offered to it.
-    private let arrived: (String) -> Void
+    private let arrived: @MainActor @Sendable (String) -> Void
 
-    public init(arrived: @escaping (String) -> Void) { self.arrived = arrived }
+    /// Nonisolated, so `InputMethodProcess` assembles one wherever it is built.
+    nonisolated public init(arrived: @escaping @MainActor @Sendable (String) -> Void) { self.arrived = arrived }
 
     /// The text input system gave `controller`'s client focus, as `cursor`.
     ///

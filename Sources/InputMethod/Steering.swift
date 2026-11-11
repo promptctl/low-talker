@@ -1,9 +1,9 @@
-import AppKit
+import Foundation
 import Insertion
 
 /// What a steering key's verdict asks for beyond the verdict itself: a kept Return is heard, and
 /// a kept Escape is told to the app, which cancels the open press with it. A key that passes asks
-/// for nothing. [LAW:effects-at-boundaries] The decision says it; `Steering.perform` does it.
+/// for nothing. [LAW:effects-at-boundaries] The decision says it; `Steering` does it.
 public nonisolated enum SteeringEffect: Equatable, Sendable {
     /// The system's own answer to a key that did nothing, so a kept Return is heard at the
     /// moment it was typed and not only found in a log. [LAW:no-silent-failure]
@@ -22,28 +22,14 @@ public nonisolated enum SteeringEffect: Equatable, Sendable {
     }
 }
 
-/// What a controller decides its steering keys with: the gate that asks the app, and what carries
-/// out the effect a verdict asks for.
+/// What a controller decides its steering keys with: the gate that asks the app, the notices a
+/// kept Escape is told through, and the beep a kept Return is heard by.
 ///
-/// [LAW:no-shared-mutable-globals] `IMKServer` builds controllers out of a class name, so the
-/// shipped process's controllers take `process`, the one place it is built; a test builds its own
-/// with a gate of its own and a `perform` that records.
+/// [LAW:no-shared-mutable-globals] One per `InputMethodProcess`, which makes it of its own notices.
 public nonisolated struct Steering: Sendable {
     public let gate: SteeringGate
-    public let perform: @MainActor @Sendable (SteeringEffect) -> Void
-
-    public init(gate: SteeringGate, perform: @escaping @MainActor @Sendable (SteeringEffect) -> Void) {
-        (self.gate, self.perform) = (gate, perform)
-    }
-
-    /// The shipped process's: the gate the entry point connects and drains commits through, the
-    /// system beep, and the app's notices.
-    public static let process = Steering(gate: SteeringGate()) { effect in
-        switch effect {
-        case .beep: NSSound.beep()
-        case .tellTheApp: Notices.shared.keyTyped(.escape)
-        }
-    }
+    let notices: Notices
+    let beep: @MainActor @Sendable () -> Void
 
     /// The gate's decision of `key`, typed at `typedAt` (system uptime), with what it asks for done.
     @MainActor
@@ -52,7 +38,11 @@ public nonisolated struct Steering: Sendable {
         case .return: gate.verdict(at: timestamp)
         case .escape: gate.escapeVerdict(at: timestamp)
         }
-        if let effect = SteeringEffect(of: key, decided.verdict) { perform(effect) }
+        switch SteeringEffect(of: key, decided.verdict) {
+        case .beep: beep()
+        case .tellTheApp: notices.keyTyped(.escape)
+        case nil: break
+        }
         return decided
     }
 }

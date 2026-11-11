@@ -72,7 +72,7 @@ extension Asker: SteeringAsking {}
 /// the engine decodes.
 ///
 /// Its one mutable fact is the app asker, connected once by the process's entry point once the
-/// app's signature has been read. The shipped process's gate is `Steering.process.gate`.
+/// app's signature has been read. The shipped process's gate is `InputMethodProcess.shipped.steering.gate`.
 public nonisolated final class SteeringGate: Sendable {
 
     /// The longest a key is held: what the app itself waits on an insert.

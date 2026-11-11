@@ -39,8 +39,9 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
 
     /// A sender that is no text client makes no cursor, and the record says the controller holds none.
     @Test(.timeLimit(.minutes(1))) func anActivationAndADeactivationWithNoClientSaySo() async throws {
-        let said = try await events(of: { DictationInputController() }) { controller in
-            controller.activate(nil, footprint: 0, makingCursor: { _ in nil })
+        let assembled = AssembledProcess()
+        let said = try await events(of: { assembled.controller() }) { controller in
+            controller.activate(nil)
             controller.deactivateServer(nil)
         }
         #expect(said == [
@@ -53,25 +54,19 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
 
     /// A sender a cursor is made of is the client the controller holds until it is deactivated.
     @Test(.timeLimit(.minutes(1))) func anActivationAndADeactivationWithAClientSayWhichClient() async throws {
-        let cursor = try FakeTextInputClient(in: "com.example.ControllerRecordTests").cursor()
-        let held = FocusedClient.holding(cursor)
-        let said = try await events(of: { DictationInputController() }) { controller in
-            controller.activate(nil, footprint: 0, makingCursor: { _ in cursor })
+        let field = FakeTextInputClient(in: "com.example.ControllerRecordTests")
+        let held = try FocusedClient.holding(field.cursor())
+        let assembled = AssembledProcess()
+        let said = try await events(of: { assembled.controller() }) { controller in
+            controller.activate(field)
             controller.deactivateServer(nil)
         }
-        // Whether the cursor is live is `FocusedClient.shared`'s, which other cases share.
-        try #require(said.count == 4)
-        guard case .callback(.inline, .activated(let activated)) = said[1], case .callback(.inline, .deactivated(let deactivated)) = said[2] else {
-            Issue.record("not an activation and a deactivation: \(said)")
-            return
-        }
-        #expect(activated.hasPrefix(held))
-        #expect(deactivated.hasPrefix(held))
+        #expect(said == [.made, .callback(.inline, .activated(holding: held)), .callback(.inline, .deactivated(holding: held)), .ended])
     }
 
     /// A command that is no steering key is declined, and the record says so.
     @Test(.timeLimit(.minutes(1))) func aCommandThatIsNoSteeringKeySaysSo() async throws {
-        let said = try await events(of: { DictationInputController() }) { controller in
+        let said = try await events(of: { AssembledProcess().controller() }) { controller in
             #expect(controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: [], typedAt: 0) == false)
         }
         try #require(said.count == 3)
@@ -80,7 +75,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
 
     /// A key typed as text leaves a record that says it was declined, and nothing of what was typed.
     @Test(.timeLimit(.minutes(1))) func aKeyTypedAsTextIsDeclinedAndNotRecorded() async throws {
-        let said = try await events(of: { DictationInputController() }) { controller in
+        let said = try await events(of: { AssembledProcess().controller() }) { controller in
             #expect(controller.inputText("secret", client: nil) == false)
         }
         try #require(said.count == 3)

@@ -1,5 +1,6 @@
 import AppKit
-import InputMethod
+@testable import InputMethod
+import InputMethodFakes
 import Insertion
 import Testing
 
@@ -12,7 +13,7 @@ import Testing
 /// Mac's keyboard holds while the suite runs.
 ///
 /// On the main actor because the controller is an `IMKInputController`, which is built and answered there.
-/// Each case builds its controller with a gate of its own and records the effects its verdicts ask for.
+/// Each case builds its controller in a process of its own, whose gate asks what the case gave it.
 @Suite @MainActor struct DictationInputControllerTests {
     /// The commands the text input system binds Return and Escape to.
     static let insertNewline = NSSelectorFromString("insertNewline:")
@@ -29,24 +30,22 @@ import Testing
         func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> { panelling }
     }
 
-    /// The effects a controller's verdicts asked for, in order.
-    @MainActor private final class Performed: Sendable {
-        var effects: [SteeringEffect] = []
+    /// A controller of a process whose gate asks `app`, and the process.
+    private func controller(asking app: App = App()) -> (DictationInputController, AssembledProcess) {
+        let assembled = AssembledProcess(asking: app)
+        return (assembled.controller(), assembled)
     }
 
-    /// A controller whose gate asks `app`, and what it performed.
-    private func controller(asking app: App = App()) -> (DictationInputController, Performed) {
-        let performed = Performed()
-        let steering = Steering(gate: SteeringGate(ceiling: .seconds(30), asking: app)) { performed.effects.append($0) }
-        return (DictationInputController(steering: steering), performed)
-    }
-
-    /// `selector` answered by a controller asking `app`, typed with `modifiers` held, and what it performed.
+    /// `selector` answered by a controller asking `app`, typed with `modifiers` held: whether it was
+    /// kept, how many times the process beeped, and every key the app was told of.
     private func answer(_ selector: Selector, holding modifiers: NSEvent.ModifierFlags = [],
-                        asking app: App) -> (kept: Bool, performed: [SteeringEffect]) {
-        let (controller, performed) = controller(asking: app)
+                        asking app: App) -> (kept: Bool, beeps: Int, told: [SteeringKey]) {
+        let (controller, assembled) = controller(asking: app)
         let kept = controller.didCommand(by: selector, holding: modifiers, typedAt: 1)
-        return (kept, performed.effects)
+        let told = assembled.recorded.withLock { $0 }.compactMap { record in
+            if case let .keyTyped(key) = record { key } else { nil }
+        }
+        return (kept, assembled.beeps, told)
     }
 
     /// Key-downs are always asked for, so Escape reaches the controller whatever the Return setting says.
@@ -59,21 +58,21 @@ import Testing
     @Test func escapePassesWhileTheBoxIsClosed() {
         let answered = answer(Self.cancelOperation, asking: App(panelling: .success(.shut)))
         #expect(answered.kept == false)
-        #expect(answered.performed == [])
+        #expect(answered.beeps == 0 && answered.told == [])
     }
 
     /// Escape is kept while the word box is open, and the app is told, so it cancels the press.
     @Test func escapeIsKeptWhileTheBoxIsOpen() {
         let answered = answer(Self.cancelOperation, asking: App(panelling: .success(.shown)))
         #expect(answered.kept == true)
-        #expect(answered.performed == [.tellTheApp])
+        #expect(answered.beeps == 0 && answered.told == [.escape])
     }
 
     /// Escape passes when no app answers whether its box is open, as it does with no app running.
     @Test func escapePassesWhenNoAppAnswers() {
         let answered = answer(Self.cancelOperation, asking: App(panelling: .failure(.nobodyIsListening(port: "port"))))
         #expect(answered.kept == false)
-        #expect(answered.performed == [])
+        #expect(answered.beeps == 0 && answered.told == [])
     }
 
     /// A Return passes, silently, when the app owes nothing and when the words it owes have landed.
@@ -81,14 +80,14 @@ import Testing
     func aReturnPassesWhenNothingIsLeftOwing(owing: Owing) {
         let answered = answer(Self.insertNewline, asking: App(owing: .success(owing), settling: .success(.landed)))
         #expect(answered.kept == false)
-        #expect(answered.performed == [])
+        #expect(answered.beeps == 0 && answered.told == [])
     }
 
     /// A bare Return is kept when the words the app owes did not all reach a cursor, and is heard.
     @Test func aReturnIsKeptWhenTheOwedWordsDoNotLand() {
         let answered = answer(Self.insertNewline, asking: App(owing: .success(.words), settling: .success(.notLanded)))
         #expect(answered.kept == true)
-        #expect(answered.performed == [.beep])
+        #expect(answered.beeps == 1 && answered.told == [])
     }
 
     /// Each modifier that makes a Return another key, named here rather than read from
@@ -102,7 +101,7 @@ import Testing
         let answered = answer(Self.insertNewline, holding: NSEvent.ModifierFlags(rawValue: modifier),
                               asking: App(owing: .success(.words), settling: .success(.notLanded)))
         #expect(answered.kept == false)
-        #expect(answered.performed == [])
+        #expect(answered.beeps == 0 && answered.told == [])
     }
 
     /// A command the input method does not decide is declined, so it reaches the app.
@@ -110,7 +109,7 @@ import Testing
     func anOtherCommandIsDeclined(name: String) {
         let answered = answer(NSSelectorFromString(name), asking: App(owing: .success(.words), panelling: .success(.shown)))
         #expect(answered.kept == false, "\(name) was claimed")
-        #expect(answered.performed == [])
+        #expect(answered.beeps == 0 && answered.told == [])
     }
 
     /// Text is never handed to this input method as keys, so it is declined.
@@ -127,11 +126,14 @@ import Testing
         #expect(controller.didCommand(by: nil, client: nil) == false)
     }
 
-    /// A cursor given focus is told to the app, which offers it words no cursor took. Other notices
-    /// the shared stream holds are passed over.
+    /// A cursor given focus is told to the app, which offers it words no cursor took.
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsTold() async {
-        Notices.shared.cursorArrived(in: "com.apple.TextEdit")
-        #expect(await Notices.shared.notices.first { @Sendable notice in notice == .cursorArrived } == .cursorArrived)
+        let assembled = AssembledProcess()
+        let controller = assembled.controller()
+        controller.activate(FakeTextInputClient())
+        #expect(await assembled.process.notices.notices.first { @Sendable _ in true } == .cursorArrived)
+        #expect(assembled.recorded.withLock { $0 } == [.footprint(0), .cursorArrived(in: "com.example.editor")])
+        withExtendedLifetime(controller) {}
     }
 
     /// The bundle's `InputMethodServerControllerClass` is a string macOS resolves through
