@@ -1,5 +1,7 @@
-import Dictation
+@testable import Dictation
+import Insertion
 import LowTalkerCore
+import Synchronization
 import Testing
 
 /// A panel that keeps what it was told to show, in order.
@@ -19,6 +21,13 @@ final class StubPanel: WordBoxPanel {
 
     func draw(_ face: WordBox.Face) { shown.append(.face(face)) }
     func hide() { shown.append(.away) }
+}
+
+/// A press as the hold tells its words apart, which a test throws away as an Escape does.
+final class Speaker: Held.Owner {
+    private let thrown = Mutex(false)
+    var cancelled: Bool { thrown.withLock { $0 } }
+    func throwAway() { thrown.withLock { $0 = true } }
 }
 
 /// When the word box is on screen and what it offers, over a real hold kept in memory, which
@@ -93,26 +102,101 @@ final class StubPanel: WordBoxPanel {
         #expect(panel.face?.words == Transcript(typed: " new"))
     }
 
-    /// The words the person asks back are handed to the box as held again, and shown.
-    @Test func aBringBackShowsTheBoxAgain() {
+    private static let refused = "WARNING: no text field took them"
+
+    /// The words the person asks back come back in the loop's turn, behind every press before:
+    /// the box stays away until they are held again, then shows them.
+    @Test func aBringBackShowsTheBoxWhenTheWordsAreHeldAgain() {
+        show(.idle)
+        box.dismiss(cancelling: nil, hold: hold)
+        show(.transcribing)
+        #expect(panel.face == nil)
+
+        hold.bringBack()
+
+        #expect(panel.face?.words == Self.earlier.allWords)
+        #expect(panel.face?.state == "Transcribing")
+    }
+
+    /// Words a press the Escape did not throw away holds after the dismissal are new to the person.
+    @Test func wordsAnotherPressHoldsAfterADismissalShowTheBox() {
         show(.idle)
         box.dismiss(cancelling: nil, hold: hold)
 
-        box.offerAgain()
-        box.show(.idle, over: ready, held: Self.earlier, insertable: true)
+        hold.heldBack(Transcript(typed: " later"), by: Speaker(), warning: Self.refused)
 
-        #expect(panel.face?.words == Self.earlier.allWords)
+        #expect(panel.face?.state == nil)
+        #expect(panel.face?.words == Transcript(typed: " later"))
+        #expect(panel.face?.controls == WordBox.Controls(insert: true, copy: true))
     }
 
-    /// The press Escape cancels can hold its words while its commits drain, until the cancel
-    /// lets them go: they are not new words, so the box stays away.
-    @Test func wordsTheCancelledPressHoldsKeepTheBoxAway() {
+    /// Words read from kept speech after a dismissal show the box, over the press it left on its
+    /// way, which offers no Copy while its insert may carry them.
+    @Test func wordsRecoveryHoldsAfterADismissalShowTheBox() {
+        show(.transcribing)
+        box.dismiss(cancelling: nil, hold: hold)
+        #expect(panel.face == nil)
+
+        hold.heldBack(Transcript(typed: " recovered"), by: nil, warning: Self.refused)
+
+        #expect(panel.face?.state == "Transcribing")
+        #expect(panel.face?.words == Transcript(typed: " recovered"))
+        #expect(panel.face?.controls?.copy == false)
+    }
+
+    /// The press an Escape threw away holds its words while its commits drain, until its drain
+    /// lets them go: they are no one's to see, so the box stays away, whatever is still on its way.
+    @Test(arguments: [Dictation.Activity.idle, .transcribing])
+    func wordsTheCancelledPressHoldsKeepTheBoxAway(after delivered: Dictation.Activity) {
+        let press = Speaker()
+        show(Self.listening(" hello"))
+        box.dismiss(cancelling: nil, hold: hold)
+        press.throwAway()
+        show(delivered)
+
+        hold.heldBack(Transcript(typed: " hello"), by: press, warning: Self.refused)
+
+        #expect(panel.face == nil)
+        #expect(hold.held == nil)
+    }
+
+    /// Words of a thrown-away press that may have landed may be in the field, so the person is told.
+    @Test func wordsTheCancelledPressMayHaveLandedShowTheBox() {
+        let press = Speaker()
+        show(Self.listening(" hello"))
+        box.dismiss(cancelling: nil, hold: hold)
+        press.throwAway()
+        show(.idle)
+
+        hold.failed(Transcript(typed: " hello"), by: press, with: .unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words)))
+
+        #expect(panel.face?.words == Transcript(typed: " hello"))
+    }
+
+    /// An Escape reaches the press it ends one turn of the main queue later: words held in that
+    /// turn wait for the loop to show the press ended, then show the box.
+    @Test func wordsHeldWhileTheCancelIsInDeliveryWaitForIt() {
         show(Self.listening(" hello"))
         box.dismiss(cancelling: nil, hold: hold)
 
-        box.show(.transcribing, over: ready, held: Self.earlier, insertable: true)
-
+        hold.heldBack(Transcript(typed: " first"), by: Speaker(), warning: Self.refused)
         #expect(panel.face == nil)
+
+        show(.idle)
+        #expect(panel.face?.words == Transcript(typed: " first"))
+    }
+
+    /// A refusal cannot be cancelled, so words held while the dismissed refusal is open wait for
+    /// its chord to come up.
+    @Test func wordsHeldUnderADismissedRefusalWaitForItToClose() {
+        show(.refused(why: "no model"))
+        box.dismiss(cancelling: nil, hold: hold)
+
+        hold.heldBack(Transcript(typed: " recovered"), by: nil, warning: Self.refused)
+        #expect(panel.face == nil)
+
+        show(.idle)
+        #expect(panel.face?.words == Transcript(typed: " recovered"))
     }
 
     /// The circle, Insert and Copy are there only while words are held, Insert where it is offered

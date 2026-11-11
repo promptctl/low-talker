@@ -64,7 +64,7 @@ import TestProbes
         #expect(rig.inputMethod.field == "")
         #expect(rig.inputMethod.takeBacks == [" hello there"])
         // The decode read " my friend" past the two commits, which a cancel drops.
-        #expect(cancelled == Cancelled(takenBack: 2, earlierWordsLanded: 0, forgotten: 0, dismissed: 0, standing: 0, discarded: 2))
+        #expect(cancelled == Cancelled(takenBack: 2, earlierWordsLanded: 0, forgotten: 0, standing: 0, discarded: 2))
         #expect(rig.hold.held == nil)
         #expect(rig.hold.dismissed == nil)
 
@@ -180,23 +180,25 @@ import TestProbes
         #expect(rig.hold.held == nil)
     }
 
-    /// The person dismissed the press's failed words before cancelling: they are theirs, and
-    /// stay dismissed, and the report says so.
-    @Test func wordsThePersonDismissedStayDismissed() async throws {
+    /// The dismissal an Escape makes lets go of what is held before it cancels the press, so the
+    /// press's failed words are among the dismissed when it is cancelled. The Escape throws its
+    /// dictation away wherever its words are, so a bring-back never types them: they are let go,
+    /// and the report counts them with the rest.
+    @Test func thePresssWordsTheDismissalTookAreLetGo() async throws {
         let rig = try await Rig(hearing: Self.engine())
         rig.inputMethod.refusing(Self.refusal)
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.hold.held != nil }
-        let dismissing = try #require(rig.hold.held)
         rig.hold.dismiss()
 
         Self.cancel(rig)
+        #expect(rig.hold.dismissed == nil, "a thrown-away press's words are offered to no one, even before its drain")
         let cancelled = try #require(await rig.report().cancelled)
 
-        #expect(cancelled.dismissed == 1)
-        #expect(cancelled.forgotten == 0)
-        #expect(rig.hold.dismissed == dismissing)
+        #expect(cancelled.forgotten == 1)
+        #expect(rig.hold.dismissed == nil)
         #expect(rig.hold.held == nil)
+        #expect(rig.store.kept == nil)
     }
 
     /// Earlier words dismissed before the press's first insert, which then fails, leave the hold
@@ -285,7 +287,7 @@ import TestProbes
     /// The press holds one word and the person dismisses it; then, with the commits stopped by a
     /// device change, kept speech is read into one held word while the key is still down. The hold
     /// offers one word, as it did before the dismissal, but it is not the press's, so the cancel
-    /// leaves the recovered word held and says the press's word stays dismissed.
+    /// leaves the recovered word held, and lets the press's dismissed word go.
     @Test func anotherDictationsWordsHeldMidPressAreNotLetGo() async throws {
         let kept = FakeUnheardStore()
         _ = try kept.keep(UnheardSpeech(said: .now, vocabulary: [], samples: [7]))
@@ -304,9 +306,9 @@ import TestProbes
         Self.cancel(rig)
         let cancelled = try #require(await rig.report().cancelled)
 
-        #expect(cancelled.forgotten == 0)
-        #expect(cancelled.dismissed == 1)
+        #expect(cancelled.forgotten == 1)
         #expect(rig.hold.held == recovered)
+        #expect(rig.hold.dismissed == nil)
     }
 
     /// The press holds one word; then, with the commits stopped by a device change, kept speech is
@@ -330,7 +332,6 @@ import TestProbes
         let cancelled = try #require(await rig.report().cancelled)
 
         #expect(cancelled.forgotten == 1)
-        #expect(cancelled.dismissed == 0)
         #expect(rig.hold.held?.words == Transcript(typed: " first"))
         #expect(rig.hold.held?.warnings == recovered.warnings)
         #expect(rig.hold.dismissed == nil)
@@ -355,6 +356,24 @@ import TestProbes
         #expect(rig.hold.held == .unaccounted(part(" hello", "\(unanswered)")))
     }
 
+    /// Words of a thrown-away press that may have landed are the person's to place once they say
+    /// they were not typed: asked for, they are offered and inserted like any held words.
+    @Test func wordsThatMayHaveLandedAreInsertedWhenAskedFor() async throws {
+        let rig = try await Rig(hearing: Self.engine())
+        rig.inputMethod.refusing(.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words)))
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.hold.held != nil }
+        Self.cancel(rig)
+        _ = try #require(await rig.report().cancelled)
+        rig.inputMethod.refusing(nil)
+
+        rig.dictation.insertHeld()
+        try await rig.dictation.finish()
+
+        #expect(rig.inputMethod.inserted.last == " hello")
+        #expect(rig.hold.held == nil)
+    }
+
     /// An insert that may have landed covers what it carried: the earlier words and the press's own
     /// failed ones stand with it, and the report counts every one.
     @Test func earlierAndFailedWordsAnUnansweredInsertCarriedStandToo() async throws {
@@ -370,7 +389,7 @@ import TestProbes
         Self.cancel(rig)
         let cancelled = try #require(await rig.report().cancelled)
 
-        #expect(cancelled == Cancelled(takenBack: 0, earlierWordsLanded: 0, forgotten: 0, dismissed: 0, standing: 4, discarded: 2))
+        #expect(cancelled == Cancelled(takenBack: 0, earlierWordsLanded: 0, forgotten: 0, standing: 4, discarded: 2))
     }
 
     /// Words that landed on either side of one that may have landed are not one run at the caret,
@@ -451,12 +470,12 @@ import TestProbes
     /// A cancelled press's account agrees with each of its counts, one and more than one.
     @Test(arguments: [
         (1, "1 word taken back, 1 held word let go, 1 heard after the commits dropped; "
-            + "1 earlier word delivered with its first insert stays, 1 dismissed word stays dismissed, 1 word that may have landed stands"),
+            + "1 earlier word delivered with its first insert stays, 1 word that may have landed stands"),
         (2, "2 words taken back, 2 held words let go, 2 heard after the commits dropped; "
-            + "2 earlier words delivered with its first insert stay, 2 dismissed words stay dismissed, 2 words that may have landed stand"),
+            + "2 earlier words delivered with its first insert stay, 2 words that may have landed stand"),
     ])
     func aCancelledPressTellsEachCountInItsNumber(_ count: Int, _ told: String) {
-        let cancelled = Cancelled(takenBack: count, earlierWordsLanded: count, forgotten: count, dismissed: count, standing: count, discarded: count)
+        let cancelled = Cancelled(takenBack: count, earlierWordsLanded: count, forgotten: count, standing: count, discarded: count)
         #expect("\(cancelled)" == told)
     }
 }

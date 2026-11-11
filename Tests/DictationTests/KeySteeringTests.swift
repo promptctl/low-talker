@@ -214,6 +214,32 @@ private struct BadBuffer: Error {}
         #expect(loop.rig.hold.dismissed == nil)
     }
 
+    /// The case low-dictation-keys-652.6nx exists for: an Escape into a latched press while its
+    /// first commit is in the air, which is then refused, so the press holds its word while its
+    /// drain runs. Once the Escape is delivered the press is not shown on its way, and no state
+    /// the hold shows from the Escape on offers its word: the drain lets it go and counts it.
+    @Test(.timeLimit(.minutes(1))) func anEscapedPressIsShownToNoOneWhileItDrains() async throws {
+        let loop = try await Loop(hearing: FakeTranscriber(confirming: { $0.count >= 2 ? Transcript(typed: " hello") : Transcript(typed: "") }) { _ in
+            Transcript(typed: " hello")
+        })
+        loop.rig.inputMethod.hold()
+        await loop.latchedPress()
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+
+        loop.escapeTheBox()
+        await loop.delivered()
+        #expect(loop.rig.shown.activities.last == .idle)
+        let shownBefore = loop.rig.shown.states.count
+        loop.rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        loop.rig.inputMethod.letGo()
+
+        let cancelled = try #require(await loop.rig.report().cancelled)
+        #expect(cancelled.forgotten == 1)
+        #expect(loop.rig.shown.states.dropFirst(shownBefore).allSatisfy { $0.held == nil && $0.dismissed == nil })
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.store.kept == nil)
+    }
+
     /// A press cut short, its engine still loading when Escape comes and then failing: nothing of
     /// it is held, and its speech is not kept to be read later.
     @Test(.timeLimit(.minutes(1))) func anEscapeWhileACutPressWaitsOnItsEngineKeepsNothing() async throws {
