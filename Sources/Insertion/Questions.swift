@@ -8,7 +8,7 @@ import os
 /// answer to its first question, which both keys ask. [LAW:types-are-the-program] Two values and
 /// no third: an app that said nothing has admitted nothing, and that is the asker's to read, not
 /// a case here.
-public enum Owing: String, Codable, Sendable {
+public enum Owing: String, Codable, Sendable, CaseIterable {
     /// No press is open and no word is on its way to a cursor.
     case nothing
     /// A press is open, or its words are not all acknowledged yet.
@@ -17,14 +17,14 @@ public enum Owing: String, Codable, Sendable {
 
 /// How a debt the app admitted to ended, the answer to the second question: every insert it
 /// had accepted before the Return is acknowledged, or the words did not all reach a cursor.
-public enum Settlement: String, Codable, Sendable {
+public enum Settlement: String, Codable, Sendable, CaseIterable {
     case landed
     case notLanded
 }
 
 /// Whether the app's word box is open: the answer to whether an Escape is the app's to cancel with.
 /// [LAW:types-are-the-program] Two values: the box is open, or it is not.
-public enum PanelState: String, Codable, Sendable {
+public enum PanelState: String, Codable, Sendable, CaseIterable {
     case shut
     case shown
 }
