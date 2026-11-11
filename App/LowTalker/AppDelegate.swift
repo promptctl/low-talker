@@ -54,9 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotkeyStatus: HotkeyStatus = .starting(step: nil)
     /// What the loop is doing with presses, which the icon shows over the engine's readiness.
     private var activity: Dictation.Activity = .idle
+    /// When the word box is shown, what it shows, and its dismissal; `hud` puts it on screen.
+    private lazy var box = WordBox(panel: hud)
     /// The loop's activity again, floating over the app being dictated into, with the words
     /// no cursor took.
-    private lazy var hud: HUD = HUD(circleClicked: { [unowned self] in dismiss() }, insert: { [unowned self] in
+    private lazy var hud: HUD = HUD(circleClicked: { [unowned self] in box.dismiss(cancelling: listening?.hotkey, hold: hold) }, insert: { [unowned self] in
         // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
         let words = hold.held?.allWords.words.count ?? 0
         let unheard = listening == nil ? ", with no loop listening to insert them" : ""
@@ -334,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// hold as it changes, since the hold calls here before it is assigned.
     private func showHUD(held: Held?) {
         let insertable = if case .listening = hotkeyStatus { true } else { false }
-        hud.show(activity, over: engineReadiness, held: held, insertable: insertable)
+        box.show(activity, over: engineReadiness, held: held, insertable: insertable)
     }
 
     /// When the loop comes up, is rebuilt, or is left as it stands, and the one owner of the
@@ -427,7 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     heard: { [unowned self] notice in
                         inputMethod.heard(notice).map(showInputMethod)
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
-                        if case let .keyTyped(_, key) = notice { react(to: key) }
+                        if case let .keyTyped(_, key) = notice { box.react(to: key, cancelling: listening?.hotkey, hold: hold) }
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
@@ -463,30 +465,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// input method asks for it at each Return, so a change here needs no word to the input method.
     @objc private func toggleReturnHold() {
         ReturnHoldSetting.set(!ReturnHoldSetting.isOn)
-    }
-
-    /// What each steering key the input method reports does. The switch is exhaustive, so a key
-    /// added to `SteeringKey` has to say what it does here before this builds.
-    private func react(to key: SteeringKey) {
-        switch key {
-        // Escape, with the panel shown. The input method keeps an Escape only while the panel is
-        // shown, so a shut panel is no Escape for us.
-        case .escape: dismiss()
-        // Return is held and sent by the input method; the app has nothing to do when it passes.
-        case .return: break
-        }
-    }
-
-    /// The person put the dictation away, with Escape or the word box's circle: the open press is
-    /// cancelled, the held words no cursor has taken are let go, and the panel closes until the next
-    /// press or until the dismissed words are brought back. The words the press already put at the
-    /// cursor are taken back by the press's own path.
-    /// [LAW:single-enforcer] One dismissal, whichever way it was asked for, so the circle cannot
-    /// let go of the words and leave the microphone open.
-    private func dismiss() {
-        listening.map { KeySteering.escape($0.hotkey) }
-        hold.dismiss()
-        hud.dismiss()
     }
 
     /// The line says how to press only while an input method is running to type the words,
@@ -1125,7 +1103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sessions.notice("asked to bring back \(counted(self.hold.dismissed?.allWords.words.count ?? 0, "dismissed word", "dismissed words"), privacy: .public)\(unheard, privacy: .public)")
         // The panel opens again only where a loop will bring the words back to show.
         if let listening {
-            hud.offerAgain()
+            box.offerAgain()
             listening.dictation.bringBackDismissed()
         }
     }

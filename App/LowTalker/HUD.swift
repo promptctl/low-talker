@@ -1,6 +1,5 @@
 import AppKit
 import Dictation
-import GrammaticalNumber
 import Identity
 import LowTalkerCore
 
@@ -19,9 +18,10 @@ import LowTalkerCore
 /// Every click on the face goes through it to whatever is under it, so the text field it asks
 /// for is clickable even beneath it.
 ///
-/// [LAW:one-source-of-truth] It draws `Dictation.Activity` and `Held` and keeps nothing of its own.
+/// [LAW:effects-at-boundaries] `WordBox` decides what it shows and when it is put away; this
+/// lays out and orders in what it is given.
 @MainActor
-final class HUD {
+final class HUD: WordBoxPanel {
     private static let width: CGFloat = 440
     /// The width the lines wrap to, inside the face's margins.
     private static let lineWidth = width - 32
@@ -185,104 +185,54 @@ final class HUD {
         return copyButton
     }()
 
-    /// The person put the panel away, with Escape or the circle, so it stays away whatever the
-    /// activity says until a press starts or they ask for the dismissed words back.
-    private var dismissed = false
-
-    /// Puts the panel away at once, whatever it shows, until the next press starts or
-    /// `offerAgain` is called.
-    func dismiss() {
-        dismissed = true
-        hide()
-    }
-
-    /// The person asked for the dismissed words back, so the panel shows what is held again.
-    func offerAgain() {
-        dismissed = false
-    }
-
-    /// `insertable` is whether a loop is listening to insert what is held through, without which
-    /// Insert is not offered.
-    func show(_ activity: Dictation.Activity, over readiness: EngineReadiness, held: Held?, insertable: Bool) {
-        // A press starts as listening or refused, and either one is new words to show.
-        switch activity {
-        case .listening, .refused: dismissed = false
-        case .idle, .transcribing: break
-        }
-        guard !dismissed else { return hide() }
-        // A press on its way carries the words a cursor is offered in its own insert, so only a
-        // panel with nothing on its way asks for a click, and only for those words: not those
-        // that may have landed. Insert is offered once the press is closed, since an ask is
-        // queued behind its insert; while it is open the face shows what it heard instead. Copy
-        // is offered where the click is, since a press's insert would carry what it copied.
-        // A refused press's reason is warned of first, above why any words are held.
-        let box = activity.box(over: readiness)
-        let offer = box.offersClick ? held.flatMap(Self.offer) ?? "" : ""
-        guard box.state != nil || held != nil else { return hide() }
-        draw(state: box.state, warnings: [box.refusal].compactMap { $0 } + (held?.warnings ?? []), held: held,
-             words: box.heard ?? held?.allWords ?? Transcript(words: []), offer: offer, insert: box.offersInsert && insertable,
-             copy: box.offersCopy)
-    }
-
-    /// What a click into a text field places of what is held, shown after it: the words after
-    /// any that may have landed, which the panel shows ahead of them.
-    private static func offer(_ held: Held) -> String? {
-        held.offered.map { offered in
-            " Click into a text field to insert \(held.standing == nil ? "these words" : "the last \(counted(offered.words.words.count, "word", "words"))")."
-        }
-    }
-
     /// Whether the panel is on screen. The input method asks for it when an Escape is typed.
     private(set) var isShown = false
 
-    private func hide() {
+    func hide() {
         isShown = false
         panel.orderOut(nil)
         corner.orderOut(nil)
         below.orderOut(nil)
     }
 
-    /// The panel with these lines, centred low on the screen the person is working on.
-    private func draw(state: String?, warnings: [String], held: Held?, words: Transcript, offer: String, insert: Bool, copy: Bool) {
-        self.state.stringValue = state ?? ""
-        self.state.isHidden = state == nil
-        // One line per warning, each after the symbol, which says it is a warning, so the text
-        // drops the word. The offer ends the last.
-        let reasons = warnings.map { String($0.trimmingPrefix("WARNING: ")) }
+    /// The panel with this face, centred low on the screen the person is working on.
+    func draw(_ face: WordBox.Face) {
+        state.stringValue = face.state ?? ""
+        state.isHidden = face.state == nil
+        // One line per warning, each after the symbol, which says it is a warning.
         let warned = NSMutableAttributedString()
-        for (index, reason) in reasons.enumerated() {
+        for (index, reason) in face.warnings.enumerated() {
             let symbol = NSTextAttachment()
             symbol.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning")
             warned.append(NSAttributedString(string: index == 0 ? "" : "\n"))
             warned.append(NSAttributedString(attachment: symbol))
-            warned.append(NSAttributedString(string: " \(reason)\(index == reasons.count - 1 ? offer : "")"))
+            warned.append(NSAttributedString(string: " \(reason)"))
         }
         warning.attributedStringValue = warned
-        warning.isHidden = reasons.isEmpty
-        heard.stringValue = words.truncatingHead { height($0) <= heardHeight }
+        warning.isHidden = face.warnings.isEmpty
+        heard.stringValue = face.words.truncatingHead { height($0) <= heardHeight }
         // A press with nothing read yet shows only its state, rather than an empty line.
-        heard.isHidden = words.isBlank
+        heard.isHidden = face.words.isBlank
         // With no display attached there is nowhere for the panel to be.
         guard let screen = NSScreen.main?.visibleFrame else { return hide() }
         // Measured through the panel's face, whose constraints hold the content to its width.
-        let size = face.fittingSize
+        let size = self.face.fittingSize
         let frame = NSRect(x: screen.midX - size.width / 2, y: screen.minY + screen.height * 0.12, width: size.width, height: size.height)
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
         isShown = true
         // The circle's centre sits on the face's top-left arc, as a Notification Center
-        // banner's does, and the buttons sit under the face's right edge. They are there only
-        // while something is held: Insert while it is offered, Copy dimmed where it is not.
+        // banner's does, and the buttons sit under the face's right edge.
         let onTheArc = Self.cornerRadius * (1 - 1 / 2.squareRoot())
         corner.setFrameOrigin(NSPoint(x: frame.minX + onTheArc - Self.circleSide / 2, y: frame.maxY - onTheArc - Self.circleSide / 2))
-        if held != nil {
-            place.isHidden = !insert
-            copyButton.isEnabled = copy
+        if let controls = face.controls {
+            place.isHidden = !controls.insert
+            copyButton.isEnabled = controls.copy
             let size = buttons.fittingSize
             below.setFrame(NSRect(x: frame.maxX - size.width, y: frame.minY - 6 - size.height, width: size.width, height: size.height), display: true)
         }
-        for (control, shown) in [(corner, held != nil), (below, held != nil)] {
-            if shown { control.orderFrontRegardless() } else { control.orderOut(nil) }
+        for control in [corner, below] {
+            if face.controls != nil { control.orderFrontRegardless() } else { control.orderOut(nil) }
         }
     }
 
