@@ -393,18 +393,17 @@ public final class Dictation {
         /// The key-up ended the press as `ending`, unless an Escape reached it first: a cancel
         /// stands. A press that commits nothing more stops its commits here; its decode goes on
         /// to the end of its audio, and each pass is still shown, so what it hears past the
-        /// commits is held. [LAW:no-silent-failure] Says whether this threw it away, as `cancel` does.
+        /// commits is held. [LAW:no-silent-failure] An ending that is a cancel is one, so it says
+        /// whether this threw the press away, as `cancel` does.
         func end(_ ending: Ending) -> Bool {
-            let left = enter { phase in
+            if case .cancelled = ending { return cancel() }
+            enter { phase in
                 switch phase {
                 case .ended(.cancelled): phase
                 case .open, .lost, .ended: .ended(ending)
                 }
             }
-            return switch (ending, left) {
-            case (.cancelled, .open), (.cancelled, .lost): true
-            case (.cancelled, .ended), (.released, _), (.cut, _), (.usedAsModifier, _): false
-            }
+            return false
         }
 
         /// The person threw the press away with Escape, whether its key is down or it is on its
@@ -641,8 +640,9 @@ public final class Dictation {
         case .up, .blocked, .down: unreported
         }
         let thrown = shown.filter { $0.cancel() }
-        thrown.forEach(threwAway)
+        // The activity first, so what the hold shows as it lets go is drawn over what is still coming.
         show()
+        thrown.forEach(threwAway)
         return thrown.count
     }
 
