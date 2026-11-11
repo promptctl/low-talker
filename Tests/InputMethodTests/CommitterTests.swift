@@ -234,7 +234,7 @@ import Testing
         case .none:
             #expect(answer == .refused(.noTextFieldHasFocus))
             #expect(field.text == "say")
-        case .selectionOnly, .toTheField, .toWhatItWasHanded:
+        case .selectionOnly, .toTheField:
             #expect(answer == .inserted(characters: 6, into: "com.apple.Safari"))
             #expect(field.text == "say hello")
         }
@@ -272,7 +272,7 @@ import Testing
         case .selectionOnly:
             #expect(answer == .refused(.wordsCannotBeTakenBack))
             #expect(field.text == "say hello")
-        case .toTheField, .toWhatItWasHanded:
+        case .toTheField:
             #expect(answer == .inserted(characters: 0, into: "com.apple.Safari"))
             #expect(field.text == "say ")
         }

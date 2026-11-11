@@ -46,6 +46,26 @@ import Testing
         #expect(field.text.isEmpty)
     }
 
+    /// A field answering all it was handed says the words it dropped are there, where a person
+    /// sees none of them.
+    @Test func aFieldAnsweringAllItWasHandedReadsTheWordsItDropped() {
+        let field = FakeTextInputClient(.webKitLimitedTextAreaAnsweringAll, maxLength: 10)
+
+        field.insertText("alpha bravo charlie delta echo", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(field.string(in: NSRange(location: 26, length: 4)) == "echo")
+        #expect(field.text == "alpha brav")
+    }
+
+    /// Nobody said what a field answering words it dropped does with the next insert, so the fake
+    /// fails the case that makes one, and leaves the field as it was.
+    @Test func anInsertAfterAnsweringDroppedWordsFailsTheCaseThatGaveIt() {
+        let field = FakeTextInputClient(.webKitLimitedTextAreaAnsweringAll, maxLength: 3)
+        field.insertText("alpha", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        withKnownIssue { field.insertText("x", replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        #expect(field.text == "alp")
+    }
+
     /// No client was measured answering a range past the end of its field, so the fake fails the
     /// one case that handed it such a range, and leaves the field as it was, rather than guess.
     @Test func aRangePastTheFieldFailsTheCaseThatGaveIt() {

@@ -77,7 +77,7 @@ import Testing
 
         switch profile.access {
         case .none: #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client).get() }
-        case .selectionOnly, .toTheField, .toWhatItWasHanded: #expect(try cursor(client).get() === taken)
+        case .selectionOnly, .toTheField: #expect(try cursor(client).get() === taken)
         }
     }
 
