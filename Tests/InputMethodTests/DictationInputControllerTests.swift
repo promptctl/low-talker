@@ -1,5 +1,6 @@
 import AppKit
-import InputMethod
+@testable import InputMethod
+import InputMethodFakes
 import Insertion
 import Testing
 
@@ -29,16 +30,10 @@ import Testing
         func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> { panelling }
     }
 
-    /// The effects a controller's verdicts asked for, in order.
-    @MainActor private final class Performed: Sendable {
-        var effects: [SteeringEffect] = []
-    }
-
-    /// A controller whose gate asks `app`, and what it performed.
-    private func controller(asking app: App = App()) -> (DictationInputController, Performed) {
-        let performed = Performed()
-        let steering = Steering(gate: SteeringGate(ceiling: .seconds(30), asking: app)) { performed.effects.append($0) }
-        return (DictationInputController(steering: steering), performed)
+    /// A controller of a process whose gate asks `app`, and the process.
+    private func controller(asking app: App = App()) -> (DictationInputController, AssembledProcess) {
+        let assembled = AssembledProcess(asking: app)
+        return (assembled.controller(), assembled)
     }
 
     /// `selector` answered by a controller asking `app`, typed with `modifiers` held, and what it performed.
@@ -46,7 +41,7 @@ import Testing
                         asking app: App) -> (kept: Bool, performed: [SteeringEffect]) {
         let (controller, performed) = controller(asking: app)
         let kept = controller.didCommand(by: selector, holding: modifiers, typedAt: 1)
-        return (kept, performed.effects)
+        return (kept, performed.performed)
     }
 
     /// Key-downs are always asked for, so Escape reaches the controller whatever the Return setting says.
@@ -127,11 +122,13 @@ import Testing
         #expect(controller.didCommand(by: nil, client: nil) == false)
     }
 
-    /// A cursor given focus is told to the app, which offers it words no cursor took. Other notices
-    /// the shared stream holds are passed over.
+    /// A cursor given focus is told to the app, which offers it words no cursor took.
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsTold() async {
-        Notices.shared.cursorArrived(in: "com.apple.TextEdit")
-        #expect(await Notices.shared.notices.first { @Sendable notice in notice == .cursorArrived } == .cursorArrived)
+        let assembled = AssembledProcess()
+        let controller = assembled.controller()
+        controller.activate(FakeTextInputClient())
+        #expect(await assembled.process.notices.notices.first { @Sendable _ in true } == .cursorArrived)
+        #expect(assembled.recorded.withLock { $0 } == [.footprint(0), .cursorArrived(in: "com.example.editor")])
     }
 
     /// The bundle's `InputMethodServerControllerClass` is a string macOS resolves through

@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import Identity
 import InputMethod
 import InputMethodKit
@@ -51,23 +50,9 @@ let server: IMKServer = {
     return server
 }()
 
-/// Whether this input method's source is the one in use, read from the text input system.
-/// No current source, or one that names no identifier, is not this one.
-func isTheSelectedSource() -> Bool {
-    let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
-    let identifier = current.flatMap { TISGetInputSourceProperty($0, kTISPropertyInputSourceID) }
-        .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String }
-    return identifier == AppIdentity.inputSourceIdentifier
-}
-
-/// Where the insert port's words are committed: on the main actor, each insert waited on for
-/// a bounded time. Each insert's turn there is said in the log once it has run, so a commit
-/// that outlasted its answer is still accounted for. Held for the life of the process like
-/// everything else opened here.
-///
-/// Its turns wait on the same queue a held Return runs while it waits for words to land, so the
-/// words a Return waits for can be committed by the thread that is waiting.
-let committer = Committer(turns: Steering.process.gate.turns) { ended in logger.notice("\(ended.description, privacy: .public)") }
+/// The process's parts, assembled once (`InputMethodProcess.shipped`): the controllers `IMKServer`
+/// builds take the same one, so the ports opened here and the controllers answer as one process.
+let process = InputMethodProcess.shipped
 
 /// The app's door, beside the text input system's. Held for the life of the process for
 /// the same reason the server is: released, the app's next request finds nothing listening.
@@ -97,14 +82,7 @@ let insertions = Task.detached { () -> InsertionPort? in
         let port = try await InsertionPort(build: build, queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
             logger.error("\(String(describing: event), privacy: .public)")
         }) { request in
-            // Read on the main actor, where the effects are, and handed to the decision as
-            // values. [LAW:effects-at-boundaries]
-            let placed = committer.insert(request) {
-                FocusedClient.shared.inFront(for: request.destination,
-                                             whileInFrontIs: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-                                             selected: isTheSelectedSource(),
-                                             screens: NSScreen.screens.map(\.frame))
-            }
+            let placed = process.insert(request)
             logger.notice("\(placed.description, privacy: .public)")
             return placed.answer
         }
@@ -133,7 +111,7 @@ let insertions = Task.detached { () -> InsertionPort? in
 let tellingTheApp = Task.detached {
     _ = await insertions.value
     let sender = NoticeSender(build: build)
-    await Notices.shared.relay(tell: sender.tell, end: { DispatchQueue.main.async { exit(EXIT_FAILURE) } })
+    await process.notices.relay(tell: sender.tell, end: { DispatchQueue.main.async { exit(EXIT_FAILURE) } })
 }
 
 /// What a held Return asks the app, and whom it believes: this installation's app, by its
@@ -148,7 +126,7 @@ let askingTheApp = Task.detached {
         logger.fault("no Return will be held for the app's words: this installation's app cannot be recognised: \(String(describing: error), privacy: .public)")
         answerer = .failure(error)
     }
-    Steering.process.gate.connect(Asker(answerer: answerer))
+    process.steering.gate.connect(Asker(answerer: answerer))
 }
 
 /// A cursor outlives its app unless someone says otherwise, and the text input system does
@@ -158,7 +136,7 @@ let quits = NSWorkspace.shared.notificationCenter.addObserver(
     forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
 ) { note in
     let quit = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
-    MainActor.assumeIsolated { quit.map(FocusedClient.shared.applicationQuit) }
+    MainActor.assumeIsolated { quit.map(process.focused.applicationQuit) }
 }
 
 // The insert port is said by the task opening it, once it is open or has failed to.

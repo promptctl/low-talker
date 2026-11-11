@@ -9,13 +9,9 @@ private nonisolated let noticesLog = Logger(subsystem: AppIdentity.inputMethodBu
 /// words go to (`FocusedClient`), so the app can offer words no cursor took to it, and
 /// the process ending itself over its memory ceiling, so the app can say why it went away.
 ///
-/// [LAW:no-shared-mutable-globals] Shared for `FocusedClient`'s reason: `IMKServer` builds
-/// controllers out of a class name, so there is no constructor of ours to hand a sender to.
-/// It is one stream with two writer's doors, `cursorArrived(in:)` and `activated(holding:)`,
+/// [LAW:no-shared-mutable-globals] One per `InputMethodProcess`. It is one stream with two writer's doors, `cursorArrived(in:)` and `activated(holding:)`,
 /// and one reader, `relay`, which the process's entry point runs.
 public nonisolated final class Notices: Sendable {
-    public static let shared = Notices { $0.log() }
-
     /// IMK rule 7: the most memory this process holds before it ends itself, in bytes.
     public static let memoryCeiling: UInt64 = 1024 * 1024 * 1024
 

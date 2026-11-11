@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import Insertion
 
 /// What a steering key's verdict asks for beyond the verdict itself: a kept Return is heard, and
@@ -26,7 +26,7 @@ public nonisolated enum SteeringEffect: Equatable, Sendable {
 /// out the effect a verdict asks for.
 ///
 /// [LAW:no-shared-mutable-globals] `IMKServer` builds controllers out of a class name, so the
-/// shipped process's controllers take `process`, the one place it is built; a test builds its own
+/// shipped process's controllers take `InputMethodProcess.shipped`'s; a test builds its own
 /// with a gate of its own and a `perform` that records.
 public nonisolated struct Steering: Sendable {
     public let gate: SteeringGate
@@ -34,15 +34,6 @@ public nonisolated struct Steering: Sendable {
 
     public init(gate: SteeringGate, perform: @escaping @MainActor @Sendable (SteeringEffect) -> Void) {
         (self.gate, self.perform) = (gate, perform)
-    }
-
-    /// The shipped process's: the gate the entry point connects and drains commits through, the
-    /// system beep, and the app's notices.
-    public static let process = Steering(gate: SteeringGate()) { effect in
-        switch effect {
-        case .beep: NSSound.beep()
-        case .tellTheApp: Notices.shared.keyTyped(.escape)
-        }
     }
 
     /// The gate's decision of `key`, typed at `typedAt` (system uptime), with what it asks for done.

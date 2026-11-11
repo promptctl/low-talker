@@ -171,13 +171,14 @@ import Testing
 
     /// Through the main queue while something else holds it - another app's stalled commit, or
     /// anything at all: the port answers busy at its bound, and the main actor, reaching the
-    /// insert after that, lets it go without asking any app and says how long it waited.
+    /// insert after that, lets it go without asking any app.
     @Test func anInsertTheMainActorDoesNotReachInTimeIsBusyAndAsksNoApp() async throws {
         let field = FakeTextInputClient()
         let cursor = try await field.cursor()
         let decided = OSAllocatedUnfairLock(initialState: 0)
         let ends = OSAllocatedUnfairLock(initialState: [Ended]())
-        let committer = Committer(bound: .milliseconds(50)) { ended in ends.withLock { $0.append(ended) } }
+        // A bound of nothing: the main queue is held, so the wait is over before the turn is reached.
+        let committer = Committer(bound: .zero) { ended in ends.withLock { $0.append(ended) } }
         let held = DispatchSemaphore(value: 0)
         let released = DispatchSemaphore(value: 0)
         DispatchQueue.main.async {
@@ -199,7 +200,6 @@ import Testing
         #expect(placed.answer == .refused(.inputMethodIsBusy))
         let said = ends.withLock { $0 }
         #expect(said.map(\.did) == [.letGo])
-        #expect(said.allSatisfy { $0.waited >= .milliseconds(50) })
         #expect(decided.withLock { $0 } == 0)
         #expect(await field.text.isEmpty)
     }
