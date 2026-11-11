@@ -72,11 +72,11 @@ extension Dictation {
             }
         }
 
-        /// The word box's face for an activity: the line saying what the press is doing, if
-        /// any; the words being spoken, which it shows in place of any held; why a press is not
-        /// heard; whether held words are offered to a click into a text field, which only a box
-        /// with nothing on its way does; whether Insert may be offered for them; and whether
-        /// Copy is, which follows from the click.
+        /// What an activity puts on the word box, which `WordBox.face` joins with what is held:
+        /// the line saying what the press is doing, if any; the words being spoken, which it
+        /// shows in place of any held; why a press is not heard; whether held words are offered
+        /// to a click into a text field, which only a box with nothing on its way does; whether
+        /// Insert may be offered for them; and whether Copy is, which follows from the click.
         public struct Box: Equatable, Sendable {
             public let state: String?
             public let heard: Transcript?

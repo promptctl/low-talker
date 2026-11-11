@@ -63,8 +63,8 @@ import Testing
         let feed: Feed
         let steering: KeySteering
 
-        init(hearing engine: FakeTranscriber = FakeTranscriber { _ in Transcript(typed: "a") }, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false) async throws {
-            rig = try await Rig(hearing: engine)
+        init(hearing engine: FakeTranscriber = FakeTranscriber { _ in Transcript(typed: "a") }, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false, keeping store: FakeHeldStore = FakeHeldStore()) async throws {
+            rig = try await Rig(hearing: engine, keeping: store)
             rig.inputMethod.refusing(refusal)
             feed = Feed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
@@ -169,6 +169,64 @@ import Testing
         KeySteering.escape(loop.hotkey)
 
         #expect(loop.hotkey.phase == .idle)
+    }
+
+    /// The Escape the input method reports is the word box's dismissal: the press open is
+    /// cancelled, the words held before it are let go, and the box is put away, and stays away
+    /// through what the loop shows of the cancelled press after it.
+    @Test(.timeLimit(.minutes(1))) func anEscapeTheInputMethodReportsDismissesTheBox() async throws {
+        let earlier = Held.unplaced(part(" earlier words", "WARNING: no text field took them"))
+        let loop = try await Loop(keeping: FakeHeldStore(keeping: earlier))
+        let panel = StubPanel()
+        let box = WordBox(panel: panel)
+        let ready = EngineReadiness.ready(.default, after: .seconds(1))
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+        loop.rig.speak([1, 2, 3])
+        box.show(try #require(loop.rig.shown.activities.last), over: ready, held: loop.rig.hold.held, insertable: true)
+        #expect(panel.face?.state == "Listening")
+        let shownBefore = loop.rig.shown.activities.count
+
+        box.react(to: .escape, cancelling: loop.hotkey, hold: loop.rig.hold)
+
+        #expect(panel.shown.last == .away)
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.hold.dismissed == earlier)
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.hotkey.phase == .idle)
+        let after = loop.rig.shown.activities.dropFirst(shownBefore)
+        #expect(!after.isEmpty)
+        for activity in after {
+            box.show(activity, over: ready, held: loop.rig.hold.held, insertable: true)
+            #expect(panel.face == nil, "shown \(activity) after the Escape")
+        }
+    }
+
+    /// A Return the input method reports passed through it, held and sent there: the press stays
+    /// open, and the box and the held words are as they were.
+    @Test(.timeLimit(.minutes(1))) func aReturnTheInputMethodReportsChangesNothing() async throws {
+        let earlier = Held.unplaced(part(" earlier words", "WARNING: no text field took them"))
+        let loop = try await Loop(keeping: FakeHeldStore(keeping: earlier))
+        let panel = StubPanel()
+        let box = WordBox(panel: panel)
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+        box.show(.listening(heard: Transcript(words: [])), over: .ready(.default, after: .seconds(1)), held: loop.rig.hold.held, insertable: true)
+        let shown = panel.shown
+
+        box.react(to: .return, cancelling: loop.hotkey, hold: loop.rig.hold)
+
+        #expect(panel.shown == shown)
+        #expect(loop.rig.hold.held == earlier)
+        guard case .held = loop.hotkey.phase else {
+            Issue.record("the press is \(loop.hotkey.phase) after a Return")
+            return
+        }
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+        #expect(await loop.rig.report().cancelled == nil)
     }
 
     @Test(.timeLimit(.minutes(1))) func nothingIsOwedWhenNoPressIsOpen() async throws {
