@@ -5,9 +5,9 @@ import InputMethod
 /// made through the port, and what the client answers and the field holds after it.
 ///
 /// Stated through the port's own calls plus what the field holds, which is the one reading a real
-/// client cannot give. The fake gives it in `make test`, and on studious the test host app gives it
-/// for its fields (low-test-layers-sqm.if6), so the same cases run against both, and a case a real
-/// client fails is the fake to change. [LAW:one-source-of-truth]
+/// client cannot give. The fake gives it in `make test`, and its answers are the measured client
+/// profiles', so a case is a statement about every client a profile describes.
+/// [LAW:one-source-of-truth]
 public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
     /// The call the case makes through the port before the client is read.
     public enum Act: Sendable, CustomStringConvertible {
