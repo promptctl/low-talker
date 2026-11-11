@@ -193,9 +193,8 @@ final class HALInput: PreparedInput {
                 // the same way every other claim about preparing is: by reading the device back.
                 registered.append(try HALInput.watch(device, kAudioDevicePropertyDeviceIsAlive, scope: kAudioObjectPropertyScopeGlobal, onStale))
                 registered.append(try HALInput.watch(device, kAudioDevicePropertyStreamFormat, scope: kAudioObjectPropertyScopeInput, onStale))
-                // The channels it is heard on, which a person can name again under it. A device
-                // that publishes none has nothing to watch.
-                if case .named = layout.heardChannels.stereo {
+                // The channels a wider device is heard on, which a person can name again under it.
+                if layout.heardChannels.followsStereo {
                     registered.append(try HALInput.watch(device, kAudioDevicePropertyPreferredChannelsForStereo, scope: kAudioObjectPropertyScopeInput, onStale))
                 }
 

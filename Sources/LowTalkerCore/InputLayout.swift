@@ -16,6 +16,8 @@ import CoreAudio
 struct InputLayout: Sendable, Equatable {
     /// The channels of each buffer, in the order the IOProc is handed them.
     let buffers: [Int]
+    /// Every channel of every buffer.
+    let channels: Int
     let sampleRate: Double
     /// Which of the device's channels are heard, and why those.
     let heardChannels: HeardChannels
@@ -29,12 +31,11 @@ struct InputLayout: Sendable, Equatable {
         let lane: Int
     }
 
-    var channels: Int { buffers.reduce(0, +) }
-
     init(buffers: [Int], sampleRate: Double, stereo: StereoChannels) {
         self.buffers = buffers
         self.sampleRate = sampleRate
-        heardChannels = HeardChannels(of: buffers.reduce(0, +), stereo: stereo)
+        channels = buffers.reduce(0, +)
+        heardChannels = HeardChannels(of: channels, stereo: stereo)
         let lanes = buffers.enumerated().flatMap { buffer, width in (0..<width).map { Lane(buffer: buffer, lane: $0) } }
         heard = heardChannels.channels.map { lanes[$0 - 1] }
     }
@@ -185,32 +186,52 @@ public enum StereoChannels: Sendable, Equatable {
     case unpublished(OSStatus)
 }
 
-/// Which channels of a device are heard, numbered from 1: the two it names for stereo, or the
-/// one a mono device names twice. A device that names none it has is heard on its first one or
-/// two rather than refused, because a refused device fails every press. AVAudioConverter mixes
-/// two as it mixes any stereo input, half of each (measured), so a mono or stereo device is
-/// heard as it was before devices wider than two could be.
-public struct HeardChannels: Sendable, Equatable, CustomStringConvertible {
-    public let channels: [Int]
-    public let stereo: StereoChannels
+/// Which channels of a device are heard, numbered from 1. A device of one or two is heard on
+/// all of them, exactly as before wider devices could be: AVAudioConverter mixes two as it mixes
+/// any stereo input, half of each (measured). A wider device is heard on the two it names for
+/// stereo, or the one it names twice, since AVAudioFormat describes no more than two without a
+/// channel layout. One that names none it has is heard on its first two rather than refused,
+/// because a refused device fails every press.
+public enum HeardChannels: Sendable, Equatable, CustomStringConvertible {
+    /// Every channel of a device of one or two.
+    case every(Int)
+    /// The channels a wider device names for stereo.
+    case named(Int, Int)
+    /// The first two channels of a wider device that names none it has, and what it named.
+    case first(StereoChannels)
 
     /// For a device of `count` channels, at least one.
     public init(of count: Int, stereo: StereoChannels) {
-        self.stereo = stereo
-        channels = switch stereo {
-        case .named(let left, let right) where (1...count).contains(left) && (1...count).contains(right):
-            left == right ? [left] : [left, right]
-        default:
-            Array(1...min(2, count))
+        self = switch stereo {
+        case _ where count <= 2: .every(count)
+        case .named(let left, let right) where (1...count).contains(left) && (1...count).contains(right): .named(left, right)
+        default: .first(stereo)
+        }
+    }
+
+    public var channels: [Int] {
+        switch self {
+        case .every(let count): Array(1...count)
+        case .named(let left, let right): left == right ? [left] : [left, right]
+        case .first: [1, 2]
+        }
+    }
+
+    /// Whether naming other channels for stereo would change which are heard, which is when the
+    /// pair is watched.
+    var followsStereo: Bool {
+        switch self {
+        case .every, .first(.unpublished): false
+        case .named, .first(.named): true
         }
     }
 
     public var description: String {
         let heard = channels.count == 1 ? "heard on channel \(channels[0])" : "heard on channels \(channels[0]) and \(channels[1])"
-        return switch stereo {
-        case .named(let left, let right) where Set([left, right]) == Set(channels): heard
-        case .named(let left, let right): "\(heard), its first: it names channels \(left) and \(right) for stereo"
-        case .unpublished(let status): "\(heard), its first: it names no channels for stereo (status \(status))"
+        return switch self {
+        case .every, .named: heard
+        case .first(.named(let left, let right)): "\(heard), its first: it names channels \(left) and \(right) for stereo"
+        case .first(.unpublished(let status)): "\(heard), its first: it names no channels for stereo (status \(status))"
         }
     }
 }

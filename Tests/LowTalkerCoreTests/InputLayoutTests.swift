@@ -197,17 +197,20 @@ import Testing
     // MARK: which channels a device is heard on
 
     @Test(arguments: [
-        // A mono device names its one channel twice.
+        // A device of one or two channels is heard on all of them, whatever it names.
         (1, StereoChannels.named(1, 1), [1]),
         (2, .named(1, 2), [1, 2]),
-        (2, .named(1, 1), [1]),
-        // An audio interface or a loopback is heard on the two it names, and no other.
+        (2, .named(1, 1), [1, 2]),
+        (2, .named(2, 2), [1, 2]),
+        (1, .unpublished(-1), [1]),
+        (2, .unpublished(-1), [1, 2]),
+        // An audio interface or a loopback is heard on the channels it names, and no other.
         (16, .named(1, 2), [1, 2]),
         (16, .named(3, 4), [3, 4]),
-        // A device that names a channel it lacks, or none at all, is heard on its first.
-        (2, .named(0, 0), [1, 2]),
-        (2, .named(1, 3), [1, 2]),
-        (1, .unpublished(-1), [1]),
+        (16, .named(5, 5), [5]),
+        // A wider device that names a channel it lacks, or none at all, is heard on its first two.
+        (16, .named(0, 0), [1, 2]),
+        (16, .named(3, 17), [1, 2]),
         (16, .unpublished(-1), [1, 2]),
     ])
     func aDeviceIsHeardOnTheChannelsItNamesForStereo(count: Int, stereo: StereoChannels, heard: [Int]) {
@@ -217,9 +220,23 @@ import Testing
     /// The record says which channels are heard, and why when they are not the ones named.
     @Test func theRecordSaysWhichChannelsAreHeardAndWhy() {
         #expect(HeardChannels(of: 1, stereo: .named(1, 1)).description == "heard on channel 1")
+        #expect(HeardChannels(of: 2, stereo: .unpublished(-1)).description == "heard on channels 1 and 2")
         #expect(HeardChannels(of: 16, stereo: .named(2, 1)).description == "heard on channels 2 and 1")
-        #expect(HeardChannels(of: 2, stereo: .named(0, 0)).description == "heard on channels 1 and 2, its first: it names channels 0 and 0 for stereo")
-        #expect(HeardChannels(of: 2, stereo: .unpublished(-1)).description == "heard on channels 1 and 2, its first: it names no channels for stereo (status -1)")
+        #expect(HeardChannels(of: 16, stereo: .named(0, 0)).description == "heard on channels 1 and 2, its first: it names channels 0 and 0 for stereo")
+        #expect(HeardChannels(of: 16, stereo: .unpublished(-1)).description == "heard on channels 1 and 2, its first: it names no channels for stereo (status -1)")
+    }
+
+    /// The pair is watched where naming another would change what is heard: a wider device that
+    /// names one, in range or not.
+    @Test(arguments: [
+        (2, StereoChannels.named(1, 2), false),
+        (2, .unpublished(-1), false),
+        (16, .named(3, 4), true),
+        (16, .named(0, 0), true),
+        (16, .unpublished(-1), false),
+    ])
+    func thePairIsWatchedWhereItDecidesWhatIsHeard(count: Int, stereo: StereoChannels, watched: Bool) {
+        #expect(HeardChannels(of: count, stereo: stereo).followsStereo == watched)
     }
 
     // MARK: how a render becomes the ring's planar samples
@@ -270,19 +287,27 @@ import Testing
 
     /// A device of any channel count is heard, an audio interface or a 16-channel loopback
     /// included: what it pops as is a shape AVAudioFormat describes and the converter reads, and
-    /// the converter hands back the voice on its channels for stereo, not silence, and none of
-    /// what its other channels carry.
-    @Test(arguments: [1, 2, 3, 4, 16])
-    func aDeviceOfAnyChannelCountIsHeardAtTheVoicesLevel(channels: Int) throws {
-        let layout = InputLayout(buffers: [channels], sampleRate: 48_000, stereo: .named(1, min(2, channels)))
+    /// the converter hands back the mean of its heard channels, as it mixes any stereo input, not
+    /// silence, and none of what its other channels carry. Each channel carries its own level, so
+    /// hearing one channel of a pair, or one channel twice, reads as a different level.
+    @Test(arguments: [
+        (1, StereoChannels.named(1, 1), Float(0.5)),
+        (2, .named(1, 1), 0.375),
+        (3, .named(1, 2), 0.375),
+        (4, .named(1, 2), 0.375),
+        (16, .named(1, 2), 0.375),
+        (16, .named(3, 4), 0.1458),
+    ])
+    func aDeviceOfAnyChannelCountIsHeardAsTheMeanOfItsHeardChannels(channels: Int, stereo: StereoChannels, level: Float) throws {
+        let layout = InputLayout(buffers: [channels], sampleRate: 48_000, stereo: stereo)
         let ring = SliceRing(channels: layout.heard.count, frames: 4_800, entries: 4)
-        Self.push(ring, layout: layout, frames: 4_800) { channel, _ in channel <= 2 ? 0.5 : 0.25 }
+        Self.push(ring, layout: layout, frames: 4_800) { channel, _ in 0.5 / Float(channel) }
         let popped = AVAudioPCMBuffer(pcmFormat: try #require(layout.format), frameCapacity: 4_800)!
         _ = ring.pop(into: popped)
         let converted = try AudioClip.Converter(from: popped.format).convert(popped)
         // Past the resampler's onset, where a step from nothing rings.
         let settled = converted.dropFirst(converted.count / 2)
-        #expect(settled.allSatisfy { abs($0 - 0.5) < 0.01 }, "\(settled.min() ?? 0)...\(settled.max() ?? 0)")
+        #expect(settled.allSatisfy { abs($0 - level) < 0.01 }, "\(settled.min() ?? 0)...\(settled.max() ?? 0)")
     }
 
     // MARK: what a fault means for the input
