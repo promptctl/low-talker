@@ -372,7 +372,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
         #expect(stopped.cause as? InsertFailure == .refused(.cursorIsInAnotherApp))
-        #expect(failureLine(stopped) == "\(Refusal.cursorIsInAnotherApp) 1 words of your dictation were inserted before it; the rest were not.")
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) 1 words of your dictation were inserted before it; the rest were not.")
         #expect("\(stopped)".hasSuffix("1 words of your dictation were inserted before it; the rest were not."))
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held == .unplaced(part(" there friend", "\(Refusal.cursorIsInAnotherApp)")))
@@ -418,9 +418,36 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
         #expect(stopped.cause as? InsertFailure == .refused(.dictationIsInAnotherApp))
-        #expect(failureLine(stopped) == "\(Refusal.dictationIsInAnotherApp) 1 words of your dictation were inserted before it; the rest were not.")
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.dictationIsInAnotherApp.reason) 1 words of your dictation were inserted before it; the rest were not.")
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held?.words == Transcript(typed: " there friend"))
+    }
+
+    /// A press stopped after some of its words landed says one thing about each word: those
+    /// inserted before what stopped it, those in inserts that may have landed, mid-press and at
+    /// key-up alike, and the rest, which were not. What stopped it gives its reason alone, since
+    /// its fate would be about the same words; the hold keeps the whole warning beside them.
+    @Test(arguments: failedInserts)
+    func aPressStoppedAfterWordsLandedTellsEachWordOnce(failed: FailedInsert) async throws {
+        let engine = FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
+        }) { _ in Transcript(typed: "hello there friend") }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
+        rig.inputMethod.refusing(failed.failure)
+        rig.speak([3, 4])
+        await rig.until { engine.hearing == [1, 2, 3, 4] }
+        rig.keyUp()
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        let told = failed.mayHaveLanded
+            ? "1 words of your dictation were inserted before it, and 2 more may have been; do not dictate those again. Any others were not."
+            : "1 words of your dictation were inserted before it; the rest were not."
+        #expect("\(stopped)" == "WARNING: \(failed.failure.reason) \(told)")
+        #expect(failureLine(stopped) == "\(stopped)")
+        let rest = part(" there friend", "\(failed.failure)")
+        #expect(rig.hold.held == (failed.mayHaveLanded ? .unaccounted(rest) : .unplaced(rest)))
     }
 
     /// A refusal while the press is open stops nothing: the press keeps listening, and once
@@ -1057,7 +1084,9 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hello there") })
         rig.inputMethod.refusing(failed.failure)
         rig.hold()
-        #expect(try #require(await rig.report().failure as? PressStopped).landed == 0)
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(stopped.landed == 0)
+        #expect(stopped.standing == (failed.mayHaveLanded ? 2 : 0))
         let kept: Held = failed.mayHaveLanded
             ? .unaccounted(part("hello there", "\(failed.failure)")) : .unplaced(part("hello there", "\(failed.failure)"))
         #expect(rig.hold.held == kept)
@@ -1711,7 +1740,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold()
         guard case .failed(let failed) = await rig.report() else { Issue.record("expected the press to fail"); return }
         #expect(failed.kind == "PressStopped")
-        #expect(failed.failure.account == Account(facts: "0 words inserted before: NoEngine()"))
+        #expect(failed.failure.account == Account(facts: "0 words inserted and 0 that may have been before: NoEngine()"))
     }
 
     /// The hold is the app's, not the loop's: a loop rebuilt over a new config offers what
