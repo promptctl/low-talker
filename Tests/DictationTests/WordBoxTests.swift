@@ -104,6 +104,25 @@ final class Speaker: Held.Owner {
 
     private static let refused = "WARNING: no text field took them"
 
+    /// Dismissals that come to hold nothing, each the words of a press then thrown away, dismissed
+    /// nothing the person keeps: however many there were, the one before them is still theirs to
+    /// bring back.
+    @Test func dismissalsOfOnlyThrownWordsLeaveTheOneBefore() {
+        let (first, second) = (Speaker(), Speaker())
+        box.dismiss(cancelling: nil, hold: hold)
+        hold.heldBack(Transcript(typed: " one"), by: first, warning: Self.refused)
+        box.dismiss(cancelling: nil, hold: hold)
+        hold.heldBack(Transcript(typed: " two"), by: second, warning: Self.refused)
+        box.dismiss(cancelling: nil, hold: hold)
+
+        for press in [first, second] {
+            press.throwAway()
+            #expect(hold.forget(press) == 1)
+        }
+
+        #expect(hold.dismissed == Self.earlier)
+    }
+
     /// The words the person asks back come back in the loop's turn, behind every press before:
     /// the box stays away until they are held again, then shows them.
     @Test func aBringBackShowsTheBoxWhenTheWordsAreHeldAgain() {

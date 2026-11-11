@@ -332,6 +332,8 @@ private struct BadBuffer: Error {}
         _ = try #require(await loop.rig.report().cancelled)
         #expect(loop.rig.hold.held == nil)
         #expect(loop.rig.hold.dismissed?.allWords == kept.allWords)
+        #expect(loop.rig.store.state.dismissed?.allWords == kept.allWords)
+        #expect(loop.rig.store.state.dismissed?.warnings == kept.warnings)
     }
 
     /// An Escape throws away the press whose key-up is still in delivery, and the box then shows
