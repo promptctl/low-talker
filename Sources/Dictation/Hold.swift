@@ -166,12 +166,6 @@ public enum Held: Sendable, Equatable {
         Held(unplaced: offered?.without(owner), unaccounted: standing)
     }
 
-    /// Whether no throw can take every word held: some may have landed, or were said by a press
-    /// that is gone, which no Escape can reach.
-    var outlastsEveryThrow: Bool {
-        standing != nil || offered?.runs.contains { $0.by == nil } == true
-    }
-
     /// What is left once an insert carrying the words at no cursor landed.
     var placed: Held? {
         Held(unplaced: nil, unaccounted: standing)
@@ -198,41 +192,37 @@ public enum Held: Sendable, Equatable {
 /// [LAW:one-source-of-truth] One value, so the store never keeps the one without the other.
 public struct HoldState: Sendable, Equatable, CustomStringConvertible {
     public let held: Held?
-    /// The person's dismissals, the latest first, each with what is left of it: its words no
-    /// throw or insert has taken since. One that comes to hold nothing leaves, and the one it
-    /// replaced is the latest again. An Escape dismisses what is held before it reaches the press
-    /// it throws away, a main-queue turn later on the detector's path, so a dismissal may come to
-    /// hold nothing that press did not take with it, and then the one before it is still the
-    /// person's to bring back. Only the latest is kept by the store: once the app ends, no press
-    /// that said its words can be thrown away.
-    let dismissals: [Held]
+    /// What is left of the latest dismissal: its words no throw or insert has taken since.
+    fileprivate let lastDismissed: Held?
+    /// The dismissal the latest one replaced. An Escape dismisses what is held before it reaches
+    /// the press it throws away, a main-queue turn later on the detector's path, so the latest
+    /// may come to hold nothing that press did not take with it, and then this one is still the
+    /// person's to bring back. Not kept by the store: once the app ends, no press that said the
+    /// latest dismissal's words can be thrown away.
+    fileprivate let replaced: Held?
 
-    /// The words the person dismissed last, which one step brings back. A later dismissal
-    /// replaces them, until it holds nothing.
-    /// [LAW:one-source-of-truth] Derived, so no step restores an earlier dismissal: each changes
-    /// the dismissals as it changes the dismissed words, and the earlier shows through.
-    public var dismissed: Held? { dismissals.first }
+    /// The words the person dismissed last, which one step brings back: what is left of the
+    /// latest dismissal, or once nothing is, the one it replaced. A later dismissal replaces them.
+    /// [LAW:one-source-of-truth] Derived, so no step restores the earlier dismissal: each changes
+    /// what is left of the latest as it changes the dismissed words, and the earlier shows through.
+    public var dismissed: Held? { lastDismissed ?? replaced }
 
     public init(held: Held? = nil, dismissed: Held? = nil) {
-        self.init(held: held, dismissals: [dismissed].compactMap { $0 })
+        self.init(held: held, lastDismissed: dismissed, replaced: nil)
     }
 
-    /// [LAW:single-enforcer] Every state with dismissals is made here, so none is kept that nothing
-    /// can bring back: below one that outlasts every throw, as only the latest can be emptied by an
-    /// insert carrying it.
-    fileprivate init(held: Held?, dismissals: [Held?]) {
-        let dismissals = dismissals.compactMap { $0 }
+    fileprivate init(held: Held?, lastDismissed: Held?, replaced: Held?) {
         self.held = held
-        self.dismissals = dismissals.dropFirst().firstIndex(where: \.outlastsEveryThrow).map { Array(dismissals[...$0]) } ?? dismissals
+        self.lastDismissed = lastDismissed
+        self.replaced = replaced
     }
 
     fileprivate func with(held: Held?) -> HoldState {
-        HoldState(held: held, dismissals: dismissals)
+        HoldState(held: held, lastDismissed: lastDismissed, replaced: replaced)
     }
 
-    /// With the latest dismissal changed by `change`, the one an insert on its way carries.
-    fileprivate func withDismissed(_ change: (Held) -> Held?) -> HoldState {
-        HoldState(held: held, dismissals: [dismissed.flatMap(change)] + dismissals.dropFirst().map(Optional.some))
+    fileprivate func with(lastDismissed: Held?) -> HoldState {
+        HoldState(held: held, lastDismissed: lastDismissed, replaced: replaced)
     }
 
     /// Words counted, never the words themselves: they are what the person dictated.
@@ -375,7 +365,7 @@ public final class Hold {
         let ended = switch carried {
         case nil: state
         case .held?: state.with(held: held?.sent)
-        case .dismissed?: state.withDismissed(\.sent)
+        case .dismissed?: state.with(lastDismissed: state.lastDismissed?.sent)
         }
         return HoldState(held: ended.held, dismissed: ended.dismissed)
     }
@@ -393,7 +383,7 @@ public final class Hold {
         case .held?: .dismissed
         case .dismissed?, nil: nil
         }
-        move(to: HoldState(held: nil, dismissals: [held] + state.dismissals), carrying: carrying)
+        move(to: HoldState(held: nil, lastDismissed: held, replaced: dismissed), carrying: carrying)
     }
 
     /// The person brought back the words they dismissed last, ahead of any held since, since
@@ -424,7 +414,7 @@ public final class Hold {
         let next = switch carried {
         case nil: state
         case .held?: state.with(held: held?.placed)
-        case .dismissed?: state.withDismissed(\.placed)
+        case .dismissed?: state.with(lastDismissed: state.lastDismissed?.placed)
         }
         move(to: next, carrying: nil)
     }
@@ -457,7 +447,7 @@ public final class Hold {
         guard failure.wordsMayHaveLanded else { return heldBack(words, by: owner, warning: warning) }
         let unanswered = Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: held?.standing)
         let answered = switch carried {
-        case .dismissed?: state.withDismissed { $0.mayHaveLanded(warning) }
+        case .dismissed?: state.with(lastDismissed: state.lastDismissed?.mayHaveLanded(warning))
         case .held?, nil: state
         }
         standingGeneration += 1
@@ -478,7 +468,7 @@ public final class Hold {
         let next = switch carried {
         case nil: state.without(owner)
         case .held?: state.without(owner).with(held: held)
-        case .dismissed?: HoldState(held: held?.without(owner), dismissals: [dismissed] + state.dismissals.dropFirst().map { $0.without(owner) })
+        case .dismissed?: state.without(owner).with(lastDismissed: state.lastDismissed)
         }
         let forgotten = state.offered(by: owner) - next.offered(by: owner)
         move(to: next, carrying: carried)
@@ -506,11 +496,11 @@ public final class Hold {
 private extension HoldState {
     /// Without the words at no cursor that `owner` said, held or dismissed.
     func without(_ owner: any Held.Owner) -> HoldState {
-        HoldState(held: held?.without(owner), dismissals: dismissals.map { $0.without(owner) })
+        HoldState(held: held?.without(owner), lastDismissed: lastDismissed?.without(owner), replaced: replaced?.without(owner))
     }
 
     /// How many of the words at no cursor, held or dismissed, `owner` said.
     func offered(by owner: any Held.Owner) -> Int {
-        ([held] + dismissals).reduce(0) { $0 + ($1?.offered?.count(by: owner) ?? 0) }
+        [held, lastDismissed, replaced].reduce(0) { $0 + ($1?.offered?.count(by: owner) ?? 0) }
     }
 }
