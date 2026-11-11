@@ -146,7 +146,7 @@ let package = Package(
         // The fields the client contract runs against on a Mac, an AppKit text view and WebKit's
         // `<textarea>` and `<input>`, each saying what it holds. In no product and never copied
         // into LowTalker.app: `make test-host` puts it in a bundle of its own. It links no library
-        // here, so what it reports is the field's and nothing of ours. [LAW:one-way-deps]
+        // here, so what it reports is the field's and nothing of ours.
         .executableTarget(name: "test-host", path: "Tests/TestHost", exclude: ["Info.plist"],
                           swiftSettings: [.defaultIsolation(MainActor.self)]),
         .testTarget(name: "TestHostTests", dependencies: ["test-host"]),

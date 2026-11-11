@@ -69,6 +69,16 @@ Path(sys.argv[0]).with_name("pid").write_text(str(os.getpid()))
 time.sleep(3600)
 """
 
+# A host of an older protocol, whose ready names no fields that keep a maxLength.
+says_too_little_when_ready = """
+import json, os, sys
+from pathlib import Path
+Path(sys.argv[0]).with_name("pid").write_text(str(os.getpid()))
+print(json.dumps({"event": "ready", "fields": ["input"]}), flush=True)
+sys.stdin.readline()
+sys.stdin.readline()
+"""
+
 
 class HostTests(unittest.TestCase):
     def bundle(self, script: str) -> Path:
@@ -139,11 +149,22 @@ class HostTests(unittest.TestCase):
                 host.read("input")
             with self.assertRaisesRegex(HostError, "loaded the pages"):
                 host.read("input")
+            # Nothing reads it any more, so it is ended rather than left to fill its output.
+            self.assertIsNotNone(host.process.wait(timeout=5))
 
     def test_a_host_that_never_says_it_is_ready_is_ended(self):
         bundle = self.bundle(never_ready)
         with self.assertRaises(NoAnswer):
             Host(bundle, within=1)
+        self.assertEnded(bundle)
+
+    def test_a_host_whose_ready_names_too_little_is_ended(self):
+        bundle = self.bundle(says_too_little_when_ready)
+        with self.assertRaises(KeyError):
+            Host(bundle)
+        self.assertEnded(bundle)
+
+    def assertEnded(self, bundle: Path):
         pid = int((bundle / "Contents" / "MacOS" / "pid").read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)

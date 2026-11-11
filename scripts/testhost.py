@@ -42,7 +42,6 @@ class Host:
         # Every event the host has said, in order: what every wait looks through, and what a
         # failure shows. [LAW:one-source-of-truth]
         self.said: list[dict] = []
-        self.active = False
         # Where in `said` each field's changes start: past its last setup, and past the last
         # change taken from it.
         self._changes_from: dict[str, int] = {}
@@ -54,13 +53,13 @@ class Host:
         self._reader.start()
         try:
             _, ready = self._wait(lambda event: event["event"] == "ready", within)
-        except HostError:
+            self.fields: list[str] = ready["fields"]
+            self.keeps_max_length: list[str] = ready["keepsMaxLength"]
+        except BaseException:
             # The host reads its input only once it is ready, so ending its input would not quit it.
             self.process.kill()
             self.close()
             raise
-        self.fields: list[str] = ready["fields"]
-        self.keeps_max_length: list[str] = ready["keepsMaxLength"]
 
     def __enter__(self) -> Host:
         return self
@@ -74,6 +73,8 @@ class Host:
                 self._events.put(json.loads(line))
             except json.JSONDecodeError:
                 self._events.put(HostError(f"the host said a line that is no event: {line!r}"))
+                # Nothing reads the host from here on, and a host that cannot write would never quit.
+                self.process.kill()
                 return
         self._events.put(HostError(f"the host quit with status {self.process.wait()}"))
 
@@ -104,8 +105,6 @@ class Host:
         if event["event"] == "error":
             self._end = HostError(f"the host said: {event['message']}")
             raise self._end
-        if event["event"] in ("active", "field"):
-            self.active = event["active"]
 
     def _command(self, verb: str, field: str, **rest) -> tuple[int, dict]:
         """Sends one command under a number of its own and returns the one answer carrying it, and
@@ -137,9 +136,10 @@ class Host:
         return self._command("read", field)[1]
 
     def change(self, field: str, matches: Callable[[dict], bool], within: float = 10.0) -> dict:
-        """The first reading `field` pushed on a change that `matches`, since it was set up and
-        past the last change taken from it: keys typed, an insert, whether it landed before this
-        asks or after."""
+        """The first reading `field` pushed on a change that `matches`, past its last hold's answer
+        and past the last change taken from it: keys typed, an insert, whether it landed before this
+        asks or after. A page pushes its own setup after the hold's answer (WebKit fires
+        `selectionchange` as a task of its own), so `matches` names a state the setup does not make."""
         index, pushed = self._wait(
             lambda event: event["event"] == "field" and event["answers"] is None and event["name"] == field and matches(event),
             within, start=self._changes_from.get(field, 0))
@@ -150,10 +150,12 @@ class Host:
         """Brings the host to the front, which it cannot do itself: macOS refuses the activation a
         process launched behind another app asks for. `open` on a running app's bundle activates it."""
         subprocess.run(["open", str(self.bundle)], check=True)
-        # The last state the host gave, from an `active` event or a reading: on a host already in
-        # front, `open` changes nothing and no event comes.
-        if not self.active:
-            self._wait(lambda event: event["event"] == "active" and event["active"])
+        # A reading says whether the host is active as it answers: on a host already in front,
+        # `open` changes nothing and no event comes, and on one that is not yet, its `active` event
+        # follows the answer. [LAW:no-ambient-temporal-coupling]
+        index, answer = self._command("read", self.fields[0])
+        if not answer["active"]:
+            self._wait(lambda event: event["event"] == "active" and event["active"], start=index + 1)
 
     def close(self) -> None:
         """Ends the host's standard input, which quits it, and waits for it to quit."""
