@@ -31,7 +31,7 @@ The release also offers `LowTalker-network.pkg`. It is identical except that it 
 ## Private by construction
 
 - **Local.** The Whisper model ships inside the app bundle. LowTalker downloads nothing.
-- **Sandboxed.** The offline build carries no network entitlement, so macOS refuses any connection it tries to make. That is a property of the build, not a promise. `scripts/wire-check` verifies it by watching both processes during a dictation.
+- **Sandboxed.** The offline build carries no network entitlement, so macOS refuses any connection it tries to make. That is a property of the build, not a promise: no package is made of an app or input method whose signature lets it connect out (`scripts/variant`).
 - **No special access.** Words reach the cursor through LowTalker's own macOS input method, the way a Japanese or Chinese input method commits text. It needs no Accessibility or Input Monitoring grant and no administrator approval, so it works on a managed work Mac. It never posts keystrokes and never touches the clipboard.
 
 ## Speed

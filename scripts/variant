@@ -1,23 +1,75 @@
 #!/usr/bin/env bash
-# Which build an app is, from the entitlements plist on stdin, as
-# `codesign -d --entitlements - --xml <app>` prints it: `offline` when it carries none of the
-# sandbox's network keys, `network` when it carries the server key alone, set true. Any other
-# set is a build neither variant makes, and fails naming the keys.
+# Which build a signed app is, read off its signature with the input method built beside it,
+# each held to the entitlements project.yml declares for it: `offline` when the app is signed
+# with exactly its declared set, `network` when with that set and the server key, set true.
+# Anything else is a build neither variant makes, and fails naming both sets.
 #
-#   codesign -d --entitlements - --xml <app> | scripts/variant    # prints offline or network
+#   scripts/variant <app> <its .entitlements> <input method> <its .entitlements>
+#     # prints offline or network
 #
 # The Makefile's VARIANT decides which set a build signs in; this reads the answer back off the
 # signature, so a package named for it cannot say offline over an app that may accept
 # connections. [LAW:one-source-of-truth]
+#
+# It is also where "neither process can open an outbound connection" is held on what is signed.
+# Under App Sandbox without com.apple.security.network.client, connect() and getaddrinfo are
+# refused (project.yml records the measurement), and the declared sets are sandboxed with no
+# network key, each held whole by AppEntitlementsTests and InputMethodEntitlementsTests. Every
+# other way to add an entitlement - a setting on the xcodebuild command line, an xcconfig - ends
+# in the signature, which must be the declared set and nothing else. The input method is the
+# same bytes in both builds and never listens, so it is never signed with the server key.
+# [LAW:single-enforcer]
 set -euo pipefail
 
-network=$(plutil -convert json -o - - \
-  | jq -c '[to_entries[] | select(.key | startswith("com.apple.security.network.")) | [.key, .value]]')
-case "$network" in
-  '[]') echo offline ;;
-  '[["com.apple.security.network.server",true]]') echo network ;;
-  *)
-    echo "variant: the network entitlements $network are neither the offline nor the network build's" >&2
-    exit 1
-    ;;
+usage="usage: scripts/variant <app> <its .entitlements> <input method> <its .entitlements>"
+app=${1:?$usage}
+app_declared=${2:?$usage}
+input_method=${3:?$usage}
+input_method_declared=${4:?$usage}
+
+fail() {
+  echo "variant: $1" >&2
+  exit 1
+}
+
+# An entitlements plist on stdin as one canonical line, so two sets are equal exactly when
+# their lines are.
+canonical() {
+  plutil -convert json -o - - | jq -cS . || fail "cannot read the entitlements of $1"
+}
+
+declared() {
+  canonical "$1" <"$1"
+}
+
+# What a bundle is signed with, once it is known to be the only program in it.
+signed() {
+  local executable programs entitlements
+  executable=$(plutil -extract CFBundleExecutable raw -o - "$1/Contents/Info.plist") \
+    || fail "$1 has no Contents/Info.plist naming its executable"
+  # A program in the bundle besides its executable - an XPC service or login item, a script, a
+  # link to either - runs under a signature this does not read. So the bundle carries no program
+  # but itself (low-builds-b4e.tvx), which also refuses what a warm DerivedData kept from an
+  # earlier build.
+  programs=$(find "$1" \( -type l -o -type f -perm +111 \) -print) || fail "cannot list the programs in $1"
+  [[ $programs == "$1/Contents/MacOS/$executable" ]] \
+    || fail "$1 carries the programs [$programs], and its one program is Contents/MacOS/$executable"
+  entitlements=$(codesign -d --entitlements - --xml "$1") || fail "codesign cannot read the signature of $1"
+  # codesign answers a signature with no entitlements with nothing at all, and exits 0.
+  [[ -n $entitlements ]] || fail "$1 is signed with no entitlements, so it runs outside the sandbox"
+  canonical "$1" <<<"$entitlements"
+}
+
+input_method_signed=$(signed "$input_method")
+input_method_expected=$(declared "$input_method_declared")
+[[ $input_method_signed == "$input_method_expected" ]] \
+  || fail "the input method $input_method is signed with $input_method_signed, and in either build with $input_method_declared's $input_method_expected"
+
+app_signed=$(signed "$app")
+offline=$(declared "$app_declared")
+network=$(jq -cS '. + {"com.apple.security.network.server": true}' <<<"$offline")
+case "$app_signed" in
+  "$offline") echo offline ;;
+  "$network") echo network ;;
+  *) fail "$app is signed with $app_signed, which is neither the offline build's $offline, as $app_declared declares it, nor that and the server key" ;;
 esac

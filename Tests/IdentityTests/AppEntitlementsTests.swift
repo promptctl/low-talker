@@ -10,8 +10,9 @@ private let repository = URL(fileURLWithPath: #filePath)
 ///
 /// Read off the plist xcodegen renders, so a port named wrongly in project.yml fails here
 /// rather than as a sandbox denial at the first hotkey press.
-/// Compared whole: an entitlement added without a measured failure behind it - a network
-/// one above all, which is what the offline build exists to lack - is a finding.
+/// Compared whole: an entitlement added without a measured failure behind it is a finding.
+/// That what is signed is this set and nothing else is `scripts/variant`'s, which reads the
+/// signature every route to an entitlement ends in.
 @Suite struct AppEntitlementsTests {
     @Test func theAppIsSandboxedWithOnlyTheMicrophonePickedFoldersAndItsTwoPorts() throws {
         let url = repository.appending(path: "App/Generated/\(AppIdentity.displayName).entitlements")

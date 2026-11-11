@@ -8,9 +8,8 @@ Package.resolved pins, the third-party code vendored inside those packages, and 
 the app loads (its weights and its tokenizer). Identity, URL, version and revision come
 from Package.resolved, the checkouts under .build, and model-tool; sbom/rules.json holds
 only what none of those can say - the license of each component, which packages carry
-code no manifest declares, which Hugging Face repos the default model's two parts come
-from, and which revision of a package that can reach the network scripts/wire-check last
-found silent. [LAW:one-source-of-truth]
+code no manifest declares, and which Hugging Face repos the default model's two parts come
+from. [LAW:one-source-of-truth]
 
 A component the rules do not know stops the run and names it, because a row missing from
 an SBOM is believed. [LAW:no-silent-failure] The output carries no timestamp and no
@@ -113,8 +112,9 @@ def vendored_version(component, checkout, rule):
 
 
 # Every key a package's rule is read with. Any other is a misspelling of one of these, and a
-# misspelt `silentOnTheWireAt` would turn its gate off without a word. [LAW:no-silent-failure]
-PACKAGE_KEYS = {"license", "licenseFile", "licenseMatch", "silentOnTheWireAt", "vendored"}
+# misspelt `vendored` would leave the code it names out of the SBOM without a word.
+# [LAW:no-silent-failure]
+PACKAGE_KEYS = {"license", "licenseFile", "licenseMatch", "vendored"}
 
 
 def package_component(pin, rule):
@@ -130,10 +130,6 @@ def package_component(pin, rule):
     version = state.get("version")
     if not version:
         fail(f"{identity}: Package.resolved pins it by revision alone, with no version")
-    watched = rule.get("silentOnTheWireAt")
-    if watched and watched != state["revision"]:
-        fail(f"{identity}: Package.resolved pins {version} ({state['revision']}), and it was watched on the wire at {watched}; "
-             f"run scripts/wire-check on an app built from this pin and record the new revision in sbom/rules.json")
     ref = f"pkg:swift/{re.sub(r'^https?://', '', location).removesuffix('.git')}@{version}"
     licenses, properties = license_entry(identity, checkout, rule)
     component = {

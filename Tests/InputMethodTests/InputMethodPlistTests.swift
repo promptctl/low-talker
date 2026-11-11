@@ -77,23 +77,26 @@ private let repository = URL(fileURLWithPath: #filePath)
 
 /// The input method is sandboxed, and a sandboxed process registers and looks up only the
 /// names its entitlements list - so each name it answers on is listed, and the one it tells
-/// the app on.
+/// the app on, and nothing else is.
 ///
 /// Read off the entitlements xcodegen writes, for the reason `InputMethodPlistTests` reads
 /// the plist. A name missing here is an input method that
 /// launches and never answers - the text input system's connection unopened, or the app's
 /// inserts refused as no input method running. [LAW:no-silent-failure]
+/// Compared whole, as `AppEntitlementsTests` compares the app's: an entitlement added without
+/// a measured failure behind it is a finding (IMK rule 2).
 @Suite struct InputMethodEntitlementsTests {
     @Test func theSandboxAdmitsExactlyTheNamesTheInputMethodRegistersAndLooksUp() throws {
         let url = repository.appending(path: "App/Generated/\(AppIdentity.displayName)-InputMethod.entitlements")
         try #require(FileManager.default.fileExists(atPath: url.path),
                      "\(url.lastPathComponent) has not been generated; run `make test`, which runs xcodegen - `swift test` alone does not")
         let entitlements = try #require(
-            PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
-        #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true)
-        #expect(entitlements["com.apple.security.temporary-exception.mach-register.global-name"] as? [String]
-            == [AppIdentity.inputMethodConnectionName, AppIdentity.inputMethodPortName])
-        #expect(entitlements["com.apple.security.temporary-exception.mach-lookup.global-name"] as? [String]
-            == [AppIdentity.hotkeyPortName])
+            PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? NSDictionary)
+        #expect(entitlements == [
+            "com.apple.security.app-sandbox": true,
+            "com.apple.security.temporary-exception.mach-register.global-name":
+                [AppIdentity.inputMethodConnectionName, AppIdentity.inputMethodPortName],
+            "com.apple.security.temporary-exception.mach-lookup.global-name": [AppIdentity.hotkeyPortName],
+        ] as NSDictionary)
     }
 }
