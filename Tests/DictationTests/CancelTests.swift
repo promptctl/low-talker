@@ -370,4 +370,37 @@ import TestProbes
         #expect(rig.inputMethod.takeBacks == [" hello"])
         #expect("\(left)".contains("may have been taken back, or may still be"))
     }
+
+    /// Every way a take-back fails, as an insert would fail.
+    nonisolated static let takeBackFailures: [InsertFailure] = Refusal.allCases.map(InsertFailure.refused) + [
+        .refusedForAnUnknownReason("someReason"),
+        .notYetTaken(NotYetTaken(characters: 0, into: "com.apple.TextEdit")),
+        .unreachable(.nothingIsListening(port: "port")),
+        .unreachable(.requestWasNotTaken(port: "port", after: .seconds(1))),
+        .unreachable(.didNotSayWhoItIs(port: "port", after: .seconds(1))),
+        .unreachable(.answerDidNotArrive(port: "port", after: .seconds(1))),
+        .unreachable(.answerWasAbandoned(port: "port")),
+        .unreachable(.failed(port: "port", status: 268_435_459, words: .notSent)),
+        .unreachable(.answerWasNotReadable(port: "port", bytes: 3, words: .mayHaveLanded)),
+    ]
+
+    /// A take-back is not an insert, so a failed one says what became of the words in the field and
+    /// nothing of what becomes of an insert's: not that a dictation was not inserted or not sent,
+    /// nor that it is offered again, nor that it may have landed and must not be said again.
+    @Test(arguments: takeBackFailures)
+    func aFailedTakeBackSaysNothingOfAnInsertsFate(_ failure: InsertFailure) async throws {
+        let rig = try await Rig(hearing: Self.engine())
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
+        rig.inputMethod.refusingTakeBack(failure)
+
+        Self.cancel(rig)
+        let left = try #require(await rig.report().failure as? CancelLeftWords)
+
+        let line = failureLine(left)
+        #expect(line.hasPrefix("WARNING: You cancelled a dictation, but 1 of its words "))
+        for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "land if"] {
+            #expect(!line.contains(fate), "\(line)")
+        }
+    }
 }
