@@ -44,7 +44,7 @@ public final class FakeInputMethod: Inserter, Sendable {
     public var destinations: [Destination] { state.withLock { $0.requests.map(\.destination) } }
     /// The document the inserts went into, as it stands: what a cancel is read against.
     public var field: String { state.withLock { $0.field } }
-    /// The texts every request to take words back named, answered or refused.
+    /// The texts every request to take words back named, held, answered or refused.
     public var takeBacks: [String] { state.withLock { $0.requests.map(\.replacing).filter { !$0.isEmpty } } }
     /// How many inserts it was asked for, answered or refused.
     public var asked: Int { state.withLock { $0.requests.count } }

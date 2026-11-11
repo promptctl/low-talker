@@ -1,4 +1,5 @@
 import Foundation
+import Identity
 import Insertion
 import Synchronization
 
@@ -96,13 +97,13 @@ public nonisolated final class SteeringGate: Sendable {
     public struct Unconnected: SteeringAsking {
         public init() {}
         public func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> {
-            .failure(.wire(.nobodyIsListening(port: "no app has been connected yet")))
+            .failure(.wire(.nobodyIsListening(port: AppIdentity.hotkeyPortName)))
         }
         public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> {
-            .failure(.wire(.nobodyIsListening(port: "no app has been connected yet")))
+            .failure(.wire(.nobodyIsListening(port: AppIdentity.hotkeyPortName)))
         }
         public func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> {
-            .failure(.wire(.nobodyIsListening(port: "no app has been connected yet")))
+            .failure(.wire(.nobodyIsListening(port: AppIdentity.hotkeyPortName)))
         }
     }
 

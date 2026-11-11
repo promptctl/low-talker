@@ -56,11 +56,17 @@ import Testing
         Owing.allCases.map(Asked.owed) + Settlement.allCases.map(Asked.settled) + PanelState.allCases.map(Asked.panel)
 
     @Test(arguments: asked)
-    func theFakeCarriesAnAnswerAsThePortDoes(question: Asked) async throws {
-        // The fake: the app's answer through its right.
+    func theFakesCarryAnAnswerAsThePortDoes(question: Asked) async throws {
+        // The fakes: the app's answer through its right, and the input method's question of an app
+        // that gives what that right was sent.
         let reply = FakeReply()
         let fakeDelivery = question.answer(through: reply)
         let said = await reply.said()
+        let unasked = NotAnswered.wire(.abandoned(port: "fake"))
+        let fakeRead = question.ask(FakeApp(
+            owing: { if case .owing(let owing) = said { .success(owing) } else { .failure(unasked) } },
+            settling: { if case .settlement(let settlement) = said { .success(settlement) } else { .failure(unasked) } },
+            panelling: { if case .panel(let panel) = said { .success(panel) } else { .failure(unasked) } }))
 
         // The real ends, across a port.
         let name = aPortNobodyElseUses()
@@ -73,6 +79,7 @@ import Testing
         #expect(fakeDelivery == .delivered)
         #expect(realDelivery == fakeDelivery)
         #expect(said == question.said)
+        #expect("\(try fakeRead.get())" == "\(question)")
         #expect("\(try await realRead.get())" == "\(question)")
         withExtendedLifetime(port) {}
     }

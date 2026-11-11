@@ -2,8 +2,9 @@ import Foundation
 import Insertion
 
 /// The app as the input method's gate asks it, answering each question with what the test gave
-/// it, and with no port and no app. The one `SteeringAsking` fake. It reads nothing, so it has no
-/// reading of its own to hold to `Asker`'s. [LAW:one-type-per-behavior]
+/// it, and with no port and no app. The one `SteeringAsking` fake: `QuestionsContract` holds it
+/// to `Asker` on the one thing it decides, which answer each question reads.
+/// [LAW:one-type-per-behavior]
 ///
 /// An app that is asked nothing in particular owes nothing, has settled, and has its box shut,
 /// which is the app on any key typed while no one is dictating.
@@ -27,8 +28,8 @@ public struct FakeApp: SteeringAsking {
 
 /// The right to answer one question, as the app's steering holds it, which hands the answer to the
 /// test instead of a port. The one `Answering` fake, held by `QuestionsContract` to what `Reply`
-/// does: one answer per question, and that answer delivered whatever became of its asker, since
-/// the kernel accepts it either way.
+/// does with each answer: delivered, and read by the asker as what was sent. A second answer
+/// stops here as it stops `Reply`.
 public final class FakeReply: Answering {
     /// The answer, as it was sent.
     public enum Said: Equatable, Sendable {

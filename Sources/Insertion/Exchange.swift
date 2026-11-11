@@ -54,8 +54,9 @@ public enum WireFailure: Error, Equatable, Sendable, CustomStringConvertible {
 /// asker asks the app, so a message crosses and its answer is checked by one rule.
 /// [LAW:single-enforcer] [LAW:one-type-per-behavior]
 ///
-/// Every exchange makes its own reply right, so an answer to an earlier message cannot be read
-/// as this one's. The answerer is checked before its bytes are returned: a name anyone can
+/// Every exchange makes its own reply right, so an answer to another exchange's message cannot be
+/// read as this one's. Within one, a message is sent only after the one before it was answered:
+/// a round trip that failed leaves an answer that may still come, so its exchange is done. The answerer is checked before its bytes are returned: a name anyone can
 /// compute is a name anyone can register first.
 package final class Exchange {
     private let portName: String
