@@ -1117,7 +1117,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(engineFailed(stopped.cause, with: NoEngine.self))
         #expect(stopped.landed == 0)
-        #expect(failureLine(stopped) == "Your last dictation was not placed: NoEngine(). No words were heard in it.")
+        #expect(failureLine(stopped) == "Your last dictation was not placed: NoEngine(). No words of this dictation were inserted or held.")
         failing.withLock { $0 = false }
         rig.hold()
         _ = try await rig.session()
@@ -1794,10 +1794,28 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.speak([4, 5])
         rig.dictation.cursorArrived()
         rig.dictation.press(.ended(.lapsed))
-        #expect(await rig.report().stopped(by: PressLapsed.self) != nil)
+        let (stopped, _) = try #require(await rig.report().stopped(by: PressLapsed.self))
+        // The earlier press's word is told by its own line, not as this one's.
+        #expect("\(stopped)" == "WARNING: The hotkey stopped listening during your dictation. 1 words are held. No others were inserted or held.")
         try await rig.dictation.finish()
         #expect(rig.inputMethod.inserted == ["a b"])
         #expect(rig.hold.held == nil)
+    }
+
+    /// A press cut short that heard nothing tells nothing of its own as held, though words an
+    /// earlier press left are, since no insert of it carried them.
+    @Test func aCutPressThatHeardNothingDoesNotTellEarlierHeldWordsAsItsOwn() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { clip throws(TranscriptionFailure) in
+            guard clip.samples == [1, 2, 3] else { throw .nothingSpoken(peak: 0, quiet: .none) }
+            return Transcript(typed: "a b c")
+        })
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.hold()
+        _ = await rig.report()
+        rig.lapse(speaking: [0, 0])
+        let (stopped, _) = try #require(await rig.report().stopped(by: PressLapsed.self))
+        #expect(failureLine(stopped) == "WARNING: The hotkey stopped listening during your dictation. No words of this dictation were inserted or held.")
+        #expect(rig.hold.held?.words == Transcript(typed: "a b c"))
     }
 
     /// A failed press is reported by its kind and with its cause in the clear: as readable in
@@ -1806,7 +1824,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) })
         rig.hold()
         guard case .failed(let failed) = await rig.report() else { Issue.record("expected the press to fail"); return }
-        #expect(failed.kind == "PressStopped")
+        #expect(failed.kind == "PressStopped(TranscriptionFailure)")
         #expect(failed.failure.account == Account(facts: "0 words inserted, 0 that may have been, 0 held, before: NoEngine()"))
     }
 

@@ -218,6 +218,24 @@ public final class Dictation {
 
             /// What the hold would keep of its offered part if the press were cancelled now.
             var keeping: Held.Part? { pre > 0 ? preexisting : nil }
+
+            /// `run` of the press's words are at no cursor, and the hold now offers `offered`. When
+            /// the offered part is not what the press knew of it and those, the person dismissed it
+            /// meanwhile, and the hold rebuilt it of the press's words alone.
+            mutating func held(_ run: Int, offered: Int) {
+                if offered == pre + own + run {
+                    own += run
+                } else {
+                    pre = 0
+                    own = offered
+                }
+            }
+
+            /// How many of the `offered` words the hold offers are the press's own: `own` while the
+            /// offered part is the `pre` earlier words and those, and every one once a dismissal or a
+            /// landing removed that part, since only the press's loop adds to it while it is open.
+            /// Earlier words no insert of the press carried are no part of its account.
+            func ownOffered(of offered: Int) -> Int { offered == pre + own ? own : offered }
         }
 
         /// [LAW:one-source-of-truth] The key event's own stamp, on the clock every insert is
@@ -368,13 +386,15 @@ public final class Dictation {
                     state.provenance.standingWords += state.provenance.pre + state.provenance.own + run
                     state.provenance.pre = 0
                     state.provenance.own = 0
-                } else if offered == state.provenance.pre + state.provenance.own + run {
-                    state.provenance.own += run
                 } else {
-                    state.provenance.pre = 0
-                    state.provenance.own = offered
+                    state.provenance.held(run, offered: offered)
                 }
             }
+        }
+
+        /// `run` words the press heard and never sent are held, and the hold now offers `offered`.
+        func heldBack(run: Int, offered: Int) {
+            state.withLock { $0.provenance.held(run, offered: offered) }
         }
 
         /// What this press knows of its own words.
@@ -1044,7 +1064,15 @@ public final class Dictation {
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
         // words are already at the cursor, how many may be, and how many the hold offers.
         func stopped(_ cause: any Accounted) -> Failed {
-            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: hold.offeredWords, cause: cause))
+            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: heard.streaming.provenance.ownOffered(of: hold.offeredWords), cause: cause))
+        }
+        // [LAW:single-enforcer] What the press heard and never sent is held here, and counted as
+        // its own. A press that heard nothing more leaves the hold's warning on the words it
+        // already holds, which that warning is about.
+        func holdBack(_ rest: Transcript, warning: String) {
+            if rest.isBlank { return }
+            hold.heldBack(rest, warning: warning)
+            heard.streaming.heldBack(run: rest.words.count, offered: hold.offeredWords)
         }
         switch heard.ending {
         case .released(let press, let keyUp, let delivery):
@@ -1055,7 +1083,7 @@ public final class Dictation {
                 // [LAW:no-silent-failure] The decode failed, and what the passes during the hold
                 // read past the commits is held, the words said after them missing.
                 let rest = heard.streaming.rest(of: heard.streaming.reading)
-                if !rest.isBlank { hold.heldBack(rest, warning: PressStopped.readingFailed) }
+                holdBack(rest, warning: PressStopped.readingFailed)
                 // A refused commit came before the decode's end, so the report names it first. The
                 // audio is kept whether or not one was refused.
                 let cause = keeping(failed.failure)
@@ -1091,11 +1119,8 @@ public final class Dictation {
             case .failure(let failed):
                 if case .nothingSpoken? = failed.failure as? TranscriptionFailure { unread = nil } else { unread = keeping(failed.failure) }
             }
-            // A cut that heard nothing past the commits leaves the hold's warning on the words
-            // it already holds, which that warning is about. Words a failed decode leaves are
-            // told as missing what was said after them, beside the cut.
-            let warning = unread == nil ? "\(cut.cause)" : "\(cut.cause) \(PressStopped.readingFailed)"
-            if !rest.isBlank { hold.heldBack(rest, warning: warning) }
+            // Words a failed decode leaves are told as missing what was said after them, beside the cut.
+            holdBack(rest, warning: unread == nil ? "\(cut.cause)" : "\(cut.cause) \(PressStopped.readingFailed)")
             // [LAW:no-silent-failure] The report names what left words unplaced first: a refused
             // commit came before the decode's end, and either before the cut was known.
             throw stopped(unplaced ?? unread ?? cut.cause)
@@ -1243,7 +1268,8 @@ public struct PressStopped: Accounted {
     /// an insert's fate would be a second account of them, so the press tells them and the insert
     /// its reason. The hold's warning can be a later one, a cut's or a failed reading's, so the
     /// press tells the remedy beside the words it offers. Until then, an insert's fate is the
-    /// account, since it carried every word the hold offers.
+    /// account: none of the press's words is at a cursor, and the fate says that and how the hold
+    /// offers them again, which a cut or a failed reading holding more words after it leaves true.
     var stoppedBy: String {
         guard let insert, reached else { return "\(cause)" }
         return "WARNING: \(insert.reason)"
@@ -1267,7 +1293,7 @@ public struct PressStopped: Accounted {
             (held, offered),
         ]
         let each = fates.filter { $0.0 > 0 }.map { " \($0.0) \($0.1)" }
-        return each.isEmpty ? " No words were heard in it." : each.joined() + " No others were inserted or held."
+        return each.isEmpty ? " No words of this dictation were inserted or held." : each.joined() + " No others were inserted or held."
     }
 
     public var description: String { stoppedBy + told }
@@ -1287,8 +1313,14 @@ extension Dictation {
 
         public init(_ failure: any Accounted) { self.failure = failure }
 
-        /// Which failure it is, by its type's name.
-        public var kind: String { String(describing: type(of: failure)) }
+        /// Which failure it is, by its type's name; a stopped press's names what stopped it too, as
+        /// `PressStopped(PressLapsed)`, so a cut reads apart from a refusal. [LAW:nothing-unseen]
+        public var kind: String { Self.kind(of: failure) }
+
+        private static func kind(of failure: any Accounted) -> String {
+            let name = String(describing: type(of: failure))
+            return (failure as? PressStopped).map { "\(name)(\(kind(of: $0.cause)))" } ?? name
+        }
     }
 }
 
