@@ -33,8 +33,8 @@ final class HUD {
     private let circleClicked: @MainActor () -> Void
     private let insert: @MainActor () -> Void
 
-    init(dismiss: @escaping @MainActor () -> Void, insert: @escaping @MainActor () -> Void) {
-        circleClicked = dismiss
+    init(circleClicked: @escaping @MainActor () -> Void, insert: @escaping @MainActor () -> Void) {
+        self.circleClicked = circleClicked
         self.insert = insert
     }
 
@@ -161,7 +161,9 @@ final class HUD {
     }()
 
     /// The person put the panel away, with Escape or the circle, so it stays away whatever the
-    /// activity says until a press starts.
+    /// activity says until a press starts or words are held again. A dismissal lets go of every
+    /// held word, so words held after it are new to the person - brought back from the menu, or
+    /// a later insert's failure - and show. [LAW:nothing-unseen]
     private var dismissed = false
 
     /// Puts the panel away at once, whatever it shows, until the next press starts.
@@ -178,6 +180,7 @@ final class HUD {
         case .listening, .refused: dismissed = false
         case .idle, .transcribing: break
         }
+        if held != nil { dismissed = false }
         guard !dismissed else { return hide() }
         // A press on its way carries the words a cursor is offered in its own insert, so only a
         // panel with nothing on its way asks for a click, and only for those words: not those

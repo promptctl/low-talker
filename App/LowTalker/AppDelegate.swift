@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activity: Dictation.Activity = .idle
     /// The loop's activity again, floating over the app being dictated into, with the words
     /// no cursor took.
-    private lazy var hud: HUD = HUD(dismiss: { [unowned self] in dismiss() }, insert: { [unowned self] in
+    private lazy var hud: HUD = HUD(circleClicked: { [unowned self] in dismiss() }, insert: { [unowned self] in
         // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
         let words = hold.held?.allWords.words.count ?? 0
         let unheard = listening == nil ? ", with no loop listening to insert them" : ""
