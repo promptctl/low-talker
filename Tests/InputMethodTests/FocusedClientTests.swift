@@ -32,6 +32,13 @@ import Testing
         Client(field, inFront: frontmost)!
     }
 
+    /// A client that names no app is no cursor, even with an app in front: its app could never be
+    /// compared against the one in front, so it could never be refused for being somewhere else.
+    @Test(arguments: [nil, ""])
+    func aClientNamingNoAppIsNoCursor(_ name: String?) {
+        #expect(Client(FakeTextInputClient(in: name), inFront: "com.apple.TextEdit") == nil)
+    }
+
     /// The decision, on a desk with only the display and no secure input unless said.
     private func cursor(_ client: FocusedClient, for destination: Destination = .cursorInFront, whileInFrontIs frontmost: String? = inFront,
                         secureInputHeldBy holder: String? = nil, selected: Bool = true,
@@ -156,6 +163,7 @@ import Testing
         let seen = client.inFront(for: .cursorInFront, whileInFrontIs: "com.apple.TextEdit", secureInputHeldBy: nil, selected: true, screens: [Self.display])
         _ = seen.description
         #expect(field.documentAccessAsked == 1)
+        #expect(field.text.isEmpty, "deciding where the words would go put some there")
     }
 
     /// The insert's log line tells the three ways into `noTextFieldHasFocus` apart - no

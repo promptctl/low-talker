@@ -71,15 +71,26 @@ public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
 public nonisolated extension ContractCase {
     /// Every cell of bem's table (cmt-8694d7d2) the port's calls reach, for each row measured.
     static let measured: [ContractCase] = [ClientProfile.appKit, .webKitTextArea].flatMap(theFullField) + [
-        // The none tier, measured as `<input maxlength=10>`: blind before and after an insert, and
-        // an explicit range ignored.
+        // The none tier, measured as `<input maxlength=10>`: blind, and an explicit range ignored.
         ContractCase(profile: .webKitInput, holding: "", act: .read, answers: blind, holds: ""),
-        ContractCase(profile: .webKitInput, holding: "", maxLength: 10, act: .insert(thirty, replacementRange: atThePoint), answers: blind, holds: "alpha brav"),
         ContractCase(profile: .webKitInput, holding: "alpha", act: .insert("RNG", replacementRange: NSRange(location: 0, length: 3)), answers: blind, holds: "alphaRNG"),
         ContractCase(profile: .noTextField, holding: "", act: .read, answers: blind, holds: ""),
-        // Its reads are the profile's unmeasured half (`ClientProfile.iTerm2`).
+    ]
+
+    /// What the fake answers where no client was measured, each case for the studious run to
+    /// settle (low-test-layers-sqm.8m3): a real client disagreeing with one of these is the guess
+    /// corrected, not a client that changed.
+    static let unsettled: [ContractCase] = [
+        // bem's `<input maxlength=10>` row has no insert: what the field keeps of 30.
+        ContractCase(profile: .webKitInput, holding: "", maxLength: 10, act: .insert(thirty, replacementRange: atThePoint), answers: blind, holds: "alpha brav"),
+        // bem measured the textarea without `maxlength`: whether one with it still gives document
+        // access, and what its reads answer once it has kept 10 of 30 (low-reliability-z2z.rgy).
+        ContractCase(profile: .webKitTextArea, holding: "", maxLength: 10, act: .insert(thirty, replacementRange: atThePoint),
+                     answers: reads(caret: 10, text: "alpha"), holds: "alpha brav"),
+        // sk9 read document access and a real selection where bem read none, and the text over a
+        // range under document access is unmeasured.
         ContractCase(profile: .iTerm2, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint),
-                     answers: Answers(documentAccess: true, selection: NSRange(location: 0, length: 0), text: nil), holds: "alpha bravo x"),
+                     answers: reads(caret: 13, text: "alpha"), holds: "alpha bravo x"),
     ]
 
     private init(profile: ClientProfile, holding: String, selected: NSRange? = nil, maxLength: Int? = nil, act: Act, answers: Answers, holds: String) {
@@ -91,11 +102,12 @@ public nonisolated extension ContractCase {
     private static let thirty = "alpha bravo charlie delta echo"
     private static let blind = Answers(documentAccess: false, selection: NSRange(location: NSNotFound, length: NSNotFound), text: nil)
 
+    private static func reads(caret: Int, text: String) -> Answers { Answers(documentAccess: true, selection: NSRange(location: caret, length: 0), text: text) }
+
     /// The full and partial tiers alike: reads answer the field, an insert at the insertion point
     /// replaces the selection, and an explicit range is honoured.
     private static func theFullField(_ profile: ClientProfile) -> [ContractCase] {
-        func reads(caret: Int, text: String) -> Answers { Answers(documentAccess: true, selection: NSRange(location: caret, length: 0), text: text) }
-        return [
+        [
             ContractCase(profile: profile, holding: "alpha bravo", act: .read, answers: reads(caret: 11, text: "alpha"), holds: "alpha bravo"),
             ContractCase(profile: profile, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint),
                          answers: reads(caret: 13, text: "alpha"), holds: "alpha bravo x"),

@@ -16,9 +16,6 @@ public nonisolated struct ClientProfile: Sendable, CustomStringConvertible {
         case none
         /// Document access, and the reads answer what the field holds.
         case toTheField
-        /// Document access, and the reads answer an empty document - a caret at 0 and no text -
-        /// before and after a commit that landed.
-        case toAnEmptyDocument
     }
 
     public let description: String
@@ -32,12 +29,12 @@ public nonisolated struct ClientProfile: Sendable, CustomStringConvertible {
     /// Safari's and Chrome's `<input>`, measured as `<input maxlength=10>`: the none tier, before and
     /// after an insert.
     public static let webKitInput = ClientProfile(description: "a WebKit <input>", access: .none)
-    /// iTerm2's terminal, where words land in plain sight. Document access as low-reliability-z2z.sk9
-    /// measured it, its words seen landing once a client without document access was refused; bem's
-    /// row reads none. Its reads are unmeasured under document access, and answer an empty document
-    /// here from Committer's note that it answers `length()` 0 before and after a commit. Both are
-    /// contract cases for the studious run to settle (low-test-layers-sqm.8m3, cmt-b4e012ab).
-    public static let iTerm2 = ClientProfile(description: "iTerm2's terminal", access: .toAnEmptyDocument)
+    /// iTerm2's terminal, where words land in plain sight: document access and a real
+    /// `selectedRange`, as low-reliability-z2z.sk9 measured it, its words seen landing once a
+    /// client without document access was refused. bem's row reads none, and the text it says is
+    /// in a range is unmeasured: `ContractCase.unsettled`. Its `length()` of 0 (Committer) is not a
+    /// call the port makes, so it is not modelled.
+    public static let iTerm2 = ClientProfile(description: "iTerm2's terminal", access: .toTheField)
     /// A window with no text field focused, which still hands the input method a client: Calculator,
     /// Installer, Activity Monitor with every window closed, a page whose body text was clicked
     /// (low-reliability-z2z.sk9).
@@ -102,15 +99,20 @@ public final class FakeTextInputClient: TextInputClient {
         switch profile.access {
         case .none: NSRange(location: NSNotFound, length: NSNotFound)
         case .toTheField: selection
-        case .toAnEmptyDocument: NSRange(location: 0, length: 0)
         }
     }
 
     public func string(in range: NSRange) -> String? {
         switch profile.access {
-        case .none, .toAnEmptyDocument: nil
-        case .toTheField: range.location >= 0 && NSMaxRange(range) <= text.utf16.count ? (text as NSString).substring(with: range) : nil
+        case .none: nil
+        case .toTheField: holds(range) ? (text as NSString).substring(with: range) : nil
         }
+    }
+
+    /// Whether `range` lies within the field, asked without `NSMaxRange`, which overflows on a
+    /// location of NSNotFound.
+    private func holds(_ range: NSRange) -> Bool {
+        range.location >= 0 && range.location <= text.utf16.count && range.length <= text.utf16.count - range.location
     }
 
     /// As the measured clients take it: at NSNotFound the words replace the selection, an explicit
@@ -119,6 +121,9 @@ public final class FakeTextInputClient: TextInputClient {
     public func insertText(_ words: String, replacementRange range: NSRange) {
         duringInsert()
         let replaced = range.location == NSNotFound || profile.access == .none ? selection : range
+        // No client was measured answering a range past the end of its field, so the fake answers
+        // none: it stops the run, naming the range, rather than guess.
+        precondition(holds(replaced), "insertText into \(profile) holding \(text.utf16.count) units was given \(replaced)")
         var room = maxLength.map { $0 - (text.utf16.count - replaced.length) } ?? .max
         let kept = String(words.prefix { character in
             room -= character.utf16.count

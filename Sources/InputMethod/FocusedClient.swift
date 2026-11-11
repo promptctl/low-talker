@@ -264,8 +264,7 @@ nonisolated struct ClientName: CustomStringConvertible {
 /// stress rerun on studious (low-imk-rules-w3g.3ky), with 11,162 reactivations landing inside
 /// an accepted insert's round trip, lost, doubled and reordered no word.
 ///
-/// On the main actor, every member: each is a call into the client, or a fact read off it there,
-/// and IMK rules 3 and 4 put every client call on the main actor. `Committer` owns how an insert
+/// On the main actor, every member, as `TextInputClient`'s are. `Committer` owns how an insert
 /// reaches it.
 public final class Client: CustomStringConvertible {
     private let client: any TextInputClient
