@@ -20,11 +20,12 @@ extension Dictation {
         /// A press has ended and its outcome is not yet reported.
         case transcribing
 
-        /// The activity whose face the icon wears over `readiness`. A press ended before the
-        /// engine is ready is waiting on the load, or will fail with it, so the load's face is
-        /// the true one until then. [LAW:one-source-of-truth] The one precedence both the
-        /// glyph and the description read.
-        private func shown(over readiness: EngineReadiness) -> Activity {
+        /// The activity the icon and the word box show over `readiness`. A press ended before
+        /// the engine is ready is waiting on the load, or will fail with it, so the load's face
+        /// is the true one until then, and the box is not held up for the minutes a first load
+        /// takes: the menu says the press is heard once the model is ready.
+        /// [LAW:one-source-of-truth] The one precedence the glyph, the description and the box read.
+        public func shown(over readiness: EngineReadiness) -> Activity {
             switch (self, readiness) {
             case (.transcribing, .preparing), (.transcribing, .failed): .idle
             default: self

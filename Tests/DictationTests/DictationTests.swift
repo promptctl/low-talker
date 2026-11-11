@@ -2111,6 +2111,22 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect("\(Dictation.Activity.refused(why: "no microphone"))" == "refused: no microphone")
     }
 
+    /// What the word box is drawn from: a press ended while the model is loading, or after it
+    /// failed, is shown as no press, so the box goes away at the key's release rather than
+    /// staying up for the minutes a first load takes; a press being spoken is shown whatever
+    /// the engine is doing, and an ended press is shown once the engine is ready.
+    @Test func aPressEndedBeforeTheEngineIsReadyIsShownAsNone() {
+        let preparing = EngineReadiness.preparing(.loading, since: .now)
+        let failed = EngineReadiness.failed("no model")
+        let ready = EngineReadiness.ready(.default, after: .seconds(2))
+        let heard = Dictation.Activity.listening(heard: Transcript(typed: "hi"))
+        #expect(Dictation.Activity.transcribing.shown(over: preparing) == .idle)
+        #expect(Dictation.Activity.transcribing.shown(over: failed) == .idle)
+        #expect(Dictation.Activity.transcribing.shown(over: ready) == .transcribing)
+        #expect(heard.shown(over: preparing) == heard)
+        #expect(Dictation.Activity.refused(why: "no model yet").shown(over: preparing) == .refused(why: "no model yet"))
+    }
+
     /// The icon is the press's while there is one and the engine's otherwise, except that a
     /// press ended before the engine is ready shows the wait it is in.
 

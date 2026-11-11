@@ -99,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func show(_ readiness: EngineReadiness) {
         engineReadiness = readiness
         drawStatusIcon()
+        showHUD(held: hold.held)
         log.info("model: \(readiness.readout(at: .now), privacy: .public)")
     }
 
@@ -315,7 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// hold as it changes, since the hold calls here before it is assigned.
     private func showHUD(held: Held?) {
         let insertable = if case .listening = hotkeyStatus { true } else { false }
-        hud.show(activity, held: held, insertable: insertable)
+        hud.show(activity.shown(over: engineReadiness), held: held, insertable: insertable)
     }
 
     /// When the loop comes up, is rebuilt, or is left as it stands, and the one owner of the
