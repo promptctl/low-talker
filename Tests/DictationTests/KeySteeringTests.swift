@@ -131,22 +131,6 @@ import Testing
 
     /// And into a held one, the chord still down: the press ends as cancelled, and the chord's
     /// release after it ends nothing.
-    /// An Escape typed after words landed takes them back out of the field: the take-back is the
-    /// press's own, reached through the key.
-    @Test(.timeLimit(.minutes(1))) func anEscapeTypedAfterWordsLandedTakesThemBack() async throws {
-        let loop = try await Loop(hearing: FakeTranscriber(confirming: { $0.count >= 2 ? Transcript(typed: " hello") : Transcript(typed: "") }) { _ in Transcript(typed: " hello") })
-        await loop.latchedPress()
-        await loop.rig.until { loop.rig.inputMethod.field == " hello" }
-
-        KeySteering.escape(loop.hotkey)
-
-        let cancelled = try #require(await loop.rig.report().cancelled)
-        #expect(loop.rig.inputMethod.field == "")
-        #expect(loop.rig.inputMethod.takeBacks == [" hello"])
-        #expect(cancelled.takenBack == 1)
-        #expect(loop.rig.hold.held == nil)
-    }
-
     @Test(.timeLimit(.minutes(1))) func anEscapeTypedIntoAHeldPressCancelsIt() async throws {
         let loop = try await Loop()
         loop.chord(.down, atMilliseconds: 0)
@@ -159,6 +143,23 @@ import Testing
         await loop.delivered()
         _ = try #require(await loop.rig.report().cancelled)
         #expect(loop.hotkey.phase == .idle)
+    }
+
+    /// An Escape typed after words landed takes them back out of the field: the take-back is the
+    /// press's own, reached through the key.
+    @Test(.timeLimit(.minutes(1))) func anEscapeTypedAfterWordsLandedTakesThemBack() async throws {
+        let loop = try await Loop(hearing: FakeTranscriber(confirming: { $0.count >= 2 ? Transcript(typed: " hello") : Transcript(typed: "") }) { _ in Transcript(typed: " hello") })
+        await loop.latchedPress()
+        await loop.rig.until { loop.rig.inputMethod.field == " hello" }
+
+        KeySteering.escape(loop.hotkey)
+
+        #expect(loop.hotkey.phase == .idle)
+        let cancelled = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+        #expect(loop.rig.inputMethod.takeBacks == [" hello"])
+        #expect(cancelled.takenBack == 1)
+        #expect(loop.rig.hold.held == nil)
     }
 
     /// Escape with no press open is nothing to cancel, and leaves the next press to begin normally.

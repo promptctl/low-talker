@@ -5,8 +5,7 @@ import Foundation
 /// Return is never held and passes as it does with no input method in it.
 ///
 /// [LAW:one-source-of-truth] The app's preferences are the record. The input method asks the app
-/// about it at each Return and keeps no copy of its own; the type has no instances, so neither
-/// does the app.
+/// about it at each Return and keeps no copy of its own.
 public enum ReturnHoldSetting {
     private static let key = "holdReturnForDictation"
 

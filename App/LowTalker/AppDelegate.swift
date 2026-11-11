@@ -459,8 +459,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         showInputMethod(inputMethod.told(event))
     }
 
-    /// The menu's checkbox for holding a Return until the dictated words land. The input method
-    /// asks for it at each Return, so a change here needs no word to the input method.
+    /// Flips whether a Return is held until the dictated words land, from the menu's checkbox. The
+    /// input method asks for it at each Return, so a change here needs no word to the input method.
     @objc private func toggleReturnHold() {
         ReturnHoldSetting.set(!ReturnHoldSetting.isOn)
     }
