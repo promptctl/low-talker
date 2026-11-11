@@ -281,7 +281,7 @@ private struct BadBuffer: Error {}
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
 
-        loop.rig.dictation.cancel()
+        #expect(loop.rig.dictation.cancel() == 1)
         loop.chord(.up, atMilliseconds: 400)
         await loop.delivered()
 
@@ -303,6 +303,47 @@ private struct BadBuffer: Error {}
         loop.rig.speak([1, 2, 3])
 
         loop.escapeTheBox()
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+        gate.open()
+
+        _ = try await loop.rig.report().get()
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == " one")
+    }
+
+    /// With no press open the box shows every press on its way as one Transcribing, so an Escape
+    /// throws every one of them away.
+    @Test(.timeLimit(.minutes(1))) func anEscapeWithTwoPressesOnTheirWayCancelsBoth() async throws {
+        let gate = Gate()
+        let loop = try await Loop(hearing: FakeTranscriber { _ in
+            await gate.wait()
+            return Transcript(typed: " one")
+        })
+        await loop.release(speaking: [1, 2, 3])
+        await loop.release(speaking: [1, 2, 3])
+
+        loop.escapeTheBox()
+        gate.open()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+    }
+
+    /// An Escape in the moment after a chord goes down, before its press reaches the loop, is that
+    /// press's alone: the detector cancels it, and the press before it, on its way, lands.
+    @Test(.timeLimit(.minutes(1))) func anEscapeAsAChordGoesDownCancelsOnlyThatPress() async throws {
+        let gate = Gate()
+        let loop = try await Loop(hearing: FakeTranscriber { _ in
+            await gate.wait()
+            return Transcript(typed: " one")
+        })
+        await loop.release(speaking: [1, 2, 3])
+        loop.chord(.down, atMilliseconds: 0)
+
+        loop.escapeTheBox()
+        await loop.delivered()
         loop.chord(.up, atMilliseconds: 400)
         await loop.delivered()
         gate.open()

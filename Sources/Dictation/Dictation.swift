@@ -593,20 +593,21 @@ public final class Dictation {
         }
     }
 
-    /// The person threw away the dictation the box shows, with Escape or the circle: the open
-    /// press, or with none open the latest on its way. A refused press shows its refusal, so
-    /// there is nothing to throw away. What it put at the cursor is taken back, and nothing of it
-    /// is held, by its own path. Ending an open press is the detector's; this reaches the press
-    /// whose ending is already in delivery, and every one past the detector.
+    /// The person threw away the dictation the box shows, with Escape or the circle, once the
+    /// detector holds no press open: the press whose ending is still in delivery, or with none
+    /// open every press on its way, which the box shows as one Transcribing. A refused press shows
+    /// its refusal, so there is nothing to throw away. What each put at the cursor is taken back,
+    /// and nothing of it is held, by its own path. Says how many presses it threw away.
     /// [LAW:one-source-of-truth] Chosen off `press`, as `activity` is, so an Escape throws away
-    /// the press the box was showing and no other.
-    public func cancel() {
-        let shown: Streaming? = switch press {
-        case .down(_, let open): open.streaming
-        case .refused: nil
-        case .up, .blocked: unreported.last
+    /// what the box was showing and nothing else.
+    public func cancel() -> Int {
+        let shown: [Streaming] = switch press {
+        case .down(_, let open): [open.streaming]
+        case .refused: []
+        case .up, .blocked: unreported
         }
-        shown?.cancel()
+        for streaming in shown { streaming.cancel() }
+        return shown.count
     }
 
     /// Tells `showing` the activity when it differs from what it last heard. Every change
