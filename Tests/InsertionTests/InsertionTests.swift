@@ -110,6 +110,7 @@ import Testing
         #expect(Wire.refusalReason(of: Wire.answer(.refused(.noTextFieldHasFocus))) == "noClientHasFocus")
         #expect(Wire.refusalReason(of: Wire.answer(.inserted(characters: 1, into: anEditor))) == nil)
         #expect(Wire.refusalReason(of: Data("nonsense".utf8)) == nil)
+        #expect(Wire.refusalReason(of: Data(#"{"refused":{"_0":"aReasonFromALaterBuild"},"inserted":{"_0":"x"}}"#.utf8)) == nil)
     }
 
     @Test func bytesThatAreNotARequestAreNotARequest() {

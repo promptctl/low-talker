@@ -201,7 +201,7 @@ public struct InputMethodInserter: Inserter {
         }
     }
 
-    /// What an answer this build could not read says: a refusal for a reason only a later
+    /// What an answer this build could not read says: a refusal for a reason only another
     /// build names, which commits nothing, or no answer at all, which leaves the words where
     /// they were when it came. [LAW:single-enforcer] The one reading of unread bytes, for the
     /// greeting and the words alike.

@@ -291,7 +291,7 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
 /// fails in front of it, and a new way is a new case the compiler walks every reader to.
 public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     case refused(Refusal)
-    /// Refused for a reason this build has no name for, which only an input method of a later
+    /// Refused for a reason this build has no name for, which only an input method of another
     /// build can give. A refusal commits nothing, whatever its reason, so the words are held
     /// like any refusal's and not taken for words that may have landed.
     case refusedForAnUnknownReason(String)
@@ -304,7 +304,7 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
         switch self {
         case .refused(let refusal): "\(refusal)"
         case .refusedForAnUnknownReason(let reason):
-            "WARNING: The input method is from a later build of \(AppIdentity.displayName) and refused your dictation for a reason this app does not know (\(reason)). Your dictation was not inserted."
+            "WARNING: The input method is from another build of \(AppIdentity.displayName) and refused your dictation for a reason this app does not know (\(reason)). Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
         case .notYetTaken(let notYetTaken): "\(notYetTaken)"
         case .unreachable(let unreachable): "\(unreachable)"
         case .answererUnreadable(let unreadable): "WARNING: The app could not say which input method may answer it: \(unreadable). Your dictation was not sent."
@@ -430,13 +430,12 @@ enum Wire {
     }
 
     /// The reason a refusal names, read for one `answer(of:)` cannot read: a refusal for a
-    /// reason this build has no name for. Nil for bytes that are no refusal at all.
+    /// reason this build has no name for. Nil for bytes that are no refusal at all, and for an
+    /// answer carrying anything beside its refusal, which may be words that landed.
     static func refusalReason(of data: Data) -> String? {
-        struct Refused: Decodable {
-            struct Reason: Decodable { let _0: String }
-            let refused: Reason
-        }
-        return (try? JSONDecoder().decode(Refused.self, from: data))?.refused._0
+        struct Reason: Decodable { let _0: String }
+        guard let answer = try? JSONDecoder().decode([String: Reason].self, from: data), answer.count == 1 else { return nil }
+        return answer["refused"]?._0
     }
 
     static func overrun(_ overrun: Overrun) -> Data { try! JSONEncoder().encode(overrun) }
