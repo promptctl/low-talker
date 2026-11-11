@@ -3,8 +3,9 @@ import AppKit
 import Insertion
 import Testing
 
-/// Which modifiers a Return is held with, and whether that makes it another key that passes as typed.
-/// [LAW:behavior-not-structure] Asked of the modifiers a Return arrives with, not of how the rule is written.
+/// Which steering key a command is, by the modifiers it is held with: a Return held with a modifier is
+/// another key that passes as typed, and an Escape is an Escape whatever is held.
+/// [LAW:behavior-not-structure] Asked of the command and modifiers a key arrives with, not of how the rule is written.
 @Suite struct SteeringKeyTests {
     struct Held: Sendable, CustomStringConvertible {
         let description: String
@@ -33,6 +34,12 @@ import Testing
 
     @Test(arguments: held)
     func aReturnHeldWithAModifierIsAnotherKey(held: Held) {
-        #expect(SteeringKey.makesAnotherKey(held.flags) == held.anotherKey, "\(held)")
+        let key = SteeringKey(command: NSSelectorFromString("insertNewline:"), holding: held.flags)
+        #expect(key == (held.anotherKey ? nil : .return), "\(held)")
+    }
+
+    @Test(arguments: held)
+    func anEscapeIsAnEscapeWhateverIsHeld(held: Held) {
+        #expect(SteeringKey(command: NSSelectorFromString("cancelOperation:"), holding: held.flags) == .escape, "\(held)")
     }
 }

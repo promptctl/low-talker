@@ -8,8 +8,8 @@ import Testing
 /// Every other command, and all text, is declined, so it reaches the app as it would have.
 ///
 /// [LAW:behavior-not-structure] Asked by naming the command and reading the answer, not by checking which
-/// methods the class overrides. A Return is asked with the modifiers the case holds, never the ones this Mac's
-/// keyboard holds while the suite runs.
+/// methods the class overrides. Every command is asked with the modifiers the case holds, never the ones this
+/// Mac's keyboard holds while the suite runs.
 ///
 /// On the main actor because the controller is an `IMKInputController`, which is built and answered there.
 ///
@@ -47,21 +47,21 @@ import Testing
     /// Escape passes while the word box is closed.
     @Test func escapePassesWhileTheBoxIsClosed() throws {
         try withApp(App(panelling: .success(.shut))) { controller in
-            #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == false)
+            #expect(controller.didCommand(by: Self.cancelOperation, holding: []) == false)
         }
     }
 
     /// Escape is kept for the app while the word box is open.
     @Test func escapeIsKeptWhileTheBoxIsOpen() throws {
         try withApp(App(panelling: .success(.shown))) { controller in
-            #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == true)
+            #expect(controller.didCommand(by: Self.cancelOperation, holding: []) == true)
         }
     }
 
     /// Escape passes when no app answers whether its box is open, as it does with no app running.
     @Test func escapePassesWhenNoAppAnswers() throws {
         try withApp(App(panelling: .failure(.nobodyIsListening(port: "port")))) { controller in
-            #expect(controller.didCommand(by: Self.cancelOperation, client: nil) == false)
+            #expect(controller.didCommand(by: Self.cancelOperation, holding: []) == false)
         }
     }
 
@@ -89,7 +89,7 @@ import Testing
     /// A Return typed with a modifier is another key, and passes even when the owed words did not land.
     @Test func aReturnWithAModifierPassesWhenTheOwedWordsDoNotLand() throws {
         try withApp(App(owing: .success(.words), settling: .success(.notLanded))) { controller in
-            #expect(controller.didCommand(by: Self.insertNewline, holding: .option) == false)
+            #expect(controller.didCommand(by: Self.insertNewline, holding: .function) == false)
         }
     }
 
@@ -97,7 +97,7 @@ import Testing
     @Test(arguments: ["moveLeft:", "deleteBackward:", "insertTab:"])
     func anOtherCommandIsDeclined(name: String) throws {
         try withApp(App(owing: .success(.words), panelling: .success(.shown))) { controller in
-            #expect(controller.didCommand(by: NSSelectorFromString(name), client: nil) == false, "\(name) was claimed")
+            #expect(controller.didCommand(by: NSSelectorFromString(name), holding: []) == false, "\(name) was claimed")
         }
     }
 
@@ -111,7 +111,7 @@ import Testing
     /// input method down.
     @Test func aCallWithNoSelectorIsDeclined() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        #expect(controller.didCommand(by: nil, client: nil) == false)
+        #expect(controller.didCommand(by: nil, holding: []) == false)
     }
 
     /// A cursor given focus is told to the app, which offers it words no cursor took. Other notices

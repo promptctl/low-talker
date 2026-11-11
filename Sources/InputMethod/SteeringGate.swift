@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import Identity
 import Insertion
 import os
@@ -7,10 +7,10 @@ import Synchronization
 private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "steering")
 
 /// What happens to a steering key the input method has been handed: it reaches the app, or it is
-/// swallowed. [LAW:types-are-the-program] `handle` answers from this and nothing else.
+/// swallowed. [LAW:types-are-the-program] `didCommand` answers from this and nothing else.
 public nonisolated enum SteeringVerdict: Equatable, Sendable {
     /// Declined, so the text input system delivers the key to the app: after any words committed
-    /// while it was held, since `handle` has not returned until they were.
+    /// while it was held, since `didCommand` has not returned until they were.
     case pass
     /// Taken, so the app never sees it.
     case keep
@@ -33,7 +33,7 @@ extension Asker: SteeringAsking {}
 ///
 /// A genuine Return reaches the app grant-free in one way only: this process declines the key
 /// and the text input system delivers it. Declining after the words are committed puts them
-/// first, so the gate waits on the main thread inside `handle`, and what it waits for is the
+/// first, so the gate waits on the main thread inside `didCommand`, and what it waits for is the
 /// app's to say. The app is asked whether it owes anything; when it does not, or does not
 /// answer that, the Return passes at once as it would with no LowTalker: **a Return is held
 /// only against a debt the app has admitted to**. When it does owe, the gate waits for the app to
@@ -112,19 +112,11 @@ public nonisolated final class SteeringGate: Sendable {
         let decided = Mutex<Decided?>(nil)
     }
 
-    /// What the gate does with a Return typed at `timestamp` with `modifiers` held, on the main thread,
-    /// where `didCommand` is called. Returns once the Return passes or is kept, and in between runs the
-    /// commits the app's inserts ask for.
-    ///
-    /// A Return with a modifier is another key, and passes as typed without the app being asked.
+    /// What the gate does with a Return typed at `timestamp`, on the main thread, where `didCommand` is
+    /// called. Returns once the Return passes or is kept, and in between runs the commits the app's
+    /// inserts ask for.
     @MainActor
-    public func verdict(at timestamp: TimeInterval, holding modifiers: NSEvent.ModifierFlags) -> SteeringVerdict {
-        guard !SteeringKey.makesAnotherKey(modifiers) else {
-            // [LAW:nothing-unseen] Routine, as Shift+Return in a chat box is, so at debug level like a
-            // Return with nothing owed.
-            log.debug("a Return passes: the modifiers held, 0x\(String(modifiers.rawValue, radix: 16), privacy: .public), make it another key")
-            return .pass
-        }
+    public func verdict(at timestamp: TimeInterval) -> SteeringVerdict {
         let (question, ceiling) = (self.question, self.ceiling)
         return answered("a Return", unanswered: Decided(verdict: .keep, because: "the app had not answered after \(ceiling)")) { asker in
             Self.decide(asker, at: timestamp, question: question, ceiling: ceiling)
