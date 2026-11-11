@@ -25,15 +25,20 @@ public nonisolated enum SteeringKey: Codable, Equatable, Sendable, CustomStringC
         }
     }
 
+    /// The steering key typed, from the command the text input system bound it to and the modifiers
+    /// held with it, or nil for every other key, which is declined as typed. [LAW:single-enforcer]
+    /// The one place a command becomes a steering key; the input method asks here and nowhere else.
+    public init?(command: Selector?, holding modifiers: NSEvent.ModifierFlags) {
+        switch command.map(NSStringFromSelector) {
+        case "insertNewline:" where modifiers.isDisjoint(with: Self.makeAnotherKey): self = .return
+        case "cancelOperation:": self = .escape
+        default: return nil
+        }
+    }
+
     /// The modifiers that make a Return another key. Option+Return is a newline in a terminal
     /// and Shift+Return one in a chat box; Fn is a chord a person can choose, and a Return under
     /// the chord is the chord's, not bare. Caps lock and the numeric pad flag, which keypad
     /// Enter carries, make nothing else of it.
     private static let makeAnotherKey: NSEvent.ModifierFlags = [.shift, .control, .option, .command, .function]
-
-    /// Whether a Return held with `flags` is another key, which passes as typed, rather than a bare
-    /// Return that steers. [LAW:single-enforcer] The one rule for it; the input method asks here.
-    public static func makesAnotherKey(_ flags: NSEvent.ModifierFlags) -> Bool {
-        !flags.isDisjoint(with: makeAnotherKey)
-    }
 }
