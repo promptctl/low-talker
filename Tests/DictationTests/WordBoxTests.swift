@@ -93,19 +93,26 @@ final class StubPanel: WordBoxPanel {
         #expect(panel.face?.words == Transcript(typed: " new"))
     }
 
-    /// The dismissal let go of what was held at it, so words held after it are new: a press it
-    /// could not cancel, since it was transcribing, whose insert then failed, or the dismissed
-    /// words brought back.
-    @Test(arguments: [Dictation.Activity.idle, .transcribing])
-    func wordsHeldAfterADismissalShowTheBoxAgain(before: Dictation.Activity) {
-        let later = Held.unplaced(part(" later words", "WARNING: no text field took them"))
-        show(before)
+    /// The words the person asks back are handed to the box as held again, and shown.
+    @Test func aBringBackShowsTheBoxAgain() {
+        show(.idle)
         box.dismiss(cancelling: nil, hold: hold)
-        show(before)
 
-        box.show(.idle, over: ready, held: later, insertable: true)
+        box.offerAgain()
+        box.show(.idle, over: ready, held: Self.earlier, insertable: true)
 
-        #expect(panel.face?.words == later.allWords)
+        #expect(panel.face?.words == Self.earlier.allWords)
+    }
+
+    /// The press Escape cancels can hold its words while its commits drain, until the cancel
+    /// lets them go: they are not new words, so the box stays away.
+    @Test func wordsTheCancelledPressHoldsKeepTheBoxAway() {
+        show(Self.listening(" hello"))
+        box.dismiss(cancelling: nil, hold: hold)
+
+        box.show(.transcribing, over: ready, held: Self.earlier, insertable: true)
+
+        #expect(panel.face == nil)
     }
 
     /// The circle, Insert and Copy are there only while words are held, Insert where it is offered
