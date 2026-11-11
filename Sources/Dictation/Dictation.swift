@@ -605,15 +605,16 @@ public final class Dictation {
     /// its refusal, so there is nothing to throw away. What each put at the cursor is taken back,
     /// and nothing of it is held, by its own path. Says how many presses it threw away that no
     /// Escape had before.
-    /// [LAW:one-source-of-truth] Chosen off `press`, as `activity` is, so an Escape throws away
-    /// what the box was showing and nothing else.
+    /// [LAW:one-source-of-truth] Chosen off `press`, as `activity` is, so of the presses past the
+    /// detector an Escape throws away what the box was showing. A press the detector holds open
+    /// is newer than anything the box has shown yet, and `KeySteering.escape` gives it the Escape.
     func cancel() -> Int {
         let shown: [Streaming] = switch press {
         case .down(_, let open): [open.streaming]
         case .refused: []
         case .up, .blocked: unreported
         }
-        return shown.map { $0.cancel() }.filter { $0 }.count
+        return shown.reduce(0) { thrown, streaming in thrown + (streaming.cancel() ? 1 : 0) }
     }
 
     /// Tells `showing` the activity when it differs from what it last heard. Every change
