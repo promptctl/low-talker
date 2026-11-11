@@ -133,8 +133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// did not make.
     private let build: Build = Build(of: .main) ?? { preconditionFailure("the app bundle carries no build number or source revision; it was not built by `make app`") }()
 
-    /// The input method's process and the build it last said, which together are the one
-    /// source of what the status line says of it. [LAW:one-source-of-truth]
+    /// The input method's process, the one source of what the status line says of it, and the
+    /// build it last said, which the log names. [LAW:one-source-of-truth]
     private lazy var inputMethod = InputMethodWatch(app: build)
 
     private func showHotkeyStatus(_ status: HotkeyStatus) {

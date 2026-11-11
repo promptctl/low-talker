@@ -23,7 +23,8 @@ private let logger = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, 
 
 /// This process's build, read off its bundle before anything else here runs, so it is the
 /// build that was launched and not one an install has since put on disk. Said to the app in
-/// every greeting and every arrival, so the app's log names the build answering it.
+/// every arrival, which the app's log names, and in every greeting, which an app from before
+/// builds of either end took each other's words compares with its own.
 ///
 /// A bundle that carries none says none. The build refuses to make such a bundle, so the fault
 /// says it was not built here. [LAW:no-silent-failure]

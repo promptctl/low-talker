@@ -115,6 +115,8 @@ import Testing
     @Test func bytesThatAreNotARequestAreNotARequest() {
         #expect(Wire.request(of: Data([0xFF, 0xFE, 0xFD])) == nil)
         #expect(Wire.request(of: Data("hello".utf8)) == nil)
+        #expect(Wire.request(of: Data([Wire.requestMark]) + Data("hello".utf8)) == nil)
+        #expect(Wire.request(of: Data([Wire.requestMark])) == nil)
     }
 
     @Test func nonsenseIsNotAnAnswer() {
@@ -276,7 +278,7 @@ private let anEditor = "com.example.editor"
 
         // Sent by hand, because no `Inserter` can put bytes that are not a request onto the wire,
         // and on a thread of its own for the reason the suite doc gives.
-        let answer = try await onAThreadOfItsOwn { try roundTrip(Data([0xFF, 0xFE]), to: name) }
+        let answer = try await onAThreadOfItsOwn { try roundTrip(Data([Wire.requestMark]) + Data("hello".utf8), to: name) }
         #expect(Wire.answer(of: answer) == .refused(.requestWasNotReadable))
         withExtendedLifetime(port) {}
     }
