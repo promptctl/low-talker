@@ -6,6 +6,9 @@ import LowTalkerCore
 import TestProbes
 import Testing
 
+private struct LoadFailed: Error {}
+private struct BadBuffer: Error {}
+
 /// How the app answers the input method about a Return it is holding, over the real loop, the
 /// real hotkey and a keyboard the test types on, with the answers read off a stand-in for the
 /// port. [LAW:behavior-not-structure] What is held is what the input method would be told, and
@@ -64,7 +67,11 @@ import Testing
         let steering: KeySteering
 
         init(hearing engine: FakeTranscriber = FakeTranscriber { _ in Transcript(typed: "a") }, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false, keeping store: FakeHeldStore = FakeHeldStore()) async throws {
-            rig = try await Rig(hearing: engine, keeping: store)
+            try self.init(over: try await Rig(hearing: engine, keeping: store), refusing: refusal, holdsReturn: holdsReturn, panelOpen: panelOpen)
+        }
+
+        init(over rig: Rig, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false) throws {
+            self.rig = rig
             rig.inputMethod.refusing(refusal)
             feed = Feed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
@@ -94,6 +101,20 @@ import Testing
             await delivered()
         }
 
+        /// A hold, `samples` spoken into it, and its release.
+        func release(speaking samples: [Float]) async {
+            chord(.down, atMilliseconds: 0)
+            await delivered()
+            rig.speak(samples)
+            chord(.up, atMilliseconds: 400)
+            await delivered()
+        }
+
+        /// The Escape the input method reports while the word box is shown.
+        func escapeTheBox() {
+            WordBox(panel: StubPanel()).react(to: .escape, cancelling: steering, hold: rig.hold)
+        }
+
         /// Now, as a Return's stamp: on the host clock the press is ended against.
         var typedNow: TimeInterval { HostTime.now.uptime / .seconds(1) }
     }
@@ -121,7 +142,7 @@ import Testing
         let loop = try await Loop()
         await loop.latchedPress()
 
-        KeySteering.escape(loop.hotkey)
+        loop.steering.escape()
 
         #expect(loop.hotkey.phase == .idle)
         let cancelled = try #require(await loop.rig.report().cancelled)
@@ -137,7 +158,7 @@ import Testing
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
 
-        KeySteering.escape(loop.hotkey)
+        loop.steering.escape()
 
         loop.chord(.up, atMilliseconds: 400)
         await loop.delivered()
@@ -152,7 +173,7 @@ import Testing
         await loop.latchedPress()
         await loop.rig.until { loop.rig.inputMethod.field == " hello" }
 
-        KeySteering.escape(loop.hotkey)
+        loop.steering.escape()
 
         #expect(loop.hotkey.phase == .idle)
         let cancelled = try #require(await loop.rig.report().cancelled)
@@ -166,9 +187,193 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func anEscapeWithNoPressOpenCancelsNothing() async throws {
         let loop = try await Loop()
 
-        KeySteering.escape(loop.hotkey)
+        loop.steering.escape()
 
         #expect(loop.hotkey.phase == .idle)
+    }
+
+    /// The case low-dictation-keys-652.1hf exists for: an Escape the input method reports while a
+    /// released press is still being transcribed throws it away. The words it committed are taken
+    /// back, nothing of it is held, and it reports as cancelled.
+    @Test(.timeLimit(.minutes(1))) func anEscapeWhileAReleasedPressIsTranscribedCancelsIt() async throws {
+        let gate = Gate()
+        let loop = try await Loop(hearing: FakeTranscriber(confirming: { $0.count >= 2 ? Transcript(typed: " hello") : Transcript(typed: "") }) { _ in
+            await gate.wait()
+            return Transcript(typed: " hello world")
+        })
+        await loop.release(speaking: [1, 2, 3])
+        await loop.rig.until { loop.rig.inputMethod.field == " hello" }
+        #expect(loop.rig.shown.activities.last == .transcribing)
+
+        loop.escapeTheBox()
+        gate.open()
+
+        let cancelled = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+        #expect(cancelled.takenBack == 1)
+        #expect(loop.rig.hold.held == nil)
+    }
+
+    /// An Escape while a released press's last words are going in takes them back once they land.
+    @Test(.timeLimit(.minutes(1))) func anEscapeWhileAReleasedPressInsertsTakesItsWordsBack() async throws {
+        let loop = try await Loop(hearing: FakeTranscriber { _ in Transcript(typed: " hello") })
+        loop.rig.inputMethod.hold()
+        await loop.release(speaking: [1, 2, 3])
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+
+        loop.escapeTheBox()
+        loop.rig.inputMethod.letGo()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+        #expect(loop.rig.inputMethod.takeBacks == [" hello"])
+        #expect(loop.rig.hold.held == nil)
+    }
+
+    /// And when that insert is refused, its words are let go rather than held behind the dismissal.
+    @Test(.timeLimit(.minutes(1))) func anEscapeWhileARefusedInsertGoesInHoldsNothing() async throws {
+        let loop = try await Loop(hearing: FakeTranscriber { _ in Transcript(typed: " hello") })
+        loop.rig.inputMethod.hold()
+        await loop.release(speaking: [1, 2, 3])
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+
+        loop.escapeTheBox()
+        loop.rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        loop.rig.inputMethod.letGo()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.hold.dismissed == nil)
+    }
+
+    /// A press cut short, its engine still loading when Escape comes and then failing: nothing of
+    /// it is held, and its speech is not kept to be read later.
+    @Test(.timeLimit(.minutes(1))) func anEscapeWhileACutPressWaitsOnItsEngineKeepsNothing() async throws {
+        let gate = Gate()
+        let rig = try await Rig(engine: { () throws(EngineUnavailable) -> Dictation.Engine in
+            { () async throws(EngineUnavailable) -> any Transcriber in
+                await gate.wait()
+                throw EngineUnavailable(LoadFailed())
+            }
+        })
+        let loop = try Loop(over: rig)
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+        loop.rig.speak([1, 2, 3])
+        loop.hotkey.stop()
+        await loop.delivered()
+        await gate.changed.settled { gate.waiting == 1 }
+
+        loop.escapeTheBox()
+        gate.open()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.unheard.kept.isEmpty)
+    }
+
+    /// An Escape that reaches the loop before the key-up it follows is delivered still cancels the
+    /// press: the detector has let it go, so the loop throws it away, and the key-up's release does
+    /// not undo it.
+    @Test(.timeLimit(.minutes(1))) func aPressCancelledBeforeItsReleaseIsDeliveredStaysCancelled() async throws {
+        let loop = try await Loop()
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+        loop.rig.speak([1, 2, 3])
+
+        loop.chord(.up, atMilliseconds: 400)
+        loop.escapeTheBox()
+        await loop.delivered()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+    }
+
+    /// An Escape throws away the press the box shows: the open one, and not an earlier press still
+    /// on its way, whose words land.
+    @Test(.timeLimit(.minutes(1))) func anEscapeIntoAnOpenPressLeavesTheOneBeforeIt() async throws {
+        let gate = Gate()
+        let loop = try await Loop(hearing: FakeTranscriber { _ in
+            await gate.wait()
+            return Transcript(typed: " one")
+        })
+        await loop.release(speaking: [1, 2, 3])
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+        loop.rig.speak([1, 2, 3])
+
+        loop.escapeTheBox()
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+        gate.open()
+
+        _ = try await loop.rig.report().get()
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == " one")
+    }
+
+    /// With no press open the box shows every press on its way as one Transcribing, so an Escape
+    /// throws every one of them away.
+    @Test(.timeLimit(.minutes(1))) func anEscapeWithTwoPressesOnTheirWayCancelsBoth() async throws {
+        let gate = Gate()
+        let loop = try await Loop(hearing: FakeTranscriber { _ in
+            await gate.wait()
+            return Transcript(typed: " one")
+        })
+        await loop.release(speaking: [1, 2, 3])
+        await loop.release(speaking: [1, 2, 3])
+
+        loop.escapeTheBox()
+        gate.open()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+    }
+
+    /// An Escape in the moment after a chord goes down, before its press reaches the loop, is that
+    /// press's alone: the detector cancels it, and the press before it, on its way, lands.
+    @Test(.timeLimit(.minutes(1))) func anEscapeAsAChordGoesDownCancelsOnlyThatPress() async throws {
+        let gate = Gate()
+        let loop = try await Loop(hearing: FakeTranscriber { _ in
+            await gate.wait()
+            return Transcript(typed: " one")
+        })
+        await loop.release(speaking: [1, 2, 3])
+        loop.chord(.down, atMilliseconds: 0)
+
+        loop.escapeTheBox()
+        await loop.delivered()
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+        gate.open()
+
+        _ = try await loop.rig.report().get()
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == " one")
+    }
+
+    /// A refused press shows its refusal, so an Escape into it throws away nothing on its way.
+    @Test(.timeLimit(.minutes(1))) func anEscapeIntoARefusedPressLeavesTheOneBeforeIt() async throws {
+        let gate = Gate()
+        let loop = try await Loop(hearing: FakeTranscriber { _ in
+            await gate.wait()
+            return Transcript(typed: " one")
+        })
+        await loop.release(speaking: [1, 2, 3])
+        loop.rig.hardware.failingToLaunch = BadBuffer()
+        loop.chord(.down, atMilliseconds: 0)
+        await loop.delivered()
+
+        loop.escapeTheBox()
+        gate.open()
+        loop.chord(.up, atMilliseconds: 400)
+        await loop.delivered()
+
+        _ = try await loop.rig.report().get()
+        #expect(await loop.rig.report().failure is NoMicrophone)
+        #expect(loop.rig.inputMethod.field == " one")
     }
 
     /// The Escape the input method reports is the word box's dismissal: the press open is
@@ -187,7 +392,7 @@ import Testing
         #expect(panel.face?.state == "Listening")
         let shownBefore = loop.rig.shown.activities.count
 
-        box.react(to: .escape, cancelling: loop.hotkey, hold: loop.rig.hold)
+        box.react(to: .escape, cancelling: loop.steering, hold: loop.rig.hold)
 
         #expect(panel.shown.last == .away)
         #expect(loop.rig.hold.held == nil)
@@ -216,7 +421,7 @@ import Testing
         box.show(.listening(heard: Transcript(words: [])), over: .ready(.default, after: .seconds(1)), held: loop.rig.hold.held, insertable: true)
         let shown = panel.shown
 
-        box.react(to: .return, cancelling: loop.hotkey, hold: loop.rig.hold)
+        box.react(to: .return, cancelling: loop.steering, hold: loop.rig.hold)
 
         #expect(panel.shown == shown)
         #expect(loop.rig.hold.held == earlier)

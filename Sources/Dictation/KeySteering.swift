@@ -15,7 +15,8 @@ import os
 ///
 /// [LAW:single-enforcer] The press is ended here and nowhere else a typed key can end one, through
 /// the hotkey, which is the one thing that ends presses. An Escape is `escape()`, not a question:
-/// the input method keeps it while the panel is shown, and the app cancels the press when told.
+/// the input method keeps it while the panel is shown, and the app cancels the press when told,
+/// or the presses past the hotkey when it holds none.
 public struct KeySteering: Sendable {
     private let dictation: Dictation
     private let hotkey: Hotkey
@@ -56,14 +57,21 @@ public struct KeySteering: Sendable {
         }
     }
 
-    /// Escape, typed while the panel is shown, or the panel's circle clicked: the press that is
-    /// open, held or latched, is cancelled, and the words it already put at the cursor are taken
-    /// back by the press's own path. Nothing is cancelled when no press is open, and the outcome
-    /// is in that press's own report.
-    /// [LAW:single-enforcer] The detector ends the press, as it ends every press.
-    @MainActor public static func escape(_ hotkey: Hotkey) {
+    /// Escape, typed while the panel is shown, or the panel's circle clicked: the dictation the
+    /// panel shows is cancelled, the open press, held or latched, or the presses on their way, and
+    /// the words they already put at the cursor are taken back by each press's own path. The
+    /// outcome is in each press's own report.
+    /// [LAW:single-enforcer] One Escape throws away one dictation. The detector ends the press it
+    /// holds open, as it ends every press; only with none open does the loop throw away the
+    /// presses past the detector, so a chord pressed just before the Escape is the one it cancels,
+    /// never that and the press before it.
+    @MainActor public func escape() {
         let steered = hotkey.steer(.cancel)
-        Self.log.debug("escape: \(String(describing: steered), privacy: .public)")
+        let pastTheDetector = switch steered {
+        case .ended, .chordDown: 0
+        case .nothingOpen: dictation.cancel()
+        }
+        Self.log.debug("escape: \(String(describing: steered), privacy: .public), \(pastTheDetector) presses past the detector cancelled")
     }
 
     /// [LAW:no-silent-failure] An answer the kernel would not take is said, so a Return the input
