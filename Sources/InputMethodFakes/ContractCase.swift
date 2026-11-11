@@ -126,8 +126,7 @@ public nonisolated extension ContractCase {
     private static func theFullField(_ profile: ClientProfile) -> [ContractCase] {
         [
             ContractCase(profile: profile, holding: "alpha bravo", act: .read, answers: reads(caret: 11, text: "alpha"), holds: "alpha bravo"),
-            ContractCase(profile: profile, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint),
-                         answers: reads(caret: 13, text: "alpha"), holds: "alpha bravo x"),
+            typed(into: profile, answers: reads(caret: 13, text: "alpha")),
             ContractCase(profile: profile, holding: "alpha bravo", selected: NSRange(location: 6, length: 5), act: .insert("delta", replacementRange: atThePoint),
                          answers: reads(caret: 11, text: "alpha"), holds: "alpha delta"),
             ContractCase(profile: profile, holding: "alpha bravo", act: .insert("RNG", replacementRange: NSRange(location: 0, length: 3)),

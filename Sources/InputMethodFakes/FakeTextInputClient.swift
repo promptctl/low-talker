@@ -28,7 +28,7 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
         case keepsWhatFits
         /// It keeps them all, as though it had no `maxlength`.
         case keepsThemAll
-        /// It keeps none of them.
+        /// It keeps none of them, and the field is left as it was.
         case keepsNone
     }
 
@@ -199,7 +199,7 @@ public final class FakeTextInputClient: TextInputClient {
             switch profile.overflow {
             case .keepsWhatFits: kept = Self.prefix(of: words, fitting: room)
             case .keepsThemAll: kept = words
-            case .keepsNone: kept = ""
+            case .keepsNone: return
             case nil:
                 Issue.record("insertText into \(profile) overflowed its maxlength, and nobody said what it keeps")
                 return
