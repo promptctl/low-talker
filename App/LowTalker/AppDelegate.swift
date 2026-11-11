@@ -1101,11 +1101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // [LAW:nothing-unseen] A click with no loop to bring them back through moves nothing, and says so.
         let unheard = listening == nil ? ", with no loop listening to bring them back" : ""
         sessions.notice("asked to bring back \(counted(self.hold.dismissed?.allWords.words.count ?? 0, "dismissed word", "dismissed words"), privacy: .public)\(unheard, privacy: .public)")
-        // The panel opens again only where a loop will bring the words back to show.
-        if let listening {
-            box.offerAgain()
-            listening.dictation.bringBackDismissed()
-        }
+        // The words come back, and the box with them, only where a loop will bring them back.
+        listening?.dictation.bringBackDismissed()
     }
 
     /// A line the menu says and nothing a reader can press. An item with no action is

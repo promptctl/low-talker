@@ -3,14 +3,9 @@ import Dictation
 import Identity
 import LowTalkerCore
 
-/// The small panel near the bottom of the screen while a press is on its way, or while words
-/// no cursor took are held: not listening, and why, while a refused press is open;
-/// listening, with what the engine has read of the press so far, then
-/// transcribing, then gone once the press's outcome is reported - unless an insert failed, and
-/// then it says why and holds the words until a cursor takes them, the person places them with
-/// the Insert button below it, or dismisses them with the circle on its corner, which also stops a
-/// press still listening, as Escape does. Copy, beside Insert, puts them on the clipboard and
-/// dismisses them, so the next press does not type them beside the paste.
+/// The word box on screen: a face near the bottom of the screen, the circle on its corner, and
+/// Insert and Copy below it. Copy puts the held words on the clipboard and dismisses them, so the
+/// next press does not type them beside the paste.
 ///
 /// It never takes focus from the app the words are going to. A borderless panel cannot become
 /// key, and a non-activating one is ordered in without activating this app, so a click on the

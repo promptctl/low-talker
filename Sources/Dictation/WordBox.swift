@@ -12,8 +12,8 @@ public protocol WordBoxPanel: AnyObject {
 
 /// The word box: the panel near the bottom of the screen while a press is on its way, or while
 /// words no cursor took are held, and the person's dismissal of it, with Escape or the circle on
-/// its corner, which keeps it away until a press opens after it or the dismissed words are asked
-/// back.
+/// its corner, which keeps it away until there are new words to show: a press opening after it,
+/// or words held after it, whether a press's insert failed or the dismissed words were brought back.
 ///
 /// [LAW:one-source-of-truth] It draws `Dictation.Activity` and `Held` as it is handed them, and
 /// keeps only what neither says: the dismissal, and whether the press open at it has closed.
@@ -40,7 +40,7 @@ public final class WordBox {
     }
 
     private let panel: any WordBoxPanel
-    /// The person put the box away, so it stays away whatever the activity says.
+    /// The person put the box away, so it stays away until there are new words to show.
     private var dismissed = false
     /// Whether the activity last shown had a press open, so a press opening is told from one
     /// going on. A cancelled press goes on being heard until its cancellation is delivered, and a
@@ -59,25 +59,27 @@ public final class WordBox {
         case .listening, .refused: true
         case .idle, .transcribing: false
         }
-        // A press opening is new words to show.
-        if pressIsOpen && !pressWasOpen { dismissed = false }
+        // A press opening is new words to show, and so is anything held: the dismissal let go of
+        // what was held at it.
+        if pressIsOpen && !pressWasOpen || held != nil { dismissed = false }
         pressWasOpen = pressIsOpen
         guard !dismissed, let face = Self.face(of: activity, over: readiness, held: held, insertable: insertable) else { return panel.hide() }
         panel.draw(face)
     }
 
-    /// The person put the dictation away, with Escape or the circle: the open press is cancelled
-    /// through `hotkey`, the held words no cursor has taken are let go, and the box is put away
-    /// until a press opens or the dismissed words are brought back. The words the press already
-    /// put at the cursor are taken back by the press's own path.
+    /// The person put the dictation away, with Escape or the circle: the held words no cursor has
+    /// taken are let go, the open press is cancelled through `hotkey`, and the box is put away
+    /// until there are new words to show. The words the press already put at the cursor are
+    /// taken back by the press's own path.
     /// [LAW:single-enforcer] One dismissal, whichever way it was asked for, so the circle cannot
     /// let go of the words and leave the microphone open. `hold` is handed in because the hold
     /// shows the box from its own start, before a box built over it could be. Dismissed first,
-    /// so the box the hold shows as it lets go is already put away.
+    /// so the box the hold shows as it lets go is already put away, and let go before the press
+    /// is cancelled, so no box shown for the cancel is handed the words being let go.
     public func dismiss(cancelling hotkey: Hotkey?, hold: Hold) {
         dismissed = true
-        hotkey.map(KeySteering.escape)
         hold.dismiss()
+        hotkey.map(KeySteering.escape)
         panel.hide()
     }
 
@@ -91,11 +93,6 @@ public final class WordBox {
         // Return is held and sent by the input method; the app has nothing to do when it passes.
         case .return: break
         }
-    }
-
-    /// The person asked for the dismissed words back, so the box shows what is held again.
-    public func offerAgain() {
-        dismissed = false
     }
 
     /// What the box shows of `activity` over `readiness` with what is `held`, or nil when there

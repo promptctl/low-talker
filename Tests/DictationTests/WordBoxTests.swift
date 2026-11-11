@@ -21,22 +21,23 @@ final class StubPanel: WordBoxPanel {
     func hide() { shown.append(.away) }
 }
 
-/// When the word box is on screen and what it offers, over a real hold kept in memory.
+/// When the word box is on screen and what it offers, over a real hold kept in memory, which
+/// shows the box with the loop's activity as it changes, as the app's does.
 /// [LAW:behavior-not-structure] What the panel is told to draw, and where the held words are.
 @MainActor
-@Suite struct WordBoxTests {
+@Suite final class WordBoxTests {
     private let panel = StubPanel()
-    private let box: WordBox
-    private let hold: Hold
+    private lazy var box = WordBox(panel: panel)
+    private var activity = Dictation.Activity.idle
     private let ready = EngineReadiness.ready(.default, after: .seconds(1))
+    private lazy var hold = Hold(store: FakeHeldStore(keeping: Self.earlier), failedToKeep: { _ in }, showing: { [unowned self] in
+        box.show(activity, over: ready, held: $0.held, insertable: true)
+    })
     private static let earlier = Held.unplaced(part(" earlier words", "WARNING: no text field took them"))
 
-    init() {
-        box = WordBox(panel: panel)
-        hold = Hold(store: FakeHeldStore(keeping: Self.earlier), failedToKeep: { _ in }, showing: { _ in })
-    }
-
+    /// The loop doing `activity`, shown with what the hold holds.
     private func show(_ activity: Dictation.Activity, insertable: Bool = true) {
+        self.activity = activity
         box.show(activity, over: ready, held: hold.held, insertable: insertable)
     }
 
@@ -44,12 +45,15 @@ final class StubPanel: WordBoxPanel {
         .listening(heard: Transcript(typed: typed))
     }
 
+    /// Not drawn even as the hold lets go, when it shows the box what it holds after.
     @Test func aDismissalPutsTheBoxAwayAndLetsGoOfTheHeldWords() {
-        show(.idle)
+        show(Self.listening(" hi"))
         #expect(panel.face != nil)
+        let before = panel.shown.count
 
         box.dismiss(cancelling: nil, hold: hold)
 
+        #expect(panel.shown.dropFirst(before).allSatisfy { $0 == .away })
         #expect(panel.shown.last == .away)
         #expect(hold.held == nil)
         #expect(hold.dismissed == Self.earlier)
@@ -89,14 +93,19 @@ final class StubPanel: WordBoxPanel {
         #expect(panel.face?.words == Transcript(typed: " new"))
     }
 
-    @Test func aBringBackShowsTheBoxAgain() {
-        show(.idle)
+    /// The dismissal let go of what was held at it, so words held after it are new: a press it
+    /// could not cancel, since it was transcribing, whose insert then failed, or the dismissed
+    /// words brought back.
+    @Test(arguments: [Dictation.Activity.idle, .transcribing])
+    func wordsHeldAfterADismissalShowTheBoxAgain(before: Dictation.Activity) {
+        let later = Held.unplaced(part(" later words", "WARNING: no text field took them"))
+        show(before)
         box.dismiss(cancelling: nil, hold: hold)
+        show(before)
 
-        box.offerAgain()
-        box.show(.idle, over: ready, held: Self.earlier, insertable: true)
+        box.show(.idle, over: ready, held: later, insertable: true)
 
-        #expect(panel.face?.words == Self.earlier.allWords)
+        #expect(panel.face?.words == later.allWords)
     }
 
     /// The circle, Insert and Copy are there only while words are held, Insert where it is offered
@@ -108,30 +117,24 @@ final class StubPanel: WordBoxPanel {
         (.listening(heard: Transcript(typed: " hi")), true, [false, false]),
         (.refused(why: "no model"), true, [false, false]),
     ])
-    func thePanelOrdersInTheControlsTheBoxOffers(activity: Dictation.Activity, insertable: Bool, insertAndCopy: [Bool]) {
+    func theBoxOffersTheCircleInsertAndCopy(activity: Dictation.Activity, insertable: Bool, insertAndCopy: [Bool]) {
         show(activity, insertable: insertable)
 
         let controls = panel.face?.controls
         #expect(controls.map { [$0.insert, $0.copy] } == insertAndCopy)
     }
 
-    @Test func nothingHeldOrdersInNoControls() {
-        box.dismiss(cancelling: nil, hold: hold)
-        box.offerAgain()
-
-        show(.transcribing)
+    @Test func nothingHeldOffersNoControls() {
+        box.show(.transcribing, over: ready, held: nil, insertable: true)
 
         #expect(panel.face?.state == "Transcribing")
         #expect(panel.face?.controls == nil)
     }
 
     @Test func nothingOnItsWayAndNothingHeldIsNoBox() {
-        box.dismiss(cancelling: nil, hold: hold)
-        box.offerAgain()
+        box.show(.idle, over: ready, held: nil, insertable: true)
 
-        show(.idle)
-
-        #expect(panel.shown.last == .away)
+        #expect(panel.shown == [.away])
     }
 
     /// Each warning is said once, after the symbol that says it is a warning, and the last ends
