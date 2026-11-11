@@ -163,23 +163,11 @@ final class HALInput: PreparedInput {
             do {
                 layout = try HALInput.layout(of: device)
 
-                // Float samples, one buffer per channel: the shape `AudioClip.Converter` reads
-                // and the shape the ring is read back in. `SliceRing` makes it out of whatever
-                // the layout's buffers are, so nothing here has to know how the device lays its
-                // channels out.
-                var client = AudioStreamBasicDescription(
-                    mSampleRate: layout.sampleRate,
-                    mFormatID: kAudioFormatLinearPCM,
-                    mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
-                    mBytesPerPacket: UInt32(MemoryLayout<Float>.size),
-                    mFramesPerPacket: 1,
-                    mBytesPerFrame: UInt32(MemoryLayout<Float>.size),
-                    mChannelsPerFrame: UInt32(layout.channels),
-                    mBitsPerChannel: UInt32(MemoryLayout<Float>.size * 8),
-                    mReserved: 0
-                )
-                guard let described = AVAudioFormat(streamDescription: &client) else {
-                    throw AudioClipError.unconvertibleFormat(sampleRate: client.mSampleRate, channels: client.mChannelsPerFrame)
+                // The shape the ring pops each slice in, mixed down to one channel, so the
+                // converter only resamples and nothing here has to know how many channels the
+                // device has or how it lays them out.
+                guard let described = SliceRing.format(sampleRate: layout.sampleRate) else {
+                    throw AudioClipError.unconvertibleFormat(sampleRate: layout.sampleRate, channels: 1)
                 }
                 format = described
 
@@ -274,7 +262,6 @@ final class HALInput: PreparedInput {
                 SliceRing(channels: layout.channels, frames: frames, entries: frames / max(Int(range.mMinimum), 1) + 1),
                 layout: layout,
                 slice: slice,
-                format: format,
                 converter: sink.converter,
                 appending: appending,
                 onFailure: onFailure

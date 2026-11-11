@@ -118,7 +118,6 @@ import Testing
                 ring,
                 layout: layout,
                 slice: slice,
-                format: SliceRingTests.format,
                 converter: AudioClip.Converter(from: SliceRingTests.format),
                 appending: { samples, time in self.appended.withLock { $0.append((samples, time)) } },
                 onFailure: { error in self.failures.withLock { $0.append("\(error)") } }
@@ -210,7 +209,6 @@ import Testing
             SliceRing(channels: 1, frames: 1_000, entries: 2),
             layout: Self.mono,
             slice: 100,
-            format: Self.format,
             converter: AudioClip.Converter(from: Self.format),
             appending: { _, _ in
                 // The first slice holds the delivery thread, so the ring's two entries fill behind it.

@@ -113,8 +113,18 @@ final class SliceRing: @unchecked Sendable {
         return true
     }
 
-    /// Consumer end: the oldest entry, or nil when there is none. A slice's frames are
-    /// copied into `buffer`, whose frame length becomes the slice's.
+    /// The shape a slice is popped in: one channel of float samples at the device's rate.
+    /// AVAudioFormat describes it for every device, where one buffer per device channel has
+    /// no description past two channels without a channel layout, and with one AVAudioConverter
+    /// downmixes it to silence (measured on macOS 26, for 2, 4 and 16 channels).
+    static func format(sampleRate: Double) -> AVAudioFormat? {
+        AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)
+    }
+
+    /// Consumer end: the oldest entry, or nil when there is none. A slice's frames are mixed
+    /// down into `buffer`, of `format`, whose frame length becomes the slice's: each sample is
+    /// the mean of every channel's, the equal-weight downmix AVAudioConverter gives stereo. A
+    /// voice on one channel of N arrives at 1/N of its level.
     func pop(into buffer: AVAudioPCMBuffer) -> Entry? {
         let next = popped.load(ordering: .relaxed)
         guard next < pushed.load(ordering: .acquiring) else { return nil }
@@ -124,11 +134,13 @@ final class SliceRing: @unchecked Sendable {
             let start = framesPopped.load(ordering: .relaxed)
             let at = start % capacity
             let head = min(frames, capacity - at)
+            let mix = buffer.floatChannelData![0]
+            mix.update(repeating: 0, count: frames)
+            let weight = 1 / Float(channels)
             for channel in 0..<channels {
                 let ring = samples + channel * capacity
-                let destination = buffer.floatChannelData![channel]
-                destination.update(from: ring + at, count: head)
-                (destination + head).update(from: ring, count: frames - head)
+                for frame in 0..<head { mix[frame] += weight * ring[at + frame] }
+                for frame in 0..<(frames - head) { mix[head + frame] += weight * ring[frame] }
             }
             buffer.frameLength = AVAudioFrameCount(frames)
             framesPopped.store(start + frames, ordering: .releasing)

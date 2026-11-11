@@ -191,9 +191,16 @@ import Testing
         #expect(mismatch.reason == .noMemory)
     }
 
-    // MARK: how a render becomes the ring's planar samples
+    // MARK: how a render becomes the one channel the pipeline hears
 
-    @Test func anInterleavedBufferIsDeinterleavedIntoOneRingPerChannel() throws {
+    /// The next slice of `ring`, as the one channel it pops as.
+    static func popped(_ ring: SliceRing, frames: Int) -> [Float] {
+        let popped = AVAudioPCMBuffer(pcmFormat: SliceRing.format(sampleRate: 48_000)!, frameCapacity: AVAudioFrameCount(frames))!
+        _ = ring.pop(into: popped)
+        return Array(UnsafeBufferPointer(start: popped.floatChannelData![0], count: Int(popped.frameLength)))
+    }
+
+    @Test func anInterleavedBufferPopsAsTheMeanOfItsChannels() throws {
         let layout = InputLayout(buffers: [2], sampleRate: 48_000)
         let ring = SliceRing(channels: 2, frames: 8, entries: 4)
         // Frames (0, 100), (1, 101), (2, 102): left counts up from 0, right from 100.
@@ -203,33 +210,43 @@ import Testing
             list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2 + 1] = Float(100 + frame)
         }
         ring.push(list.base, layout: layout, frames: 3, stamp: AudioTimeStamp())
-        let popped = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!, frameCapacity: 8)!
-        _ = ring.pop(into: popped)
-        #expect(Array(UnsafeBufferPointer(start: popped.floatChannelData![0], count: 3)) == [0, 1, 2])
-        #expect(Array(UnsafeBufferPointer(start: popped.floatChannelData![1], count: 3)) == [100, 101, 102])
+        #expect(Self.popped(ring, frames: 8) == [50, 51, 52])
     }
 
-    @Test func twoBuffersOfDifferentWidthsLandInTheirChannelsAcrossTheWrap() throws {
+    @Test func twoBuffersOfDifferentWidthsPopAsTheMeanOfEveryChannelAcrossTheWrap() throws {
         // Buffer 0 is stereo interleaved, buffer 1 mono: channels 0 and 1, then 2.
         let layout = InputLayout(buffers: [2, 1], sampleRate: 48_000)
         let ring = SliceRing(channels: 3, frames: 5, entries: 8)
-        let popped = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: 48_000, channelLayout: AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_Unknown | 3)!), frameCapacity: 5)!
         // Four frames, then four more: the second wraps the five-frame ring.
         for round in 0..<2 {
             let list = List([(2, 8), (1, 4)])
             for frame in 0..<4 {
                 let value = Float(round * 4 + frame)
                 list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2] = value
-                list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2 + 1] = value + 100
-                list.pointer[1].mData!.assumingMemoryBound(to: Float.self)[frame] = value + 200
+                list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * 2 + 1] = value + 30
+                list.pointer[1].mData!.assumingMemoryBound(to: Float.self)[frame] = value + 60
             }
             ring.push(list.base, layout: layout, frames: 4, stamp: AudioTimeStamp())
-            _ = ring.pop(into: popped)
-            let expected = (0..<4).map { Float(round * 4 + $0) }
-            #expect(Array(UnsafeBufferPointer(start: popped.floatChannelData![0], count: 4)) == expected)
-            #expect(Array(UnsafeBufferPointer(start: popped.floatChannelData![1], count: 4)) == expected.map { $0 + 100 })
-            #expect(Array(UnsafeBufferPointer(start: popped.floatChannelData![2], count: 4)) == expected.map { $0 + 200 })
+            #expect(Self.popped(ring, frames: 5) == (0..<4).map { Float(round * 4 + $0) + 30 })
         }
+    }
+
+    /// A device of any channel count is heard, an audio interface or a 16-channel loopback with
+    /// the voice on its last channel included: what it pops as is a shape the converter reads,
+    /// carrying that channel at its share of the mix.
+    @Test(arguments: [1, 2, 3, 4, 16])
+    func everyChannelCountIsHeardOnItsLastChannel(channels: Int) throws {
+        let layout = InputLayout(buffers: [channels], sampleRate: 48_000)
+        let ring = SliceRing(channels: channels, frames: 8, entries: 4)
+        let list = List([(channels, 4 * channels)])
+        for frame in 0..<4 {
+            for channel in 0..<channels {
+                list.pointer[0].mData!.assumingMemoryBound(to: Float.self)[frame * channels + channel] = channel == channels - 1 ? Float(channels) : 0
+            }
+        }
+        ring.push(list.base, layout: layout, frames: 4, stamp: AudioTimeStamp())
+        #expect(Self.popped(ring, frames: 8) == [1, 1, 1, 1])
+        _ = try AudioClip.Converter(from: try #require(SliceRing.format(sampleRate: layout.sampleRate)))
     }
 
     // MARK: what a fault means for the input

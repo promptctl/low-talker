@@ -48,12 +48,13 @@ final class SliceDelivery: @unchecked Sendable {
         _ ring: SliceRing,
         layout: InputLayout,
         slice: Int,
-        format: AVAudioFormat,
         converter: AudioClip.Converter,
         appending: @escaping @Sendable ([Float], HostTime) -> Void,
         onFailure: @escaping @Sendable (any Error) -> Void
     ) throws {
-        guard let popped = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(slice)) else {
+        guard let format = SliceRing.format(sampleRate: layout.sampleRate),
+              let popped = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(slice))
+        else {
             throw AudioClipError.bufferAllocationFailed
         }
         self.ring = ring
