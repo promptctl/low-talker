@@ -160,8 +160,8 @@ final class HUD {
         return place
     }()
 
-    /// The person cancelled a press, with Escape or the circle, so the panel stays away whatever
-    /// the activity says until a press starts or they ask for the dismissed words back.
+    /// The person put the panel away, with Escape or the circle, so it stays away whatever the
+    /// activity says until a press starts or they ask for the dismissed words back.
     private var dismissed = false
 
     /// Puts the panel away at once, whatever it shows, until the next press starts or

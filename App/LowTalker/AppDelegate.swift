@@ -460,19 +460,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The person put the dictation away, with Escape or the word box's circle: the open press is
-    /// cancelled, and the held words no cursor has taken are let go. The words the press already
-    /// put at the cursor are taken back by the press's own path.
+    /// cancelled, the held words no cursor has taken are let go, and the panel closes until the next
+    /// press or until the dismissed words are brought back. The words the press already put at the
+    /// cursor are taken back by the press's own path.
     /// [LAW:single-enforcer] One dismissal, whichever way it was asked for, so the circle cannot
     /// let go of the words and leave the microphone open.
-    ///
-    /// Only a cancelled press keeps the panel shut until the next press, since its inserts still on
-    /// their way would show words the person threw away. With no press cancelled the panel shows
-    /// what is left, a transcription on its way and whatever it comes to hold, since that is not
-    /// what was put away. [LAW:nothing-unseen]
     private func dismiss() {
-        let steered = listening.map { KeySteering.escape($0.hotkey) }
+        listening.map { KeySteering.escape($0.hotkey) }
         hold.dismiss()
-        if case .ended? = steered { hud.dismiss() }
+        hud.dismiss()
     }
 
     /// The line says how to press only while an input method that can type the words is
@@ -987,10 +983,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// [LAW:no-silent-failure] A hotkey line that read as working while nothing could type
     /// would send the person after a broken app rather than the Input menu.
     private func untypedBecause() -> [String] {
-        let reasons: [String?] = [
-            InstalledInputMethod.isSelected() ? nil : "\(AppIdentity.displayName) is not the selected input source",
-        ]
-        let found = reasons.compactMap { $0 }
+        let found = InstalledInputMethod.isSelected() ? [] : ["\(AppIdentity.displayName) is not the selected input source"]
         log.notice("hotkey: words held, not typed, because [\(found.joined(separator: "; "), privacy: .public)]")
         return found
     }
@@ -1114,8 +1107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // [LAW:nothing-unseen] A click with no loop to bring them back through moves nothing, and says so.
         let unheard = listening == nil ? ", with no loop listening to bring them back" : ""
         sessions.notice("asked to bring back \(self.hold.dismissed?.allWords.words.count ?? 0, privacy: .public) dismissed words\(unheard, privacy: .public)")
-        hud.offerAgain()
-        listening?.dictation.bringBackDismissed()
+        // The panel opens again only where a loop will bring the words back to show.
+        if let listening {
+            hud.offerAgain()
+            listening.dictation.bringBackDismissed()
+        }
     }
 
     /// A line the menu says and nothing a reader can press. An item with no action is
