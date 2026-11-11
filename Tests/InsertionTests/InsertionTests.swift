@@ -17,7 +17,7 @@ import Testing
         .refused(.noTextFieldHasFocus),
         .refused(.cursorIsInAnotherApp),
         .refused(.dictationIsInAnotherApp),
-        .refused(.cursorIsInSeveralPlaces),
+        .refused(.cursorIsNotSettled),
         .refused(.requestWasNotReadable),
         .refused(.senderIsNotThisInstallationsApp),
         .refused(.inputMethodIsBusy),

@@ -53,13 +53,13 @@ public final class DictationInputController: IMKInputController {
         logLife("was made")
     }
 
-    /// On the main actor, as every report to `FocusedClient` is: a controller that ends without
-    /// being deactivated - closed with its window, or orphaned (IMK rule 5) - takes its cursor with
-    /// it, so no cursor outlives its controller to be refused beside a live one or committed into,
-    /// and no later controller at the same address inherits it.
-    isolated deinit {
+    /// A controller that ends without being deactivated - closed with its window, or orphaned (IMK
+    /// rule 5) - takes its cursor with it, so no cursor outlives its controller to be refused
+    /// beside a live one or committed into, and no later controller at the same address inherits
+    /// it: through the one hop every callback takes (IMK rule 3), before this returns.
+    deinit {
         logLife("ended")
-        FocusedClient.shared.left(self)
+        onMainActor("deinit", ()) { FocusedClient.shared.left(self) }
     }
 
     nonisolated private var address: UInt { UInt(bitPattern: ObjectIdentifier(self)) }
@@ -160,7 +160,7 @@ public final class DictationInputController: IMKInputController {
             // that activate in the same millisecond are two lines that say so, and a sender that
             // made no cursor is the controller's own held one, named. Said before the cursor is
             // taken, so the log reads the activation ahead of the arrival it causes.
-            imkLog.log("\(arriving.map { controllerLine(controller: self.address, "activated", client: "holding \($0)") } ?? self.said("activated without a usable client"), privacy: .public)")
+            imkLog.log("\(arriving.map { controllerLine(controller: self.address, "activated", client: FocusedClient.holding($0)) } ?? self.said("activated without a usable client"), privacy: .public)")
             // Told to the app by `FocusedClient` once this is the cursor words go to, so words the
             // app offers in answer find it in front.
             arriving.map { FocusedClient.shared.took($0, by: self) }

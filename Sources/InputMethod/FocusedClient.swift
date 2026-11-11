@@ -117,7 +117,7 @@ public final class FocusedClient {
     /// another app or key typed elsewhere has since ruled out.
     private struct Held {
         let cursor: Client
-        let live: Bool
+        var live: Bool
     }
 
     /// Told the app of a cursor that has become the one words go to, so words no cursor took are
@@ -138,7 +138,7 @@ public final class FocusedClient {
     /// cursor of the same app is no such proof, and stays live.
     public func took(_ cursor: Client, by controller: AnyObject) {
         changing {
-            held = held.mapValues { Held(cursor: $0.cursor, live: $0.live && $0.cursor.application == cursor.application) }
+            for (other, entry) in held where entry.cursor.application != cursor.application { held[other]?.live = false }
             held[ObjectIdentifier(controller)] = Held(cursor: cursor, live: true)
         }
     }
@@ -169,14 +169,20 @@ public final class FocusedClient {
             if live.count != 1 || !typed.live {
                 insertLog.notice("a key typed into \(typed.cursor, privacy: .public) makes it the one live cursor, of \(self.live.count, privacy: .public) live")
             }
-            changing { held = Dictionary(uniqueKeysWithValues: held.map { ($0.key, Held(cursor: $0.value.cursor, live: $0.key == key)) }) }
+            changing { for other in held.keys { held[other]?.live = other == key } }
         }
     }
 
     /// How `controller`'s lines say the cursor it holds, from here, where it is held: whether it is
     /// live is part of what it holds. [LAW:one-source-of-truth]
     public func holding(_ controller: AnyObject) -> String {
-        held[ObjectIdentifier(controller)].map { "holding \($0.cursor)" + ($0.live ? "" : ", not live") } ?? "holding no client"
+        held[ObjectIdentifier(controller)].map { Self.holding($0.cursor, live: $0.live) } ?? "holding no client"
+    }
+
+    /// The one spelling of a held cursor in a controller's line, for a cursor said before it is
+    /// taken as much as for one held.
+    public static func holding(_ cursor: Client, live: Bool = true) -> String {
+        "holding \(cursor)" + (live ? "" : ", not live")
     }
 
     /// An app quit. Any cursor of its is gone with it, whatever the text input system did
@@ -248,7 +254,8 @@ public final class FocusedClient {
     ///
     /// Then the cursor has to be the only one live: of two, either could be the window the
     /// person is in, and committing into the other is answered `inserted` while the words go
-    /// somewhere they are not looking.
+    /// somewhere they are not looking. None live, while the app in front holds cursors ruled out,
+    /// is the same refusal, as a key settles both.
     ///
     /// Last, the cursor's client has to answer that a text field is behind it. Every app
     /// hands the input method a client, a window with no field focused included, and what is
@@ -259,15 +266,20 @@ public final class FocusedClient {
     public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, selected: Bool,
                         screens: [CGRect]) -> InFront {
         let cursors = live
+        let ruledOut = held.values.count { !$0.live && $0.cursor.application == frontmost }
         func seen(_ field: FieldAnswer?, _ cursor: Result<Client, Refusal>) -> InFront {
             InFront(frontmost: frontmost, selected: selected, cursorApplication: cursors.first?.application,
-                    cursors: cursors.count, field: field, screens: screens, cursor: cursor)
+                    cursors: cursors.count, ruledOut: ruledOut, field: field, screens: screens, cursor: cursor)
         }
         guard destination.admits(frontmost) else { return seen(nil, .failure(.dictationIsInAnotherApp)) }
         guard selected else { return seen(nil, .failure(.inputSourceIsNotSelected)) }
-        guard let application = cursors.first?.application else { return seen(nil, .failure(.noTextFieldHasFocus)) }
+        // None live, though the app in front holds some, is not settled rather than no field: a key
+        // typed into one of them makes it the cursor.
+        guard let application = cursors.first?.application else {
+            return seen(nil, .failure(ruledOut == 0 ? .noTextFieldHasFocus : .cursorIsNotSettled))
+        }
         guard application == frontmost else { return seen(nil, .failure(.cursorIsInAnotherApp)) }
-        guard let focus = sole else { return seen(nil, .failure(.cursorIsInSeveralPlaces)) }
+        guard let focus = sole else { return seen(nil, .failure(.cursorIsNotSettled)) }
         let field = focus.field
         return seen(field, field.isAField(on: screens) ? .success(focus) : .failure(.noTextFieldHasFocus))
     }
@@ -289,6 +301,8 @@ public struct InFront: CustomStringConvertible {
     let cursorApplication: String?
     /// How many cursors are live, all of them in `cursorApplication`.
     let cursors: Int
+    /// How many cursors the app in front holds that are not live.
+    let ruledOut: Int
     /// Asked only of the cursor the words would go to, so absent for every refusal decided
     /// before it.
     let field: FieldAnswer?
@@ -298,6 +312,7 @@ public struct InFront: CustomStringConvertible {
     public var description: String {
         "with \(frontmost ?? "nothing") in front and "
             + (cursorApplication.map { cursors == 1 ? "the cursor in \($0)" : "\(cursors) cursors in \($0)" } ?? "no cursor")
+            + (ruledOut == 0 ? "" : ", \(ruledOut) of its own ruled out")
             + (field.map(said) ?? "")
             + (selected ? "" : ", another input source selected")
     }

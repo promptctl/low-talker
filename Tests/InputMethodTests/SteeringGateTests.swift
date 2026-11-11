@@ -30,7 +30,7 @@ import Testing
 
     @MainActor
     private static func inFront(_ cursor: Client) -> InFront {
-        InFront(frontmost: cursor.application, selected: true, cursorApplication: cursor.application, cursors: 1,
+        InFront(frontmost: cursor.application, selected: true, cursorApplication: cursor.application, cursors: 1, ruledOut: 0,
                 field: nil, screens: [], cursor: .success(cursor))
     }
 

@@ -19,7 +19,7 @@ import Testing
     /// What `FocusedClient` would have seen: the cursor chosen, or the refusal.
     @MainActor
     private static func seen(_ cursor: Result<Client, Refusal>) -> InFront {
-        InFront(frontmost: "com.example.editor", selected: true, cursorApplication: "com.example.editor", cursors: 1,
+        InFront(frontmost: "com.example.editor", selected: true, cursorApplication: "com.example.editor", cursors: 1, ruledOut: 0,
                 field: nil, screens: [], cursor: cursor)
     }
 

@@ -294,7 +294,7 @@ import Testing
         try client.took(key.cursor())
         try client.took(behind.cursor())
 
-        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
+        #expect(throws: Refusal.cursorIsNotSettled) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
         #expect(key.documentAccessAsked == 0 && behind.documentAccessAsked == 0)
         #expect(key.text.isEmpty && behind.text.isEmpty)
     }
@@ -339,7 +339,7 @@ import Testing
         let new = try FakeTextInputClient(in: Self.textEdit).cursor()
         told.client.took(old)
         told.client.took(new)
-        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+        #expect(throws: Refusal.cursorIsNotSettled) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
 
         told.client.left(old)
         #expect(told.arrivals == [Self.textEdit, Self.textEdit])
@@ -379,7 +379,8 @@ import Testing
 
     /// A key settles which window has the keyboard, and the window it ruled out is not lost for
     /// it: once the person moves there and types, that key is the same proof, whether or not
-    /// macOS activates its client again first.
+    /// macOS activates its client again first. Until then the words are refused as not settled,
+    /// which names that key, rather than as no field.
     @Test func aKeyIntoACursorAnotherKeyRuledOutMakesItTheCursor() throws {
         let told = Told()
         let (key, window) = (Controller(), Controller())
@@ -388,7 +389,7 @@ import Testing
         told.client.took(there, by: window)
         told.client.typedInto(key)
         told.client.left(key)
-        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+        #expect(throws: Refusal.cursorIsNotSettled) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
 
         told.client.typedInto(window)
         #expect(try cursor(told.client, whileInFrontIs: Self.textEdit).get() === there)
@@ -406,7 +407,9 @@ import Testing
         try told.client.took(FakeTextInputClient(in: "com.apple.Spotlight").cursor(), by: overlay)
         told.client.left(overlay)
         #expect(told.client.holding(editor) == "holding \(there), not live")
-        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+        #expect(throws: Refusal.cursorIsNotSettled) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+        let seen = told.client.inFront(for: .cursorInFront, whileInFrontIs: Self.textEdit, selected: true, screens: [Self.display])
+        #expect(seen.description == "with com.apple.TextEdit in front and no cursor, 1 of its own ruled out")
 
         told.client.typedInto(editor)
         #expect(told.client.holding(editor) == "holding \(there)")
@@ -436,7 +439,7 @@ import Testing
         try told.client.took(FakeTextInputClient(in: Self.textEdit).cursor())
         told.client.typedInto(Controller())
 
-        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+        #expect(throws: Refusal.cursorIsNotSettled) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
         #expect(told.arrivals == [Self.textEdit])
     }
 
@@ -513,7 +516,7 @@ import Testing
         try client.took(FakeTextInputClient(in: Self.installer).cursor())
         let panel = try panelCursor()
         client.took(panel)
-        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(client, whileInFrontIs: Self.installer).get() }
+        #expect(throws: Refusal.cursorIsNotSettled) { try cursor(client, whileInFrontIs: Self.installer).get() }
 
         client.typedInto(panel)
         #expect(try cursor(client, whileInFrontIs: Self.installer).get() === panel)

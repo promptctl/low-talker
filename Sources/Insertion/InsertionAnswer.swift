@@ -129,12 +129,14 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// here: the person moved, and the rest of what they said belongs beside the words that
     /// landed, not in whatever they moved to.
     case dictationIsInAnotherApp
-    /// Two or more clients of the app in front are focused at once, and nothing says which one
-    /// the person is in: TextEdit launched with restored windows activated two, and the one the
-    /// words went to was behind the key window (low-reliability-z2z.n8z). A key typed into one
-    /// of them settles it, and is the cursor arrival that offers the words again, so the fix
-    /// named is a key that adds no text.
-    case cursorIsInSeveralPlaces
+    /// The app in front holds cursors and nothing says which one the person is in. Two or more
+    /// of its clients are focused at once: TextEdit launched with restored windows activated two,
+    /// and the one the words went to was behind the key window (low-reliability-z2z.n8z). Or none
+    /// is live, though some are held: an activation in another app, or a key typed into another
+    /// window, ruled them out, and macOS did not activate one again. A key typed into one settles
+    /// it, and is the cursor arrival that offers the words again, so the fix named is a key that
+    /// adds no text.
+    case cursorIsNotSettled
     /// The bytes that arrived were not a request. Answered rather than dropped, because a
     /// sender that hears nothing waits out its whole timeout and learns nothing.
     /// [LAW:no-silent-failure] Spelled on the wire as it was when a request was bare text,
@@ -168,8 +170,8 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
         case .noTextFieldHasFocus: "WARNING: No text field has focus. Your dictation was not inserted."
         case .cursorIsInAnotherApp: "WARNING: The cursor is in an app that is not in front. Your dictation was not inserted."
         case .dictationIsInAnotherApp: "WARNING: You moved to another app while dictating."
-        case .cursorIsInSeveralPlaces:
-            "WARNING: More than one window or field of the app in front has the cursor, and the input method cannot tell which you mean. Your dictation was not inserted; press an arrow key where you want it and it is offered again."
+        case .cursorIsNotSettled:
+            "WARNING: The input method cannot tell which window or field of the app in front has the cursor. Your dictation was not inserted; press an arrow key where you want it and it is offered again."
         case .requestWasNotReadable: "WARNING: The input method was asked something it could not read. Nothing was inserted."
         case .inputSourceIsNotSelected:
             "WARNING: \(AppIdentity.displayName) is not the selected input source, so it cannot type. Your dictation was not inserted; select \(AppIdentity.displayName) in the Input menu and it is offered again."
