@@ -148,7 +148,7 @@ public final class DictationInputController: IMKInputController {
             // The app in front is read here, where the workspace is, and handed to the cursor
             // as a value. [LAW:effects-at-boundaries]
             let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-            let arriving = (sender as? IMKTextInput).flatMap { Client($0, inFront: frontmost) }
+            let arriving = (sender as? IMKTextInput).flatMap { Client(IMKClient(client: $0), inFront: frontmost) }
             self.cursor = arriving ?? self.cursor
             arriving.map(FocusedClient.shared.took)
             // [LAW:nothing-unseen] Which controller and which client, so two windows of one app

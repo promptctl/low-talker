@@ -1,5 +1,6 @@
 import Foundation
 @testable import InputMethod
+import InputMethodFakes
 import Insertion
 import os
 import TestProbes
@@ -7,41 +8,17 @@ import Testing
 
 /// Committing on the main actor, and how long an answer waits for it.
 ///
-/// [LAW:behavior-not-structure] Held through `TextCursor`, with a cursor that records what it
-/// was asked and given. The port giving up is played by waiting on the turn at the moment
-/// under test - before the main actor reaches it, while it decides, while it commits - so no
-/// case has to hold the main thread to make an app look hung.
+/// [LAW:behavior-not-structure] Held through the real `Client` over the fake field
+/// (`FakeTextInputClient`), so what an answer claims is held against what the field holds. The
+/// port giving up is played by waiting on the turn at the moment under test - before the main
+/// actor reaches it, while it decides, while the app takes the words - so no case has to hold
+/// the main thread to make an app look hung.
 @Suite struct CommitterTests {
-    /// A cursor in some app, which records what it was given, and runs `during` inside each
-    /// commit.
-    @MainActor private final class Cursor: TextCursor {
-        let application: String
-        var committed: [String] = []
-        /// What each commit asked to take the place of, in step with `committed`.
-        var replaced: [String] = []
-        /// What the client says to every commit: nil takes it, a refusal changes nothing.
-        var refusing: Refusal?
-        var during: () -> Void = {}
-
-        nonisolated init(in application: String = "com.example.editor") { self.application = application }
-
-        // Never asked here: whether a cursor takes words is decided by `FocusedClient`, and
-        // what that decided is handed to the committer as an `InFront`.
-        var field: FieldAnswer { .documentAccess(caretLine: nil) }
-
-        func commit(_ text: String, replacing: String) -> Refusal? {
-            during()
-            committed.append(text)
-            replaced.append(replacing)
-            return refusing
-        }
-    }
-
     private static let request = InsertRequest("🫠 hello", into: .cursorInFront)
 
     /// What `FocusedClient` would have seen: the cursor chosen, or the refusal.
     @MainActor
-    private static func seen(_ cursor: Result<any TextCursor, Refusal>) -> InFront {
+    private static func seen(_ cursor: Result<Client, Refusal>) -> InFront {
         InFront(frontmost: "com.example.editor", secureInputHolder: nil, selected: true, cursorApplication: "com.example.editor",
                 field: nil, screens: [], cursor: cursor)
     }
@@ -51,37 +28,42 @@ import Testing
     /// The words go in, and the answer counts them as a person would: an emoji is one
     /// character to whoever dictated it.
     @MainActor
-    @Test func wordsCommittedInTimeAreAnsweredInsertedWithTheirCount() {
-        let cursor = Cursor()
+    @Test func wordsCommittedInTimeAreAnsweredInsertedWithTheirCount() throws {
+        let field = FakeTextInputClient()
+        let cursor = try field.cursor()
         let turn = Turn()
 
         let did = Committer.place(Self.request, turn: turn, inFront: { Self.seen(.success(cursor)) })
 
-        #expect(cursor.committed == ["🫠 hello"])
+        #expect(field.text == "🫠 hello")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 7, into: cursor.application), seen: Self.seenLine))
         guard case .committed(7, cursor.application, _, _, late: false) = did else { Issue.record("\(did)"); return }
     }
 
-    /// What the request names to replace reaches the client, and an ordinary insert names nothing.
+    /// The words a request names to replace are taken out of the field, and an ordinary insert
+    /// takes nothing out.
     @MainActor
-    @Test func theTextAnInsertReplacesReachesTheClient() {
-        let cursor = Cursor()
-        _ = Committer.place(Self.request, turn: Turn(), inFront: { Self.seen(.success(cursor)) })
-        _ = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "🫠 hello"), turn: Turn(), inFront: { Self.seen(.success(cursor)) })
+    @Test func theTextAnInsertReplacesIsTakenOutOfTheField() throws {
+        let field = FakeTextInputClient(holding: "say ")
+        let cursor = try field.cursor()
 
-        #expect(cursor.replaced == ["", "🫠 hello"])
+        _ = Committer.place(Self.request, turn: Turn(), inFront: { Self.seen(.success(cursor)) })
+        #expect(field.text == "say 🫠 hello")
+        _ = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "🫠 hello"), turn: Turn(), inFront: { Self.seen(.success(cursor)) })
+        #expect(field.text == "say ")
     }
 
-    /// A client that finds the words are not there to take back changes nothing, and the answer
-    /// says so as the refusal it is, not as an insert.
+    /// Words that are not before the caret are not taken back: the field is unchanged, and the
+    /// answer says so as the refusal it is, not as an insert.
     @MainActor
-    @Test func aTakeBackTheClientRefusesIsAnsweredRefused() {
-        let cursor = Cursor()
-        cursor.refusing = .wordsCannotBeTakenBack
+    @Test func aTakeBackOfWordsTheFieldDoesNotHoldIsAnsweredRefused() throws {
+        let field = FakeTextInputClient(holding: "say goodbye")
+        let cursor = try field.cursor()
         let turn = Turn()
 
         let did = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "hello"), turn: turn, inFront: { Self.seen(.success(cursor)) })
 
+        #expect(field.text == "say goodbye")
         #expect(turn.wait(.zero) == .answered(.refused(.wordsCannotBeTakenBack), seen: Self.seenLine))
         guard case .refused(.wordsCannotBeTakenBack, _, late: false) = did else { Issue.record("\(did)"); return }
     }
@@ -100,8 +82,9 @@ import Testing
     /// main actor makes no call into any app - not even to read the field of one that may be
     /// hung - and commits nothing.
     @MainActor
-    @Test func anInsertGivenUpBeforeItIsReachedAsksNoApp() {
-        let cursor = Cursor()
+    @Test func anInsertGivenUpBeforeItIsReachedAsksNoApp() throws {
+        let field = FakeTextInputClient()
+        let cursor = try field.cursor()
         let turn = Turn()
         var decided = 0
 
@@ -113,14 +96,15 @@ import Testing
 
         #expect(did == .letGo)
         #expect(decided == 0)
-        #expect(cursor.committed.isEmpty)
+        #expect(field.text.isEmpty)
     }
 
     /// The port gave up while the main actor was asking which cursor is in front: it answered
     /// busy, so the words are not committed once the answer arrives.
     @MainActor
-    @Test func anInsertGivenUpWhileDecidingIsNotCommitted() {
-        let cursor = Cursor()
+    @Test func anInsertGivenUpWhileDecidingIsNotCommitted() throws {
+        let field = FakeTextInputClient()
+        let cursor = try field.cursor()
         let turn = Turn()
         var answered: Placed.Outcome?
 
@@ -130,7 +114,7 @@ import Testing
         })
 
         #expect(answered == .busy(reached: true))
-        #expect(cursor.committed.isEmpty)
+        #expect(field.text.isEmpty)
         guard case .letGoAfterDeciding(_, Self.seenLine) = did else { Issue.record("\(did)"); return }
     }
 
@@ -147,27 +131,28 @@ import Testing
         guard case .refused(.secureInputIsOn, _, late: true) = did else { Issue.record("\(did)"); return }
     }
 
-    /// The port gave up while the words were being handed over: it answered that the app has
-    /// not taken them yet, naming the app, and the commit finishes - once - and says it
-    /// finished late.
+    /// The port gave up while the app was taking the words: it answered that the app has not
+    /// taken them yet, naming the app, and the commit finishes - once - and says it finished late.
     @MainActor
-    @Test func aCommitOutlastingThePortsWaitIsNotYetTakenAndFinishesOnce() {
-        let cursor = Cursor()
+    @Test func aCommitOutlastingThePortsWaitIsNotYetTakenAndFinishesOnce() throws {
+        let field = FakeTextInputClient()
+        let cursor = try field.cursor()
         let turn = Turn()
         var answered: Placed.Outcome?
-        cursor.during = { answered = turn.wait(.zero) }
+        field.duringInsert = { answered = turn.wait(.zero) }
 
         let did = Committer.place(Self.request, turn: turn, inFront: { Self.seen(.success(cursor)) })
 
         #expect(answered == .notYetTaken(characters: 7, into: cursor.application, seen: Self.seenLine))
-        #expect(cursor.committed == ["🫠 hello"])
+        #expect(field.text == "🫠 hello")
         guard case .committed(7, cursor.application, _, _, late: true) = did else { Issue.record("\(did)"); return }
     }
 
     /// Through the main queue, as the insert port asks: answered in time, the words land in
     /// the order they were asked for, and each turn's end is said.
-    @Test func insertsThroughTheMainActorAreAnsweredAndLandInOrder() async {
-        let cursor = Cursor()
+    @Test func insertsThroughTheMainActorAreAnsweredAndLandInOrder() async throws {
+        let field = FakeTextInputClient()
+        let cursor = try await field.cursor()
         let ends = OSAllocatedUnfairLock(initialState: [Ended]())
         let committer = Committer(bound: .seconds(20)) { ended in ends.withLock { $0.append(ended) } }
 
@@ -178,7 +163,7 @@ import Testing
         }
 
         #expect(answers == [3, 3, 5].map { .inserted(characters: $0, into: "com.example.editor") })
-        #expect(await cursor.committed == ["one", "two", "three"])
+        #expect(await field.text == "onetwothree")
         let said = ends.withLock { $0 }
         #expect(said.map(\.insert) == [1, 2, 3])
         #expect(said.allSatisfy { if case .committed(_, _, _, _, late: false) = $0.did { true } else { false } })
@@ -187,8 +172,9 @@ import Testing
     /// Through the main queue while something else holds it - another app's stalled commit, or
     /// anything at all: the port answers busy at its bound, and the main actor, reaching the
     /// insert after that, lets it go without asking any app and says how long it waited.
-    @Test func anInsertTheMainActorDoesNotReachInTimeIsBusyAndAsksNoApp() async {
-        let cursor = Cursor()
+    @Test func anInsertTheMainActorDoesNotReachInTimeIsBusyAndAsksNoApp() async throws {
+        let field = FakeTextInputClient()
+        let cursor = try await field.cursor()
         let decided = OSAllocatedUnfairLock(initialState: 0)
         let ends = OSAllocatedUnfairLock(initialState: [Ended]())
         let committer = Committer(bound: .milliseconds(50)) { ended in ends.withLock { $0.append(ended) } }
@@ -215,7 +201,50 @@ import Testing
         #expect(said.map(\.did) == [.letGo])
         #expect(said.allSatisfy { $0.waited >= .milliseconds(50) })
         #expect(decided.withLock { $0 } == 0)
-        #expect(await cursor.committed.isEmpty)
+        #expect(await field.text.isEmpty)
+    }
+
+    // MARK: a field that keeps less than it is handed (low-reliability-z2z.rgy)
+
+    /// Thirty characters dictated into `field`, through the decision and the commit as an insert
+    /// arriving on the port is, with the field's app in front on studious's one display.
+    @MainActor
+    private static func dictate(into field: FakeTextInputClient) throws -> Placed.Outcome {
+        let client = FocusedClient()
+        let cursor = try field.cursor()
+        client.took(cursor)
+        let turn = Turn()
+        _ = Committer.place(InsertRequest("alpha bravo charlie delta echo", into: .cursorInFront), turn: turn, inFront: {
+            client.inFront(for: .cursorInFront, whileInFrontIs: cursor.application, secureInputHeldBy: nil, selected: true,
+                           screens: [CGRect(x: 0, y: 0, width: 1600, height: 900)])
+        })
+        return turn.wait(.zero)
+    }
+
+    /// Safari's and Chrome's `<input maxlength=10>` gives no document access, as measured, so the
+    /// words are refused before any commit, as for a window with no text field, and the app holds
+    /// them: the field is left empty, and cannot be dictated into at all.
+    @MainActor
+    @Test func aDictationIntoAWebKitInputIsRefusedAsNoTextField() throws {
+        let field = FakeTextInputClient(in: "com.apple.Safari", .webKitInput, maxLength: 10)
+
+        guard case .answered(.refused(.noTextFieldHasFocus), _) = try Self.dictate(into: field) else { Issue.record("not refused"); return }
+        #expect(field.text.isEmpty)
+    }
+
+    /// A `<textarea>` gives document access, and one that keeps 10 of the 30 characters it is
+    /// handed (a `maxlength`, unmeasured on a textarea: low-test-layers-sqm.8m3) is answered
+    /// inserted with all 30, while 20 never reached the field and nothing holds them. What the
+    /// input method answers today, and the answer low-reliability-z2z.rgy changes.
+    @MainActor
+    @Test func aDictationIntoATextAreaThatKeepsTenOfThirtyIsAnsweredInsertedWithThirty() throws {
+        let field = FakeTextInputClient(in: "com.apple.Safari", .webKitTextArea, maxLength: 10)
+
+        guard case .answered(.inserted(characters: 30, into: "com.apple.Safari"), _) = try Self.dictate(into: field) else {
+            Issue.record("not answered inserted")
+            return
+        }
+        #expect(field.text == "alpha brav")
     }
 
     /// The port's line for each way its wait can end, numbered as the main actor's line is.
