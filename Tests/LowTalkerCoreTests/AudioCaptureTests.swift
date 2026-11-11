@@ -68,7 +68,7 @@ private final class FakeHardware: AudioHardware {
 
         /// The device this is bound to, as an open says it.
         var microphone: MicrophoneInput {
-            MicrophoneInput(device: AudioObjectID(device), name: .success("Device \(device)"), sampleRate: 48_000, channels: 1)
+            MicrophoneInput(device: AudioObjectID(device), name: .success("Device \(device)"), sampleRate: 48_000, channels: 1, heard: HeardChannels(of: 1, stereo: .named(1, 1)))
         }
 
         var isOnTheDefaultInput: Bool { device == hardware.defaultInput }
@@ -545,7 +545,7 @@ private struct Authorized: MicrophoneAuthority {
         hardware.engines[0].appending([0.25], after(4) + .milliseconds(40))
         let reading = capture.endSession(session).reading
         #expect(reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 3, peak: 0.75, firstSample: .milliseconds(40)))
-        #expect(reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) delivered 0.0 s (3 samples) peaking at -2.5 dBFS, the first 40 ms after the key went down")
+        #expect(reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered 0.0 s (3 samples) peaking at -2.5 dBFS, the first 40 ms after the key went down")
     }
 
     /// A press whose microphone delivered nothing reads as nothing, not as a quiet room: no
@@ -556,7 +556,7 @@ private struct Authorized: MicrophoneAuthority {
         let session = capture.stream(try await opened(capture))
         let end = capture.endSession(session)
         #expect(end.reading == CapturedAudio.Reading(inputs: [hardware.engines[0].input.microphone], samples: 0, peak: 0, firstSample: nil))
-        #expect(end.reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) delivered nothing after the key went down")
+        #expect(end.reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered nothing after the key went down")
         #expect(end.lost?.unopened == .noAudio)
     }
 
@@ -570,7 +570,7 @@ private struct Authorized: MicrophoneAuthority {
         let reading = capture.endSession(session).reading
         #expect(reading.samples == AudioClip.sampleCount(for: 1))
         #expect(reading.peak == 0)
-        #expect(reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) delivered 1.0 s (16000 samples) of digital silence, the first 0 ms after the key went down")
+        #expect(reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered 1.0 s (16000 samples) of digital silence, the first 0 ms after the key went down")
     }
 
     /// The device under a press went away and capture relaunched on the one that replaced
@@ -587,7 +587,7 @@ private struct Authorized: MicrophoneAuthority {
         let end = capture.endSession(session)
         #expect(end.reading.inputs == [hardware.engines[0].input.microphone, hardware.engines[1].input.microphone])
         #expect(end.reading.samples == 2)
-        #expect(end.reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel) then \"Device 2\" (device 2, 48000 Hz, 1 channel) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
+        #expect(end.reading.description == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) then \"Device 2\" (device 2, 48000 Hz, 1 channel, heard on channel 1) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
         #expect(end.lost?.interrupted == true)
     }
 

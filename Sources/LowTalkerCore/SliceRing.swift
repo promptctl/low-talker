@@ -68,12 +68,12 @@ final class SliceRing: @unchecked Sendable {
     /// Slices and faults that found the ring full and were never handed over.
     var dropped: Int { droppedCount.load(ordering: .relaxed) }
 
-    /// Producer end: copies `frames` frames of `list` in, planar. `layout` says how many
-    /// channels each buffer carries: an interleaved buffer of k channels is de-interleaved to
-    /// k rings, and a buffer of one is copied as it is. The caller has already held `list` to
+    /// Producer end: copies `frames` frames of `list`'s heard channels in, planar, and no other
+    /// channel. A channel of an interleaved buffer of k channels is de-interleaved from every
+    /// k-th sample, and a buffer of one is copied as it is. The caller has already held `list` to
     /// `layout` (`InputLayout.verdict`), which is what makes every read here in bounds.
     func push(_ list: UnsafePointer<AudioBufferList>, layout: InputLayout, frames: Int, stamp: AudioTimeStamp) {
-        precondition(layout.channels == channels, "a ring is made for the channels of the layout it is pushed")
+        precondition(layout.heard.count == channels, "a ring is made for the channels its layout hears")
         let start = framesPushed
         guard start + frames - framesPopped.load(ordering: .acquiring) <= capacity else {
             return drop()
@@ -82,18 +82,16 @@ final class SliceRing: @unchecked Sendable {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         let at = start % capacity
         let head = min(frames, capacity - at)
-        for index in 0..<layout.buffers.count {
-            let width = layout.buffers[index]
-            let source = list[index].mData!.assumingMemoryBound(to: Float.self)
-            for lane in 0..<width {
-                let ring = samples + (layout.offsets[index] + lane) * capacity
-                if width == 1 {
-                    (ring + at).update(from: source, count: head)
-                    ring.update(from: source + head, count: frames - head)
-                } else {
-                    for frame in 0..<head { ring[at + frame] = source[frame * width + lane] }
-                    for frame in 0..<(frames - head) { ring[frame] = source[(head + frame) * width + lane] }
-                }
+        for (channel, heard) in layout.heard.enumerated() {
+            let width = layout.buffers[heard.buffer]
+            let source = list[heard.buffer].mData!.assumingMemoryBound(to: Float.self) + heard.lane
+            let ring = samples + channel * capacity
+            if width == 1 {
+                (ring + at).update(from: source, count: head)
+                ring.update(from: source + head, count: frames - head)
+            } else {
+                for frame in 0..<head { ring[at + frame] = source[frame * width] }
+                for frame in 0..<(frames - head) { ring[frame] = source[(head + frame) * width] }
             }
         }
         framesPushed = start + frames
