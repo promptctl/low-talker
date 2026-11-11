@@ -1,6 +1,5 @@
 import Foundation
 @testable import InputMethod
-import os
 import TestProbes
 import Testing
 

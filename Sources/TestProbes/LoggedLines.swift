@@ -11,15 +11,12 @@ import OSLog
 /// Under the parallel suite the store hands one entry back twice, about one read in seven: the
 /// same date to the tenth of a microsecond, the same thread, the same message, a measured wait
 /// included (low-unfiled-50ff.88w). Kept once by that identity, so a line logged once is read once.
-/// The entries' dates read about 30 ms behind `Date.now` (2026-11-11), so a `date >= since`
-/// filter would drop the lines a test has just logged.
 public func loggedLines(category: String, since: Date) async throws -> [String] {
     try await onAThreadOfItsOwn {
         let store = try OSLogStore(scope: .currentProcessIdentifier)
         var read = Set<Entry>()
         return try store.getEntries(at: store.position(date: since), matching: NSPredicate(format: "category == %@", category))
-            // A category's entries are its log lines: nothing in this program signposts.
-            .map { Entry($0 as! OSLogEntryLog) }
+            .compactMap { ($0 as? OSLogEntryLog).map(Entry.init) }
             .filter { read.insert($0).inserted }
             .map(\.message)
     }
