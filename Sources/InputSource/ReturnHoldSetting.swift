@@ -6,19 +6,13 @@ import Foundation
 ///
 /// [LAW:one-source-of-truth] The app's preferences are the record. The input method asks the app
 /// about it at each Return and keeps no copy of its own.
-public struct ReturnHoldSetting {
+public enum ReturnHoldSetting {
     private static let key = "holdReturnForDictation"
 
-    private let defaults: UserDefaults
-
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
     /// Off until a person turns it on, and off when nothing was ever written.
-    public var isOn: Bool { defaults.bool(forKey: Self.key) }
+    public static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
 
-    public func set(_ on: Bool) {
-        defaults.set(on, forKey: Self.key)
+    public static func set(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: key)
     }
 }
