@@ -95,11 +95,12 @@ public final class DictationInputController: IMKInputController, InputController
     nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {
         // IMK hands the command while the key is still down, so the modifiers held as it arrives are
         // the key's own. Read before the hop, which can wait out a Return the main thread is holding,
-        // and handed on as a value. [LAW:effects-at-boundaries]
-        let modifiers = NSEvent.modifierFlags
+        // and handed on as a value: a read of the window server's modifier state, not a call on the
+        // client, so off the main actor is where it belongs. [LAW:effects-at-boundaries]
+        let command = (selector: selector, modifiers: NSEvent.modifierFlags)
         // Debug level: this is made once per key typed anywhere.
-        return onMainActor("didCommand", (selector, modifiers), level: .debug) { command in
-            self.didCommand(by: command.0, holding: command.1)
+        return onMainActor("didCommand", command, level: .debug) { command in
+            self.didCommand(by: command.selector, holding: command.modifiers)
         }
     }
 
@@ -109,8 +110,7 @@ public final class DictationInputController: IMKInputController, InputController
         let key = SteeringKey(command: selector, holding: modifiers)
         // [LAW:nothing-unseen] A Return under a modifier is declined as another key, so the line says
         // which command came and what it was taken for.
-        let command = selector.map(NSStringFromSelector) ?? "no command"
-        imkLog.debug("\(self.said("was handed \(command), \(key.map { "a steering key, \($0)" } ?? "not a steering key")"), privacy: .public)")
+        imkLog.debug("\(self.said("was handed \(selector.map(NSStringFromSelector) ?? "no command"), \(key.map { "a steering key, \($0)" } ?? "not a steering key")"), privacy: .public)")
         switch key {
         case .return?: return holdReturn()
         case .escape?:

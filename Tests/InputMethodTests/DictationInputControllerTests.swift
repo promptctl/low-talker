@@ -108,10 +108,11 @@ import Testing
     }
 
     /// A call carrying no selector, which IMK may make, is declined rather than trapping and taking the
-    /// input method down.
+    /// input method down. Asked through IMK's own override, the edge that could trap; with no command,
+    /// the keys this Mac holds change nothing.
     @Test func aCallWithNoSelectorIsDeclined() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        #expect(controller.didCommand(by: nil, holding: []) == false)
+        #expect(controller.didCommand(by: nil, client: nil) == false)
     }
 
     /// A cursor given focus is told to the app, which offers it words no cursor took. Other notices
