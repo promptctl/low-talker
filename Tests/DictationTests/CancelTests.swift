@@ -393,10 +393,15 @@ import TestProbes
         }
     }
 
-    /// A cancelled press's account agrees with each of its counts, a count of one included.
-    @Test func aCancelledPressTellsEachCountOfOneAsOne() {
-        let one = Cancelled(takenBack: 1, earlierWordsLanded: 1, forgotten: 1, dismissed: 1, standing: 1, discarded: 1)
-        #expect("\(one)" == "1 word taken back, 1 held word let go, 1 heard after the commits dropped; "
-            + "1 earlier word delivered with its first insert stays, 1 dismissed word stays dismissed, 1 word that may have landed stands")
+    /// A cancelled press's account agrees with each of its counts, one and more than one.
+    @Test(arguments: [
+        (1, "1 word taken back, 1 held word let go, 1 heard after the commits dropped; "
+            + "1 earlier word delivered with its first insert stays, 1 dismissed word stays dismissed, 1 word that may have landed stands"),
+        (2, "2 words taken back, 2 held words let go, 2 heard after the commits dropped; "
+            + "2 earlier words delivered with its first insert stay, 2 dismissed words stay dismissed, 2 words that may have landed stand"),
+    ])
+    func aCancelledPressTellsEachCountInItsNumber(_ count: Int, _ told: String) {
+        let cancelled = Cancelled(takenBack: count, earlierWordsLanded: count, forgotten: count, dismissed: count, standing: count, discarded: count)
+        #expect("\(cancelled)" == told)
     }
 }

@@ -46,7 +46,7 @@ public final class Recovery {
         troubles = read.setAside
         for line in read.setAside { Self.log.fault("\(line, privacy: .public)") }
         if !read.entries.isEmpty {
-            Self.log.notice("\(read.entries.count, privacy: .public) kept speeches were found at launch, \(Self.seconds(read.entries), privacy: .public) s, waiting for the model")
+            Self.log.notice("\(counted(read.entries.count, "kept speech was found", "kept speeches were found"), privacy: .public) at launch, \(Self.seconds(read.entries), privacy: .public) s, waiting for the model")
         }
     }
 
@@ -84,7 +84,7 @@ public final class Recovery {
         for entry in kept {
             do throws(UnheardFault) { try store.remove(entry) } catch { troubles.append("kept speech \(entry.id) could not be removed: \(error)") }
         }
-        Self.log.notice("the person discarded \(self.kept.count, privacy: .public) kept speeches, \(Self.seconds(self.kept), privacy: .public) s")
+        Self.log.notice("the person discarded \(counted(self.kept.count, "kept speech", "kept speeches"), privacy: .public), \(Self.seconds(self.kept), privacy: .public) s")
         kept = []
         unread = [:]
     }

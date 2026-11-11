@@ -1167,7 +1167,7 @@ public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
 /// words were still dealt with, as `cancelled` says.
 ///
 /// [LAW:no-silent-failure] Says how many words stay, in which app, and why, and that nothing more
-/// was done to them.
+/// was done.
 public struct CancelLeftWords: WordFree {
     /// The press's own words that landed, which the take-back was to remove.
     public let left: Int

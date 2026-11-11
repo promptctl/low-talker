@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import GrammaticalNumber
 
 /// What a device's IOProc hands over, as a shape: how many buffers there are, how many
 /// channels each carries, and the one sample rate they share.
@@ -142,14 +143,14 @@ public struct ShapeMismatch: Equatable, Sendable, CustomStringConvertible {
     let gotBytes: Int
 
     public var description: String {
-        let held = "buffer \(buffer) of \(gotBuffers) held \(gotBytes) bytes"
+        let held = "buffer \(buffer) of \(gotBuffers) held \(counted(gotBytes, "byte", "bytes"))"
         switch reason {
-        case .bufferCount: return "\(gotBuffers) buffers where \(expectedBuffers) were expected"
-        case .channels: return "\(held) over \(gotChannels) channels where \(expectedChannels) were expected"
-        case .partialFrame: return "\(held), which is not a whole number of frames of \(expectedChannels) channels"
+        case .bufferCount: return "\(counted(gotBuffers, "buffer", "buffers")) where \(counted(expectedBuffers, "was expected", "were expected"))"
+        case .channels: return "\(held) over \(counted(gotChannels, "channel", "channels")) where \(counted(expectedChannels, "was expected", "were expected"))"
+        case .partialFrame: return "\(held), which is not a whole number of frames of \(counted(expectedChannels, "channel", "channels"))"
         case .noMemory: return "\(held) with no memory behind them"
         case .unequalFrames(let before):
-            return "\(held), \(gotBytes / (MemoryLayout<Float>.size * max(expectedChannels, 1))) frames where the buffers before it held \(before)"
+            return "\(held), \(counted(gotBytes / (MemoryLayout<Float>.size * max(expectedChannels, 1)), "frame", "frames")) where the buffers before it held \(before)"
         }
     }
 }
