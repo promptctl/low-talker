@@ -198,8 +198,10 @@ import Testing
         #expect(loop.hotkey.phase == .idle)
         let after = loop.rig.shown.activities.dropFirst(shownBefore)
         #expect(!after.isEmpty)
-        for activity in after { box.show(activity, over: ready, held: loop.rig.hold.held, insertable: true) }
-        #expect(panel.face == nil)
+        for activity in after {
+            box.show(activity, over: ready, held: loop.rig.hold.held, insertable: true)
+            #expect(panel.face == nil, "shown \(activity) after the Escape")
+        }
     }
 
     /// A Return the input method reports passed through it, held and sent there: the press stays
