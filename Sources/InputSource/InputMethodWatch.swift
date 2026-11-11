@@ -91,22 +91,17 @@ public struct InputMethodWatch: Sendable {
 
     private func running(_ pid: Int32) -> InputMethodStanding {
         guard let arrival, arrival.pid == pid else { return .running(pid: pid, build: .notYetSaid) }
-        return BuildMismatch(app: app, inputMethod: arrival.build).map { .otherBuild(pid: pid, $0) }
-            ?? .running(pid: pid, build: .sameBuild)
+        return .running(pid: pid, build: arrival.build == app ? .sameBuild : .otherBuild(arrival.build))
     }
 }
 
 /// Where the input method stands for the app.
 public enum InputMethodStanding: Equatable, Sendable, CustomStringConvertible {
-    /// Running, and words may go to it: its build is the app's, or it has not said its build
-    /// yet. Not yet said is not refused here. Its greeting says the build before any words go,
-    /// and the inserter refuses there. A process the supervisor launched is given the client
-    /// in front at once (`InputMethodSupervisor`), so its first arrival follows straight away.
-    /// One already running says its build at the next cursor it is given, and one from before
-    /// cursor arrivals only in the first press's greeting.
+    /// Running, and words go to it, whichever build it said. The build is for the log, which
+    /// is where a person reads which build is answering. A process the supervisor launched is
+    /// given the client in front at once (`InputMethodSupervisor`), so its first arrival
+    /// follows straight away; one already running says its build at the next cursor it is given.
     case running(pid: Int32, build: Said)
-    /// Running, and of another build, so no words go to it.
-    case otherBuild(pid: Int32, BuildMismatch)
     case ended(pid: Int32)
     /// Ending, or ended, by its own hand, holding more memory than its ceiling.
     case overMemoryCeiling(pid: Int32, Overrun)
@@ -114,14 +109,17 @@ public enum InputMethodStanding: Equatable, Sendable, CustomStringConvertible {
 
     public enum Said: Equatable, Sendable {
         case sameBuild
+        /// Another build than the app's, or none, which is what an input method from before
+        /// builds were compared says.
+        case otherBuild(Build?)
         case notYetSaid
     }
 
     public var description: String {
         switch self {
         case let .running(pid, .sameBuild): "process \(pid) running, of this app's build"
+        case let .running(pid, .otherBuild(build)): "process \(pid) running, of \(build.map(\.description) ?? "a build from before builds were compared, saying none")"
         case let .running(pid, .notYetSaid): "process \(pid) running, its build not yet said"
-        case let .otherBuild(pid, mismatch): "process \(pid) running, \(mismatch.facts)"
         case let .ended(pid): "process \(pid) ended"
         case let .overMemoryCeiling(pid, overrun): "process \(pid) ending itself, \(overrun)"
         case let .notOpened(reason): "not opened: \(reason)"

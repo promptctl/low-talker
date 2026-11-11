@@ -46,6 +46,26 @@ public struct InsertRequest: Codable, Equatable, Sendable {
         self.destination = destination
         self.replacing = replacing
     }
+
+    // A field at its default is left out of the JSON and an absent one reads as its default,
+    // so an ordinary insert is the same bytes to an input method that knows a field as to one
+    // that does not. Every field a later build adds keeps this rule, or the input methods
+    // before it refuse every request it writes (`Wire.request(of:)`).
+    private enum CodingKeys: CodingKey { case text, destination, replacing }
+
+    public init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            try fields.decode(String.self, forKey: .text), into: try fields.decode(Destination.self, forKey: .destination),
+            replacing: try fields.decodeIfPresent(String.self, forKey: .replacing) ?? "")
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        try fields.encode(text, forKey: .text)
+        try fields.encode(destination, forKey: .destination)
+        try fields.encodeIfPresent(replacing.isEmpty ? nil : replacing, forKey: .replacing)
+    }
 }
 
 /// What the input method did with the text it was asked to insert.
@@ -137,11 +157,15 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// it, and is the cursor arrival that offers the words again, so the fix named is a key that
     /// adds no text.
     case cursorIsNotSettled
-    /// The bytes that arrived were not a request. Answered rather than dropped, because a
-    /// sender that hears nothing waits out its whole timeout and learns nothing.
-    /// [LAW:no-silent-failure] Spelled on the wire as it was when a request was bare text,
-    /// because that is how an input method from then refuses a request it cannot read, and
-    /// the app has to read that refusal as one rather than as an answer it cannot read.
+    /// The bytes that arrived were not a request this input method reads whole. Answered rather
+    /// than dropped, because a sender that hears nothing waits out its whole timeout and learns
+    /// nothing. [LAW:no-silent-failure] An app and an input method of one build always read
+    /// each other, so this is an input method of another build: one older than a field or a
+    /// destination the request carries, or one from before requests were read whole, which
+    /// refuses every request this build writes. Spelled on the wire as it was when a request
+    /// was bare text, because that is how an input method from then refuses a request it
+    /// cannot read, and the app has to read that refusal as one rather than as an answer it
+    /// cannot read.
     case requestWasNotReadable = "requestWasNotText"
     /// Another input source is selected, so the text input system hands this input method
     /// no client to type into. Its own reason and not `noTextFieldHasFocus`, because the fix
@@ -172,7 +196,8 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
         case .dictationIsInAnotherApp: "WARNING: You moved to another app while dictating."
         case .cursorIsNotSettled:
             "WARNING: The input method cannot tell which window or field of the app in front has the cursor. Your dictation was not inserted; press an arrow key where you want it and it is offered again."
-        case .requestWasNotReadable: "WARNING: The input method was asked something it could not read. Nothing was inserted."
+        case .requestWasNotReadable:
+            "WARNING: The input method is from another build of \(AppIdentity.displayName) and could not read what it was asked. Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
         case .inputSourceIsNotSelected:
             "WARNING: \(AppIdentity.displayName) is not the selected input source, so it cannot type. Your dictation was not inserted; select \(AppIdentity.displayName) in the Input menu and it is offered again."
         case .senderIsNotThisInstallationsApp:
@@ -266,21 +291,23 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
 /// fails in front of it, and a new way is a new case the compiler walks every reader to.
 public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     case refused(Refusal)
+    /// Refused for a reason this build has no name for, which only an input method of a later
+    /// build can give. A refusal commits nothing, whatever its reason, so the words are held
+    /// like any refusal's and not taken for words that may have landed.
+    case refusedForAnUnknownReason(String)
     case notYetTaken(NotYetTaken)
     case unreachable(Unreachable)
     /// This end could not write down who may answer, so it asked nobody.
     case answererUnreadable(PeerIdentity.Unreadable)
-    /// The input method that answered the greeting is from another build, so the words were
-    /// not sent: what it would make of them is not this build's to know.
-    case buildMismatch(BuildMismatch)
 
     public var description: String {
         switch self {
         case .refused(let refusal): "\(refusal)"
+        case .refusedForAnUnknownReason(let reason):
+            "WARNING: The input method is from a later build of \(AppIdentity.displayName) and refused your dictation for a reason this app does not know (\(reason)). Your dictation was not inserted."
         case .notYetTaken(let notYetTaken): "\(notYetTaken)"
         case .unreachable(let unreachable): "\(unreachable)"
         case .answererUnreadable(let unreadable): "WARNING: The app could not say which input method may answer it: \(unreadable). Your dictation was not sent."
-        case .buildMismatch(let mismatch): "\(mismatch)"
         }
     }
 
@@ -293,7 +320,7 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
         switch self {
         case .notYetTaken: true
         case .unreachable(let unreachable): unreachable.words == .mayHaveLanded
-        case .refused, .answererUnreadable, .buildMismatch: false
+        case .refused, .refusedForAnUnknownReason, .answererUnreadable: false
         }
     }
 }
@@ -313,6 +340,13 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
 /// JSON, which is the codec Swift already writes for them. Both directions are held by
 /// tests against the values, never against the bytes: what matters is that what goes in
 /// comes out. [LAW:behavior-not-structure]
+///
+/// The app and the input method may be of different builds, so each reads the other as far
+/// as it can and refuses or reports the rest by name. A request is an order, and is done
+/// only when read whole: one carrying anything this build does not know is refused, never
+/// done as something it is not. An answer is a report, and a refusal in it stays a refusal
+/// whatever reason it names. A notice or a question the app does not know is let go, and the
+/// input method hears its question was dropped. [LAW:no-silent-failure]
 enum Wire {
     static let greeting: mach_msg_id_t = 1
     static let insert: mach_msg_id_t = 2
@@ -332,17 +366,28 @@ enum Wire {
     /// The first byte of every request, and one no UTF-8 text contains. An input method built
     /// when a request was its bare text, still running past an install, reads this as bytes
     /// that are not text and refuses them, rather than typing the request out.
-    static let requestMark: UInt8 = 0xFF
+    ///
+    /// 0xFF was the mark while a request was read by the fields the reader knew, the rest
+    /// passed over, so an input method from then would do a request to take words back as one
+    /// to insert nothing. It refuses this mark as it refuses any bytes that are not a request.
+    static let requestMark: UInt8 = 0xFE
 
     // The encoder cannot fail on these types: every case holds `Codable` primitives and
     // nothing else. Said here, at the one place it is true, rather than as a throw every
     // caller would carry and none could act on.
     static func request(_ request: InsertRequest) -> Data { Data([requestMark]) + (try! JSONEncoder().encode(request)) }
 
-    /// [LAW:parse-dont-validate] A request or nothing at all.
+    /// [LAW:parse-dont-validate] A request read whole, or nothing at all. Whole is the JSON
+    /// written again from the request being the JSON that arrived, which a key, a destination
+    /// or a value this build does not know cannot pass: it is lost in the reading, and doing
+    /// the rest of the request would be doing something the app did not ask.
     static func request(of data: Data) -> InsertRequest? {
-        guard data.first == requestMark else { return nil }
-        return try? JSONDecoder().decode(InsertRequest.self, from: data.dropFirst())
+        let json = { (data: Data) in (try? JSONSerialization.jsonObject(with: data)) as? NSObject }
+        guard data.first == requestMark,
+              let request = try? JSONDecoder().decode(InsertRequest.self, from: data.dropFirst()),
+              json(data.dropFirst()) == json(Self.request(request).dropFirst())
+        else { return nil }
+        return request
     }
 
     static func answer(_ answer: InsertionAnswer) -> Data { try! JSONEncoder().encode(answer) }
@@ -364,14 +409,15 @@ enum Wire {
     /// insert's answer, because the port refuses a sender the same way whichever message
     /// it sent.
     static func greeting(of data: Data) -> Greeting? {
-        if let build = build(of: data) { return .admitted(by: build) }
+        if build(of: data) != nil { return .admitted }
         guard case .refused(let refusal)? = answer(of: data) else { return nil }
         return .refused(refusal)
     }
 
+    /// Admitted whichever build the input method said, since words go to an input method of
+    /// any build, or refused.
     enum Greeting: Equatable {
-        /// Admitted, by an input method that said this build, or none.
-        case admitted(by: Build?)
+        case admitted
         case refused(Refusal)
     }
 
@@ -381,6 +427,16 @@ enum Wire {
     /// is believed, and it refuses one at its own border, in `Client.init?`. [LAW:single-enforcer]
     static func answer(of data: Data) -> InsertionAnswer? {
         try? JSONDecoder().decode(InsertionAnswer.self, from: data)
+    }
+
+    /// The reason a refusal names, read for one `answer(of:)` cannot read: a refusal for a
+    /// reason this build has no name for. Nil for bytes that are no refusal at all.
+    static func refusalReason(of data: Data) -> String? {
+        struct Refused: Decodable {
+            struct Reason: Decodable { let _0: String }
+            let refused: Reason
+        }
+        return (try? JSONDecoder().decode(Refused.self, from: data))?.refused._0
     }
 
     static func overrun(_ overrun: Overrun) -> Data { try! JSONEncoder().encode(overrun) }

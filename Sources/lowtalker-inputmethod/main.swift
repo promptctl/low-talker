@@ -23,15 +23,14 @@ private let logger = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, 
 
 /// This process's build, read off its bundle before anything else here runs, so it is the
 /// build that was launched and not one an install has since put on disk. Said to the app in
-/// every greeting and every arrival, which is how the app sends words only to its own build.
+/// every greeting and every arrival, so the app's log names the build answering it.
 ///
-/// A bundle that carries none says none, and the app holds every word and says why; keys still
-/// pass through. The build refuses to make such a bundle, so the fault says it was not built
-/// here. [LAW:no-silent-failure]
+/// A bundle that carries none says none. The build refuses to make such a bundle, so the fault
+/// says it was not built here. [LAW:no-silent-failure]
 let build: Build? = {
     let build = Build(of: .main)
     if build == nil {
-        logger.fault("this bundle carries no build number or source revision, so the app will send it no words; it was not built by `make app`")
+        logger.fault("this bundle carries no build number or source revision, so the app cannot say which build answers it; it was not built by `make app`")
     }
     return build
 }()

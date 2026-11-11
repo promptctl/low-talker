@@ -23,23 +23,24 @@ private let another = Build(number: "9", revision: "ba9876543210")
         #expect(watch.standing == .running(pid: 7, build: .sameBuild))
     }
 
+    /// Running, so words go to it and the line says how to press, and of the build it said.
     @Test(arguments: [Optional(another), nil])
-    func aProcessOfAnotherBuildIsOtherBuild(said: Build?) throws {
+    func aProcessOfAnotherBuildRunsAsThatBuild(said: Build?) {
         var watch = InputMethodWatch(app: app)
         _ = watch.told(.running(pid: 7, opening: 1))
         _ = watch.heard(.cursorArrived(CursorArrival(pid: 7, build: said)))
-        #expect(watch.standing == .otherBuild(pid: 7, try #require(BuildMismatch(app: app, inputMethod: said))))
+        #expect(watch.standing == .running(pid: 7, build: .otherBuild(said)))
     }
 
     /// A loop rebuilt makes a new supervisor, whose first word is the process already running.
-    /// That process is still the build it said, so the mismatch stands rather than reading as
-    /// listening.
-    @Test func aRebuiltSupervisorKeepsTheBuildTheRunningProcessSaid() throws {
+    /// That process is still the build it said, so it stands as that build rather than reading
+    /// as not yet said.
+    @Test func aRebuiltSupervisorKeepsTheBuildTheRunningProcessSaid() {
         var watch = InputMethodWatch(app: app)
         _ = watch.told(.running(pid: 7, opening: 1))
         _ = watch.heard(.cursorArrived(CursorArrival(pid: 7, build: another)))
         _ = watch.told(.running(pid: 7, opening: 1))
-        #expect(watch.standing == .otherBuild(pid: 7, try #require(BuildMismatch(app: app, inputMethod: another))))
+        #expect(watch.standing == .running(pid: 7, build: .otherBuild(another)))
     }
 
     /// The process the supervisor opens next is not the one that said a build, so nothing it
@@ -58,12 +59,12 @@ private let another = Build(number: "9", revision: "ba9876543210")
 
     /// A process can be handed a cursor before the supervisor hears it is running, and what it
     /// said then counts once it is.
-    @Test func anArrivalBeforeTheSupervisorsWordCountsOnceItComes() throws {
+    @Test func anArrivalBeforeTheSupervisorsWordCountsOnceItComes() {
         var watch = InputMethodWatch(app: app)
         _ = watch.told(.ended(pid: 7, launched: nil))
         _ = watch.heard(.cursorArrived(CursorArrival(pid: 8, build: another)))
         _ = watch.told(.running(pid: 8, opening: 2))
-        #expect(watch.standing == .otherBuild(pid: 8, try #require(BuildMismatch(app: app, inputMethod: another))))
+        #expect(watch.standing == .running(pid: 8, build: .otherBuild(another)))
     }
 
     @Test func aProcessThatCouldNotBeOpenedSaysWhy() {
@@ -82,11 +83,10 @@ private let another = Build(number: "9", revision: "ba9876543210")
 
     /// An arrival in each app the person moves to shows nothing, so the line keeps whatever
     /// else it says, and only one that moves the standing is shown and logged.
-    @Test func anArrivalIsShownOnlyWhenItMovesTheStanding() throws {
+    @Test func anArrivalIsShownOnlyWhenItMovesTheStanding() {
         var watch = InputMethodWatch(app: app)
         _ = watch.told(.running(pid: 7, opening: 1))
-        let mismatch = try #require(BuildMismatch(app: app, inputMethod: another))
-        #expect(watch.heard(.cursorArrived(CursorArrival(pid: 7, build: another))) == .init(standing: .otherBuild(pid: 7, mismatch), isNew: true))
+        #expect(watch.heard(.cursorArrived(CursorArrival(pid: 7, build: another))) == .init(standing: .running(pid: 7, build: .otherBuild(another)), isNew: true))
         #expect(watch.heard(.cursorArrived(CursorArrival(pid: 7, build: another))) == nil)
         _ = watch.told(.running(pid: 8, opening: 2))
         #expect(watch.heard(.cursorArrived(CursorArrival(pid: 8, build: app))) == .init(standing: .running(pid: 8, build: .sameBuild), isNew: true))

@@ -1,5 +1,4 @@
 import Foundation
-import Identity
 
 /// One build of LowTalker: the build number its bundle carries, and the source revision it
 /// was built from.
@@ -38,35 +37,4 @@ public struct Build: Codable, Hashable, Sendable, CustomStringConvertible {
     }
 
     public var description: String { "build \(number) (\(revision))" }
-}
-
-/// The app and the input method answering it are not from one build.
-///
-/// [LAW:single-enforcer] The one place the rule is written: the inserter refuses to send
-/// words across a mismatch, and the app's status line says one stands, both by asking here.
-public struct BuildMismatch: Error, Equatable, Sendable, CustomStringConvertible {
-    public let app: Build
-    /// The build the input method said, or nothing when it said none, which is what every
-    /// input method from before builds were compared says.
-    public let inputMethod: Build?
-
-    /// A mismatch between `app` and what the input method said, or nil when it said `app`.
-    public init?(app: Build, inputMethod: Build?) {
-        guard inputMethod != app else { return nil }
-        self.app = app
-        self.inputMethod = inputMethod
-    }
-
-    /// The two builds, as a status line and the log say them.
-    public var facts: String {
-        "the input method is \(inputMethod.map(\.description) ?? "from before builds were compared, saying no build"), and the app is \(app)"
-    }
-
-    /// What makes the two one build again: an install puts both bundles down from one build
-    /// and starts both processes again.
-    public static let fix = "reinstall \(AppIdentity.displayName) so the two match"
-
-    public var description: String {
-        "WARNING: Words go only to the input method of the app's own build: \(facts). Your dictation was not sent; it is held until the two match. To fix it, \(Self.fix)."
-    }
 }

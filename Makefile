@@ -66,7 +66,7 @@ XCODE_RESOLVED_DIR := LowTalker.xcodeproj/project.xcworkspace/xcshareddata/swift
 #
 # The source revision is read once and handed to the one xcodebuild call, which hands a
 # command-line setting to every target, so the app and its input method carry the same one
-# and the app sends words only to an input method of its own build.
+# and the log can say when the input method answering is of another build.
 define build_app
 	xcodegen generate
 	mkdir -p $(XCODE_RESOLVED_DIR)

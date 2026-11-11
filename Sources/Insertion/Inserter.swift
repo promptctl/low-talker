@@ -75,10 +75,9 @@ public extension Inserter {
 /// words went.
 /// [LAW:single-enforcer] `PeerIdentity` is the check; this is its one caller here.
 ///
-/// And only to that input method of this app's own build, which its greeting's answer says
-/// before any words go. One of another build may read the words as something they are not,
-/// or answer in a shape this end cannot read, and then nobody knows whether they landed.
-/// `BuildMismatch` is that rule.
+/// To that input method of whatever build: the wire is read across builds (`Wire`), so an
+/// input method that cannot do a request refuses it and the words are held, and an answer
+/// this build cannot read is never taken for words that did not land.
 ///
 /// Nothing is retried. An input method that did not answer is one whose state nobody here
 /// knows - it may have inserted the words and died before replying - and sending again
@@ -90,8 +89,6 @@ public struct InputMethodInserter: Inserter {
     /// insert, so a build that cannot say who its input method is says so on each press
     /// rather than inserting through whoever answers. [LAW:no-silent-failure]
     private let answerer: Result<PeerIdentity, PeerIdentity.Unreadable>
-    /// The build the words may go to: the app's own.
-    private let build: Build
 
     /// What the app gives each insert, split evenly across its four phases. The input
     /// method's own bound on a client is set beneath one phase, so its answer naming a hung
@@ -99,8 +96,8 @@ public struct InputMethodInserter: Inserter {
     public static let standardTimeout = Duration.seconds(5)
 
     /// Onto the input method's own insert port, answered only by a process signed like this
-    /// one under the input method's identifier, and of `build`.
-    public init(build: Build, timeout: Duration = standardTimeout) async {
+    /// one under the input method's identifier.
+    public init(timeout: Duration = standardTimeout) async {
         // The identity is read once here and kept; a failure to read it is kept too and thrown
         // by every insert (see `answerer`). `signedLikeThisProcess` runs the read off the
         // caller's actor, which is why this init is async. [LAW:single-enforcer]
@@ -108,16 +105,15 @@ public struct InputMethodInserter: Inserter {
         do throws(PeerIdentity.Unreadable) {
             answerer = .success(try await .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier))
         } catch { answerer = .failure(error) }
-        self.init(portName: AppIdentity.inputMethodPortName, timeout: timeout, answerer: answerer, build: build)
+        self.init(portName: AppIdentity.inputMethodPortName, timeout: timeout, answerer: answerer)
     }
 
     /// Onto a port and an answerer someone else named, which is how a test puts its own port
     /// on the far end without installing an input method. [LAW:decomposition]
-    package init(portName: String, timeout: Duration, answerer: Result<PeerIdentity, PeerIdentity.Unreadable>, build: Build) {
+    package init(portName: String, timeout: Duration, answerer: Result<PeerIdentity, PeerIdentity.Unreadable>) {
         self.portName = portName
         self.timeout = timeout
         self.answerer = answerer
-        self.build = build
     }
 
     public func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
@@ -133,9 +129,7 @@ public struct InputMethodInserter: Inserter {
                 abandoned: .answerWasAbandoned(port: portName))
         } catch { throw .unreachable(error) }
         let data = received.payload ?? Data()
-        guard let answer = Wire.answer(of: data) else {
-            throw .unreachable(.answerWasNotReadable(port: portName, bytes: data.count, words: .mayHaveLanded))
-        }
+        guard let answer = Wire.answer(of: data) else { throw unread(data, words: .mayHaveLanded) }
         // [LAW:parse-dont-validate] The wire's sum ends here: past this line a refusal or
         // words not yet taken is a failure thrown like the others, and a caller holds words
         // inserted or nothing.
@@ -201,13 +195,19 @@ public struct InputMethodInserter: Inserter {
         // thrown by name like any other.
         let said = greeting.payload ?? Data()
         switch Wire.greeting(of: said) {
-        case .admitted(let inputMethod)?:
-            if let mismatch = BuildMismatch(app: build, inputMethod: inputMethod) { throw .buildMismatch(mismatch) }
-        case .refused(let refusal)?:
-            throw .refused(refusal)
-        case nil:
-            throw .unreachable(.answerWasNotReadable(port: portName, bytes: said.count, words: .notSent))
+        case .admitted?: return
+        case .refused(let refusal)?: throw .refused(refusal)
+        case nil: throw unread(said, words: .notSent)
         }
+    }
+
+    /// What an answer this build could not read says: a refusal for a reason only a later
+    /// build names, which commits nothing, or no answer at all, which leaves the words where
+    /// they were when it came. [LAW:single-enforcer] The one reading of unread bytes, for the
+    /// greeting and the words alike.
+    private func unread(_ data: Data, words: Words) -> InsertFailure {
+        Wire.refusalReason(of: data).map(InsertFailure.refusedForAnUnknownReason)
+            ?? .unreachable(.answerWasNotReadable(port: portName, bytes: data.count, words: words))
     }
 
     /// One message out and its answer back, from `answerer` and nobody else, each half
