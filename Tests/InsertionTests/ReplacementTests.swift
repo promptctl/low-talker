@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import InputMethod
+import Insertion
 
 /// Words are taken back only when the field proves they are there. [LAW:behavior-not-structure]
 /// Held against a string standing in for the document, read the way a client reads it: by
