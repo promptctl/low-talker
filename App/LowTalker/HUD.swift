@@ -9,7 +9,7 @@ import LowTalkerCore
 /// transcribing, then gone once the press's outcome is reported - unless an insert failed, and
 /// then it says why and holds the words until a cursor takes them, the person places them with
 /// the Insert button below it, or dismisses them with the circle on its corner, which also stops a
-/// press still listening, as Escape does.
+/// press still listening, as Escape does. Copy, beside Insert, puts them on the clipboard.
 ///
 /// It never takes focus from the app the words are going to. A borderless panel cannot become
 /// key, and a non-activating one is ordered in without activating this app, so a click on the
@@ -32,10 +32,12 @@ final class HUD {
 
     private let circleClicked: @MainActor () -> Void
     private let insert: @MainActor () -> Void
+    private let copy: @MainActor () -> Void
 
-    init(circleClicked: @escaping @MainActor () -> Void, insert: @escaping @MainActor () -> Void) {
+    init(circleClicked: @escaping @MainActor () -> Void, insert: @escaping @MainActor () -> Void, copy: @escaping @MainActor () -> Void) {
         self.circleClicked = circleClicked
         self.insert = insert
+        self.copy = copy
     }
 
     private lazy var panel: NSPanel = {
@@ -55,13 +57,20 @@ final class HUD {
         return corner
     }()
 
-    /// The Insert button, in a panel of its own for the same reason, hanging below the face so
-    /// it covers none of the words.
+    /// Copy and Insert, in a panel of their own for the same reason, hanging below the face so
+    /// they cover none of the words.
     private lazy var below: NSPanel = {
-        let size = place.fittingSize
+        let size = buttons.fittingSize
         let below = Self.floating(width: size.width, height: size.height)
-        below.contentView = place
+        below.contentView = buttons
         return below
+    }()
+
+    private lazy var buttons: NSStackView = {
+        let buttons = NSStackView(views: [copyButton, place])
+        buttons.orientation = .horizontal
+        buttons.spacing = 6
+        return buttons
     }()
 
     /// A panel that floats over every app on every Space and is never key.
@@ -160,6 +169,17 @@ final class HUD {
         return place
     }()
 
+    private lazy var copyButton: FirstClick = {
+        let copyButton = FirstClick { [unowned self] in copy() }
+        copyButton.title = "Copy"
+        copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+        copyButton.imagePosition = .imageLeading
+        copyButton.bezelStyle = .push
+        copyButton.controlSize = .small
+        copyButton.setAccessibilityLabel("Copy the held words to the clipboard")
+        return copyButton
+    }()
+
     /// The person put the panel away, with Escape or the circle, so it stays away whatever the
     /// activity says until a press starts or they ask for the dismissed words back.
     private var dismissed = false
@@ -194,7 +214,8 @@ final class HUD {
         let offer = box.offersClick ? held.flatMap(Self.offer) ?? "" : ""
         guard box.state != nil || held != nil else { return hide() }
         draw(state: box.state, warnings: [box.refusal].compactMap { $0 } + (held?.warnings ?? []), held: held,
-             words: box.heard ?? held?.allWords ?? Transcript(words: []), offer: offer, insert: box.offersInsert && insertable)
+             words: box.heard ?? held?.allWords ?? Transcript(words: []), offer: offer, insert: box.offersInsert && insertable,
+             copy: box.offersCopy)
     }
 
     /// What a click into a text field places of what is held, shown after it: the words after
@@ -216,7 +237,7 @@ final class HUD {
     }
 
     /// The panel with these lines, centred low on the screen the person is working on.
-    private func draw(state: String?, warnings: [String], held: Held?, words: Transcript, offer: String, insert: Bool) {
+    private func draw(state: String?, warnings: [String], held: Held?, words: Transcript, offer: String, insert: Bool, copy: Bool) {
         self.state.stringValue = state ?? ""
         self.state.isHidden = state == nil
         // One line per warning, each after the symbol, which says it is a warning, so the text
@@ -244,12 +265,18 @@ final class HUD {
         panel.orderFrontRegardless()
         isShown = true
         // The circle's centre sits on the face's top-left arc, as a Notification Center
-        // banner's does, and the button sits under the face's right edge. Both are there only
-        // while something is held.
+        // banner's does, and the buttons sit under the face's right edge. They are there only
+        // while something is held, each only while it is offered.
         let onTheArc = Self.cornerRadius * (1 - 1 / 2.squareRoot())
         corner.setFrameOrigin(NSPoint(x: frame.minX + onTheArc - Self.circleSide / 2, y: frame.maxY - onTheArc - Self.circleSide / 2))
-        below.setFrameOrigin(NSPoint(x: frame.maxX - below.frame.width, y: frame.minY - 6 - below.frame.height))
-        for (control, shown) in [(corner, held != nil), (below, held != nil && insert)] {
+        let offered = held != nil && (insert || copy)
+        if offered {
+            place.isHidden = !insert
+            copyButton.isHidden = !copy
+            let size = buttons.fittingSize
+            below.setFrame(NSRect(x: frame.maxX - size.width, y: frame.minY - 6 - size.height, width: size.width, height: size.height), display: true)
+        }
+        for (control, shown) in [(corner, held != nil), (below, offered)] {
             if shown { control.orderFrontRegardless() } else { control.orderOut(nil) }
         }
     }
@@ -261,7 +288,7 @@ final class HUD {
     }
 }
 
-/// A button on a panel that is never key: the circle that lets held words go, and Insert.
+/// A button on a panel that is never key: the circle that lets held words go, Copy and Insert.
 ///
 /// Answers the first click, though the panel is never key: the panel cannot become key, so
 /// every click on it is a first one, and a button that waited for a second would never fire.
