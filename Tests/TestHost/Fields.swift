@@ -18,6 +18,13 @@ final class TextViewField: HostedField {
 
     init(_ field: Field) {
         self.field = field
+        // What the field holds is what reached it, whatever the person's text settings say.
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextCompletionEnabled = false
+        textView.smartInsertDeleteEnabled = false
         for name in [NSText.didChangeNotification, NSTextView.didChangeSelectionNotification] {
             NotificationCenter.default.addObserver(forName: name, object: textView, queue: .main) { [unowned self] _ in
                 MainActor.assumeIsolated { Events.field(reading(), answering: nil) }

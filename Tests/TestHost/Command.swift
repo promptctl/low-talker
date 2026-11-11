@@ -18,8 +18,9 @@ nonisolated enum Field: String, CaseIterable, Sendable {
     var surface: Surface {
         switch self {
         case .textView: .appKitTextView
-        case .textarea: .webKit(element: "<textarea id=f></textarea>")
-        case .input: .webKit(element: "<input id=f>")
+        // No spelling correction: what the field holds is what reached it.
+        case .textarea: .webKit(element: "<textarea id=f spellcheck=false></textarea>")
+        case .input: .webKit(element: "<input id=f spellcheck=false>")
         }
     }
 
@@ -70,6 +71,9 @@ nonisolated struct Command: Equatable, Sendable {
         guard let id = integer(object["id"]) else { throw unreadable("names no id for its answer") }
         let verbs = ["hold", "read"].filter { object[$0] != nil }
         guard verbs.count == 1, let verb = verbs.first else { throw unreadable("names \(verbs.isEmpty ? "no" : "more than one") command") }
+        // A key misspelled is a setting the runner meant and the host would never make.
+        let keys: Set = verb == "read" ? ["id", "read"] : ["id", "hold", "text", "selection", "maxLength"]
+        if let unknown = object.keys.sorted().first(where: { !keys.contains($0) }) { throw unreadable("names \(unknown), which a \(verb) has not") }
         guard let name = object[verb] as? String, let field = Field(rawValue: name) else {
             throw unreadable("names no field: the fields are \(Field.allCases.map(\.rawValue).joined(separator: ", "))")
         }

@@ -37,6 +37,8 @@ struct CommandTests {
         (#"{"id":1,"hold":"input","text":"","selection":[0,0],"maxLength":-1}"#, "maxLength"),
         (#"{"id":1,"hold":"text-view","text":"","selection":[0,0],"maxLength":10}"#, "text-view has no maxLength"),
         ("read input", "not a JSON object"),
+        (#"{"id":1,"hold":"input","text":"","selection":[0,0],"maxlength":10}"#, "names maxlength, which a hold has not"),
+        (#"{"id":1,"read":"input","text":""}"#, "names text, which a read has not"),
     ])
     func aLineItCannotActOnSaysWhyAndQuotesIt(line: String, reason: String) {
         #expect {

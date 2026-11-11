@@ -43,17 +43,20 @@ def main() -> int:
                 # The last two keys move the caret back two. A key typed moves the caret before the
                 # next one comes, so no reading of typing shows the caret two short of the end,
                 # even one that shows the text before the caret: once a reading does, no key is
-                # still on its way, whatever the field kept.
+                # still on its way, whatever the field kept. A field that never says so fails: the
+                # pushes are what a runner waits on, and keys still on their way could land later.
                 subprocess.run(["vhid", "press", "--into", "test-host", "left", "left"], check=True, stdout=subprocess.DEVNULL)
                 try:
                     host.change(name, lambda event: units(event["text"]) >= 2 and event["selection"] == [units(event["text"]) - 2, 0])
-                except NoAnswer as error:
-                    print(f"note {name}: {error} while waiting for the caret to move back two")
+                    pushed = True
+                except NoAnswer:
+                    pushed = False
                 held = host.read(name)
-                passed = held["text"] == kept and held["selection"] == caret and held["focused"] and held["active"]
+                passed = pushed and held["text"] == kept and held["selection"] == caret and held["focused"] and held["active"]
                 failed |= not passed
                 print(f"{'pass' if passed else 'fail'} {name}, maxLength {max_length}: holds {held['text']!r}, "
-                      f"selection {held['selection']}, focused {held['focused']}, active {held['active']}; "
+                      f"selection {held['selection']}, focused {held['focused']}, active {held['active']}, "
+                      f"pushed the caret moving back {pushed}; "
                       f"typed {TYPED!r} and left twice, expected {kept!r} with the caret at {caret[0]}")
     except Exception as error:
         # Whatever stops the check itself, a host or a tool, is no field that failed.

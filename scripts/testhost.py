@@ -31,6 +31,27 @@ class NoAnswer(HostError):
     """The host is still there and did not say what was waited for in time."""
 
 
+# The keys each kind of event carries, as Tests/TestHost/Events.swift writes them.
+KEYS = {
+    "ready": {"fields", "keepsMaxLength"},
+    "field": {"answers", "name", "text", "selection", "maxLength", "focused", "active"},
+    "active": {"active"},
+    "error": {"message"},
+}
+
+
+def parse_event(line: str) -> dict:
+    """One line the host said, as the event it is: raises unless it is an event of a kind the host
+    says, carrying every key of that kind. [LAW:parse-dont-validate]"""
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        event = None
+    if not isinstance(event, dict) or event.get("event") not in KEYS or not KEYS[event["event"]] <= event.keys():
+        raise HostError(f"the host said a line that is no event: {line!r}")
+    return event
+
+
 class Host:
     def __init__(self, bundle: str | Path, within: float = 20.0):
         self.bundle = Path(bundle)
@@ -56,7 +77,8 @@ class Host:
             self.fields: list[str] = ready["fields"]
             self.keeps_max_length: list[str] = ready["keepsMaxLength"]
         except BaseException:
-            # The host reads its input only once it is ready, so ending its input would not quit it.
+            # The host's loop over its input, which quits at the input's end, starts only once it
+            # is ready, so ending its input would not quit it.
             self.process.kill()
             self.close()
             raise
@@ -70,9 +92,9 @@ class Host:
     def _read(self) -> None:
         for line in self.process.stdout:
             try:
-                self._events.put(json.loads(line))
-            except json.JSONDecodeError:
-                self._events.put(HostError(f"the host said a line that is no event: {line!r}"))
+                self._events.put(parse_event(line))
+            except HostError as error:
+                self._events.put(error)
                 # Nothing reads the host from here on, and a host that cannot write would never quit.
                 self.process.kill()
                 return

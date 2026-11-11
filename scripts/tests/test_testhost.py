@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from testhost import Host, HostError, NoAnswer  # noqa: E402
+from testhost import Host, HostError, NoAnswer, parse_event  # noqa: E402
 
 READY = """{"event": "ready", "fields": ["text-view", "textarea", "input"], "keepsMaxLength": ["textarea", "input"]}"""
 
@@ -143,6 +143,12 @@ class HostTests(unittest.TestCase):
             with self.assertRaisesRegex(HostError, "status 3"):
                 host.read("input")
 
+    def test_a_line_is_an_event_only_with_every_key_of_its_kind(self):
+        self.assertEqual(parse_event('{"event": "active", "active": true}'), {"event": "active", "active": True})
+        for line in ["loaded", "[]", '{"text": "a"}', '{"event": "sound"}', '{"event": "field", "name": "input"}']:
+            with self.subTest(line=line), self.assertRaisesRegex(HostError, "no event"):
+                parse_event(line)
+
     def test_a_line_that_is_no_event_ends_the_host(self):
         with Host(self.bundle(says_a_line_that_is_no_event)) as host:
             with self.assertRaisesRegex(HostError, "loaded the pages"):
@@ -160,7 +166,7 @@ class HostTests(unittest.TestCase):
 
     def test_a_host_whose_ready_names_too_little_is_ended(self):
         bundle = self.bundle(says_too_little_when_ready)
-        with self.assertRaises(KeyError):
+        with self.assertRaisesRegex(HostError, "no event"):
             Host(bundle)
         self.assertEnded(bundle)
 
