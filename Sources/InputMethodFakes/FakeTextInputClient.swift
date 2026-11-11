@@ -9,7 +9,7 @@ import Testing
 /// One type and its rows as values: two rows the port cannot tell apart today are still two rows,
 /// because they part ways once the port reads more of the field than it does now.
 /// [LAW:one-type-per-behavior]
-public nonisolated struct ClientProfile: Sendable, CustomStringConvertible {
+public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConvertible {
     /// What the client gives the input method of the field behind it.
     public enum Access: Sendable {
         /// No document access: `selectedRange` answers NSNotFound and the text nil whatever the
@@ -35,7 +35,7 @@ public nonisolated struct ClientProfile: Sendable, CustomStringConvertible {
     public let access: Access
     public let overflow: Overflow
 
-    public init(_ description: String, access: Access, overflow: Overflow = .keepsWhatFits) {
+    init(_ description: String, access: Access, overflow: Overflow = .keepsWhatFits) {
         self.description = description
         self.access = access
         self.overflow = overflow
@@ -47,8 +47,9 @@ public nonisolated struct ClientProfile: Sendable, CustomStringConvertible {
     /// is not a call the port makes, so it is not modelled.
     public static let webKitTextArea = ClientProfile("a WebKit <textarea>", access: .toTheField)
     /// Safari's and Chrome's `<input>`, measured as `<input maxlength=10>`: the none tier, before and
-    /// after an insert. What it keeps of words past its `maxlength` is unmeasured, and the profiles
-    /// in `possible` give each answer.
+    /// after an insert. What it keeps of words past its `maxlength` is unmeasured: this row keeps what
+    /// fits, `webKitInputKeepingAll` and `webKitInputKeepingNone` give the other answers, and
+    /// `ContractCase.possible` states all three.
     public static let webKitInput = ClientProfile("a WebKit <input>", access: .none)
     /// A window with no text field focused, which still hands the input method a client: Calculator,
     /// Installer, Activity Monitor with every window closed, a page whose body text was clicked
@@ -110,8 +111,8 @@ public final class FakeTextInputClient: TextInputClient {
     public private(set) var text: String
     /// The selection, in UTF-16 units as `NSRange` counts; a caret is a selection of length 0.
     public private(set) var selection: NSRange
-    /// The most UTF-16 units the field holds, as an HTML `maxlength` counts them. An insert past it
-    /// keeps what fits, and the client answers the same either way.
+    /// The most UTF-16 units the field holds, as an HTML `maxlength` counts them. What an insert past
+    /// it keeps is the profile's `overflow`.
     public let maxLength: Int?
     /// Where the client says the caret's line is, in screen coordinates, or nil for a client that
     /// reports none.
@@ -175,6 +176,11 @@ public final class FakeTextInputClient: TextInputClient {
     public func insertText(_ words: String, replacementRange range: NSRange) {
         duringInsert()
         let replaced = range.location == NSNotFound || profile.access == .none ? selection : range
+        // No selection-only client was measured taking an explicit range, so the fake answers none.
+        guard range.location == NSNotFound || profile.access != .selectionOnly else {
+            Issue.record("insertText into \(profile) was given \(range), and nobody measured a selection-only client taking one")
+            return
+        }
         // No client was measured answering a range past the end of its field, so the fake answers
         // none: it fails the case that handed it one, naming the range, rather than guess.
         guard holds(replaced) else {

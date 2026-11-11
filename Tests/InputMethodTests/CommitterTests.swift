@@ -239,6 +239,15 @@ import Testing
             #expect(field.text.isEmpty)
         case .selectionOnly, .toTheField:
             #expect(answer == .inserted(characters: 30, into: "com.apple.Safari"))
+            #expect(field.text == Self.kept(of: "alpha bravo charlie delta echo", fitting: 10, by: profile.overflow))
+        }
+    }
+
+    private static func kept(of words: String, fitting room: Int, by overflow: ClientProfile.Overflow) -> String {
+        switch overflow {
+        case .keepsWhatFits: String(words.prefix(room))
+        case .keepsThemAll: words
+        case .keepsNone: ""
         }
     }
 
