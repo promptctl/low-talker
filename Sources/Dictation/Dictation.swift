@@ -213,6 +213,9 @@ public final class Dictation {
             /// Words in inserts that may have landed, the press's own and the earlier ones they
             /// carried: the hold stands them, as it does for any such insert.
             var standingWords = 0
+            /// The press's own words no cursor took that the hold let go once the person threw it
+            /// away: held or dismissed at the throw, and handed back by an insert after it.
+            var forgotten = 0
         }
 
         /// Whether the person threw the press away. [LAW:one-source-of-truth] Read off its phase, so
@@ -346,11 +349,18 @@ public final class Dictation {
         }
 
         /// An insert failed. One that may have landed covers everything it carried, which stands;
-        /// one that cannot have landed left its words with the hold, which tells them by the press.
+        /// one that cannot have landed left its words with the hold, which tells them by the press,
+        /// or let them go, for a press thrown away.
         func failed(_ unplaced: Unplaced) {
-            if unplaced.failure.wordsMayHaveLanded {
-                state.withLock { $0.provenance.standingWords += unplaced.carried }
+            state.withLock { state in
+                if unplaced.failure.wordsMayHaveLanded { state.provenance.standingWords += unplaced.carried }
+                state.provenance.forgotten += unplaced.forgotten
             }
+        }
+
+        /// The hold let go of `count` of the press's words no cursor took, as the person threw it away.
+        func forgot(_ count: Int) {
+            state.withLock { $0.provenance.forgotten += count }
         }
 
         /// What this press knows of its own words.
@@ -441,6 +451,8 @@ public final class Dictation {
     private struct Unplaced: Error {
         let failure: InsertFailure
         let carried: Int
+        /// Of the words the press said, how many the hold let go, since the press was thrown away.
+        let forgotten: Int
     }
 
     /// What key-down left for key-up: the mode its chord began it in, and the marks on the
@@ -623,9 +635,17 @@ public final class Dictation {
         case .refused: []
         case .up, .blocked: unreported
         }
-        let thrown = shown.reduce(0) { thrown, streaming in thrown + (streaming.cancel() ? 1 : 0) }
+        let thrown = shown.filter { $0.cancel() }
+        thrown.forEach(threwAway)
         show()
-        return thrown
+        return thrown.count
+    }
+
+    /// The person threw `streaming` away: its words no cursor took leave the hold now, held or
+    /// dismissed, in the turn the loop learns of it, so no one is offered them while it drains,
+    /// and the press counts them for its report. [LAW:single-enforcer] Every throw passes here.
+    private func threwAway(_ streaming: Streaming) {
+        streaming.forgot(hold.forget(streaming))
     }
 
     /// Tells `showing` the activity when it differs from what it last heard. Every change
@@ -771,6 +791,9 @@ public final class Dictation {
                 // it arrive. Ended here on the main actor, where every run is taken, so a
                 // pass the ended audio lets the engine finish is never committed.
                 down.streaming.end(ended)
+                // An Escape that reached the loop before this delivery has let go of what the
+                // press held then, and the hold has taken none of its words since.
+                if case .cancelled = ended { threwAway(down.streaming) }
                 pending = .heard(Heard(decode: down.decode, streaming: down.streaming, committing: down.committing))
             }
             // Once the press knows how it ended, so one thrown away is not shown on its way.
@@ -939,8 +962,8 @@ public final class Dictation {
             performed.map { _ in hold.landed() }
             return Placed(performed: performed, words: performed.map { _ in offered.words.count } ?? 0, offered: offered, carried: carried)
         } catch {
-            hold.failed(words, by: owner, with: error)
-            throw Unplaced(failure: error, carried: offered.words.count)
+            let forgotten = hold.failed(words, by: owner, with: error)
+            throw Unplaced(failure: error, carried: offered.words.count, forgotten: forgotten)
         }
     }
 
@@ -1028,9 +1051,9 @@ public final class Dictation {
     /// Throws a cancelled press away, as soon as its commits have drained.
     ///
     /// What it put at the cursor is taken back by one request through the executor, never through
-    /// `place`, which would carry held words into it. What no cursor took of its own words is let
-    /// go from the hold, held or dismissed, whether or not the take-back happened, since a cancel
-    /// discards what is not in the field. What was said past the commits is dropped, as for a chord
+    /// `place`, which would carry held words into it. What no cursor took of its own words the hold
+    /// let go at the throw (`threwAway`), held or dismissed, since a cancel discards what is not in
+    /// the field, and the report counts it. What was said past the commits is dropped, as for a chord
     /// that was a typed key's modifier. Words an insert may have landed stand with the hold's
     /// warning, and earlier dictation that landed with the press's first insert stays in the
     /// field: the report counts both.
@@ -1044,13 +1067,12 @@ public final class Dictation {
         if let last = heard.streaming.landed.performed.last {
             do throws(InsertFailure) { try await executor.takeBack(own.landedText, from: last) } catch { couldNot = (last.into, error) }
         }
-        let forgotten = hold.forget(heard.streaming)
         // The engine's turn passes on only when the decode ends, so it is waited out, and what it
         // heard past the commits is counted as dropped.
         let dropped = words(past: heard.streaming, in: await heard.decode.value)
         let cancelled = Cancelled(
             takenBack: couldNot == nil ? own.landedWords : 0, earlierWordsLanded: own.earlierWordsLanded,
-            forgotten: forgotten,
+            forgotten: own.forgotten,
             standing: own.standingWords, discarded: dropped.isBlank ? 0 : dropped.words.count)
         if let couldNot {
             throw Failed(CancelLeftWords(left: own.landedWords, app: couldNot.app, cause: couldNot.cause, cancelled: cancelled))

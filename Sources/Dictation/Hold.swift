@@ -28,12 +28,10 @@ public enum Held: Sendable, Equatable {
     struct Run: Sendable {
         let words: [Transcript.Word]
         let warning: String
-        /// Nil for words no press here said: read back from the store, or read from kept speech,
-        /// and for words the person asked for themselves.
-        let by: (any Owner)?
-
-        /// Said by a press the person threw away, whose drain lets its words at no cursor go.
-        var thrownAway: Bool { by?.cancelled ?? false }
+        /// Nil for words no press here said: read back from the store, or read from kept speech.
+        /// Kept weakly: nothing asks which words a press said once it is reported, and a press is
+        /// far more than its identity.
+        weak var by: (any Owner)?
     }
 
     /// Words held, and why the latest of them were.
@@ -72,10 +70,10 @@ public enum Held: Sendable, Equatable {
             runs.filter { $0.by === owner }.reduce(0) { $0 + $1.words.count }
         }
 
-        /// What is held without the runs `dropped` picks, each word left under the warning it was
+        /// What is held without the words `owner` said, each word left under the warning it was
         /// held with, or nothing when those are all.
-        func without(_ dropped: (Run) -> Bool) -> Part? {
-            Part(runs: runs.filter { !dropped($0) })
+        func without(_ owner: any Owner) -> Part? {
+            Part(runs: runs.filter { $0.by !== owner })
         }
 
         /// What a part is to everything that compares one, the person shown it and the store
@@ -157,16 +155,15 @@ public enum Held: Sendable, Equatable {
         }
     }
 
-    /// Every word held, in the order said, under the latest warning, as words the person asked for:
-    /// no press's, so no press the person threw away takes them out of what is held.
+    /// Every word held, in the order said, under the latest warning.
     var whole: Part {
-        Part(holding: allRuns.map { Run(words: $0.words, warning: $0.warning, by: nil) })
+        Part(holding: allRuns)
     }
 
-    /// What is held without the words at no cursor that `dropped` picks. Words that may have
-    /// landed always stand.
-    func withoutOffered(_ dropped: (Run) -> Bool) -> Held? {
-        Held(unplaced: offered?.without(dropped), unaccounted: standing)
+    /// What is held without the words at no cursor that `owner` said. Words that may have landed
+    /// always stand.
+    func without(_ owner: any Owner) -> Held? {
+        Held(unplaced: offered?.without(owner), unaccounted: standing)
     }
 
     /// What is left once an insert carrying the words at no cursor landed.
@@ -268,7 +265,7 @@ public enum HeldUnkept: Error, Equatable, Sendable, CustomStringConvertible {
 /// The words no cursor has taken, kept until one does, and the words the person dismissed last,
 /// kept until one step brings them back or a later dismissal replaces them. Brandon, 2026-10-15:
 /// a dictation's words are never thrown away. The one exception is the person's own Escape, which
-/// throws a dictation away on purpose: `forget` lets go of the words it left held.
+/// throws a dictation away on purpose: `forget` lets go of the words it left at no cursor.
 ///
 /// [LAW:no-shared-mutable-globals] One for the life of the app, so a loop rebuilt over a new
 /// config keeps what the old one held. Written by the loop as it places words and by the
@@ -276,17 +273,7 @@ public enum HeldUnkept: Error, Equatable, Sendable, CustomStringConvertible {
 /// made, then told to `showing`, so no end of the process leaves the store behind what was shown.
 @MainActor
 public final class Hold {
-    /// What the hold has, the words at no cursor of a press the person threw away included until
-    /// its drain lets them go (`forget`), which counts them. Every change to it is the hold's own.
-    private var recorded = HoldState()
-
-    /// What the hold has, as everyone reading it is told: without the words at no cursor of a
-    /// press the person threw away, which no one is offered, shown, or kept from one run to the
-    /// next, however soon after the throw its drain lets them go.
-    /// [LAW:one-source-of-truth] Read off `recorded` and each press's own record of how it ended.
-    public var state: HoldState {
-        HoldState(held: recorded.held?.withoutOffered(\.thrownAway), dismissed: recorded.dismissed?.withoutOffered(\.thrownAway))
-    }
+    public private(set) var state = HoldState()
 
     public var held: Held? { state.held }
     public var dismissed: Held? { state.dismissed }
@@ -316,14 +303,13 @@ public final class Hold {
     private let failedToKeep: @MainActor (HeldUnkept) -> Void
     private let showing: @MainActor (HoldState) -> Void
 
-
     /// Holds what `store` kept, and tells `showing` of it as of every later change.
     public init(store: any HeldStore, failedToKeep: @escaping @MainActor (HeldUnkept) -> Void, showing: @escaping @MainActor (HoldState) -> Void) {
         self.store = store
         self.failedToKeep = failedToKeep
         self.showing = showing
         do throws(HeldUnreadable) {
-            recorded = try store.read()
+            state = try store.read()
             unrestored = nil
         } catch {
             unrestored = error
@@ -336,7 +322,7 @@ public final class Hold {
     /// changed.
     private func move(to next: HoldState, carrying: Carried?) {
         let shown = state
-        recorded = next
+        state = next
         carried = carrying
         do throws(HeldUnkept) {
             try store.write(kept)
@@ -348,26 +334,25 @@ public final class Hold {
         if state != shown { showing(state) }
     }
 
-    /// What the store keeps: the state as it is told, with the words an insert on its way carries
-    /// kept as an end of the process then would leave them, so a launch after a crash mid-insert
-    /// does not type them a second time.
+    /// What the store keeps: the state, with the words an insert on its way carries kept as an
+    /// end of the process then would leave them, so a launch after a crash mid-insert does not
+    /// type them a second time.
     private var kept: HoldState {
-        let told = state
-        return switch carried {
-        case nil: told
-        case .held?: HoldState(held: told.held?.sent, dismissed: told.dismissed)
-        case .dismissed?: HoldState(held: told.held, dismissed: told.dismissed?.sent)
+        switch carried {
+        case nil: state
+        case .held?: HoldState(held: held?.sent, dismissed: dismissed)
+        case .dismissed?: HoldState(held: held, dismissed: dismissed?.sent)
         }
     }
 
     private func hold(_ held: Held?) {
-        move(to: HoldState(held: held, dismissed: recorded.dismissed), carrying: carried)
+        move(to: HoldState(held: held, dismissed: dismissed), carrying: carried)
     }
 
     /// The person let the held words go, until they bring them back. A click that comes after
     /// the words it was shown for were placed lets nothing go, and leaves the earlier dismissal.
     public func dismiss() {
-        guard let held = recorded.held else { return }
+        guard let held else { return }
         standingGeneration += 1
         let carrying: Carried? = switch carried {
         case .held?: .dismissed
@@ -378,34 +363,33 @@ public final class Hold {
 
     /// The person brought back the words they dismissed last, ahead of any held since, since
     /// they were said first. In the loop's turn, so no insert is on its way to settle words
-    /// these join, and behind the drain of every press thrown away before it was asked for, so
-    /// none of theirs is among them.
+    /// these join.
     func bringBack() {
-        guard let dismissed = recorded.dismissed else { return }
+        guard let dismissed else { return }
         precondition(carried == nil, "dismissed words were brought back while an insert was on its way")
         standingGeneration += 1
-        move(to: HoldState(held: recorded.held.map { $0.after(dismissed) } ?? dismissed, dismissed: nil), carrying: nil)
+        move(to: HoldState(held: held.map { $0.after(dismissed) } ?? dismissed, dismissed: nil), carrying: nil)
     }
 
     /// What is held that an insert made now carries ahead of its own words.
     func sending() -> Held.Part? {
-        move(to: recorded, carrying: recorded.held?.offered.map { _ in .held })
-        return recorded.held?.offered
+        move(to: state, carrying: held?.offered.map { _ in .held })
+        return held?.offered
     }
 
     /// What is offered, then `words` under `warning`. A run of no words only carries the warning
     /// the part shows, which the run after it replaces, so none is kept behind another.
     private func offering(_ words: Transcript, warning: String, by owner: (any Held.Owner)?) -> [Held.Run] {
-        (recorded.held?.offered?.runs ?? []).filter { !$0.words.isEmpty } + [Held.Run(words: words.words, warning: warning, by: owner)]
+        (held?.offered?.runs ?? []).filter { !$0.words.isEmpty } + [Held.Run(words: words.words, warning: warning, by: owner)]
     }
 
     /// An insert carrying the held words it was sent with landed, which places those words and
     /// says nothing of words that may have landed before it.
     func landed() {
         let next = switch carried {
-        case nil: recorded
-        case .held?: HoldState(held: recorded.held?.placed, dismissed: recorded.dismissed)
-        case .dismissed?: HoldState(held: recorded.held, dismissed: recorded.dismissed?.placed)
+        case nil: state
+        case .held?: HoldState(held: held?.placed, dismissed: dismissed)
+        case .dismissed?: HoldState(held: held, dismissed: dismissed?.placed)
         }
         move(to: next, carrying: nil)
     }
@@ -418,7 +402,7 @@ public final class Hold {
     func asked(vouching generation: Int) -> Bool {
         guard generation == standingGeneration else { return false }
         standingGeneration += 1
-        hold(recorded.held.map { .unplaced($0.whole) })
+        hold(held.map { .unplaced($0.whole) })
         return true
     }
 
@@ -431,30 +415,31 @@ public final class Hold {
     /// and its warning stands in for theirs, which told the person the same thing.
     ///
     /// The person reads the warning, and the app logs it, so it is the failure's facts, which
-    /// its account keeps clear of the words.
-    func failed(_ words: Transcript, by owner: (any Held.Owner)?, with failure: InsertFailure) {
+    /// its account keeps clear of the words. Says how many of `words` it let go, as `heldBack` does.
+    @discardableResult
+    func failed(_ words: Transcript, by owner: (any Held.Owner)?, with failure: InsertFailure) -> Int {
         let warning = failure.account.facts
         guard failure.wordsMayHaveLanded else { return heldBack(words, by: owner, warning: warning) }
-        let unanswered = Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: recorded.held?.standing)
+        let unanswered = Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: held?.standing)
         let dismissed = switch carried {
-        case .dismissed?: recorded.dismissed?.mayHaveLanded(warning)
-        case .held?, nil: recorded.dismissed
+        case .dismissed?: dismissed?.mayHaveLanded(warning)
+        case .held?, nil: dismissed
         }
         standingGeneration += 1
         move(to: HoldState(held: unanswered?.mayHaveLanded(warning), dismissed: dismissed), carrying: nil)
+        return 0
     }
 
-    /// A cancelled press's own words that no cursor took are let go, from what is held and from
-    /// what the person dismissed, since an Escape throws its dictation away wherever its words
-    /// are: the words `owner` said leave both, and every other word stays, under the warning it
-    /// was held with. Says how many it let go.
+    /// The person threw `owner` away: its own words that no cursor took are let go, from what is
+    /// held and from what the person dismissed, since an Escape throws its dictation away wherever
+    /// its words are, and every other word stays, under the warning it was held with. Says how
+    /// many it let go.
     ///
     /// Words that may have landed stand and are never touched. Standing words are unchanged, so
     /// `standingGeneration` is too.
     func forget(_ owner: any Held.Owner) -> Int {
-        let (held, dismissed) = (recorded.held, recorded.dismissed)
-        let said: (Held.Run) -> Bool = { $0.by === owner }
-        move(to: HoldState(held: held?.withoutOffered(said), dismissed: dismissed?.withoutOffered(said)), carrying: carried)
+        let (held, dismissed) = (held, dismissed)
+        move(to: HoldState(held: held?.without(owner), dismissed: dismissed?.without(owner)), carrying: carried)
         return [held, dismissed].reduce(0) { $0 + ($1?.offered?.count(by: owner) ?? 0) }
     }
 
@@ -463,7 +448,14 @@ public final class Hold {
     /// those a press cut short never offered. Nothing said leaves the hold as it was. An insert
     /// that failed placing nothing is answered here, so the words it carried are at no cursor
     /// wherever they are now.
-    func heldBack(_ words: Transcript, by owner: (any Held.Owner)?, warning: String) {
-        move(to: HoldState(held: Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: recorded.held?.standing), dismissed: recorded.dismissed), carrying: nil)
+    ///
+    /// A press the person threw away holds none of its words, which an insert it began before the
+    /// throw hands back after it, so what `forget` let go at the throw is never shown again; the
+    /// failure's warning still stands on what is held. Says how many of `words` it let go.
+    @discardableResult
+    func heldBack(_ words: Transcript, by owner: (any Held.Owner)?, warning: String) -> Int {
+        let kept = Transcript(words: owner?.cancelled == true ? [] : words.words)
+        move(to: HoldState(held: Held(unplaced: Held.Part(runs: offering(kept, warning: warning, by: owner)), unaccounted: held?.standing), dismissed: dismissed), carrying: nil)
+        return words.words.count - kept.words.count
     }
 }

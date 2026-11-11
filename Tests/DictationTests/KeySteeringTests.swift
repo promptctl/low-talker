@@ -215,13 +215,15 @@ private struct BadBuffer: Error {}
     }
 
     /// The case low-dictation-keys-652.6nx exists for: an Escape into a latched press while its
-    /// first commit is in the air, which is then refused, so the press holds its word while its
-    /// drain runs. Once the Escape is delivered the press is not shown on its way, and no state
-    /// the hold shows from the Escape on offers its word: the drain lets it go and counts it.
+    /// first commit is in the air, which is then refused. Once the Escape is delivered the press
+    /// is not shown on its way, and the refused word is never held: the hold lets it go and the
+    /// report counts it. So a circle clicked while the press drains finds nothing held, and the
+    /// person's earlier dismissal is still theirs to bring back.
     @Test(.timeLimit(.minutes(1))) func anEscapedPressIsShownToNoOneWhileItDrains() async throws {
+        let earlier = Held.unplaced(part(" before", "\(Refusal.noTextFieldHasFocus)"))
         let loop = try await Loop(hearing: FakeTranscriber(confirming: { $0.count >= 2 ? Transcript(typed: " hello") : Transcript(typed: "") }) { _ in
             Transcript(typed: " hello")
-        })
+        }, keeping: FakeHeldStore(dismissed: earlier))
         loop.rig.inputMethod.hold()
         await loop.latchedPress()
         await loop.rig.until { loop.rig.inputMethod.holding == 1 }
@@ -232,11 +234,14 @@ private struct BadBuffer: Error {}
         let shownBefore = loop.rig.shown.states.count
         loop.rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
         loop.rig.inputMethod.letGo()
+        await loop.rig.until { loop.rig.inputMethod.holding == 0 }
+        loop.rig.hold.dismiss()
 
         let cancelled = try #require(await loop.rig.report().cancelled)
         #expect(cancelled.forgotten == 1)
-        #expect(loop.rig.shown.states.dropFirst(shownBefore).allSatisfy { $0.held == nil && $0.dismissed == nil })
+        #expect(loop.rig.shown.states.dropFirst(shownBefore).allSatisfy { $0.held == nil && $0.dismissed == earlier })
         #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.hold.dismissed == earlier)
         #expect(loop.rig.store.kept == nil)
     }
 

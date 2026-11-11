@@ -144,10 +144,10 @@ final class Speaker: Held.Owner {
         #expect(panel.face?.controls?.copy == false)
     }
 
-    /// The press an Escape threw away holds its words while its commits drain, until its drain
-    /// lets them go: they are no one's to see, so the box stays away, whatever is still on its way.
+    /// An insert the press began before an Escape threw it away hands its words back after: the
+    /// hold takes none of them, so the box stays away, whatever is still on its way.
     @Test(arguments: [Dictation.Activity.idle, .transcribing])
-    func wordsTheCancelledPressHoldsKeepTheBoxAway(after delivered: Dictation.Activity) {
+    func wordsTheCancelledPressHandsBackKeepTheBoxAway(after delivered: Dictation.Activity) {
         let press = Speaker()
         show(Self.listening(" hello"))
         box.dismiss(cancelling: nil, hold: hold)
