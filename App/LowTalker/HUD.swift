@@ -67,7 +67,9 @@ final class HUD {
     }()
 
     private lazy var buttons: NSStackView = {
-        let buttons = NSStackView(views: [copyButton, place])
+        // Copy on the trailing edge, where it stays whether or not Insert is offered, so Insert
+        // appearing never moves a button under a click aimed at Copy: Insert types.
+        let buttons = NSStackView(views: [place, copyButton])
         buttons.orientation = .horizontal
         buttons.spacing = 6
         return buttons
