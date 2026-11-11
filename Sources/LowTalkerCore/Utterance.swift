@@ -143,7 +143,21 @@ actor Utterance {
     private var recent: [Float] = []
     private static let roomFrames = Int((roomSpan / frame).rounded())
     private var ended = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// [LAW:single-enforcer] Every change to the waits reports itself, so no path that
+    /// parks or wakes one can leave an observer's count behind.
+    private var waiting: [CheckedContinuation<Void, Never>] = [] {
+        didSet { onWaitingChanged(waiting.count) }
+    }
+    /// Run with how many waits are parked each time the list of them is set, so an observer
+    /// awaits a wait parked before the event that must wake it rather than trusting the
+    /// scheduler to have run it first. Defaults to doing nothing, so production is
+    /// unchanged. [LAW:no-ambient-temporal-coupling] The count is pushed, not read, because
+    /// an actor's state cannot be read without awaiting it.
+    private let onWaitingChanged: @Sendable (_ parked: Int) -> Void
+
+    init(onWaitingChanged: @escaping @Sendable (_ parked: Int) -> Void = { _ in }) {
+        self.onWaitingChanged = onWaitingChanged
+    }
 
     /// The span each clip is judged in: the tenth of a second the floor and the range
     /// were measured over. [LAW:one-type-per-behavior] Frames are cut from the audio

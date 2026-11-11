@@ -1,5 +1,42 @@
 @testable import LowTalkerCore
+import Synchronization
 import Testing
+import TestProbes
+
+/// A wait on an utterance, run alongside the test's own calls on the actor, and where it has got
+/// to: parked on the actor or returned. Read after each event, it fails a wait that returned where
+/// it should have parked, or stayed parked where a wake should have taken it, at once and by name,
+/// rather than passing on a lucky schedule or hanging. [LAW:no-ambient-temporal-coupling]
+private final class Waiter: Sendable {
+    enum Place { case parked, returned }
+
+    private let state = Mutex((parked: 0, returned: false))
+    private let changes = Changes()
+
+    /// What the utterance reports through its `onWaitingChanged`.
+    func report(_ parked: Int) {
+        state.withLock { $0.parked = parked }
+        changes.note()
+    }
+
+    func run<Heard: Sendable>(_ wait: @escaping @Sendable () async -> Heard) -> Task<Heard, Never> {
+        Task {
+            let heard = await wait()
+            state.withLock { $0.returned = true }
+            changes.note()
+            return heard
+        }
+    }
+
+    /// Where the wait is once it is anywhere. A wait not yet run, or woken and not yet back on
+    /// the actor, is neither parked nor returned, so this waits for it to become one: a wake
+    /// takes the count to nothing on the actor, inside the call that woke it, so a wait read
+    /// parked after an event parked after it.
+    func place() async -> Place {
+        await changes.settled { state.withLock { $0.returned || $0.parked > 0 } }
+        return state.withLock { $0.returned ? .returned : .parked }
+    }
+}
 
 @Suite struct UtteranceTests {
     /// A clip loud enough to be speech.
@@ -14,12 +51,16 @@ import Testing
 
     /// A wait for more than a count returns only once the speech has grown past it,
     /// with everything spoken by then and the hangover after it.
-    @Test func audioBeyondACountWaitsForTheSpeechToPassIt() async {
-        let utterance = Utterance()
-        async let heard = utterance.audio(beyond: 1_600 + Utterance.hangover)
+    @Test func audioBeyondACountWaitsForTheSpeechToPassIt() async throws {
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
+        let heard = waiter.run { await utterance.audio(beyond: 1_600 + Utterance.hangover) }
         await utterance.append(Self.speech(1_600))
+        // Speech that only reaches the count leaves the wait parked.
+        try #require(await waiter.place() == .parked)
         await utterance.append(Self.speech(1_600))
-        let (samples, _, ended, _) = await heard
+        try #require(await waiter.place() == .returned)
+        let (samples, _, ended, _) = await heard.value
         #expect(samples.count == 3_200 + Utterance.hangover)
         #expect(samples.prefix(3_200).allSatisfy { $0 == 0.5 })
         #expect(samples.dropFirst(3_200).allSatisfy { $0 == 0 })
@@ -54,18 +95,22 @@ import Testing
     /// Quiet after speech is not more speech: the audio is what was spoken plus the
     /// hangover, the hangover carrying the quiet that has actually arrived, and a
     /// wait for more does not return until the utterance ends.
-    @Test func quietDoesNotGrowTheSpeech() async {
-        let utterance = Utterance()
+    @Test func quietDoesNotGrowTheSpeech() async throws {
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
         await utterance.append(Self.speech(1_600))
         await utterance.append(Self.quiet(16_000))
         let (samples, _, ended, _) = await utterance.audio(beyond: 0)
         #expect(samples.count == 1_600 + Utterance.hangover)
         #expect(samples.dropFirst(1_600).allSatisfy { $0 == 0.001 })
         #expect(!ended)
-        async let more = utterance.audio(beyond: 1_600 + Utterance.hangover)
+        let more = waiter.run { await utterance.audio(beyond: 1_600 + Utterance.hangover) }
         await utterance.append(Self.quiet(16_000))
+        // Quiet leaves the wait parked: it has not grown the speech.
+        try #require(await waiter.place() == .parked)
         await utterance.end()
-        let (final, _, over, _) = await more
+        try #require(await waiter.place() == .returned)
+        let (final, _, over, _) = await more.value
         #expect(final.count == 1_600 + Utterance.hangover)
         #expect(over)
     }
@@ -119,12 +164,15 @@ import Testing
     }
 
     /// The end wakes a wait that the speech never satisfied, with what there is.
-    @Test func theEndWakesAWaitWithWhatArrived() async {
-        let utterance = Utterance()
-        async let heard = utterance.audio(beyond: 100_000)
+    @Test func theEndWakesAWaitWithWhatArrived() async throws {
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
+        let heard = waiter.run { await utterance.audio(beyond: 100_000) }
         await utterance.append(Self.speech(1_605))
+        try #require(await waiter.place() == .parked)
         await utterance.end()
-        let (samples, arrived, ended, _) = await heard
+        try #require(await waiter.place() == .returned)
+        let (samples, arrived, ended, _) = await heard.value
         #expect(samples.count == 1_605 + Utterance.hangover)
         #expect(arrived == 1_605)
         #expect(ended)
@@ -144,13 +192,16 @@ import Testing
     /// Speech shorter than any wait is still handed over whole once the utterance
     /// ends: the speech plus its hangover, nothing withheld for being short, and the
     /// hangover that never arrived is silence that says so.
-    @Test func shortSpeechIsHandedOverWholeAtTheEnd() async {
-        let utterance = Utterance()
-        async let heard = utterance.audio(beyond: 16_000)
+    @Test func shortSpeechIsHandedOverWholeAtTheEnd() async throws {
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
+        let heard = waiter.run { await utterance.audio(beyond: 16_000) }
         await utterance.append(Self.speech(6_400))
         await utterance.append(Self.quiet(1_600))
+        try #require(await waiter.place() == .parked)
         await utterance.end()
-        let (samples, arrived, ended, _) = await heard
+        try #require(await waiter.place() == .returned)
+        let (samples, arrived, ended, _) = await heard.value
         #expect(samples.count == 6_400 + Utterance.hangover)
         #expect(arrived == 8_000)
         #expect(samples.dropFirst(arrived).allSatisfy { $0 == 0 })
@@ -177,15 +228,18 @@ import Testing
     /// cancellation, so a waiter parked for more speech is woken with the end and
     /// never waits on a key-up that is not coming.
     @Test func cancellingTheFillEndsTheUtteranceAndWakesAWaiter() async throws {
-        let utterance = Utterance()
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
         // The continuation is held to the end: dropping it would finish the stream.
         let (never, feed) = AsyncStream<AudioClip>.makeStream()
         let filling = Task { try await utterance.fill(from: never) }
-        async let heard = utterance.audio(beyond: 100_000)
-        // `heard` cannot return until the utterance ends, and it ends only when the fill is
-        // cancelled, so awaiting `heard` proves the waiter was woken without timing the cancel.
+        let heard = waiter.run { await utterance.audio(beyond: 100_000) }
+        try #require(await waiter.place() == .parked)
         filling.cancel()
-        let (samples, _, ended, _) = await heard
+        // The fill ends the utterance once the cancel ends its iteration.
+        _ = await filling.result
+        try #require(await waiter.place() == .returned)
+        let (samples, _, ended, _) = await heard.value
         #expect(ended)
         #expect(samples.isEmpty)
         feed.finish()
