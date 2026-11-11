@@ -4,40 +4,51 @@ import InputMethodKit
 import Insertion
 import os
 
-/// Somewhere words can be put: what this process actually needs of the thing in front of
-/// it, which is one thing out of the three dozen `IMKTextInput` offers.
+/// The text input system's client, as this process calls it: the seven of the three dozen
+/// members `IMKTextInput` offers that `Client` uses, and nothing else.
 ///
-/// [LAW:composability] Named here rather than passing the text input system's own protocol
-/// around, because a type that demanded all of `IMKTextInput` could only ever be handed the
-/// real one - by macOS, in a process macOS launched, with a person's cursor at the far end.
-/// Everything below this line is then reachable without any of that.
+/// [LAW:composability] The seam where this process meets macOS, named here rather than passing
+/// the text input system's own protocol around, because a type that demanded all of
+/// `IMKTextInput` could only ever be handed the real one - by macOS, in a process macOS
+/// launched, with a person's cursor at the far end. Everything above it, `Client`'s decisions
+/// included, runs in a test over the fake that answers as the measured clients do
+/// (`FakeTextInputClient`, in InputMethodFakes); the real one, `IMKClient`, passes each call
+/// through and decides nothing.
 ///
-/// On the main actor, every member: each is a call into the client, or a fact read off it
-/// there, and IMK rules 3 and 4 put every client call on the main actor. `Committer` owns
-/// how an insert reaches it.
-public protocol TextCursor: AnyObject {
-    /// The app this cursor belongs to, which is how a cursor left over from an app the
-    /// person has since switched away from is told from the one in front of them. The app
-    /// the person is using, which for the client of an Open or Save panel is the app that put
-    /// it up and not the service that draws it (`CursorApplication`).
-    ///
-    /// A cursor has one, always. It is read when the cursor is made, while the client is
-    /// certainly alive, and never again: [FRAMING:representation] asking a client for its
-    /// bundle identifier later means asking a proxy whose process may since have quit, and
-    /// on the one path that must stay answerable - deciding whether to refuse - that is the
-    /// last thing to reach for. A client that will not name one is no cursor at all, which
-    /// its constructor establishes rather than leaving every reader of this to ask again.
-    /// [LAW:parse-dont-validate]
-    var application: String { get }
-    /// What the client answers about the text field behind it.
-    ///
-    /// Read from the client each time it is asked and never kept, because focus moves
-    /// between fields and page bodies in ways the text input system does not always report.
-    var field: FieldAnswer { get }
-    /// Commits `text` at the insertion point in place of `replacing`, the text immediately before
-    /// it, which is nothing for every ordinary commit. Refuses, changing nothing, when the
-    /// words to take back are not there.
-    func commit(_ text: String, replacing: String) -> Refusal?
+/// On the main actor, every member: each is a call into the client, and IMK rules 3 and 4 put
+/// every client call on the main actor.
+public protocol TextInputClient {
+    func bundleIdentifier() -> String?
+    func uniqueClientIdentifierString() -> String?
+    /// Whether the client gives document access, its answer to
+    /// `kTSMDocumentSupportDocumentAccessPropertyTag`.
+    func givesDocumentAccess() -> Bool
+    /// The line rectangle at `index`, in screen coordinates, or `.zero` from a client that
+    /// reports none.
+    func lineHeightRectangle(forCharacterIndex index: Int) -> NSRect
+    func selectedRange() -> NSRange
+    /// The text the client says is in `range`, or nil where it will not say.
+    func string(in range: NSRange) -> String?
+    func insertText(_ text: String, replacementRange: NSRange)
+}
+
+/// The `IMKTextInput` macOS hands `activateServer`, as the port: each call passed through as it is.
+struct IMKClient: TextInputClient {
+    let client: IMKTextInput
+
+    func bundleIdentifier() -> String? { client.bundleIdentifier() }
+    func uniqueClientIdentifierString() -> String? { client.uniqueClientIdentifierString() }
+    func givesDocumentAccess() -> Bool { client.supportsProperty(TSMDocumentPropertyTag(kTSMDocumentSupportDocumentAccessPropertyTag)) }
+
+    func lineHeightRectangle(forCharacterIndex index: Int) -> NSRect {
+        var line = NSRect.zero
+        _ = client.attributes(forCharacterIndex: index, lineHeightRectangle: &line)
+        return line
+    }
+
+    func selectedRange() -> NSRange { client.selectedRange() }
+    func string(in range: NSRange) -> String? { client.attributedSubstring(from: range)?.string }
+    func insertText(_ text: String, replacementRange: NSRange) { client.insertText(text, replacementRange: replacementRange) }
 }
 
 /// What a client answers about the text field words committed into it would go to.
@@ -88,7 +99,7 @@ public final class FocusedClient {
     public static let shared = FocusedClient()
 
     /// The cursor in front, which carries the app it belongs to.
-    private var focus: (any TextCursor)?
+    private var focus: Client?
 
     /// The text input system gave this cursor focus.
     ///
@@ -96,10 +107,10 @@ public final class FocusedClient {
     /// will not name its app is refused by `Client.init`, so the rule lives at the one place
     /// a cursor comes into being rather than at every place one is handled.
     /// [LAW:parse-dont-validate] [LAW:single-enforcer]
-    public func took(_ cursor: any TextCursor) { focus = cursor }
+    public func took(_ cursor: Client) { focus = cursor }
 
     /// The text input system took focus away from this cursor.
-    public func left(_ leaving: any TextCursor) {
+    public func left(_ leaving: Client) {
         // Not unconditional: focus can move by activating the new client before
         // deactivating the old, and clearing on the old one's word would then drop the
         // client that just arrived and refuse the next insert for no reason.
@@ -170,7 +181,7 @@ public final class FocusedClient {
     /// [LAW:no-silent-failure] [LAW:one-source-of-truth]
     public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, secureInputHeldBy holder: String?,
                         selected: Bool, screens: [CGRect]) -> InFront {
-        func seen(_ field: FieldAnswer?, _ cursor: Result<any TextCursor, Refusal>) -> InFront {
+        func seen(_ field: FieldAnswer?, _ cursor: Result<Client, Refusal>) -> InFront {
             InFront(frontmost: frontmost, secureInputHolder: holder, selected: selected, cursorApplication: self.focus?.application,
                     field: field, screens: screens, cursor: cursor)
         }
@@ -203,7 +214,7 @@ public struct InFront: CustomStringConvertible {
     /// before it.
     let field: FieldAnswer?
     let screens: [CGRect]
-    public let cursor: Result<any TextCursor, Refusal>
+    public let cursor: Result<Client, Refusal>
 
     public var description: String {
         "with \(frontmost ?? "nothing") in front and "
@@ -238,7 +249,8 @@ nonisolated struct ClientName: CustomStringConvertible {
     var description: String { "client \(identifier ?? "with no identifier") of \(application)" }
 }
 
-/// The text input system's client, as the one thing this process asks of it.
+/// A cursor: the text input system's client as somewhere words can be put, the one thing this
+/// process asks of it, decided over the calls `TextInputClient` names.
 ///
 /// `NSNotFound` as the replacement range is how the text input system is told "at the
 /// insertion point, and do not take anything away" - the same commit a Japanese or Chinese
@@ -251,8 +263,22 @@ nonisolated struct ClientName: CustomStringConvertible {
 /// client now runs on the main actor, so a reactivation and a commit never overlap: the same
 /// stress rerun on studious (low-imk-rules-w3g.3ky), with 11,162 reactivations landing inside
 /// an accepted insert's round trip, lost, doubled and reordered no word.
-final class Client: TextCursor, CustomStringConvertible {
-    private let client: IMKTextInput
+///
+/// On the main actor, every member: each is a call into the client, or a fact read off it there,
+/// and IMK rules 3 and 4 put every client call on the main actor. `Committer` owns how an insert
+/// reaches it.
+public final class Client: CustomStringConvertible {
+    private let client: any TextInputClient
+    /// The app this cursor belongs to, which is how a cursor left over from an app the person
+    /// has since switched away from is told from the one in front of them. The app the person
+    /// is using, which for the client of an Open or Save panel is the app that put it up and not
+    /// the service that draws it (`CursorApplication`).
+    ///
+    /// A cursor has one, always. It is read when the cursor is made, while the client is
+    /// certainly alive, and never again: [FRAMING:representation] asking a client for its
+    /// bundle identifier later means asking a proxy whose process may since have quit, and on
+    /// the one path that must stay answerable - deciding whether to refuse - that is the last
+    /// thing to reach for.
     let application: String
     /// The identifier the log says this client by, read once here and only ever said: nothing
     /// is decided from it (`ClientName`).
@@ -269,7 +295,7 @@ final class Client: TextCursor, CustomStringConvertible {
     /// client's own name. An empty name counts as unnamed, as it would be printed by the
     /// caller as a line ending in nothing at all, and a cursor whose app cannot be compared
     /// against the one in front could never be refused for being somewhere else.
-    init?(_ client: IMKTextInput, inFront frontmost: String?) {
+    init?(_ client: any TextInputClient, inFront frontmost: String?) {
         let named = client.bundleIdentifier()
         guard let application = CursorApplication.named(by: named, inFront: frontmost) else { return nil }
         // [LAW:nothing-unseen] Every later line names the app, and only this one says it is
@@ -282,26 +308,34 @@ final class Client: TextCursor, CustomStringConvertible {
         identifier = client.uniqueClientIdentifierString()
     }
 
-    var description: String { ClientName(identifier: identifier, application: application).description }
+    public var description: String { ClientName(identifier: identifier, application: application).description }
 
+    /// What the client answers about the text field behind it.
+    ///
+    /// Read from the client each time it is asked and never kept, because focus moves between
+    /// fields and page bodies in ways the text input system does not always report.
+    ///
     /// The line is asked for only once document access is given, so a client with no field
     /// costs the one call. Index 0 with no marked text asks for the current selection's line
     /// (IMKInputSession.h), so it is the insertion point's: Finder's buffer holding 19
     /// characters answered x 108. A client that reports no line leaves the rectangle
     /// untouched. [LAW:parse-dont-validate]
     var field: FieldAnswer {
-        guard client.supportsProperty(TSMDocumentPropertyTag(kTSMDocumentSupportDocumentAccessPropertyTag)) else { return .noDocumentAccess }
-        var line = NSRect.zero
-        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &line)
+        guard client.givesDocumentAccess() else { return .noDocumentAccess }
+        let line = client.lineHeightRectangle(forCharacterIndex: 0)
         return .documentAccess(caretLine: line == .zero ? nil : line)
     }
 
+    /// Commits `text` at the insertion point in place of `replacing`, the text immediately before
+    /// it, which is nothing for every ordinary commit. Refuses, changing nothing, when the words
+    /// to take back are not there.
+    ///
     /// [LAW:no-silent-failure] A take-back that cannot be proved is refused with what was found,
     /// said in the log beside the refusal the app is told.
     func commit(_ text: String, replacing: String) -> Refusal? {
         let range: NSRange
         do throws(Replacement.Unfound) {
-            range = try Replacement.range(of: replacing, selection: { client.selectedRange() }, text: { client.attributedSubstring(from: $0)?.string }).get()
+            range = try Replacement.range(of: replacing, selection: { client.selectedRange() }, text: client.string(in:)).get()
         } catch {
             Self.log.notice("words could not be taken back from \(self.application, privacy: .public): \(error.description, privacy: .public)")
             return .wordsCannotBeTakenBack

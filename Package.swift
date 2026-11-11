@@ -114,7 +114,12 @@ let package = Package(
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
         .target(name: "InputMethod", dependencies: ["Insertion", "Identity"], swiftSettings: inputMethodIsolation),
-        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "Insertion", "Identity", "TestProbes"]),
+        // The one fake of the input method's text client port, answering as the measured
+        // clients do, and the port's contract stated so it runs against the fake and against a
+        // real client alike. Beside the port and depending only on it; in no product, and never
+        // copied into a bundle. [LAW:one-source-of-truth]
+        .target(name: "InputMethodFakes", dependencies: ["InputMethod"], swiftSettings: inputMethodIsolation),
+        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "InputMethodFakes", "Insertion", "Identity", "TestProbes"]),
         // The two calls that cross between the app and the input method - words one way, the
         // modifier keys the other - and both ends of each port. It links Identity for the
         // ports' names and the Darwin calls beneath them, and nothing else - in particular no

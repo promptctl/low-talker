@@ -1,5 +1,6 @@
 import Foundation
 @testable import InputMethod
+import InputMethodFakes
 import Insertion
 import os
 import Testing
@@ -27,19 +28,8 @@ import Testing
         var all: [String] { lines.withLock { $0 } }
     }
 
-    @MainActor private final class Cursor: TextCursor {
-        let application = "com.example.editor"
-        var committed: [String] = []
-        var field: FieldAnswer { .documentAccess(caretLine: nil) }
-        nonisolated init() {}
-        func commit(_ text: String, replacing _: String) -> Refusal? {
-            committed.append(text)
-            return nil
-        }
-    }
-
     @MainActor
-    private static func inFront(_ cursor: Cursor) -> InFront {
+    private static func inFront(_ cursor: Client) -> InFront {
         InFront(frontmost: cursor.application, secureInputHolder: nil, selected: true, cursorApplication: cursor.application,
                 field: nil, screens: [], cursor: .success(cursor))
     }
@@ -62,7 +52,8 @@ import Testing
     /// let through to the app.
     @MainActor
     @Test(.timeLimit(.minutes(1))) func wordsOwedAreCommittedBeforeTheReturnPasses() {
-        let cursor = Cursor()
+        let field = FakeTextInputClient()
+        let cursor = Client(field, inFront: nil)!
         let turns = MainTurns()
         let committer = Committer(bound: Self.farOff, turns: turns) { _ in }
         let order = Log()
@@ -75,7 +66,7 @@ import Testing
         let verdict = gate.verdict(at: 1)
         order.add("the Return was let through: \(verdict == .pass)")
 
-        #expect(cursor.committed == ["the tail"])
+        #expect(field.text == "the tail")
         #expect(order.all == [
             "the app was answered \(InsertionAnswer.inserted(characters: 8, into: cursor.application))",
             "the Return was let through: true",
