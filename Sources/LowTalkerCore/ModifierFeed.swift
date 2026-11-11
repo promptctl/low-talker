@@ -10,9 +10,6 @@ public protocol ModifierFeed {
     /// Starts telling `handle`, on the main actor, every modifier key that moves, until the
     /// disposal it answers with is called. Throws when it cannot start.
     func install(handling handle: @escaping @MainActor (KeyEvent) -> Void) throws -> Disposal
-
-    /// When a key that is not a modifier last went down, as the session places it now.
-    func lastKeyDown() -> HostTime
 }
 
 extension Modifier {

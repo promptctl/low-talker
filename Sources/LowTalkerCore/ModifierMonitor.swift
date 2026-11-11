@@ -122,11 +122,6 @@ public struct ModifierMonitor: ModifierFeed {
             NSEvent.removeMonitor(local)
         }
     }
-
-    /// A session with no key typed reports one near when the machine came up, as `FlagsChanged.typed` reads it.
-    public func lastKeyDown() -> HostTime {
-        HostTime(seconds: max(FlagsChanged.lastKeyDownInSession(), 0))
-    }
 }
 
 /// A monitor macOS did not install. [LAW:no-silent-failure]
@@ -175,13 +170,9 @@ public struct FlagsChanged: Equatable, Sendable, CustomStringConvertible {
     /// Input, so a key typed there under the chord goes unseen.
     @MainActor
     static func reading(_ event: NSEvent) -> FlagsChanged {
-        FlagsChanged(flags: UInt64(event.modifierFlags.rawValue), keyCode: event.keyCode, timestamp: event.timestamp,
-                     lastKeyDown: lastKeyDownInSession())
-    }
-
-    /// The session's last key-down, in seconds since the machine came up, read now.
-    static func lastKeyDownInSession() -> TimeInterval {
-        ProcessInfo.processInfo.systemUptime - CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        let sinceTyped = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        return FlagsChanged(flags: UInt64(event.modifierFlags.rawValue), keyCode: event.keyCode, timestamp: event.timestamp,
+                            lastKeyDown: ProcessInfo.processInfo.systemUptime - sinceTyped)
     }
 
     /// When a key was last typed, given the session's last key down, if that was before the

@@ -20,8 +20,6 @@ private final class FakeFeed: ModifierFeed {
 
     private(set) var installations: [Installation] = []
     private let refusal: (any Error)?
-    /// The session's last key-down, as the test has typed it.
-    var typed = at(-60_000)
 
     init(refusing refusal: (any Error)? = nil) {
         self.refusal = refusal
@@ -33,8 +31,6 @@ private final class FakeFeed: ModifierFeed {
         installations.append(installation)
         return { installation.disposed = true }
     }
-
-    func lastKeyDown() -> HostTime { typed }
 }
 
 /// Lets the main queue run what the hotkey put on it.
@@ -76,7 +72,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
         try hotkey.start { transitions.append($0) }
         let installation = try #require(feed.installations.first)
         installation.handle(rightOption(.down, at: 0))
-        #expect(hotkey.phase == .held(rightOption, since: at(0), typedBefore: at(-60_000)))
+        #expect(hotkey.phase == .held(rightOption, since: at(0)))
         await settle()
         #expect(transitions == [.began(rightOption, at: at(0))])
         installation.handle(rightOption(.up, at: 400))
@@ -281,30 +277,5 @@ extension HotkeyTests {
     @Test func aSteeringKeyBeforeTheHotkeyStartedEndsNothing() {
         let hotkey = Hotkey(modes: Config.default.modes, feed: FakeFeed())
         #expect(hotkey.steer(.send(at: at(0))) == .nothingOpen)
-    }
-}
-
-/// An Option shortcut typed quicker than a tap while an app holds Secure Event Input: the session
-/// places the key only later, and the latched tap ends then, as the modifier it was.
-extension HotkeyTests {
-    @Test(.timeLimit(.minutes(1))) func aKeyTheSessionPlacesLateUnderALatchedTapEndsIt() async throws {
-        let feed = FakeFeed()
-        let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
-        let (told, telling) = AsyncStream.makeStream(of: HotkeyDetector.Transition.self)
-        try hotkey.start { telling.yield($0) }
-        let installation = try #require(feed.installations.first)
-        // Each event still places the last key a minute back; the session places the one typed
-        // under the chord, at 50 ms, only once it has caught up.
-        installation.handle(rightOption(.down, at: 0))
-        installation.handle(rightOption(.up, at: 100))
-        feed.typed = at(50)
-
-        var transitions: [HotkeyDetector.Transition] = []
-        for await transition in told {
-            transitions.append(transition)
-            if transitions.count == 2 { break }
-        }
-        #expect(transitions == [.began(rightOption, at: at(0)), .ended(.usedAsModifier)])
-        #expect(hotkey.phase == .idle)
     }
 }

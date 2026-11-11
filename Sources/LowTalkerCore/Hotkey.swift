@@ -19,13 +19,6 @@ public struct PressRefusal: Sendable {
 @MainActor
 public final class Hotkey {
     nonisolated public static let defaultTapThreshold: Duration = .milliseconds(250)
-    /// How long after a latched tap's release the session's clock of typed keys has placed every
-    /// key typed before it. While an app holds Secure Event Input the session gives the last key-down
-    /// only to the half second below it, and only once that half second is over: measured on u2
-    /// (macOS 26.5.2), 2026-11-10, each half second's key showed 0.507-0.512 s after the half second
-    /// began. Half a second, and the measured lag past it with room. With the clock exact, the
-    /// release has already placed every key and the reading changes nothing.
-    nonisolated public static let typingClockCatchUp: Duration = .milliseconds(600)
     /// The chord listened for where the config names no other: Right Option.
     nonisolated public static let defaultChord = KeyChord(modifiers: .rightOption)
 
@@ -177,29 +170,5 @@ public final class Hotkey {
 
     private func handle(_ event: KeyEvent, _ onTransition: @escaping Handler) {
         for transition in detector.handle(event) { deliver(transition, to: onTransition) }
-        detector.typingCheckDue.map(checkTyping)
-    }
-
-    /// Reads the session's clock of typed keys at `due`, when it has caught up with the latched
-    /// tap's release, and hands the detector what it places.
-    ///
-    /// [LAW:no-ambient-temporal-coupling] The wait is the clock's own measured lag, and nothing is
-    /// decided by when the reading happens: the detector compares the moment the session places
-    /// against the press's own stamps, so a reading that comes early finds no key, as the release
-    /// did, and one that comes for a tap since ended, or for a later tap, judges only the press
-    /// latched then. Read only while the feed is installed: a stopped hotkey has no press open.
-    private func checkTyping(at due: HostTime) {
-        let wait = max(due - .now, .zero)
-        DispatchQueue.main.asyncAfter(deadline: .now() + .nanoseconds(Int(wait / .nanoseconds(1)))) { [weak self] in
-            MainActor.assumeIsolated { self?.installed.map { self?.confirmTyping(to: $0.onTransition) } }
-        }
-    }
-
-    private func confirmTyping(to onTransition: @escaping Handler) {
-        let typed = feed.lastKeyDown()
-        let transition = detector.confirmTyping(lastKeyDown: typed)
-        // [LAW:nothing-unseen] Both outcomes, so a tap left latched says what the clock placed.
-        Logger.hotkey.info("the session placed the last key at \(typed.uptime / .milliseconds(1)) ms of uptime: \(transition.map { "the latched tap \($0)" } ?? "nothing changes", privacy: .public)")
-        transition.map { deliver($0, to: onTransition) }
     }
 }
