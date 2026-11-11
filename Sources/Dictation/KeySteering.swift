@@ -56,7 +56,7 @@ public struct KeySteering: Sendable {
         }
     }
 
-    /// Escape, typed while the panel is shown: the press that is open, held or latched, is
+    /// Escape, typed while the panel is shown, or the panel's circle clicked: the press that is open, held or latched, is
     /// cancelled, and the words it already put at the cursor are taken back by the press's own path. Nothing
     /// is cancelled when no press is open, and the outcome is in that press's own report.
     /// [LAW:single-enforcer] The detector ends the press, as it ends every press.
