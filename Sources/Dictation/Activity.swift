@@ -20,12 +20,11 @@ extension Dictation {
         /// A press has ended and its outcome is not yet reported.
         case transcribing
 
-        /// The activity the icon and the word box show over `readiness`. A press ended before
-        /// the engine is ready is waiting on the load, or will fail with it, so the load's face
-        /// is the true one until then, and the box is not held up for the minutes a first load
-        /// takes: the menu says the press is heard once the model is ready.
-        /// [LAW:one-source-of-truth] The one precedence the glyph, the description and the box read.
-        public func shown(over readiness: EngineReadiness) -> Activity {
+        /// The activity whose face the icon wears over `readiness`. A press ended before the
+        /// engine is ready is waiting on the load, or will fail with it, so the load's face is
+        /// the true one until then. [LAW:one-source-of-truth] The one precedence both the
+        /// glyph and the description read.
+        private func shown(over readiness: EngineReadiness) -> Activity {
             switch (self, readiness) {
             case (.transcribing, .preparing), (.transcribing, .failed): .idle
             default: self
@@ -51,6 +50,41 @@ extension Dictation {
             case .listening: "\(name): listening"
             case .refused: "\(name): not listening"
             case .transcribing: "\(name): transcribing"
+            }
+        }
+
+        /// What the word box shows of this activity over `readiness`.
+        ///
+        /// A press ended before the engine is ready waits on the load, which on a first run takes
+        /// minutes, so it has no line of its own and the box goes away at the key's release
+        /// unless words are held; those are shown without a click offered for them, since a
+        /// click is queued behind the press and nothing would happen until the load ends.
+        public func box(over readiness: EngineReadiness) -> Box {
+            switch self {
+            case .idle: Box(state: nil, offersClick: true, offersInsert: true)
+            case .listening: Box(state: "Listening", offersClick: false, offersInsert: false)
+            case .refused: Box(state: "Not listening", offersClick: false, offersInsert: false)
+            case .transcribing:
+                if case .ready = readiness {
+                    Box(state: "Transcribing", offersClick: false, offersInsert: true)
+                } else {
+                    Box(state: nil, offersClick: false, offersInsert: true)
+                }
+            }
+        }
+
+        /// The word box's face for an activity: the line saying what the press is doing, if
+        /// any, whether held words are offered to a click into a text field, which only a box
+        /// with nothing on its way does, and whether Insert may be offered for them.
+        public struct Box: Equatable, Sendable {
+            public let state: String?
+            public let offersClick: Bool
+            public let offersInsert: Bool
+
+            public init(state: String?, offersClick: Bool, offersInsert: Bool) {
+                self.state = state
+                self.offersClick = offersClick
+                self.offersInsert = offersInsert
             }
         }
 

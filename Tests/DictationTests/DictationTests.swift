@@ -2111,20 +2111,22 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect("\(Dictation.Activity.refused(why: "no microphone"))" == "refused: no microphone")
     }
 
-    /// What the word box is drawn from: a press ended while the model is loading, or after it
-    /// failed, is shown as no press, so the box goes away at the key's release rather than
-    /// staying up for the minutes a first load takes; a press being spoken is shown whatever
-    /// the engine is doing, and an ended press is shown once the engine is ready.
-    @Test func aPressEndedBeforeTheEngineIsReadyIsShownAsNone() {
+    /// The word box over a press ended while the model loads, or after it failed, says nothing
+    /// of the press and offers no click for held words, so the box goes away at the key's
+    /// release unless words are held; every other activity reads as the box always drew it.
+    @Test func aPressWaitingOnTheLoadHasNoLineInTheBoxAndOffersNoClick() {
         let preparing = EngineReadiness.preparing(.loading, since: .now)
         let failed = EngineReadiness.failed("no model")
         let ready = EngineReadiness.ready(.default, after: .seconds(2))
-        let heard = Dictation.Activity.listening(heard: Transcript(typed: "hi"))
-        #expect(Dictation.Activity.transcribing.shown(over: preparing) == .idle)
-        #expect(Dictation.Activity.transcribing.shown(over: failed) == .idle)
-        #expect(Dictation.Activity.transcribing.shown(over: ready) == .transcribing)
-        #expect(heard.shown(over: preparing) == heard)
-        #expect(Dictation.Activity.refused(why: "no model yet").shown(over: preparing) == .refused(why: "no model yet"))
+        typealias Box = Dictation.Activity.Box
+        #expect(Dictation.Activity.transcribing.box(over: preparing) == Box(state: nil, offersClick: false, offersInsert: true))
+        #expect(Dictation.Activity.transcribing.box(over: failed) == Box(state: nil, offersClick: false, offersInsert: true))
+        #expect(Dictation.Activity.transcribing.box(over: ready) == Box(state: "Transcribing", offersClick: false, offersInsert: true))
+        for readiness in [preparing, failed, ready] {
+            #expect(Dictation.Activity.idle.box(over: readiness) == Box(state: nil, offersClick: true, offersInsert: true))
+            #expect(Dictation.Activity.listening(heard: Transcript(typed: "hi")).box(over: readiness) == Box(state: "Listening", offersClick: false, offersInsert: false))
+            #expect(Dictation.Activity.refused(why: "x").box(over: readiness) == Box(state: "Not listening", offersClick: false, offersInsert: false))
+        }
     }
 
     /// The icon is the press's while there is one and the engine's otherwise, except that a

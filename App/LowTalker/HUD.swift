@@ -170,7 +170,7 @@ final class HUD {
 
     /// `insertable` is whether a loop is listening to insert what is held through, without which
     /// Insert is not offered.
-    func show(_ activity: Dictation.Activity, held: Held?, insertable: Bool) {
+    func show(_ activity: Dictation.Activity, over readiness: EngineReadiness, held: Held?, insertable: Bool) {
         // A press starts as listening or refused, and either one is new words to show.
         switch activity {
         case .listening, .refused: dismissedByKey = false
@@ -183,14 +183,15 @@ final class HUD {
         // queued behind its insert; while it is open the face shows what it heard instead.
         // A refused press's reason is warned of first, above why any words are held.
         let allHeld = held?.allWords ?? Transcript(words: [])
-        let shown: (state: String?, refusal: String?, words: Transcript, offer: String, insert: Bool) = switch activity {
-        case .idle: (nil, nil, allHeld, held.flatMap(Self.offer) ?? "", insertable)
-        case .listening(let heard): ("Listening", nil, heard, "", false)
-        case .refused(let why): ("Not listening", why, allHeld, "", false)
-        case .transcribing: ("Transcribing", nil, allHeld, "", insertable)
+        let box = activity.box(over: readiness)
+        let (words, refusal): (Transcript, String?) = switch activity {
+        case .listening(let heard): (heard, nil)
+        case .refused(let why): (allHeld, why)
+        case .idle, .transcribing: (allHeld, nil)
         }
-        guard shown.state != nil || held != nil else { return hide() }
-        draw(state: shown.state, warnings: [shown.refusal].compactMap { $0 } + (held?.warnings ?? []), held: held, words: shown.words, offer: shown.offer, insert: shown.insert)
+        let offer = box.offersClick ? held.flatMap(Self.offer) ?? "" : ""
+        guard box.state != nil || held != nil else { return hide() }
+        draw(state: box.state, warnings: [refusal].compactMap { $0 } + (held?.warnings ?? []), held: held, words: words, offer: offer, insert: box.offersInsert && insertable)
     }
 
     /// What a click into a text field places of what is held, shown after it: the words after

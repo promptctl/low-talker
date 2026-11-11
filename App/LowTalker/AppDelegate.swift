@@ -97,9 +97,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// [LAW:one-source-of-truth] Every engine status passes through here, so the
     /// menu and the log never tell different stories.
     private func show(_ readiness: EngineReadiness) {
+        let box = activity.box(over: engineReadiness)
         engineReadiness = readiness
         drawStatusIcon()
-        showHUD(held: hold.held)
+        // Only a change in what the box shows redraws it, so the load's phases leave it be.
+        if activity.box(over: readiness) != box { showHUD(held: hold.held) }
         log.info("model: \(readiness.readout(at: .now), privacy: .public)")
     }
 
@@ -316,7 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// hold as it changes, since the hold calls here before it is assigned.
     private func showHUD(held: Held?) {
         let insertable = if case .listening = hotkeyStatus { true } else { false }
-        hud.show(activity.shown(over: engineReadiness), held: held, insertable: insertable)
+        hud.show(activity, over: engineReadiness, held: held, insertable: insertable)
     }
 
     /// When the loop comes up, is rebuilt, or is left as it stands, and the one owner of the
