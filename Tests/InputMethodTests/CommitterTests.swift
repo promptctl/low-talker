@@ -204,44 +204,65 @@ import Testing
         #expect(await field.text.isEmpty)
     }
 
-    // MARK: a field that keeps less than it is handed (low-reliability-z2z.rgy)
+    // MARK: under every profile, measured and possible
 
-    /// Thirty characters dictated into `field` through an assembled process, as an insert arriving on
-    /// the port is, with the field's app in front on studious's one display.
+    /// `request` sent to `field` through an assembled process, as an insert arriving on the port
+    /// is, with the field's app in front on studious's one display.
     @MainActor
-    private static func dictate(into field: FakeTextInputClient) async throws -> InsertionAnswer {
+    private static func send(_ request: InsertRequest, to field: FakeTextInputClient) async throws -> InsertionAnswer {
         let assembled = AssembledProcess()
         assembled.frontmost = try field.cursor().application
         assembled.screens = [CGRect(x: 0, y: 0, width: 1600, height: 900)]
         let controller = assembled.controller()
         controller.activate(field)
         let process = assembled.process!
-        let answer = await onAThreadOfItsOwn { process.insert(InsertRequest("alpha bravo charlie delta echo", into: .cursorInFront)).answer }
+        let answer = await onAThreadOfItsOwn { process.insert(request).answer }
         withExtendedLifetime(controller) {}
         return answer
     }
 
-    /// Safari's and Chrome's `<input maxlength=10>` gives no document access, as measured, so the
-    /// words are refused before any commit, as for a window with no text field, and the app holds
-    /// them: the field is left empty, and cannot be dictated into at all.
+    /// Thirty characters dictated into a field with a `maxlength` of 10. A client giving no document
+    /// access is no cursor, so the words are refused before any commit and the app holds them. One
+    /// giving it is answered inserted with all 30, whatever the field kept: under a profile keeping
+    /// 10, 20 never reached the field and nothing holds them, the loss low-reliability-z2z.rgy
+    /// ends, and this case is its proof.
     @MainActor
-    @Test func aDictationIntoAWebKitInputIsRefusedAsNoTextField() async throws {
-        let field = FakeTextInputClient(in: "com.apple.Safari", .webKitInput, maxLength: 10)
+    @Test(arguments: ClientProfile.all)
+    func aDictationIsAnsweredByWhetherTheClientGivesDocumentAccess(_ profile: ClientProfile) async throws {
+        let field = FakeTextInputClient(in: "com.apple.Safari", profile, maxLength: 10)
 
-        #expect(try await Self.dictate(into: field) == .refused(.noTextFieldHasFocus))
-        #expect(field.text.isEmpty)
+        let answer = try await Self.send(InsertRequest("alpha bravo charlie delta echo", into: .cursorInFront), to: field)
+
+        switch profile.access {
+        case .none:
+            #expect(answer == .refused(.noTextFieldHasFocus))
+            #expect(field.text.isEmpty)
+        case .selectionOnly, .toTheField:
+            #expect(answer == .inserted(characters: 30, into: "com.apple.Safari"))
+        }
     }
 
-    /// A `<textarea>` gives document access, and one that keeps 10 of the 30 characters it is
-    /// handed (a `maxlength`, unmeasured on a textarea: `ContractCase.unsettled`) is answered
-    /// inserted with all 30, while 20 never reached the field and nothing holds them. What the
-    /// input method answers today, and the answer low-reliability-z2z.rgy changes.
+    /// Taking back the words a dictation put before the caret: only a client that says what text
+    /// is there has them taken out. One with a selection and no text is refused, the field left
+    /// as it was, and one giving no document access is no cursor at all.
     @MainActor
-    @Test func aDictationIntoATextAreaThatKeepsTenOfThirtyIsAnsweredInsertedWithThirty() async throws {
-        let field = FakeTextInputClient(in: "com.apple.Safari", .webKitTextArea, maxLength: 10)
+    @Test(arguments: ClientProfile.all)
+    func aTakeBackIsAnsweredByWhetherTheClientSaysWhatPrecedesTheCaret(_ profile: ClientProfile) async throws {
+        let field = FakeTextInputClient(in: "com.apple.Safari", profile, holding: "say hello")
 
-        #expect(try await Self.dictate(into: field) == .inserted(characters: 30, into: "com.apple.Safari"))
-        #expect(field.text == "alpha brav")
+        let answer = try await Self.send(InsertRequest("", into: .app("com.apple.Safari"), replacing: "hello"), to: field)
+
+        switch profile.access {
+        case .none:
+            #expect(answer == .refused(.noTextFieldHasFocus))
+            #expect(field.text == "say hello")
+        case .selectionOnly:
+            #expect(answer == .refused(.wordsCannotBeTakenBack))
+            #expect(field.text == "say hello")
+        case .toTheField:
+            #expect(answer == .inserted(characters: 0, into: "com.apple.Safari"))
+            #expect(field.text == "say ")
+        }
     }
 
     /// The port's line for each way its wait can end, numbered as the main actor's line is.

@@ -3,14 +3,20 @@ import InputMethodFakes
 import Testing
 
 /// The fake answers as the clients were measured answering (`ContractCase.measured`), and as its
-/// guesses where none was say (`ContractCase.unsettled`), which is what makes a suite built on it
+/// each answer a client nobody measured could give says (`ContractCase.possible`), which is what makes a suite built on it
 /// worth trusting.
 @MainActor
 @Suite struct TextInputClientContractTests {
-    @Test(arguments: ContractCase.measured + ContractCase.unsettled)
+    @Test(arguments: ContractCase.measured + ContractCase.possible)
     func theFakeAnswersAsTheCaseSays(_ statement: ContractCase) {
         let field = statement.fake()
         #expect(statement.disagreements(of: field, reading: { field.text }) == [])
+    }
+
+    /// Every profile is stated by a case, so none answers as nobody said it would.
+    @Test(arguments: ClientProfile.all)
+    func everyProfileIsStated(_ profile: ClientProfile) {
+        #expect((ContractCase.measured + ContractCase.possible).contains { $0.profile.description == profile.description })
     }
 
     /// A case says when the client disagrees with it: a profile that answers wrongly turns its
