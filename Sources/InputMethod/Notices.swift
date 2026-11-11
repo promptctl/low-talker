@@ -3,7 +3,7 @@ import Identity
 import Insertion
 import os
 
-private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "notices")
+private nonisolated let noticesLog = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "notices")
 
 /// What this process tells the app, in the order it happened: every cursor that becomes the one
 /// words go to (`FocusedClient`), so the app can offer words no cursor took to it, and
@@ -14,7 +14,7 @@ private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIde
 /// It is one stream with two writer's doors, `cursorArrived(in:)` and `activated(holding:)`,
 /// and one reader, `relay`, which the process's entry point runs.
 public nonisolated final class Notices: Sendable {
-    public static let shared = Notices()
+    public static let shared = Notices { $0.log() }
 
     /// IMK rule 7: the most memory this process holds before it ends itself, in bytes.
     public static let memoryCeiling: UInt64 = 1024 * 1024 * 1024
@@ -25,20 +25,56 @@ public nonisolated final class Notices: Sendable {
         case keyTyped(SteeringKey)
     }
 
+    /// What one unit of this stream's work did. A test reads it from the sink it hands in; the
+    /// shipped process's sink is the unified log, through `rendering`. [LAW:nothing-unseen]
+    public enum Record: Equatable, Sendable {
+        /// A cursor in this app became the one words go to.
+        case cursorArrived(in: String)
+        /// An activation read this footprint, in bytes, against the ceiling.
+        case footprint(UInt64)
+        /// An activation found the process over its ceiling, which it ends over.
+        case overrun(Overrun)
+        /// How telling the app fared, when it changed from the notice before.
+        case told(NoticeSender.Told)
+        /// The overrun was told, faring so, and the process ends now.
+        case overrunTold(Overrun, NoticeSender.Told)
+
+        /// What the unified log receives for this record. Everything is public: none of it is
+        /// anything a person typed.
+        public var rendering: (level: OSLogType, line: String) {
+            switch self {
+            case let .cursorArrived(application): (.info, "a cursor arrived in \(application)")
+            case let .footprint(footprint): (.info, "activated holding \(footprint) bytes of a \(Notices.memoryCeiling) byte ceiling")
+            case let .overrun(overrun): (.fault, "ending this process: \(overrun)")
+            case let .told(told): (told.isFault ? .error : .default, told.description)
+            case let .overrunTold(overrun, told): (.fault, "\(overrun); \(told)")
+            }
+        }
+
+        /// The one edge where a record reaches the unified log. [LAW:single-enforcer]
+        func log() {
+            let (level, line) = rendering
+            noticesLog.log(level: level, "\(line, privacy: .public)")
+        }
+    }
+
     /// One element per notice. The newest are kept if the reader falls behind, since one
     /// arrival is as good as another to the app. An overrun finishes the stream, so it is
     /// always the last element and nothing after it can push it out.
     /// [LAW:no-ambient-temporal-coupling]
     public let notices: AsyncStream<Notice>
     private let continuation: AsyncStream<Notice>.Continuation
+    /// Where each record goes, as `Committer`'s `told` is.
+    private let recorded: @Sendable (Record) -> Void
 
-    init() {
+    init(recorded: @escaping @Sendable (Record) -> Void) {
         (notices, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
+        self.recorded = recorded
     }
 
     /// A cursor in `application` became the one words go to.
     public func cursorArrived(in application: String) {
-        log.info("a cursor arrived in \(application, privacy: .public)")
+        recorded(.cursorArrived(in: application))
         continuation.yield(.cursorArrived)
     }
 
@@ -51,9 +87,9 @@ public nonisolated final class Notices: Sendable {
     /// A controller was activated while this process held `footprint` bytes. The overrun, when
     /// it is over the ceiling, which the controller answers by taking no client.
     public func activated(holding footprint: UInt64) -> Overrun? {
-        log.info("activated holding \(footprint, privacy: .public) bytes of a \(Self.memoryCeiling, privacy: .public) byte ceiling")
+        recorded(.footprint(footprint))
         return Overrun(footprint: footprint, ceiling: Self.memoryCeiling).map { overrun in
-            log.fault("ending this process: \(overrun.description, privacy: .public)")
+            recorded(.overrun(overrun))
             continuation.yield(.overMemoryCeiling(overrun))
             continuation.finish()
             return overrun
@@ -61,20 +97,20 @@ public nonisolated final class Notices: Sendable {
     }
 
     /// Tells the app each notice through `tell`, and runs `end` once an overrun is told.
-    /// How the telling fares is said when it changes, and always for an overrun: the app not
+    /// How the telling fares is recorded when it changes, and always for an overrun: the app not
     /// listening is the ordinary state of an app that is not running. [LAW:no-silent-failure]
     ///
     /// [LAW:effects-at-boundaries] Telling and ending are the entry point's to bring.
-    public static func relay(_ notices: AsyncStream<Notice>, tell: (Notice) -> NoticeSender.Told, end: () -> Void) async {
+    public func relay(tell: (Notice) -> NoticeSender.Told, end: () -> Void) async {
         var fared: NoticeSender.Told?
         for await notice in notices {
             let told = tell(notice)
             switch notice {
             case .cursorArrived, .keyTyped:
-                if told != fared { log.log(level: told.isFault ? .error : .default, "\(told.description, privacy: .public)") }
+                if told != fared { recorded(.told(told)) }
                 fared = told
             case .overMemoryCeiling(let overrun):
-                log.fault("\(overrun.description, privacy: .public); \(told.description, privacy: .public)")
+                recorded(.overrunTold(overrun, told))
                 end()
             }
         }
@@ -101,7 +137,7 @@ public nonisolated func ownFootprint() -> UInt64? {
         $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
     }
     guard read == KERN_SUCCESS else {
-        log.error("this process's memory footprint could not be read: \(String(cString: mach_error_string(read)), privacy: .public)")
+        noticesLog.error("this process's memory footprint could not be read: \(String(cString: mach_error_string(read)), privacy: .public)")
         return nil
     }
     return info.phys_footprint

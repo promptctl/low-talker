@@ -43,7 +43,7 @@ import Testing
             owing: { asked.add("owing"); return .success(.nothing) },
             settling: { asked.add("settled"); return .success(.landed) }))
 
-        #expect(gate.verdict(at: 1) == .pass)
+        #expect(gate.verdict(at: 1).verdict == .pass)
         #expect(asked.all == ["owing"])
     }
 
@@ -63,7 +63,7 @@ import Testing
             return .success(.landed)
         }))
 
-        let verdict = gate.verdict(at: 1)
+        let verdict = gate.verdict(at: 1).verdict
         order.add("the Return was let through: \(verdict == .pass)")
 
         #expect(field.text == "the tail")
@@ -76,7 +76,7 @@ import Testing
     @MainActor
     @Test func wordsThatDidNotAllLandKeepTheReturn() {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .success(.notLanded) }))
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1).verdict == .keep)
     }
 
     /// A debt the app admitted and then did not settle is not a debt that was settled.
@@ -84,7 +84,7 @@ import Testing
     @Test(arguments: [NotAnswered.silent(after: .seconds(5)), .abandoned, .notReadable(bytes: 3)])
     func aDebtTheAppAdmittedAndDidNotSettleKeepsTheReturn(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .failure(why) }))
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1).verdict == .keep)
     }
 
     /// The Return is held only against a debt the app has admitted to: an app that cannot be
@@ -97,7 +97,7 @@ import Testing
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(
             owing: { .failure(why) }, settling: { asked.add("settled"); return .success(.notLanded) }))
 
-        #expect(gate.verdict(at: 1) == .pass)
+        #expect(gate.verdict(at: 1).verdict == .pass)
         #expect(asked.all.isEmpty)
     }
 
@@ -110,7 +110,7 @@ import Testing
         let gate = SteeringGate(ceiling: .milliseconds(150), asking: App(settling: { release.wait(); return .success(.landed) }))
 
         let started = ContinuousClock.now
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1).verdict == .keep)
         #expect(ContinuousClock.now - started >= .milliseconds(150))
     }
 
@@ -125,20 +125,20 @@ import Testing
             defer { earlierAnswered.signal() }
             return .success(.notLanded)
         }))
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1).verdict == .keep)
 
         gate.connect(App(settling: {
             release.signal()
             earlierAnswered.wait()
             return .success(.landed)
         }))
-        #expect(gate.verdict(at: 2) == .pass)
+        #expect(gate.verdict(at: 2).verdict == .pass)
     }
 
     /// Before an app is connected nobody admits anything, so every Return passes.
     @MainActor
     @Test func aGateNoAppWasConnectedToPassesEveryReturn() {
-        #expect(SteeringGate().verdict(at: 1) == .pass)
+        #expect(SteeringGate().verdict(at: 1).verdict == .pass)
     }
 
     // MARK: - Escape
@@ -147,14 +147,14 @@ import Testing
     @MainActor
     @Test func anEscapeWhileTheBoxIsOpenIsKept() {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shown) }))
-        #expect(gate.escapeVerdict(at: 1) == .keep)
+        #expect(gate.escapeVerdict(at: 1).verdict == .keep)
     }
 
     /// An Escape with the box shut is the app in front's, as typed.
     @MainActor
     @Test func anEscapeWithTheBoxShutPasses() {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shut) }))
-        #expect(gate.escapeVerdict(at: 1) == .pass)
+        #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 
     /// An app that does not say whether its box is open has said nothing, so the Escape passes.
@@ -162,13 +162,13 @@ import Testing
     @Test(arguments: [NotAnswered.nobodyIsListening(port: "port"), .silent(after: .milliseconds(100)), .abandoned])
     func anEscapeTheAppDoesNotAnswerForPasses(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .failure(why) }))
-        #expect(gate.escapeVerdict(at: 1) == .pass)
+        #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 
     /// With no app connected, nothing is shown and every Escape passes.
     @MainActor
     @Test func anEscapeWithNoAppConnectedPasses() {
-        #expect(SteeringGate().escapeVerdict(at: 1) == .pass)
+        #expect(SteeringGate().escapeVerdict(at: 1).verdict == .pass)
     }
 
     /// The ceiling is the longest the app itself waits on an insert, one number and not two, and

@@ -1,15 +1,13 @@
 import Foundation
-import Identity
-import os
 
 /// How an IMK callback reached the main actor.
-nonisolated enum Hop: Sendable, CustomStringConvertible {
+public nonisolated enum Hop: Equatable, Sendable, CustomStringConvertible {
     /// It arrived on the main thread and ran there as it was.
     case inline
     /// It arrived on another thread, which waited this long for the main thread to start it.
     case waited(Duration)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .inline: "inline, already on the main thread"
         case .waited(let waited): "from another thread, after waiting \(waited) for the main thread"
@@ -17,12 +15,8 @@ nonisolated enum Hop: Sendable, CustomStringConvertible {
     }
 }
 
-/// The `imk` channel: what IMK handed this process, one line per callback here and one per
-/// controller event in `DictationInputController`, read together by `log show`.
-nonisolated let imkLog = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "imk")
-
-/// Runs an IMK callback's `body` on the main actor with the callback's `argument`, and says how
-/// it got there.
+/// Runs an IMK callback's `body` on the main actor with the callback's `argument`, and hands
+/// `body` how it got there, so the record the callback leaves says so.
 ///
 /// IMK rule 3: the overrides are nonisolated, and this is their one way onto the main actor -
 /// inline when IMK called on the main thread, as it does, and through `DispatchQueue.main.sync`
@@ -30,24 +24,16 @@ nonisolated let imkLog = Logger(subsystem: AppIdentity.inputMethodBundleIdentifi
 /// signatures are older than `Sendable`. The crossing is safe because the calling thread is
 /// blocked until `body` returns, so nothing else holds the argument meanwhile.
 ///
-/// `level` is the log's, for a callback made once per key typed: said at debug it is not a
-/// record of when a person typed.
-nonisolated func onMainActor<Argument, Answer: Sendable>(_ callback: StaticString, _ argument: Argument, level: OSLogType = .default,
-                                                         _ body: @MainActor (Argument) -> Answer) -> Answer {
+/// The hop is known before `body` starts, so `body` records it with the rest of what the
+/// callback did, and nothing here writes to the log. [LAW:nothing-unseen]
+nonisolated func onMainActor<Argument, Answer: Sendable>(_ argument: Argument, _ body: @MainActor (Argument, Hop) -> Answer) -> Answer {
     nonisolated(unsafe) let argument = argument
-    let hop: Hop
-    let result: Answer
     if Thread.isMainThread {
-        result = MainActor.assumeIsolated { body(argument) }
-        hop = .inline
-    } else {
-        let asked = ContinuousClock.now
-        (hop, result) = DispatchQueue.main.sync {
-            let started = Hop.waited(ContinuousClock.now - asked)
-            return (started, MainActor.assumeIsolated { body(argument) })
-        }
+        return MainActor.assumeIsolated { body(argument, .inline) }
     }
-    // [LAW:nothing-unseen] Which way every callback came, at the level `log show` keeps.
-    imkLog.log(level: level, "\(callback, privacy: .public) reached the main actor \(hop.description, privacy: .public)")
-    return result
+    let asked = ContinuousClock.now
+    return DispatchQueue.main.sync {
+        let hop = Hop.waited(ContinuousClock.now - asked)
+        return MainActor.assumeIsolated { body(argument, hop) }
+    }
 }

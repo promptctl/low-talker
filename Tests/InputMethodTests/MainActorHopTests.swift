@@ -1,42 +1,36 @@
 import Foundation
 @testable import InputMethod
-import TestProbes
 import Testing
 
-/// An IMK callback reaches the main actor however IMK called it, and says which way it came in
-/// this process's own log. Each test names its callback with a name no other test uses, so the
-/// line it reads back is its own.
-@Suite struct MainActorHopTests {
+/// An IMK callback reaches the main actor however IMK called it, and its record says which way it
+/// came. Driven through a controller's `inputText`, the callback that decides least, and read from
+/// that controller's records.
+@Suite @MainActor struct MainActorHopTests {
     /// Called on the main thread, as IMK calls, the body runs right there: no queue is waited
     /// on, so a callback can never wait out its own thread.
-    @MainActor
-    @Test func aCallbackOnTheMainThreadRunsInline() async throws {
-        let since = Date.now
-        var ran: Int?
-        onMainActor("MainActorHopTests.inline", 7) { ran = $0 }
-        #expect(ran == 7)
-        #expect(try await Self.lines(since: since).contains("MainActorHopTests.inline reached the main actor \(Hop.inline)"))
-    }
-
-    /// Called from another thread, the body still runs on the main thread, with the argument
-    /// it was handed, before the call returns with the body's answer.
-    @Test(.timeLimit(.minutes(1))) func aCallbackFromAnotherThreadRunsOnTheMainThreadBeforeReturning() async throws {
-        let since = Date.now
-        let answer = await withCheckedContinuation { done in
-            Thread.detachNewThread {
-                done.resume(returning: onMainActor("MainActorHopTests.offThread", 7) { argument in
-                    (onMain: Thread.isMainThread, argument: argument)
-                })
-            }
+    @Test(.timeLimit(.minutes(1))) func aCallbackOnTheMainThreadRunsInline() async throws {
+        let said = try await events(of: { DictationInputController() }) { controller in
+            #expect(controller.inputText("a", client: nil) == false)
         }
-        #expect(answer.onMain)
-        #expect(answer.argument == 7)
-        let said = try await Self.lines(since: since).filter { $0.hasPrefix("MainActorHopTests.offThread ") }
-        #expect(said.count == 1)
-        #expect(said.allSatisfy { $0.hasPrefix("MainActorHopTests.offThread reached the main actor from another thread, after waiting ") })
+        try #require(said.count == 3)
+        #expect(said[1] == .callback(.inline, .declinedText(holding: "holding no client")))
     }
 
-    private static func lines(since: Date) async throws -> [String] {
-        try await loggedLines(category: "imk", since: since)
+    /// Called from another thread, the body still runs on the main thread, with the argument it was
+    /// handed, before the call returns with the body's answer, and the record says the calling
+    /// thread waited for it.
+    @Test(.timeLimit(.minutes(1))) func aCallbackFromAnotherThreadRunsOnTheMainThreadBeforeReturning() async throws {
+        let said = try await events(of: { DictationInputController() }) { controller in
+            nonisolated(unsafe) let controller = controller
+            let answer = await withCheckedContinuation { done in
+                Thread.detachNewThread { done.resume(returning: controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: [])) }
+            }
+            #expect(answer == false)
+        }
+        try #require(said.count == 3)
+        guard case .callback(.waited, .command("moveLeft:", steered: nil, holding: _)) = said[1] else {
+            Issue.record("not the command handed, on a callback that waited: \(said[1])")
+            return
+        }
     }
 }
