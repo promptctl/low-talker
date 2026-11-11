@@ -101,8 +101,8 @@ public enum InsertionAnswer: Codable, Equatable, Sendable {
 public protocol InsertWarning: CustomStringConvertible {
     /// What happened, and nothing of what it means for the words.
     var reason: String { get }
-    /// What became of an insert's words, and how to have them offered again; nil where the only
-    /// request that meets it is not an insert.
+    /// What became of an insert's words, and how to have them offered again; nil where whoever
+    /// sent the request tells it.
     var fate: String? { get }
 }
 
@@ -222,15 +222,16 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
         }
     }
 
-    /// Only a take-back is refused as `wordsCannotBeTakenBack`, so it has no insert's fate.
+    /// Only a take-back is refused as `wordsCannotBeTakenBack`, which the cancel tells. Moving to
+    /// another app is refused only once some of the dictation has landed, so it is the press that
+    /// stopped which says what became of its words, and the refusal names only the cause.
     public var fate: String? {
         switch self {
-        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .dictationIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy:
-            Self.notInserted()
+        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy: Self.notInserted()
         case .cursorIsNotSettled: Self.notInserted(offeredAgainWhen: "press an arrow key where you want it")
         case .requestWasNotReadable: Self.offeredAgainOnReinstall
         case .inputSourceIsNotSelected: Self.notInserted(offeredAgainWhen: "select \(AppIdentity.displayName) in the Input menu")
-        case .wordsCannotBeTakenBack: nil
+        case .dictationIsInAnotherApp, .wordsCannotBeTakenBack: nil
         }
     }
 

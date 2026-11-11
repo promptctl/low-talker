@@ -305,20 +305,3 @@ final class FakeInputMethod: Inserter, Sendable {
         }
     }
 }
-
-extension InsertFailure {
-    /// Every way an insert or a take-back fails.
-    nonisolated static let everyShape: [InsertFailure] = Refusal.allCases.map(InsertFailure.refused) + [
-            .refusedForAnUnknownReason("someReason"),
-            .notYetTaken(NotYetTaken(characters: 0, into: "com.apple.TextEdit")),
-            .unreachable(.nothingIsListening(port: "port")),
-            .unreachable(.requestWasNotTaken(port: "port", after: .seconds(1))),
-            .unreachable(.didNotSayWhoItIs(port: "port", after: .seconds(1))),
-            .unreachable(.answerDidNotArrive(port: "port", after: .seconds(1))),
-            .unreachable(.answerWasAbandoned(port: "port")),
-            .unreachable(.failed(port: "port", status: 268_435_459, words: .notSent)),
-            .unreachable(.answerWasNotReadable(port: "port", bytes: 3, words: .mayHaveLanded)),
-            .unreachable(.answeredByAStranger(port: "port", pid: 1, because: .someoneElse(.adHoc(cdhash: "0a")), required: .adHoc(cdhash: "0b"), words: .mayHaveLanded)),
-            .answererUnreadable(.notValid),
-    ]
-}

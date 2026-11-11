@@ -1530,16 +1530,17 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
     /// Words an insert failed on are held beside a warning that says why, and what became of them:
     /// not inserted or not sent where the failure came before any cursor held them, and not to be
-    /// said again where they may have landed. Only a take-back meets `wordsCannotBeTakenBack`.
-    @Test(arguments: InsertFailure.everyShape.filter { $0 != .refused(.wordsCannotBeTakenBack) })
-    func heldWordsSayWhyAndWhatBecameOfThem(_ failure: InsertFailure) async throws {
+    /// said again where they may have landed. Only a take-back meets `wordsCannotBeTakenBack`, and
+    /// moving to another app is told by the press it stopped.
+    @Test(arguments: failedInserts.filter { ![.refused(.wordsCannotBeTakenBack), .refused(.dictationIsInAnotherApp)].contains($0.failure) })
+    func heldWordsSayWhyAndWhatBecameOfThem(failed: FailedInsert) async throws {
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
-        rig.inputMethod.refusing(failure)
+        rig.inputMethod.refusing(failed.failure)
         rig.hold()
         _ = await rig.report()
         let warning = try #require(rig.hold.held?.warnings.first)
-        #expect(warning.contains(failure.reason), "\(warning)")
-        let fates = failure.wordsMayHaveLanded ? ["do not dictate"] : ["not inserted", "not sent"]
+        #expect(warning.contains(failed.failure.reason), "\(warning)")
+        let fates = failed.mayHaveLanded ? ["do not dictate"] : ["not inserted", "not sent"]
         #expect(fates.contains { warning.contains($0) }, "\(warning)")
     }
 

@@ -374,7 +374,7 @@ import TestProbes
     /// A take-back is not an insert, so a failed one says why, and what became of the words in the
     /// field, and nothing of what becomes of an insert's: not that a dictation was not inserted or
     /// not sent, nor that it is offered again, nor that it may have landed and must not be said again.
-    @Test(arguments: InsertFailure.everyShape)
+    @Test(arguments: failedInserts.map(\.failure))
     func aFailedTakeBackSaysNothingOfAnInsertsFate(_ failure: InsertFailure) async throws {
         let rig = try await Rig(hearing: Self.engine())
         Self.begin(rig)
