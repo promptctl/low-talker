@@ -66,28 +66,29 @@ public final class WordBox {
         panel.draw(face)
     }
 
-    /// The person put the dictation away, with Escape or the circle: the open press is cancelled
-    /// through `hotkey`, the held words no cursor has taken are let go, and the box is put away
-    /// until a press opens or the dismissed words are brought back. The words the press already
+    /// The person put the dictation away, with Escape or the circle: the press the box shows,
+    /// open or on its way, is cancelled through `steering`, the held words no cursor has taken
+    /// are let go, and the box is put away until a press opens or the dismissed words are
+    /// brought back. The words the press already
     /// put at the cursor are taken back by the press's own path.
     /// [LAW:single-enforcer] One dismissal, whichever way it was asked for, so the circle cannot
     /// let go of the words and leave the microphone open. `hold` is handed in because the hold
     /// shows the box from its own start, before a box built over it could be. Dismissed first,
     /// so the box the hold shows as it lets go is already put away.
-    public func dismiss(cancelling hotkey: Hotkey?, hold: Hold) {
+    public func dismiss(cancelling steering: KeySteering?, hold: Hold) {
         dismissed = true
-        hotkey.map(KeySteering.escape)
+        steering?.escape()
         hold.dismiss()
         panel.hide()
     }
 
     /// What each steering key the input method reports does. The switch is exhaustive, so a key
     /// added to `SteeringKey` has to say what it does here before this builds.
-    public func react(to key: SteeringKey, cancelling hotkey: Hotkey?, hold: Hold) {
+    public func react(to key: SteeringKey, cancelling steering: KeySteering?, hold: Hold) {
         switch key {
         // The input method keeps an Escape only while the box is shown, so one told here is
         // the person putting it away.
-        case .escape: dismiss(cancelling: hotkey, hold: hold)
+        case .escape: dismiss(cancelling: steering, hold: hold)
         // Return is held and sent by the input method; the app has nothing to do when it passes.
         case .return: break
         }

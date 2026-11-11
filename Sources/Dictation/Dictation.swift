@@ -166,13 +166,24 @@ public final class Dictation {
             let since: Executor.Since
         }
 
-        /// How the press ended. [LAW:types-are-the-program] A lapse ends the press with no
-        /// key-up, and a chord that was a typed key's modifier with nothing to time from one,
-        /// so "over" and "when the key came up" are not one optional.
-        enum Ended {
-            case up(ContinuousClock.Instant)
-            /// Over, committing nothing more: a lapse, or a chord used as a modifier.
-            case stopped
+        /// Where the press is: its key down, or ended, and how. [LAW:one-source-of-truth] The one
+        /// record of how a press ended, which an Escape changes to cancelled until the press is
+        /// reported, so whether it commits and what its runs are timed from are read off it.
+        enum Phase {
+            case open
+            /// The key is down and its audio already lacks speech, so it commits nothing more. A
+            /// loss never heals, so a press that has one never ends released.
+            case lost
+            case ended(Ending)
+
+            /// Whether its confirmed words are still committed: while the key is down and its
+            /// audio whole, and after a release until the decode is over.
+            var commits: Bool {
+                switch self {
+                case .open, .ended(.released): true
+                case .lost, .ended(.cut), .ended(.usedAsModifier), .ended(.cancelled): false
+                }
+            }
         }
 
         private struct State {
@@ -180,11 +191,8 @@ public final class Dictation {
             /// What the latest pass read, nothing before the first.
             var partial = Partial(confirmed: Transcript(words: []), tentative: Transcript(words: []), repunctuated: 0, unread: nil)
             var firstWords: Duration?
-            /// Nil while the key is down.
-            var ended: Ended?
+            var phase = Phase.open
             var cursor = ConfirmedCursor()
-            /// False once the press stops committing.
-            var committing = true
             /// The capture's reading of what the press's audio already lacks: nil until the
             /// microphone is open, and for a press refused before it was.
             var missing: (@MainActor @Sendable () -> CapturedAudio.Loss?)?
@@ -278,25 +286,33 @@ public final class Dictation {
         ///
         /// While the key is down, audio the capture already knows is missing stops the
         /// commits: what is confirmed from then on reads a fragment, which is still heard and
-        /// held at key-up with the loss beside it. From key-up on, how the press ended says.
+        /// held at key-up with the loss beside it. Its commits end there, so what waits its turn
+        /// behind them, kept speech read into held words, does not wait for the key to come up.
+        /// From key-up on, how the press ended says.
         /// [LAW:no-silent-failure] An insert that fails stops nothing: its words are held, and
         /// the next run carries them.
         @MainActor func take() -> Run? {
             let missing = state.withLock { state -> (@MainActor @Sendable () -> CapturedAudio.Loss?)? in
-                switch state.ended {
-                case nil: state.missing
-                case .up, .stopped: nil
+                switch state.phase {
+                case .open: state.missing
+                case .lost, .ended: nil
                 }
             }
-            if let missing, missing() != nil { stop() }
-            return state.withLock { state in
-                // A stopped press commits nothing more, so the key-down it is timed from is moot.
-                let since: Executor.Since = switch state.ended {
-                case .up(let keyUp): .keyUp(keyUp)
-                case nil, .stopped: .keyDown(keyDown)
+            if let missing, missing() != nil {
+                enter { phase in
+                    switch phase {
+                    case .open: .lost
+                    case .lost, .ended: phase
+                    }
                 }
-                // A stopped press takes no words, so it has no run.
-                let run = state.cursor.advance(through: state.committing ? state.partial.confirmed.words : [])
+            }
+            return state.withLock { state in
+                // A press that commits nothing more has no run, so the key-down it is timed from is moot.
+                let since: Executor.Since = switch state.phase {
+                case .ended(.released(_, let keyUp, _)): .keyUp(keyUp)
+                case .open, .lost, .ended: .keyDown(keyDown)
+                }
+                let run = state.cursor.advance(through: state.phase.commits ? state.partial.confirmed.words : [])
                 // [LAW:one-source-of-truth] Nothing said is the transcript's test, the one the
                 // executor refuses an insert by.
                 return run.isBlank ? nil : Run(words: run, since: since)
@@ -342,20 +358,50 @@ public final class Dictation {
             state.withLock { ($0.performed, $0.words) }
         }
 
-        /// Nothing more is committed for this press, whatever is confirmed after this. Its
-        /// decode goes on to the end of its audio, and each pass is still shown: what it hears
-        /// past the commits is held. [LAW:no-silent-failure]
-        func stop() {
-            state.withLock { $0.committing = false }
-            wake.finish()
+        /// What the press showed while it was open, read at key-up.
+        var duringPress: DuringPress {
+            state.withLock { state in
+                DuringPress(passes: state.passes, repunctuated: state.partial.repunctuated, firstWords: state.firstWords, commits: state.performed.count, wordsCommitted: state.words, firstCommit: state.performed.first?.acknowledged)
+            }
         }
 
-        /// The press is over, its key up or stopped: what the press showed while it was open.
-        func ended(_ ended: Ended) -> DuringPress {
-            state.withLock { state in
-                state.ended = ended
-                return DuringPress(passes: state.passes, repunctuated: state.partial.repunctuated, firstWords: state.firstWords, commits: state.performed.count, wordsCommitted: state.words, firstCommit: state.performed.first?.acknowledged)
+        /// How the press ended, once its key-up has said, and an Escape since may have changed.
+        /// [LAW:no-ambient-temporal-coupling] Read at each point the press is placed or let go,
+        /// so an Escape that lands between them is read at the next.
+        var ending: Ending {
+            switch state.withLock({ $0.phase }) {
+            case .ended(let ending): ending
+            case .open, .lost: preconditionFailure("a press is heard once its key-up has ended it")
             }
+        }
+
+        /// The key-up ended the press as `ending`, unless an Escape reached it first: a cancel
+        /// stands. A press that commits nothing more stops its commits here; its decode goes on
+        /// to the end of its audio, and each pass is still shown, so what it hears past the
+        /// commits is held. [LAW:no-silent-failure]
+        func end(_ ending: Ending) {
+            enter { phase in
+                switch phase {
+                case .ended(.cancelled): phase
+                case .open, .lost, .ended: .ended(ending)
+                }
+            }
+        }
+
+        /// The person threw the press away with Escape, whether its key is down or it is on its
+        /// way: it commits nothing more, and whatever reads its ending next reads cancelled.
+        func cancel() {
+            enter { _ in .ended(.cancelled) }
+        }
+
+        /// Moves the press to the phase `next` makes of the one it is in, in one locked step,
+        /// and ends its commits when it no longer commits.
+        private func enter(_ next: (Phase) -> Phase) {
+            let commits = state.withLock { state in
+                state.phase = next(state.phase)
+                return state.phase.commits
+            }
+            if !commits { wake.finish() }
         }
     }
 
@@ -462,10 +508,9 @@ public final class Dictation {
         case unheard(Report.Outcome)
     }
 
-    /// A press that was heard, handed to the queue: how it ended, its commits, and the decode
-    /// that will say what was in it.
+    /// A press that was heard, handed to the queue: its commits, the decode that will say what
+    /// was in it, and the press itself, which says how it ended.
     private struct Heard: Sendable {
-        let ending: Ending
         let decode: Task<Decoded, Never>
         let streaming: Streaming
         let committing: Task<InsertFailure?, Never>
@@ -485,9 +530,9 @@ public final class Dictation {
     private var press: Press = .up
     /// What `showing` last heard.
     private var shown: Activity = .idle
-    /// Presses heard, ended, and not yet reported. A press nothing heard has nothing to
-    /// transcribe, so it is not counted and shows no panel on its way out.
-    private var unreported = 0
+    /// Presses heard, ended, and not yet reported, in the order they ended. A press nothing heard
+    /// has nothing to transcribe, so it is not here and shows no panel on its way out.
+    private var unreported: [Streaming] = []
     /// When a cursor last arrived while the open press was down, for the offer queued behind it.
     private var arrivedDuringPress: ContinuousClock.Instant?
     /// Whether the person asked for the dismissed words back while the open press was down,
@@ -544,8 +589,24 @@ public final class Dictation {
         // A chord pressed over another held modifier is that modifier's own use, Shift and
         // Right Option for a special character, not dictation: it shows no panel, and once up
         // it names nothing in the menu either. [LAW:comments-carry-meaning]
-        case .up, .blocked: unreported > 0 ? .transcribing : .idle
+        case .up, .blocked: unreported.isEmpty ? .idle : .transcribing
         }
+    }
+
+    /// The person threw away the dictation the box shows, with Escape or the circle: the open
+    /// press, or with none open the latest on its way. A refused press shows its refusal, so
+    /// there is nothing to throw away. What it put at the cursor is taken back, and nothing of it
+    /// is held, by its own path. Ending an open press is the detector's; this reaches the press
+    /// whose ending is already in delivery, and every one past the detector.
+    /// [LAW:one-source-of-truth] Chosen off `press`, as `activity` is, so an Escape throws away
+    /// the press the box was showing and no other.
+    public func cancel() {
+        let shown: Streaming? = switch press {
+        case .down(_, let open): open.streaming
+        case .refused: nil
+        case .up, .blocked: unreported.last
+        }
+        shown?.cancel()
     }
 
     /// Tells `showing` the activity when it differs from what it last heard. Every change
@@ -559,12 +620,12 @@ public final class Dictation {
     }
 
     /// Reports a press, and then shows that a heard one is no longer on its way. Whether a
-    /// microphone opened is the report's own to say — `opened` is nil for a press that heard
-    /// nothing — so the count still on its way is read from the report, not passed beside it.
+    /// microphone opened is `opening`'s to say — nil for a press that heard nothing — and the
+    /// report is built from it, so the press leaving `unreported` and its report are one value.
     /// [LAW:one-source-of-truth]
-    private func settle(_ press: Report) {
-        report(press)
-        if press.opened != nil { unreported -= 1 }
+    private func settle(_ mode: Mode, _ outcome: Report.Outcome, _ opening: Opening?) {
+        report(Report(mode: mode, outcome: outcome, opened: opening?.opened))
+        unreported.removeAll { $0 === opening?.streaming }
         show()
     }
 
@@ -609,7 +670,7 @@ public final class Dictation {
                 Task { for await _ in streaming.reads { show() } }
             } catch {
                 // Nothing will be decoded, so the commits queued for it end at once.
-                streaming.stop()
+                streaming.decoded()
                 hold.release()
                 press = .refused(mode, error)
                 refusal = PressRefusal()
@@ -634,7 +695,7 @@ public final class Dictation {
             }
             let open = press
             press = .up
-            if case .down = open { unreported += 1 }
+            if case .down(_, let down) = open { unreported.append(down.streaming) }
             show()
             // What there is to hear, or what came of a press nothing heard. One value, so a
             // press that was refused at key-down and one that was heard leave here by
@@ -666,7 +727,7 @@ public final class Dictation {
                 mode = began
                 // Read before the session ends, so it holds only what the press showed
                 // while it was open.
-                let duringPress = down.streaming.ended(released.map { .up($0.keyUp) } ?? .stopped)
+                let duringPress = down.streaming.duringPress
                 // The marks are closed and the microphone with them, however the press
                 // ended, so a session left open cannot carry its beginning into the next
                 // press's clip and cannot leave the device held after the key came up.
@@ -689,13 +750,10 @@ public final class Dictation {
                 }
                 // A press cut short commits nothing more, and its decode hears it to the end of
                 // its audio for the hold. What it already committed stays: the person watched
-                // it arrive. Stopped here on the main actor, where every run is taken, so a
+                // it arrive. Ended here on the main actor, where every run is taken, so a
                 // pass the ended audio lets the engine finish is never committed.
-                switch ended {
-                case .released: break
-                case .cut, .usedAsModifier, .cancelled: down.streaming.stop()
-                }
-                pending = .heard(Heard(ending: ended, decode: down.decode, streaming: down.streaming, committing: down.committing))
+                down.streaming.end(ended)
+                pending = .heard(Heard(decode: down.decode, streaming: down.streaming, committing: down.committing))
             }
             do throws(SerialQueueError) {
                 // Handed over before key-up returns, so a `finish` that comes next
@@ -703,21 +761,25 @@ public final class Dictation {
                 // queue that orders the inserts orders the telling of it too, and a
                 // drain that waited for the one has waited for the other.
                 // [LAW:no-ambient-temporal-coupling] [LAW:single-enforcer]
-                try sessions.submit {
+                //
+                // On the main actor, as `hear` is, so its last read of how the press ended and
+                // `settle` are one stretch with no turn between them: an Escape is read by the
+                // press, or lands after it has left `unreported`.
+                try sessions.submit { @MainActor in
                     let outcome: Report.Outcome
                     switch pending {
                     case .heard(let heard):
                         do throws(Failed) { outcome = try await self.hear(heard) } catch { outcome = .failed(error) }
                     case .unheard(let unheard): outcome = unheard
                     }
-                    await self.settle(Report(mode: mode, outcome: outcome, opened: opening?.opened))
+                    self.settle(mode, outcome, opening)
                 }
             } catch {
                 // The operation reports its own outcome; only the queue's own refusal
                 // to accept it reaches here, and then nothing will ever read the decode, so
                 // it is stopped and lets go of the engine as it does. [LAW:no-silent-failure]
                 if case .heard(let heard) = pending { heard.decode.cancel() }
-                settle(Report(mode: mode, outcome: .failed(Failed(error)), opened: opening?.opened))
+                settle(mode, .failed(Failed(error)), opening)
             }
             arrivedDuringPress.map { offer(since: .cursorArrived($0)) }
             arrivedDuringPress = nil
@@ -995,11 +1057,16 @@ public final class Dictation {
     /// short, and nowhere for a chord that was a typed key's modifier. Every press waits for
     /// its decode, the model's load included, rather than cancelling it: the engine's turn
     /// passes on only when the decode ends, and a modifier press's report counts its words.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] An Escape can cancel the press at any of its waits, so
+    /// how it ended is read after each, before anything a cancel could not undo: after its
+    /// commits, after its decode, before any word is held or speech kept, and after the one
+    /// insert past that, whose words a cancel takes back.
     private func hear(_ heard: Heard) async throws(Failed) -> Report.Outcome {
         let unplaced = await heard.committing.value
         // A cancelled press takes its words back as soon as its commits have drained, which is
         // when it is cancelled and not after a decode that may be loading a model.
-        if case .cancelled = heard.ending { return try await cancel(heard) }
+        if case .cancelled = heard.streaming.ending { return try await cancel(heard) }
         let decoded = await heard.decode.value
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
         // words are already at the cursor, how many may be, and how many the hold offers.
@@ -1013,7 +1080,7 @@ public final class Dictation {
             if rest.isBlank { return }
             hold.heldBack(rest, by: heard.streaming.owner, warning: warning)
         }
-        switch heard.ending {
+        switch heard.streaming.ending {
         case .released(let press, let keyUp, let delivery):
             let transcription: Transcription
             switch decoded.transcription {
@@ -1026,10 +1093,13 @@ public final class Dictation {
                 // The audio is kept whether or not a commit was refused.
                 throw stopped(.reading(keeping(failed.failure), after: unplaced))
             }
+            let placing = await Result { () async throws(InsertFailure) in
+                try await place(heard.streaming.rest(of: transcription.transcript), for: heard.streaming, since: .keyUp(keyUp))
+            }
+            // An Escape while the rest went in takes it back, and lets go of it if it is held.
+            if case .cancelled = heard.streaming.ending { return try await cancel(heard) }
             let placed: Placed
-            do throws(InsertFailure) {
-                placed = try await place(heard.streaming.rest(of: transcription.transcript), for: heard.streaming, since: .keyUp(keyUp))
-            } catch { throw stopped(.insert(error)) }
+            do throws(InsertFailure) { placed = try placing.get() } catch { throw stopped(.insert(error)) }
             // A rest of nothing leaves what the commits could not place where it was.
             if placed.performed == nil, let unplaced { throw stopped(.insert(unplaced)) }
             return .session(Session(press: press, transcription: transcription, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: heard.streaming.landed.performed, standing: heard.streaming.provenance.standingWords))
@@ -1043,7 +1113,7 @@ public final class Dictation {
             if let unplaced { throw stopped(.insert(unplaced)) }
             return .usedAsModifier(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, discarded: discarded)
         case .cancelled:
-            // Taken above, before the decode was waited on; this is the same answer, never a trap.
+            // An Escape while the decode was waited on, read before anything of the press is held.
             return try await cancel(heard)
         case .cut(let cut):
             // What the decode heard past the commits, and what kept it from reading them: a failed

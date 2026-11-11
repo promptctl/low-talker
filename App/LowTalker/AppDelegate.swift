@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var box = WordBox(panel: hud)
     /// The loop's activity again, floating over the app being dictated into, with the words
     /// no cursor took.
-    private lazy var hud: HUD = HUD(circleClicked: { [unowned self] in box.dismiss(cancelling: listening?.hotkey, hold: hold) }, insert: { [unowned self] in
+    private lazy var hud: HUD = HUD(circleClicked: { [unowned self] in box.dismiss(cancelling: listening?.steering, hold: hold) }, insert: { [unowned self] in
         // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
         let words = hold.held?.allWords.words.count ?? 0
         let unheard = listening == nil ? ", with no loop listening to insert them" : ""
@@ -316,6 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private struct Listening {
         let hotkey: Hotkey
         let dictation: Dictation
+        let steering: KeySteering
         /// The input method's notices, hosted for as long as the hotkey is up. Nil when they or
         /// the hotkey could not come up, and then neither is.
         let notices: InputMethodNotices?
@@ -411,6 +412,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             report: { [unowned self] in report($0) },
             showing: { [unowned self] in show($0) }
         )
+        // How Return and Escape steer this loop's press, the input method's questions and the
+        // word box's dismissal alike.
+        let steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting.isOn }, panelShown: { [unowned self] in self.hud.isShown })
         // The hotkey goes up only over an input method that installed: a hotkey over one that
         // refused would open the microphone on every press for words that go nowhere, while
         // the status line said the loop was off. [LAW:no-silent-failure]
@@ -429,11 +433,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     heard: { [unowned self] notice in
                         inputMethod.heard(notice).map(showInputMethod)
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
-                        if case let .keyTyped(_, key) = notice { box.react(to: key, cancelling: listening?.hotkey, hold: hold) }
+                        if case let .keyTyped(_, key) = notice { box.react(to: key, cancelling: listening?.steering, hold: hold) }
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
-                    asked: { KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting.isOn }, panelShown: { [unowned self] in self.hud.isShown }).answer($0, through: $1) },
+                    asked: { steering.answer($0, through: $1) },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
             } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }
         }
@@ -449,7 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return LoopRefusal(stringLiteral: "\(error)")
             }
         }
-        listening = Listening(hotkey: hotkey, dictation: dictation, notices: try? hearing.get())
+        listening = Listening(hotkey: hotkey, dictation: dictation, steering: steering, notices: try? hearing.get())
         // A hotkey that went up says how to press it once the input method's process is
         // running, which is that process's event to tell; see `show(_:)`.
         if case .failure(let refusal) = hearing { showHotkeyStatus(.off(refusal.reason)) }
