@@ -374,6 +374,35 @@ import TestProbes
         #expect(rig.hold.held == nil)
     }
 
+    /// The press's refused word is carried by its next insert, which is in the air when the person
+    /// throws the press away: that insert's answer says where the word is, so it is counted once,
+    /// taken back when it landed, standing when it may have, and let go when it came back.
+    @Test(arguments: [
+        (nil, Cancelled(takenBack: 2, earlierWordsLanded: 0, forgotten: 0, standing: 0, discarded: 2), nil),
+        (InsertFailure.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words)),
+         Cancelled(takenBack: 0, earlierWordsLanded: 0, forgotten: 0, standing: 2, discarded: 2),
+         Held.unaccounted(part(" hello there", "\(InsertFailure.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words)))"))),
+        (InsertFailure.refused(.noTextFieldHasFocus), Cancelled(takenBack: 0, earlierWordsLanded: 0, forgotten: 2, standing: 0, discarded: 2), nil),
+    ] as [(InsertFailure?, Cancelled, Held?)])
+    func heldWordsAnInsertInTheAirCarriesAreSettledByItsAnswer(_ answer: InsertFailure?, _ told: Cancelled, _ held: Held?) async throws {
+        let rig = try await Rig(hearing: Self.engine())
+        rig.inputMethod.refusing(Self.refusal)
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.hold.held != nil }
+        rig.inputMethod.hold()
+        rig.speak([3, 4])
+        await rig.until { rig.inputMethod.holding == 1 }
+
+        Self.cancel(rig)
+        rig.inputMethod.refusing(answer)
+        rig.inputMethod.letGo()
+        let cancelled = try #require(await rig.report().cancelled)
+
+        #expect(cancelled == told)
+        #expect(rig.hold.held == held)
+        #expect(rig.inputMethod.field == "")
+    }
+
     /// An insert that may have landed covers what it carried: the earlier words and the press's own
     /// failed ones stand with it, and the report counts every one.
     @Test func earlierAndFailedWordsAnUnansweredInsertCarriedStandToo() async throws {

@@ -436,11 +436,18 @@ public final class Hold {
     /// many it let go.
     ///
     /// Words that may have landed stand and are never touched. Standing words are unchanged, so
-    /// `standingGeneration` is too.
+    /// `standingGeneration` is too. [LAW:one-source-of-truth] Words an insert on its way carries
+    /// are where its answer says: taken back by the press once landed, standing once they may
+    /// have, and let go by `heldBack` once handed back.
     func forget(_ owner: any Held.Owner) -> Int {
-        let (held, dismissed) = (held, dismissed)
-        move(to: HoldState(held: held?.without(owner), dismissed: dismissed?.without(owner)), carrying: carried)
-        return [held, dismissed].reduce(0) { $0 + ($1?.offered?.count(by: owner) ?? 0) }
+        let next = switch carried {
+        case nil: state.without(owner)
+        case .held?: HoldState(held: held, dismissed: dismissed?.without(owner))
+        case .dismissed?: HoldState(held: held?.without(owner), dismissed: dismissed)
+        }
+        let forgotten = state.offered(by: owner) - next.offered(by: owner)
+        move(to: next, carrying: carried)
+        return forgotten
     }
 
     /// What is held and then `words`, which `owner` said, are at no cursor, for the reason `warning` gives the
@@ -449,13 +456,26 @@ public final class Hold {
     /// that failed placing nothing is answered here, so the words it carried are at no cursor
     /// wherever they are now.
     ///
-    /// A press the person threw away holds none of its words, which an insert it began before the
-    /// throw hands back after it, so what `forget` let go at the throw is never shown again; the
-    /// failure's warning still stands on what is held. Says how many of `words` it let go.
+    /// A press the person threw away holds none of its words at no cursor: an insert it began
+    /// before the throw hands back its words and those it carried, which `forget` left to its
+    /// answer, and they are let go with nothing shown. Says how many it let go.
     @discardableResult
     func heldBack(_ words: Transcript, by owner: (any Held.Owner)?, warning: String) -> Int {
-        let kept = Transcript(words: owner?.cancelled == true ? [] : words.words)
-        move(to: HoldState(held: Held(unplaced: Held.Part(runs: offering(kept, warning: warning, by: owner)), unaccounted: held?.standing), dismissed: dismissed), carrying: nil)
-        return words.words.count - kept.words.count
+        let next = HoldState(held: Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: held?.standing), dismissed: dismissed)
+        let thrown = owner.flatMap { $0.cancelled ? $0 : nil }
+        move(to: thrown.map(next.without) ?? next, carrying: nil)
+        return thrown.map(next.offered) ?? 0
+    }
+}
+
+private extension HoldState {
+    /// Without the words at no cursor that `owner` said, held or dismissed.
+    func without(_ owner: any Held.Owner) -> HoldState {
+        HoldState(held: held?.without(owner), dismissed: dismissed?.without(owner))
+    }
+
+    /// How many of the words at no cursor, held or dismissed, `owner` said.
+    func offered(by owner: any Held.Owner) -> Int {
+        [held, dismissed].reduce(0) { $0 + ($1?.offered?.count(by: owner) ?? 0) }
     }
 }
