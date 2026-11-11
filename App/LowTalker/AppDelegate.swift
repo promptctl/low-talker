@@ -431,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
-                    asked: { KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting().isOn }, panelShown: { [unowned self] in self.hud.isShown }).answer($0, through: $1) },
+                    asked: { KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { [returnHold = self.returnHold] in returnHold.isOn }, panelShown: { [unowned self] in self.hud.isShown }).answer($0, through: $1) },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
             } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }
         }

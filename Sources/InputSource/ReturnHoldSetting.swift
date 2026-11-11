@@ -6,10 +6,12 @@ import Foundation
 ///
 /// [LAW:one-source-of-truth] The app's preferences are the record. The input method asks the app
 /// about it at each Return and keeps no copy of its own.
-public struct ReturnHoldSetting {
+public struct ReturnHoldSetting: Sendable {
     private static let key = "holdReturnForDictation"
 
-    private let defaults: UserDefaults
+    // UserDefaults is documented safe to use from any thread; Foundation has yet to mark it
+    // Sendable.
+    nonisolated(unsafe) private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
