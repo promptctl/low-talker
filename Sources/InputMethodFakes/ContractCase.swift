@@ -74,8 +74,9 @@ public nonisolated extension ContractCase {
     /// Every cell of bem's table (cmt-8694d7d2) the port's calls reach, for each row measured.
     static let measured: [ContractCase] = [ClientProfile.appKit, .webKitTextArea].flatMap(theFullField) + [
         // The none tier, measured as `<input maxlength=10>`: blind, and an explicit range ignored.
-        ContractCase(profile: .webKitInput, holding: "", act: .read, answers: blind, holds: ""),
-        ContractCase(profile: .webKitInput, holding: "alpha", act: .insert("RNG", replacementRange: NSRange(location: 0, length: 3)), answers: blind, holds: "alphaRNG"),
+        ContractCase(profile: .webKitInput, holding: "", maxLength: 10, act: .read, answers: blind, holds: ""),
+        ContractCase(profile: .webKitInput, holding: "alpha", maxLength: 10, act: .insert("RNG", replacementRange: NSRange(location: 0, length: 3)),
+                     answers: blind, holds: "alphaRNG"),
         ContractCase(profile: .noTextField, holding: "", act: .read, answers: blind, holds: ""),
     ]
 

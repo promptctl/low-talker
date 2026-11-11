@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Checks the test host on this Mac: for each of its fields, empties it, brings the host to the
+front, types into it with vhid, moves the caret back one, and reads back what the field holds,
+which is what was typed or, with a maxLength of 10 on a web field, as much of it as fits.
+
+    scripts/test-host-check [bundle]        (default .build/TestHost.app, from `make test-host`)
+
+The keys go through the virtual keyboard, so they land through whatever input source is
+selected: a check of the host, not of the input method. macOS counts them with a person's, so
+run it while nobody else is typing on this Mac. One line per field and maxLength, `pass` or
+`fail`; the exit status is 0 when nothing failed, 1 when one failed, 2 when the check itself
+could not run, as scripts/conformance's. [LAW:nothing-unseen]
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from testhost import Host, HostError  # noqa: E402
+
+TYPED = "alpha bravo"
+
+
+def units(text: str) -> int:
+    """`text`'s length in UTF-16 units, as the host counts a selection."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def main() -> int:
+    bundle = sys.argv[1] if len(sys.argv) > 1 else ".build/TestHost.app"
+    failed = False
+    try:
+        with Host(bundle) as host:
+            for name, max_length in [(name, None) for name in host.fields] + [(name, 10) for name in host.fields if name != "text-view"]:
+                kept = TYPED if max_length is None else TYPED[:max_length]
+                host.hold(name, "", (0, 0), max_length)
+                host.front()
+                subprocess.run(["vhid", "type", "--into", "test-host", TYPED], check=True, stdout=subprocess.DEVNULL)
+                # The last key moves the caret back one: a state only it makes, so once it is seen
+                # no key is still on its way, whatever the field kept.
+                subprocess.run(["vhid", "press", "--into", "test-host", "left"], check=True, stdout=subprocess.DEVNULL)
+                try:
+                    host.change(name, lambda event: event["text"] and event["selection"] == [units(event["text"]) - 1, 0])
+                except HostError as error:
+                    print(f"note {name}: {error} while waiting for the caret to move back")
+                held = host.read(name)
+                caret = [units(kept) - 1, 0]
+                passed = held["text"] == kept and held["selection"] == caret and held["focused"] and held["active"]
+                failed |= not passed
+                print(f"{'pass' if passed else 'fail'} {name}, maxLength {max_length}: holds {held['text']!r}, "
+                      f"selection {held['selection']}, focused {held['focused']}, active {held['active']}; "
+                      f"typed {TYPED!r} and left, expected {kept!r} with the caret at {caret[0]}")
+    except (HostError, subprocess.CalledProcessError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
