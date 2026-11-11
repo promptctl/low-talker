@@ -1253,9 +1253,12 @@ public struct PressStopped: Accounted {
     /// an insert's fate would be a second account of them, so the press tells them and the insert
     /// its reason; the hold keeps the whole warning beside the words it is about.
     var stoppedBy: String {
-        guard let insert = cause as? any InsertWarning, landed + standing > 0 else { return "\(cause)" }
+        guard let insert = cause as? any InsertWarning, reached else { return "\(cause)" }
         return "WARNING: \(insert.reason)"
     }
+
+    /// Whether any of its words are or may be at a cursor.
+    var reached: Bool { landed + standing > 0 }
 
     /// What became of its words, once any are or may be at a cursor: one account of each.
     var told: String {
@@ -1270,7 +1273,7 @@ public struct PressStopped: Accounted {
     public var description: String { stoppedBy + told }
     /// What it left at the cursor, which is counts, and then the cause's account.
     public var account: Account {
-        Account(facts: "\(landed) words inserted and \(standing) that may have been before: \(cause.account.facts)", dictated: cause.account.dictated)
+        Account(facts: "\(landed) words inserted and \(standing) that may have been inserted before: \(cause.account.facts)", dictated: cause.account.dictated)
     }
 }
 
@@ -1296,8 +1299,7 @@ extension Dictation {
 public func failureLine(_ failure: any Accounted) -> String {
     let stopped = failure as? PressStopped
     let root = stopped?.stoppedBy ?? "\(failure)"
-    let reached = (stopped?.landed ?? 0) + (stopped?.standing ?? 0) > 0
-    let framed = root.hasPrefix("WARNING:") ? root : "Your last dictation \(reached ? "stopped" : "was not placed"): \(root)."
+    let framed = root.hasPrefix("WARNING:") ? root : "Your last dictation \(stopped?.reached == true ? "stopped" : "was not placed"): \(root)."
     return framed + (stopped?.told ?? "")
 }
 

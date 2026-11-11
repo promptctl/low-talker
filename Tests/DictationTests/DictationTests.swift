@@ -1740,7 +1740,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.hold()
         guard case .failed(let failed) = await rig.report() else { Issue.record("expected the press to fail"); return }
         #expect(failed.kind == "PressStopped")
-        #expect(failed.failure.account == Account(facts: "0 words inserted and 0 that may have been before: NoEngine()"))
+        #expect(failed.failure.account == Account(facts: "0 words inserted and 0 that may have been inserted before: NoEngine()"))
     }
 
     /// The hold is the app's, not the loop's: a loop rebuilt over a new config offers what
