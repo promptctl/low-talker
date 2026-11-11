@@ -145,9 +145,9 @@ actor Utterance {
     private var ended = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
     /// Run with how many waits are parked each time a wait parks and each time a wake
-    /// takes them, so an observer awaits a wait parked before the event that must wake it
-    /// rather than trusting the scheduler to have run it first. Defaults to doing nothing,
-    /// so production is unchanged. [LAW:no-ambient-temporal-coupling] The actor's own
+    /// runs, whether or not one was, so an observer awaits a wait parked before the event
+    /// that must wake it rather than trusting the scheduler to have run it first. Defaults
+    /// to doing nothing, so production is unchanged. [LAW:no-ambient-temporal-coupling] The actor's own
     /// state, reported as it moves, as `EngineTurns` reports its `reading`.
     private let onWaitingChanged: @Sendable (_ parked: Int) -> Void
 

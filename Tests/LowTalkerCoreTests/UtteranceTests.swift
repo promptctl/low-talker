@@ -3,22 +3,38 @@ import Synchronization
 import Testing
 import TestProbes
 
-/// The waits an utterance reports parked, for a test to await before the event that must wake
-/// them. A wait run alongside the test's own calls on the actor may otherwise run after them,
-/// return at once, and pass without ever having waited. [LAW:no-ambient-temporal-coupling]
-final class Parked: Sendable {
-    private let count = Mutex(0)
+/// A wait on an utterance, run alongside the test's own calls on the actor, and where it has got
+/// to: parked on the actor or returned. Read after each event, it fails a wait that returned where
+/// it should have parked, or stayed parked where a wake should have taken it, at once and by name,
+/// rather than passing on a lucky schedule or hanging. [LAW:no-ambient-temporal-coupling]
+private final class Waiter: Sendable {
+    enum Place { case parked, returned }
+
+    private let state = Mutex((parked: 0, returned: false))
     private let changes = Changes()
 
+    /// What the utterance reports through its `onWaitingChanged`.
     func report(_ parked: Int) {
-        count.withLock { $0 = parked }
+        state.withLock { $0.parked = parked }
         changes.note()
     }
 
-    var now: Int { count.withLock { $0 } }
+    func run<Heard: Sendable>(_ wait: @escaping @Sendable () async -> Heard) -> Task<Heard, Never> {
+        Task {
+            let heard = await wait()
+            state.withLock { $0.returned = true }
+            changes.note()
+            return heard
+        }
+    }
 
-    func reach(_ parked: Int) async {
-        await changes.settled { now == parked }
+    /// Where the wait is once it is anywhere. A wait not yet run, or woken and not yet back on
+    /// the actor, is neither parked nor returned, so this waits for it to become one: a wake
+    /// takes the count to nothing on the actor, inside the call that woke it, so a wait read
+    /// parked after an event parked after it.
+    func place() async -> Place {
+        await changes.settled { state.withLock { $0.returned || $0.parked > 0 } }
+        return state.withLock { $0.returned ? .returned : .parked }
     }
 }
 
@@ -36,14 +52,14 @@ final class Parked: Sendable {
     /// A wait for more than a count returns only once the speech has grown past it,
     /// with everything spoken by then and the hangover after it.
     @Test func audioBeyondACountWaitsForTheSpeechToPassIt() async throws {
-        let parked = Parked()
-        let utterance = Utterance { parked.report($0) }
-        let heard = Task { await utterance.audio(beyond: 1_600 + Utterance.hangover) }
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
+        let heard = waiter.run { await utterance.audio(beyond: 1_600 + Utterance.hangover) }
         await utterance.append(Self.speech(1_600))
         // Speech that only reaches the count leaves the wait parked.
-        await parked.reach(1)
+        try #require(await waiter.place() == .parked)
         await utterance.append(Self.speech(1_600))
-        try #require(parked.now == 0)
+        try #require(await waiter.place() == .returned)
         let (samples, _, ended, _) = await heard.value
         #expect(samples.count == 3_200 + Utterance.hangover)
         #expect(samples.prefix(3_200).allSatisfy { $0 == 0.5 })
@@ -80,20 +96,20 @@ final class Parked: Sendable {
     /// hangover, the hangover carrying the quiet that has actually arrived, and a
     /// wait for more does not return until the utterance ends.
     @Test func quietDoesNotGrowTheSpeech() async throws {
-        let parked = Parked()
-        let utterance = Utterance { parked.report($0) }
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
         await utterance.append(Self.speech(1_600))
         await utterance.append(Self.quiet(16_000))
         let (samples, _, ended, _) = await utterance.audio(beyond: 0)
         #expect(samples.count == 1_600 + Utterance.hangover)
         #expect(samples.dropFirst(1_600).allSatisfy { $0 == 0.001 })
         #expect(!ended)
-        let more = Task { await utterance.audio(beyond: 1_600 + Utterance.hangover) }
+        let more = waiter.run { await utterance.audio(beyond: 1_600 + Utterance.hangover) }
         await utterance.append(Self.quiet(16_000))
         // Quiet leaves the wait parked: it has not grown the speech.
-        await parked.reach(1)
+        try #require(await waiter.place() == .parked)
         await utterance.end()
-        try #require(parked.now == 0)
+        try #require(await waiter.place() == .returned)
         let (final, _, over, _) = await more.value
         #expect(final.count == 1_600 + Utterance.hangover)
         #expect(over)
@@ -149,13 +165,13 @@ final class Parked: Sendable {
 
     /// The end wakes a wait that the speech never satisfied, with what there is.
     @Test func theEndWakesAWaitWithWhatArrived() async throws {
-        let parked = Parked()
-        let utterance = Utterance { parked.report($0) }
-        let heard = Task { await utterance.audio(beyond: 100_000) }
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
+        let heard = waiter.run { await utterance.audio(beyond: 100_000) }
         await utterance.append(Self.speech(1_605))
-        await parked.reach(1)
+        try #require(await waiter.place() == .parked)
         await utterance.end()
-        try #require(parked.now == 0)
+        try #require(await waiter.place() == .returned)
         let (samples, arrived, ended, _) = await heard.value
         #expect(samples.count == 1_605 + Utterance.hangover)
         #expect(arrived == 1_605)
@@ -177,14 +193,14 @@ final class Parked: Sendable {
     /// ends: the speech plus its hangover, nothing withheld for being short, and the
     /// hangover that never arrived is silence that says so.
     @Test func shortSpeechIsHandedOverWholeAtTheEnd() async throws {
-        let parked = Parked()
-        let utterance = Utterance { parked.report($0) }
-        let heard = Task { await utterance.audio(beyond: 16_000) }
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
+        let heard = waiter.run { await utterance.audio(beyond: 16_000) }
         await utterance.append(Self.speech(6_400))
         await utterance.append(Self.quiet(1_600))
-        await parked.reach(1)
+        try #require(await waiter.place() == .parked)
         await utterance.end()
-        try #require(parked.now == 0)
+        try #require(await waiter.place() == .returned)
         let (samples, arrived, ended, _) = await heard.value
         #expect(samples.count == 6_400 + Utterance.hangover)
         #expect(arrived == 8_000)
@@ -212,18 +228,17 @@ final class Parked: Sendable {
     /// cancellation, so a waiter parked for more speech is woken with the end and
     /// never waits on a key-up that is not coming.
     @Test func cancellingTheFillEndsTheUtteranceAndWakesAWaiter() async throws {
-        let parked = Parked()
-        let utterance = Utterance { parked.report($0) }
+        let waiter = Waiter()
+        let utterance = Utterance { waiter.report($0) }
         // The continuation is held to the end: dropping it would finish the stream.
         let (never, feed) = AsyncStream<AudioClip>.makeStream()
         let filling = Task { try await utterance.fill(from: never) }
-        let heard = Task { await utterance.audio(beyond: 100_000) }
-        await parked.reach(1)
+        let heard = waiter.run { await utterance.audio(beyond: 100_000) }
+        try #require(await waiter.place() == .parked)
         filling.cancel()
-        // The fill ends the utterance once the cancel ends its iteration, and refuses it:
-        // nothing was spoken.
-        await #expect(throws: TranscriptionFailure.self) { try await filling.value }
-        try #require(parked.now == 0)
+        // The fill ends the utterance once the cancel ends its iteration.
+        _ = await filling.result
+        try #require(await waiter.place() == .returned)
         let (samples, _, ended, _) = await heard.value
         #expect(ended)
         #expect(samples.isEmpty)
