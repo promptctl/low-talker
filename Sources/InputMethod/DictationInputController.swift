@@ -38,7 +38,7 @@ nonisolated func controllerLine(controller: UInt, _ event: String, client: Strin
 /// `Info.plist` names this class as a string, and the Objective-C runtime is what resolves
 /// it; `InputMethodPlistTests` holds that string to this name.
 @objc(DictationInputController)
-public final class DictationInputController: IMKInputController {
+public final class DictationInputController: IMKInputController, InputController {
     /// How `IMKServer` builds the controller. Nonisolated, as the initializers they override
     /// are, which a main-actor class does not inherit.
     nonisolated override public init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
@@ -53,8 +53,16 @@ public final class DictationInputController: IMKInputController {
         logLife("was made")
     }
 
-    deinit {
+    /// A controller that ends without being deactivated - closed with its window, or orphaned (IMK
+    /// rule 5) - takes its cursor with it, so no cursor outlives its controller to be refused
+    /// beside a live one or committed into. Isolated rather than through `onMainActor`'s
+    /// `main.sync`: an end has no answer to wait for, and waiting would hold the thread IMK
+    /// releases it on behind a commit into a stalled app (3.0 s, low-imk-rules-w3g.3ky). The
+    /// object is not freed until this has run, so no later controller at its address inherits
+    /// the cursor.
+    isolated deinit {
         logLife("ended")
+        FocusedClient.shared.left(self)
     }
 
     nonisolated private var address: UInt { UInt(bitPattern: ObjectIdentifier(self)) }
@@ -65,10 +73,9 @@ public final class DictationInputController: IMKInputController {
     }
 
     /// One of this controller's lines about the client it holds, which says which controller it
-    /// is, and that it holds none when it does not. A client that did not arrive with an
-    /// activation is the one it already held, so the line says "holding" either way.
-    private func said(_ event: String, about client: Client?) -> String {
-        controllerLine(controller: address, event, client: client.map { "holding \($0)" } ?? "holding no client")
+    /// is, and what `FocusedClient` holds of it.
+    private func said(_ event: String) -> String {
+        controllerLine(controller: address, event, client: FocusedClient.shared.holding(self))
     }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
@@ -88,7 +95,8 @@ public final class DictationInputController: IMKInputController {
     nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {
         // Debug level: this is made once per key typed anywhere.
         return onMainActor("didCommand", selector, level: .debug) { selector in
-            imkLog.debug("\(self.said("was handed a command", about: self.cursor), privacy: .public)")
+            FocusedClient.shared.typedInto(self)
+            imkLog.debug("\(self.said("was handed a command"), privacy: .public)")
             if selector == NSSelectorFromString("insertNewline:") { return self.holdReturn() }
             if selector == NSSelectorFromString("cancelOperation:") {
                 let kept = SteeringGate.shared.escapeVerdict(at: ProcessInfo.processInfo.systemUptime) == .keep
@@ -100,10 +108,13 @@ public final class DictationInputController: IMKInputController {
         }
     }
 
-    /// Text is never handed to this input method as keys, so it is declined.
-    /// Entered on the main actor like every callback, though its answer is always no.
+    /// A key typed as text, which is declined, so it reaches the app as the person typed it.
+    /// Entered on the main actor like every callback, to say which client the key went to.
     nonisolated override public func inputText(_ text: String!, client _: Any!) -> Bool {
-        onMainActor("inputText", text, level: .debug) { _ in false }
+        onMainActor("inputText", text, level: .debug) { _ in
+            FocusedClient.shared.typedInto(self)
+            return false
+        }
     }
 
     /// The held Return: kept, and the system's beep said, when the gate keeps it.
@@ -140,42 +151,33 @@ public final class DictationInputController: IMKInputController {
             // A sender no cursor can be made of - no client at all, or a client that will
             // not name its app - changes nothing here. Not reported, because a sender THIS
             // controller cannot understand is no reason to take the cursor away from another
-            // controller that can; and not forgotten either, because the cursor last
-            // reported is the one `deactivateServer` hands back, so dropping it would leave
-            // `FocusedClient` holding a client nobody can retract. One rule, and it lives in
-            // `Client.init`: a cursor that exists is a cursor `took` accepts.
+            // controller that can; and the cursor this one already held stays as it was, held by
+            // `FocusedClient` for this controller until it deactivates or ends. One rule, and it
+            // lives in `Client.init`: a cursor that exists is a cursor `took` accepts.
             // [LAW:single-enforcer]
             // The app in front is read here, where the workspace is, and handed to the cursor
             // as a value. [LAW:effects-at-boundaries]
             let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
             let arriving = (sender as? IMKTextInput).flatMap { Client(IMKClient(client: $0), inFront: frontmost) }
-            self.cursor = arriving ?? self.cursor
-            arriving.map(FocusedClient.shared.took)
             // [LAW:nothing-unseen] Which controller and which client, so two windows of one app
             // that activate in the same millisecond are two lines that say so, and a sender that
-            // made no cursor is the controller's own held one, named.
-            imkLog.log("\(self.said(arriving == nil ? "activated without a usable client" : "activated", about: self.cursor), privacy: .public)")
-            // Told after it is taken, so words the app offers in answer find it in front.
-            arriving.map { Notices.shared.cursorArrived(in: $0.application) }
+            // made no cursor is the controller's own held one, named. Said before the cursor is
+            // taken, so the log reads the activation ahead of the arrival it causes.
+            imkLog.log("\(arriving.map { controllerLine(controller: self.address, "activated", client: FocusedClient.holding($0)) } ?? self.said("activated without a usable client"), privacy: .public)")
+            // Told to the app by `FocusedClient` once this is the cursor words go to, so words the
+            // app offers in answer find it in front.
+            arriving.map { FocusedClient.shared.took($0, by: self) }
         }
     }
 
     /// Focus left this controller's client.
     ///
-    /// The cursor made on the way in is the one handed back, so `FocusedClient` can tell
-    /// this client leaving from a different one arriving - a fresh wrapper around the same
-    /// client would be a different object and the comparison would always miss.
+    /// Said as this controller, so `FocusedClient` removes this client's cursor and never another
+    /// controller's that arrived first.
     nonisolated override public func deactivateServer(_: Any!) {
         onMainActor("deactivateServer", ()) {
-            imkLog.log("\(self.said("deactivated", about: self.cursor), privacy: .public)")
-            self.cursor.map(FocusedClient.shared.left)
-            self.cursor = nil
+            imkLog.log("\(self.said("deactivated"), privacy: .public)")
+            FocusedClient.shared.left(self)
         }
     }
-
-    /// This controller's client, as the one thing this process asks of it.
-    ///
-    /// Held here because `IMKServer` builds one controller per client, so this IS the one
-    /// place with a client's lifetime to hang it on. [LAW:one-source-of-truth]
-    private var cursor: Client?
 }
