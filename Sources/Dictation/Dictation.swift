@@ -1299,11 +1299,12 @@ public struct PressStopped: Accounted {
     /// or a failed reading's, so the press tells the remedy beside the words it offers. Until then,
     /// an insert's fate is the account: none of the press's words is at a cursor, and the fate says
     /// that and how the hold offers them again, which a cut or a failed reading holding more words
-    /// after it leaves true, so what ended it is told as having stopped it, not as a second fate.
+    /// after it leaves true. What ended it is told as having stopped it: the insert is why none
+    /// of its words was placed.
     var stoppedBy: String {
-        let insert = insert.map { reached ? "WARNING: \($0.reason)" : "\($0)" }
-        let ending = ending.map { framed("\($0)", fateTold: reached || insert != nil) }
-        return ((insert.map { [$0] } ?? []) + ending).joined(separator: " ")
+        let unplaced = insert.map { reached ? "WARNING: \($0.reason)" : "\($0)" }
+        let ending = ending.map { framed("\($0)", whyNothingWasPlaced: !reached && insert == nil) }
+        return ((unplaced.map { [$0] } ?? []) + ending).joined(separator: " ")
     }
 
     /// The insert that left its words held, when one did.
@@ -1318,10 +1319,10 @@ public struct PressStopped: Accounted {
     var reached: Bool { landed + standing > 0 }
 
     /// What became of its words: one account of each, those neither inserted nor held, unread or
-    /// let go, last. An insert that stopped it before any reached a cursor tells their fate
-    /// instead.
+    /// let go, last. An insert that held them before any reached a cursor tells their fate
+    /// instead, where it tells one.
     var told: String {
-        guard reached || insert == nil else { return "" }
+        guard reached || insert?.fate == nil else { return "" }
         let offered = insert?.remedy.map { (one: "word is held; \($0) and it is offered again.", many: "words are held; \($0) and they are offered again.") }
             ?? (one: "word is held.", many: "words are held.")
         let fates = [
@@ -1370,12 +1371,12 @@ extension Dictation {
 /// What the menu tells the person who dictated about a press that failed: what stopped it,
 /// in full, since only they read it, and what became of their words.
 public func failureLine(_ failure: any Accounted) -> String {
-    (failure as? PressStopped)?.description ?? framed("\(failure)", fateTold: false)
+    (failure as? PressStopped)?.description ?? framed("\(failure)", whyNothingWasPlaced: true)
 }
 
 /// One cause, as a sentence the person reads: one that opens with WARNING already is, and a bare
-/// technical line is told what it is: what stopped the press, where what became of its words is
-/// told beside it, and otherwise why they were not placed.
-private func framed(_ cause: String, fateTold: Bool) -> String {
-    cause.hasPrefix("WARNING:") ? cause : "Your last dictation \(fateTold ? "stopped" : "was not placed"): \(cause)."
+/// technical line is told what it is: why none of the press's words was placed, when it is, and
+/// otherwise what stopped the press.
+private func framed(_ cause: String, whyNothingWasPlaced: Bool) -> String {
+    cause.hasPrefix("WARNING:") ? cause : "Your last dictation \(whyNothingWasPlaced ? "was not placed" : "stopped"): \(cause)."
 }

@@ -800,6 +800,17 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(stopped.account == Account(facts: "1 word inserted, 0 that may have been, 1 held, before: \(InsertFailure.refused(.cursorIsInAnotherApp)); \(reading.account.facts)", dictated: " friend"))
     }
 
+    /// A refusal that tells no fate of its own leaves the press to tell what became of the words
+    /// it held, though none reached a cursor.
+    @Test func aRefusalWithNoFateOfItsOwnLeavesTheWordsToThePress() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hello") })
+        rig.inputMethod.refusing(.refused(.dictationIsInAnotherApp))
+        rig.hold()
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(stopped.soleCause as? InsertFailure == .refused(.dictationIsInAnotherApp))
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.dictationIsInAnotherApp.reason) 1 word is held. No others were inserted or held.")
+    }
+
     /// A press none of whose words reached a cursor tells their fate once, in the refusal that
     /// held them: a reading that then fails is told as what stopped it, not as words not placed.
     @Test func aFailedReadingAfterARefusalThatHeldEveryWordIsWhatStoppedIt() async throws {
