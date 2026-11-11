@@ -460,14 +460,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The person put the dictation away, with Escape or the word box's circle: the open press is
-    /// cancelled, the held words no cursor has taken are let go, and the panel closes until the next
-    /// press. The words the press already put at the cursor are taken back by the press's own path.
+    /// cancelled, and the held words no cursor has taken are let go. The words the press already
+    /// put at the cursor are taken back by the press's own path.
     /// [LAW:single-enforcer] One dismissal, whichever way it was asked for, so the circle cannot
     /// let go of the words and leave the microphone open.
+    ///
+    /// Only a cancelled press keeps the panel shut until the next press, since its inserts still on
+    /// their way would show words the person threw away. With no press cancelled the panel shows
+    /// what is left, a transcription on its way and whatever it comes to hold, since that is not
+    /// what was put away. [LAW:nothing-unseen]
     private func dismiss() {
-        listening.map { KeySteering.escape($0.hotkey) }
+        let steered = listening.map { KeySteering.escape($0.hotkey) }
         hold.dismiss()
-        hud.dismiss()
+        if case .ended? = steered { hud.dismiss() }
     }
 
     /// The line says how to press only while an input method that can type the words is
@@ -1109,6 +1114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // [LAW:nothing-unseen] A click with no loop to bring them back through moves nothing, and says so.
         let unheard = listening == nil ? ", with no loop listening to bring them back" : ""
         sessions.notice("asked to bring back \(self.hold.dismissed?.allWords.words.count ?? 0, privacy: .public) dismissed words\(unheard, privacy: .public)")
+        hud.offerAgain()
         listening?.dictation.bringBackDismissed()
     }
 

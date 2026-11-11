@@ -56,13 +56,16 @@ public struct KeySteering: Sendable {
         }
     }
 
-    /// Escape, typed while the panel is shown, or the panel's circle clicked: the press that is open, held or latched, is
-    /// cancelled, and the words it already put at the cursor are taken back by the press's own path. Nothing
-    /// is cancelled when no press is open, and the outcome is in that press's own report.
+    /// Escape, typed while the panel is shown, or the panel's circle clicked: the press that is
+    /// open, held or latched, is cancelled, and the words it already put at the cursor are taken
+    /// back by the press's own path. Nothing is cancelled when no press is open, and the outcome
+    /// is in that press's own report and in what this answers.
     /// [LAW:single-enforcer] The detector ends the press, as it ends every press.
-    @MainActor public static func escape(_ hotkey: Hotkey) {
+    @discardableResult
+    @MainActor public static func escape(_ hotkey: Hotkey) -> HotkeyDetector.Steered {
         let steered = hotkey.steer(.cancel)
         Self.log.debug("escape: \(String(describing: steered), privacy: .public)")
+        return steered
     }
 
     /// [LAW:no-silent-failure] An answer the kernel would not take is said, so a Return the input

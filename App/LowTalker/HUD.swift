@@ -146,8 +146,8 @@ final class HUD {
                 .applying(.init(paletteColors: [.white, .darkGray])))
         close.isBordered = false
         close.imagePosition = .imageOnly
-        close.setAccessibilityLabel("Stop dictating and dismiss the held words")
-        close.toolTip = "Stop dictating and dismiss the held words. Bring them back from the \(AppIdentity.displayName) menu."
+        close.setAccessibilityLabel("Dismiss the held words, and cancel a dictation still listening")
+        close.toolTip = "Dismiss the held words. Bring them back from the \(AppIdentity.displayName) menu. A dictation still listening is cancelled, as Escape cancels it, and what it typed is taken back."
         return close
     }()
 
@@ -160,16 +160,20 @@ final class HUD {
         return place
     }()
 
-    /// The person put the panel away, with Escape or the circle, so it stays away whatever the
-    /// activity says until a press starts or words are held again. A dismissal lets go of every
-    /// held word, so words held after it are new to the person - brought back from the menu, or
-    /// a later insert's failure - and show. [LAW:nothing-unseen]
+    /// The person cancelled a press, with Escape or the circle, so the panel stays away whatever
+    /// the activity says until a press starts or they ask for the dismissed words back.
     private var dismissed = false
 
-    /// Puts the panel away at once, whatever it shows, until the next press starts.
+    /// Puts the panel away at once, whatever it shows, until the next press starts or
+    /// `offerAgain` is called.
     func dismiss() {
         dismissed = true
         hide()
+    }
+
+    /// The person asked for the dismissed words back, so the panel shows what is held again.
+    func offerAgain() {
+        dismissed = false
     }
 
     /// `insertable` is whether a loop is listening to insert what is held through, without which
@@ -180,7 +184,6 @@ final class HUD {
         case .listening, .refused: dismissed = false
         case .idle, .transcribing: break
         }
-        if held != nil { dismissed = false }
         guard !dismissed else { return hide() }
         // A press on its way carries the words a cursor is offered in its own insert, so only a
         // panel with nothing on its way asks for a click, and only for those words: not those
