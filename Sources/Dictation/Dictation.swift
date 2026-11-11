@@ -198,16 +198,12 @@ public final class Dictation {
         ///
         /// [LAW:one-source-of-truth] Counts read off the hold and the inserts, never comparisons of
         /// words or text: two words that read the same are not the same word, and a count is what
-        /// the hold said at the moment. Only this press's loop adds to the hold's offered part
-        /// while the press is open, and dismissal and landing remove the whole part, so the offered
-        /// part is `pre` earlier words then `own` of this press's that failed, or nothing.
+        /// the hold said at the moment. What the press knows of the offered part is of one
+        /// generation of it, which the hold moves on at every change to the part, so whatever
+        /// changes it besides the press leaves the press claiming none of it.
         struct Provenance: Sendable {
-            /// The offered part when the press's turn began: earlier dictation a failed insert held.
-            var preexisting: Held.Part?
-            /// How many of the offered words are still that earlier dictation.
-            var pre = 0
-            /// How many of the offered words are this press's own, failed without landing.
-            var own = 0
+            /// What the press knows of the part the hold offers.
+            var offered = Offered(generation: 0, preexisting: nil, own: 0)
             /// The press's own words that landed, as the text the field holds, and how many.
             var landedText = ""
             var landedWords = 0
@@ -217,26 +213,28 @@ public final class Dictation {
             /// carried: the hold stands them, as it does for any such insert.
             var standingWords = 0
 
-            /// What the hold would keep of its offered part if the press were cancelled now.
-            var keeping: Held.Part? { pre > 0 ? preexisting : nil }
-
-            /// `run` of the press's words are at no cursor, and the hold now offers `offered`. When
-            /// the offered part is not what the press knew of it and those, the person dismissed it
-            /// meanwhile, and the hold rebuilt it of the press's words alone.
-            mutating func held(_ run: Int, offered: Int) {
-                if offered == pre + own + run {
-                    own += run
-                } else {
-                    pre = 0
-                    own = offered
-                }
+            /// `run` of the press's words are at no cursor: the hold added them to the end of its
+            /// offered part in generation `onto`, which made generation `made`.
+            mutating func held(_ run: Int, onto: Int, made: Int) {
+                let known = offered.of(onto)
+                offered = Offered(generation: made, preexisting: known.preexisting, own: known.own + run)
             }
+        }
 
-            /// How many of the `offered` words the hold offers are the press's own: `own` while the
-            /// offered part is the `pre` earlier words and those, and every one once a dismissal or a
-            /// landing removed that part, since only the press's loop adds to it while it is open.
-            /// Earlier words no insert of the press carried are no part of its account.
-            func ownOffered(of offered: Int) -> Int { offered == pre + own ? own : offered }
+        /// What the press knows of one generation of the part the hold offers: the earlier
+        /// dictation at its head, then how many words of the press's own, failed without landing.
+        struct Offered: Sendable {
+            let generation: Int
+            /// The part the hold offered when the press's turn began, earlier dictation a failed
+            /// insert held, while no insert has carried it: what a cancel keeps.
+            let preexisting: Held.Part?
+            let own: Int
+
+            /// What the press knows of generation `generation`: what it knew, while that is the
+            /// generation it knew, and nothing of any other, which something besides the press made.
+            func of(_ generation: Int) -> Offered {
+                generation == self.generation ? self : Offered(generation: generation, preexisting: nil, own: 0)
+            }
         }
 
         /// [LAW:one-source-of-truth] The key event's own stamp, on the clock every insert is
@@ -337,65 +335,57 @@ public final class Dictation {
             state.withLock { $0.cursor.advance(through: transcript.words) }
         }
 
-        /// The press's turn on the queue begins, with `preexisting` the part the hold offers: whatever
-        /// earlier presses left held, which every insert of the press carries ahead of its own.
-        func began(offering preexisting: Held.Part?) {
-            state.withLock { state in
-                state.provenance.preexisting = preexisting
-                state.provenance.pre = preexisting?.words.words.count ?? 0
-            }
+        /// The press's turn on the queue begins, with `preexisting` the part the hold offers in
+        /// `generation`: whatever earlier presses left held, which every insert of the press
+        /// carries ahead of its own.
+        func began(offering preexisting: Held.Part?, in generation: Int) {
+            state.withLock { $0.provenance.offered = Offered(generation: generation, preexisting: preexisting, own: 0) }
         }
 
-        /// An insert is about to be made with `carried` words offered by the hold, read in the same
-        /// step: the earlier words still held are what is left of `pre`, and the rest are the press's
-        /// own. A hold that offers nothing means the earlier words were dismissed or landed.
-        func sending(carried: Int) {
-            state.withLock { state in
-                state.provenance.pre = min(state.provenance.pre, carried)
-                state.provenance.own = carried - state.provenance.pre
-            }
+        /// An insert is about to carry what the hold offers in `generation`, read in the same step:
+        /// of a generation the press did not make, none of the carried words are its own.
+        func sending(_ generation: Int) {
+            state.withLock { $0.provenance.offered = $0.provenance.offered.of(generation) }
         }
 
-        /// An insert landed at the cursor, carrying `placed.words`. What it carried ahead of the
-        /// press's own words, the `pre` earlier ones, is delivered earlier dictation, and the rest is
-        /// the press's, which is what it would take back. Everything the hold offered has landed.
-        func landed(_ placed: Placed) {
+        /// An insert of `run` of the press's words landed at the cursor, carrying `placed.words`,
+        /// and the hold then offers `generation`. The press's own are the run and those it held
+        /// before it, at the end, which is what it would take back; what the insert carried ahead
+        /// of them is delivered earlier dictation. Everything the hold offered has landed.
+        func landed(_ placed: Placed, run: Int, then generation: Int) {
             state.withLock { state in
                 if let performed = placed.performed {
                     state.performed.append(performed)
-                    let earlier = min(state.provenance.pre, placed.offered.words.count)
-                    let own = placed.offered.words.dropFirst(earlier)
+                    let own = placed.offered.words.suffix(state.provenance.offered.own + run)
                     state.provenance.landedText += own.map(\.text).joined()
                     state.provenance.landedWords += own.count
-                    state.provenance.earlierWordsLanded += earlier
-                    state.provenance.pre = 0
-                    state.provenance.own = 0
+                    state.provenance.earlierWordsLanded += placed.offered.words.count - own.count
+                    state.provenance.offered = Offered(generation: generation, preexisting: nil, own: 0)
                 }
                 state.words += placed.words
             }
         }
 
-        /// An insert of `run` words failed. When it cannot have landed its words are in the hold
-        /// beside what it carried, and the count the hold offers now, `offered`, is read in the same
-        /// step: it says whether the person dismissed what the insert carried while it was in the
-        /// air, which the hold then rebuilt its offered part without. When it may have landed they
-        /// stand, and the offered part is whatever the hold made of it.
-        func failed(run: Int, mayHaveLanded: Bool, offered: Int) {
+        /// An insert of `run` of the press's words failed, carrying `unplaced.offered`. When it
+        /// cannot have landed, the hold added its words to the part it offered in `unplaced.onto`,
+        /// read in the same step: the person may have dismissed what the insert carried while it
+        /// was in the air. When it may have landed everything it carried stands, and the hold
+        /// offers whatever it made of the rest. The hold then offers `generation`.
+        func failed(_ unplaced: Unplaced, run: Int, then generation: Int) {
             state.withLock { state in
-                if mayHaveLanded {
-                    // The insert covers everything it carried, so the words held before it stand too.
-                    state.provenance.standingWords += state.provenance.pre + state.provenance.own + run
-                    state.provenance.pre = 0
-                    state.provenance.own = 0
+                if unplaced.failure.wordsMayHaveLanded {
+                    state.provenance.standingWords += unplaced.offered.words.count
+                    state.provenance.offered = Offered(generation: generation, preexisting: nil, own: 0)
                 } else {
-                    state.provenance.held(run, offered: offered)
+                    state.provenance.held(run, onto: unplaced.onto, made: generation)
                 }
             }
         }
 
-        /// `run` words the press heard and never sent are held, and the hold now offers `offered`.
-        func heldBack(run: Int, offered: Int) {
-            state.withLock { $0.provenance.held(run, offered: offered) }
+        /// `run` words the press heard and never sent were added to the end of the part the hold
+        /// offered in `onto`, which made `generation`.
+        func heldBack(run: Int, onto: Int, made generation: Int) {
+            state.withLock { $0.provenance.held(run, onto: onto, made: generation) }
         }
 
         /// What this press knows of its own words.
@@ -441,6 +431,14 @@ public final class Dictation {
         let words: Int
         /// What the insert carried: the hold's offered words, then the press's own.
         let offered: Transcript
+    }
+
+    /// One insert the loop made that failed: why, what it carried, and the generation of the
+    /// offered part the hold's answer to the failure went onto.
+    private struct Unplaced: Error {
+        let failure: InsertFailure
+        let offered: Transcript
+        let onto: Int
     }
 
     /// What key-down left for key-up: the mode its chord began it in, and the marks on the
@@ -874,12 +872,12 @@ public final class Dictation {
     /// listening, and what it was told is what this returns, unless a later insert landed.
     /// Words that one could not account for stay the hold's to warn of.
     ///
-    /// Every count the press keeps of which offered words are its own is read from the hold in the
-    /// same step as the insert it is about, with no suspension between: that is what lets a
-    /// cancelled press tell its words from earlier dictation without comparing any.
+    /// Every generation of the offered part the press keeps is read from the hold in the same step
+    /// as the change it is about, with no suspension between: that is what lets a cancelled press
+    /// tell its words from earlier dictation without comparing any.
     private func commit(_ streaming: Streaming) async -> InsertFailure? {
         var unplaced: InsertFailure?
-        streaming.began(offering: hold.held?.offered)
+        streaming.began(offering: hold.held?.offered, in: hold.offeredGeneration)
         for await _ in streaming.wakes {
             guard let run = streaming.take() else { continue }
             do throws(InsertFailure) {
@@ -896,21 +894,21 @@ public final class Dictation {
     /// [LAW:single-enforcer] Every insert a press makes passes here, its commits and what key-up
     /// leaves alike, so its counts of words landed and words that may have landed are of all of them.
     private func place(_ words: Transcript, for streaming: Streaming, since: Executor.Since) async throws(InsertFailure) -> Placed {
-        streaming.sending(carried: hold.offeredWords)
-        do throws(InsertFailure) {
+        streaming.sending(hold.offeredGeneration)
+        do throws(Unplaced) {
             let placed = try await place(words, following: streaming.landed.performed.last, since: since)
-            streaming.landed(placed)
+            streaming.landed(placed, run: words.words.count, then: hold.offeredGeneration)
             return placed
         } catch {
-            streaming.failed(run: words.words.count, mayHaveLanded: error.wordsMayHaveLanded, offered: hold.offeredWords)
-            throw error
+            streaming.failed(error, run: words.words.count, then: hold.offeredGeneration)
+            throw error.failure
         }
     }
 
     /// Inserts what is held, then `words`, as one insert. [LAW:single-enforcer] Every insert
     /// the loop makes passes through here, so held words land ahead of every word said after
     /// them, and a failed insert's words are held rather than lost. Throws as the executor does.
-    private func place(_ words: Transcript, following last: Executor.Performed?, since: Executor.Since) async throws(InsertFailure) -> Placed {
+    private func place(_ words: Transcript, following last: Executor.Performed?, since: Executor.Since) async throws(Unplaced) -> Placed {
         let offered = hold.sending(words)
         do throws(InsertFailure) {
             let performed = try await executor.insert(offered, following: last, since: since)
@@ -918,8 +916,9 @@ public final class Dictation {
             performed.map { _ in hold.landed() }
             return Placed(performed: performed, words: performed.map { _ in offered.words.count } ?? 0, offered: offered)
         } catch {
+            let onto = hold.offeredGeneration
             hold.failed(words, with: error)
-            throw error
+            throw Unplaced(failure: error, offered: offered, onto: onto)
         }
     }
 
@@ -1023,13 +1022,13 @@ public final class Dictation {
         if let last = heard.streaming.landed.performed.last {
             do throws(InsertFailure) { try await executor.takeBack(own.landedText, from: last) } catch { couldNot = (last.into, error) }
         }
-        let forgotten = hold.forget(own: own.own, keeping: own.keeping)
+        let forgotten = hold.forget(own: own.offered.own, keeping: own.offered.preexisting, of: own.offered.generation)
         // The engine's turn passes on only when the decode ends, so it is waited out, and what it
         // heard past the commits is counted as dropped.
         let dropped = words(past: heard.streaming, in: await heard.decode.value)
         let cancelled = Cancelled(
             takenBack: couldNot == nil ? own.landedWords : 0, earlierWordsLanded: own.earlierWordsLanded,
-            forgotten: forgotten ? own.own : 0, dismissed: forgotten ? 0 : own.own,
+            forgotten: forgotten ? own.offered.own : 0, dismissed: forgotten ? 0 : own.offered.own,
             standing: own.standingWords, discarded: dropped.isBlank ? 0 : dropped.words.count)
         if let couldNot {
             throw Failed(CancelLeftWords(left: own.landedWords, app: couldNot.app, cause: couldNot.cause, cancelled: cancelled))
@@ -1065,15 +1064,16 @@ public final class Dictation {
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
         // words are already at the cursor, how many may be, and how many the hold offers.
         func stopped(_ cause: PressStopped.Cause) -> Failed {
-            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: heard.streaming.provenance.ownOffered(of: hold.offeredWords), cause: cause))
+            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: heard.streaming.provenance.offered.of(hold.offeredGeneration).own, cause: cause))
         }
         // [LAW:single-enforcer] What the press heard and never sent is held here, and counted as
         // its own. A press that heard nothing more leaves the hold's warning on the words it
         // already holds, which that warning is about.
         func holdBack(_ rest: Transcript, warning: String) {
             if rest.isBlank { return }
+            let onto = hold.offeredGeneration
             hold.heldBack(rest, warning: warning)
-            heard.streaming.heldBack(run: rest.words.count, offered: hold.offeredWords)
+            heard.streaming.heldBack(run: rest.words.count, onto: onto, made: hold.offeredGeneration)
         }
         switch heard.ending {
         case .released(let press, let keyUp, let delivery):

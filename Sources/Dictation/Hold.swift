@@ -217,8 +217,6 @@ public final class Hold {
     public private(set) var state = HoldState()
 
     public var held: Held? { state.held }
-    /// How many words the hold offers to the next cursor.
-    var offeredWords: Int { held?.offered?.words.words.count ?? 0 }
     public var dismissed: Held? { state.dismissed }
 
     /// Where the held words an insert on its way carries are now. The loop makes one insert at
@@ -235,6 +233,10 @@ public final class Hold {
     /// Which words that may have landed stand: a new one each time they are set anew, so an ask
     /// can say which it saw, though the same words come back under the same warning.
     public private(set) var standingGeneration = 0
+
+    /// Which offered part the hold has: a new one each time the words a cursor is offered change,
+    /// by any change, so a press can say whether the part it last knew is the one offered now.
+    private(set) var offeredGeneration = 0
 
     /// What reading the store at launch failed with, for the life of the app. Nothing it held
     /// is offered, since nothing could read it.
@@ -265,6 +267,7 @@ public final class Hold {
     /// changed.
     private func move(to next: HoldState, carrying: Carried?) {
         let shown = state
+        if next.held?.offered != shown.held?.offered { offeredGeneration += 1 }
         state = next
         carried = carrying
         do throws(HeldUnkept) {
@@ -370,18 +373,16 @@ public final class Hold {
 
     /// A cancelled press's own words that no cursor took are let go: what the hold offers is cut
     /// back to `keeping`, the earlier part it held when the press's turn began and still holds, or
-    /// to nothing. `own` is the press's count of the offered words that are its own, and the
-    /// cut is made only when the offered part is exactly `keeping` and those: a dismissal or a
-    /// landing since removes the whole part, never a piece, so any other length is words the
-    /// person already moved, which stay where they put them. Says whether it cut.
+    /// to nothing. The press knows `own` of the offered words in `generation` are its own, and the
+    /// cut is made only while that generation is offered: any change since is words someone else
+    /// moved, which stay where they put them. Says whether it cut.
     ///
     /// Words that may have landed stand and are never touched, and neither are the dismissed.
     /// Standing words are unchanged, so `standingGeneration` is too.
     @discardableResult
-    func forget(own: Int, keeping: Held.Part?) -> Bool {
-        guard own > 0, let held, let offered = held.offered,
-              offered.words.words.count == (keeping?.words.words.count ?? 0) + own else { return false }
-        move(to: HoldState(held: Held(unplaced: keeping, unaccounted: held.standing), dismissed: dismissed), carrying: carried)
+    func forget(own: Int, keeping: Held.Part?, of generation: Int) -> Bool {
+        guard own > 0, generation == offeredGeneration else { return false }
+        move(to: HoldState(held: Held(unplaced: keeping, unaccounted: held?.standing), dismissed: dismissed), carrying: carried)
         return true
     }
 
