@@ -52,7 +52,7 @@ public nonisolated struct Steering: Sendable {
         case .return: gate.verdict(at: timestamp)
         case .escape: gate.escapeVerdict(at: timestamp)
         }
-        SteeringEffect(of: key, decided.verdict).map(perform)
+        if let effect = SteeringEffect(of: key, decided.verdict) { perform(effect) }
         return decided
     }
 }

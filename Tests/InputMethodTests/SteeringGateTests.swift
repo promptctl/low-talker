@@ -36,11 +36,6 @@ import Testing
 
     private static let farOff = Duration.seconds(30)
 
-    /// A key typed now, on the clock the edge reads.
-    private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
-    /// A key typed longer ago than `farOff`, so its ceiling has already passed.
-    private static var aCeilingAgo: TimeInterval { now - 31 }
-
     @MainActor
     @Test func nothingOwedPassesAtOnceAndTheSecondQuestionIsNotAsked() {
         let asked = Log()
@@ -48,7 +43,7 @@ import Testing
             owing: { asked.add("owing"); return .success(.nothing) },
             settling: { asked.add("settled"); return .success(.landed) }))
 
-        #expect(gate.verdict(at: Self.now).verdict == .pass)
+        #expect(gate.verdict(at: 1).verdict == .pass)
         #expect(asked.all == ["owing"])
     }
 
@@ -68,7 +63,7 @@ import Testing
             return .success(.landed)
         }))
 
-        let verdict = gate.verdict(at: Self.now).verdict
+        let verdict = gate.verdict(at: 1).verdict
         order.add("the Return was let through: \(verdict == .pass)")
 
         #expect(field.text == "the tail")
@@ -81,7 +76,7 @@ import Testing
     @MainActor
     @Test func wordsThatDidNotAllLandKeepTheReturn() {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .success(.notLanded) }))
-        #expect(gate.verdict(at: Self.now).verdict == .keep)
+        #expect(gate.verdict(at: 1).verdict == .keep)
     }
 
     /// A debt the app admitted and then did not settle is not a debt that was settled.
@@ -89,7 +84,7 @@ import Testing
     @Test(arguments: [NotAnswered.silent(after: .seconds(5)), .abandoned, .notReadable(bytes: 3)])
     func aDebtTheAppAdmittedAndDidNotSettleKeepsTheReturn(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .failure(why) }))
-        #expect(gate.verdict(at: Self.now).verdict == .keep)
+        #expect(gate.verdict(at: 1).verdict == .keep)
     }
 
     /// The Return is held only against a debt the app has admitted to: an app that cannot be
@@ -102,35 +97,21 @@ import Testing
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(
             owing: { .failure(why) }, settling: { asked.add("settled"); return .success(.notLanded) }))
 
-        #expect(gate.verdict(at: Self.now).verdict == .pass)
+        #expect(gate.verdict(at: 1).verdict == .pass)
         #expect(asked.all.isEmpty)
     }
 
     /// The ceiling protects the keyboard: a debt not settled by it is kept, at it, and the thread
-    /// that was asking is left to end by itself. The ceiling counts from the moment the Return was
-    /// typed, so one typed a ceiling ago is kept without the case waiting it out.
+    /// that was asking is left to end by itself.
     @MainActor
     @Test(.timeLimit(.minutes(1))) func aDebtNotSettledByTheCeilingKeepsTheReturnAtTheCeiling() {
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { release.wait(); return .success(.landed) }))
+        let gate = SteeringGate(ceiling: .milliseconds(20), asking: App(settling: { release.wait(); return .success(.landed) }))
 
         let started = ContinuousClock.now
-        let decided = gate.verdict(at: Self.aCeilingAgo)
-        #expect(decided.verdict == .keep)
-        #expect(decided.because.contains("had not answered"), "\(decided)")
-        #expect(ContinuousClock.now - started < Self.farOff / 2, "the ceiling was counted from the gate, not from the Return")
-        #expect(decided.waited >= Self.farOff, "the wait reads from the Return, as the reason does")
-    }
-
-    /// A Return just typed is held for the app's answer, not decided unanswered at once.
-    @MainActor
-    @Test(.timeLimit(.minutes(1))) func aReturnJustTypedIsHeldForTheAnswer() {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: {
-            Thread.sleep(forTimeInterval: 0.05)
-            return .success(.landed)
-        }))
-        #expect(gate.verdict(at: Self.now).verdict == .pass)
+        #expect(gate.verdict(at: 1).verdict == .keep)
+        #expect(ContinuousClock.now - started >= .milliseconds(20))
     }
 
     /// A Return typed after one the gate gave up on is decided on its own answers: the earlier
@@ -139,25 +120,25 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func anEarlierReturnsLateAnswerIsNotTheNextOnes() {
         let release = DispatchSemaphore(value: 0)
         let earlierAnswered = DispatchSemaphore(value: 0)
-        let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: {
+        let gate = SteeringGate(ceiling: .milliseconds(20), asking: App(settling: {
             release.wait()
             defer { earlierAnswered.signal() }
             return .success(.notLanded)
         }))
-        #expect(gate.verdict(at: Self.aCeilingAgo).verdict == .keep)
+        #expect(gate.verdict(at: 1).verdict == .keep)
 
         gate.connect(App(settling: {
             release.signal()
             earlierAnswered.wait()
             return .success(.landed)
         }))
-        #expect(gate.verdict(at: Self.now).verdict == .pass)
+        #expect(gate.verdict(at: 2).verdict == .pass)
     }
 
     /// Before an app is connected nobody admits anything, so every Return passes.
     @MainActor
     @Test func aGateNoAppWasConnectedToPassesEveryReturn() {
-        #expect(SteeringGate().verdict(at: Self.now).verdict == .pass)
+        #expect(SteeringGate().verdict(at: 1).verdict == .pass)
     }
 
     // MARK: - Escape
@@ -166,14 +147,14 @@ import Testing
     @MainActor
     @Test func anEscapeWhileTheBoxIsOpenIsKept() {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shown) }))
-        #expect(gate.escapeVerdict(at: Self.now).verdict == .keep)
+        #expect(gate.escapeVerdict(at: 1).verdict == .keep)
     }
 
     /// An Escape with the box shut is the app in front's, as typed.
     @MainActor
     @Test func anEscapeWithTheBoxShutPasses() {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .success(.shut) }))
-        #expect(gate.escapeVerdict(at: Self.now).verdict == .pass)
+        #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 
     /// An app that does not say whether its box is open has said nothing, so the Escape passes.
@@ -181,13 +162,13 @@ import Testing
     @Test(arguments: [NotAnswered.nobodyIsListening(port: "port"), .silent(after: .milliseconds(100)), .abandoned])
     func anEscapeTheAppDoesNotAnswerForPasses(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(panelling: { .failure(why) }))
-        #expect(gate.escapeVerdict(at: Self.now).verdict == .pass)
+        #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 
     /// With no app connected, nothing is shown and every Escape passes.
     @MainActor
     @Test func anEscapeWithNoAppConnectedPasses() {
-        #expect(SteeringGate().escapeVerdict(at: Self.now).verdict == .pass)
+        #expect(SteeringGate().escapeVerdict(at: 1).verdict == .pass)
     }
 
     /// The ceiling is the longest the app itself waits on an insert, one number and not two, and

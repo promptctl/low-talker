@@ -130,8 +130,7 @@ public nonisolated final class SteeringGate: Sendable {
     @MainActor
     public func verdict(at timestamp: TimeInterval) -> SteeringDecision {
         let (question, ceiling) = (self.question, self.ceiling)
-        return answered(typedAt: timestamp,
-                        unanswered: SteeringDecision(verdict: .keep, because: "the app had not answered \(ceiling) after the Return was typed")) { asker in
+        return answered(unanswered: SteeringDecision(verdict: .keep, because: "the app had not answered after \(ceiling)")) { asker in
             Self.decide(asker, at: timestamp, question: question, ceiling: ceiling)
         }
     }
@@ -141,7 +140,7 @@ public nonisolated final class SteeringGate: Sendable {
     @MainActor
     public func escapeVerdict(at timestamp: TimeInterval) -> SteeringDecision {
         let question = self.question
-        return answered(typedAt: timestamp, unanswered: SteeringDecision(verdict: .pass, because: "the app had not answered whether its word box is open")) { asker in
+        return answered(unanswered: SteeringDecision(verdict: .pass, because: "the app had not answered whether its word box is open")) { asker in
             Self.decideEscape(asker, at: timestamp, question: question)
         }
     }
@@ -150,12 +149,8 @@ public nonisolated final class SteeringGate: Sendable {
     /// its own slot for the verdict. A late answer to an earlier key lands in that key's abandoned
     /// slot and is read by nobody, and a key typed while an earlier one's thread is still blocked is
     /// not queued behind it. [LAW:no-ambient-temporal-coupling]
-    ///
-    /// Held until `ceiling` after IMK handed the key over at `timestamp` (system uptime), not after
-    /// the gate was reached: the keyboard has been waiting since then, and `waited` says so.
     @MainActor
-    private func answered(typedAt timestamp: TimeInterval, unanswered: SteeringDecision,
-                          _ decide: @escaping @Sendable (any SteeringAsking) -> SteeringDecision) -> SteeringDecision {
+    private func answered(unanswered: SteeringDecision, _ decide: @escaping @Sendable (any SteeringAsking) -> SteeringDecision) -> SteeringDecision {
         let asking = asker.withLock { $0 }
         let slot = Slot()
         let turns = self.turns
@@ -166,9 +161,8 @@ public nonisolated final class SteeringGate: Sendable {
             slot.decided.withLock { $0 = decided }
             turns.poke()
         }.start()
-        let sinceTyped = Duration.seconds(ProcessInfo.processInfo.systemUptime - timestamp)
-        turns.hold(until: started - sinceTyped + ceiling, while: { slot.decided.withLock { $0 } == nil })
-        return (slot.decided.withLock { $0 } ?? unanswered).held(for: sinceTyped + (ContinuousClock.now - started))
+        turns.hold(until: started + ceiling, while: { slot.decided.withLock { $0 } == nil })
+        return (slot.decided.withLock { $0 } ?? unanswered).held(for: ContinuousClock.now - started)
     }
 
     /// Whether an app that is not there, which is how an app that is not running looks from here

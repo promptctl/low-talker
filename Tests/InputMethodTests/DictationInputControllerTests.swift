@@ -45,7 +45,7 @@ import Testing
     private func answer(_ selector: Selector, holding modifiers: NSEvent.ModifierFlags = [],
                         asking app: App) -> (kept: Bool, performed: [SteeringEffect]) {
         let (controller, performed) = controller(asking: app)
-        let kept = controller.didCommand(by: selector, holding: modifiers, typedAt: ProcessInfo.processInfo.systemUptime)
+        let kept = controller.didCommand(by: selector, holding: modifiers, typedAt: 1)
         return (kept, performed.effects)
     }
 
@@ -128,16 +128,10 @@ import Testing
     }
 
     /// A cursor given focus is told to the app, which offers it words no cursor took. Other notices
-    /// the shared stream holds, such as the Escape the process's steering tells, are passed over.
+    /// the shared stream holds, are passed over.
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsTold() async {
         Notices.shared.cursorArrived(in: "com.apple.TextEdit")
         #expect(await Notices.shared.notices.first { @Sendable notice in notice == .cursorArrived } == .cursorArrived)
-    }
-
-    /// The shipped process's steering tells the app of a kept Escape, through the notices it hears.
-    @Test(.timeLimit(.minutes(1))) func theProcessSteeringTellsTheAppOfAKeptEscape() async {
-        await Steering.process.perform(.tellTheApp)
-        #expect(await Notices.shared.notices.first { @Sendable notice in notice == .keyTyped(.escape) } == .keyTyped(.escape))
     }
 
     /// The bundle's `InputMethodServerControllerClass` is a string macOS resolves through

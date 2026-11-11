@@ -119,7 +119,7 @@ public final class DictationInputController: IMKInputController, InputController
         // the key's own. Read before the hop, which can wait out a Return the main thread is holding,
         // and handed on as a value: a read of the window server's modifier state, not a call on the
         // client, so off the main actor is where it belongs. The moment it was typed is read beside
-        // them, so the time it waits for the hop counts against the ceiling. [LAW:effects-at-boundaries]
+        // them, the moment the app's questions are asked about. [LAW:effects-at-boundaries]
         didCommand(by: selector, holding: NSEvent.modifierFlags, typedAt: ProcessInfo.processInfo.systemUptime)
     }
 
