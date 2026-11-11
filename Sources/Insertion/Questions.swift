@@ -93,11 +93,14 @@ public enum NotAnswered: Error, Equatable, Sendable, CustomStringConvertible {
     /// This process cannot say who the app's signature must be, so no answer could be
     /// believed, and nothing was asked.
     case unverifiable(PeerIdentity.Unreadable)
+    /// No app has been connected to ask yet, so nothing was asked.
+    case unconnected
 
     public var description: String {
         switch self {
         case .wire(let failure): "\(failure)"
         case .unverifiable(let why): "no answer can be believed, because this process cannot say who the app is: \(why)"
+        case .unconnected: "no app has been connected yet"
         }
     }
 }

@@ -56,13 +56,16 @@ public enum WireFailure: Error, Equatable, Sendable, CustomStringConvertible {
 ///
 /// Every exchange makes its own reply right, so an answer to another exchange's message cannot be
 /// read as this one's. Within one, a message is sent only after the one before it was answered:
-/// a round trip that failed leaves an answer that may still come, so its exchange is done. The answerer is checked before its bytes are returned: a name anyone can
-/// compute is a name anyone can register first.
+/// a round trip that failed leaves an answer that may still come, so its exchange is done, and a
+/// round trip asked of it after is a programming error it stops on. The answerer is checked
+/// before its bytes are returned: a name anyone can compute is a name anyone can register first.
 package final class Exchange {
     private let portName: String
     private let remote: mach_port_t
     private let reply: ReceiveRight
     private let answerer: PeerIdentity
+    /// Whether a round trip failed, leaving an answer on `reply` that may still come.
+    private var failed = false
 
     /// Looks the port up and makes the reply right, before any message is sent.
     package init(portName: String, answerer: PeerIdentity) throws(WireFailure) {
@@ -86,6 +89,14 @@ package final class Exchange {
     /// One message out and its answer's payload back, from the answerer and nobody else, each
     /// half bounded by `phase`.
     package func roundTrip(_ payload: Data, id: mach_msg_id_t, within phase: Duration) throws(WireFailure) -> Data {
+        precondition(!failed, "a round trip on \(portName) after one failed would read that one's late answer as its own")
+        do throws(WireFailure) { return try trip(payload, id: id, within: phase) } catch {
+            failed = true
+            throw error
+        }
+    }
+
+    private func trip(_ payload: Data, id: mach_msg_id_t, within phase: Duration) throws(WireFailure) -> Data {
         let sent = Mach.send(
             payload, id: id, to: remote, disposition: mach_msg_type_name_t(MACH_MSG_TYPE_COPY_SEND),
             replyTo: reply.port, timeout: phase)
