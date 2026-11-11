@@ -5,8 +5,8 @@ import os
 
 private nonisolated let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "notices")
 
-/// What this process tells the app, in the order it happened: every cursor a controller is
-/// given focus in, so the app can offer words no cursor took to the one that just arrived, and
+/// What this process tells the app, in the order it happened: every cursor that becomes the one
+/// words go to (`FocusedClient`), so the app can offer words no cursor took to it, and
 /// the process ending itself over its memory ceiling, so the app can say why it went away.
 ///
 /// [LAW:no-shared-mutable-globals] Shared for `FocusedClient`'s reason: `IMKServer` builds
@@ -36,7 +36,7 @@ public nonisolated final class Notices: Sendable {
         (notices, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
     }
 
-    /// A controller was given focus in a cursor that can take words, in `application`.
+    /// A cursor in `application` became the one words go to.
     public func cursorArrived(in application: String) {
         log.info("a cursor arrived in \(application, privacy: .public)")
         continuation.yield(.cursorArrived)

@@ -10,3 +10,10 @@ extension FakeTextInputClient {
         try #require(Client(self, inFront: frontmost))
     }
 }
+
+extension FocusedClient {
+    /// `cursor` taken by a controller of its own, as `IMKServer` builds one per client: the cursor
+    /// stands for its controller, so `left(cursor)` and `typedInto(cursor)` are that controller's.
+    @MainActor
+    func took(_ cursor: Client) { took(cursor, by: cursor) }
+}

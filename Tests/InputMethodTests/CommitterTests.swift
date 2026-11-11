@@ -19,7 +19,7 @@ import Testing
     /// What `FocusedClient` would have seen: the cursor chosen, or the refusal.
     @MainActor
     private static func seen(_ cursor: Result<Client, Refusal>) -> InFront {
-        InFront(frontmost: "com.example.editor", selected: true, cursorApplication: "com.example.editor",
+        InFront(frontmost: "com.example.editor", selected: true, cursorApplication: "com.example.editor", cursors: 1,
                 field: nil, screens: [], cursor: cursor)
     }
 
@@ -210,7 +210,7 @@ import Testing
     /// arriving on the port is, with the field's app in front on studious's one display.
     @MainActor
     private static func dictate(into field: FakeTextInputClient) throws -> Placed.Outcome {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try field.cursor()
         client.took(cursor)
         let turn = Turn()

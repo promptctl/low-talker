@@ -42,7 +42,7 @@ import Testing
     }
 
     @Test func theCursorInFrontIsTheOneChosen() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try FakeTextInputClient().cursor()
         client.took(cursor)
 
@@ -53,15 +53,15 @@ import Testing
     /// has deactivated, and the refusal names the Input menu over any refusal about the
     /// cursor, since no field the person clicks into can take the words until it is fixed.
     @Test func anotherSourceSelectedIsRefusedByName() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(FakeTextInputClient().cursor())
         #expect(throws: Refusal.inputSourceIsNotSelected) { try cursor(client, selected: false).get() }
-        #expect(throws: Refusal.inputSourceIsNotSelected) { try cursor(FocusedClient(), selected: false).get() }
+        #expect(throws: Refusal.inputSourceIsNotSelected) { try cursor(FocusedClient { _ in }, selected: false).get() }
     }
 
     /// Nothing in front is an answer, not a failure, and it is said by name.
     @Test func nothingInFrontIsRefusedByName() {
-        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(FocusedClient()).get() }
+        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(FocusedClient { _ in }).get() }
     }
 
     /// A window with no field focused still hands the input method a client, and what is
@@ -69,7 +69,7 @@ import Testing
     /// Installer, a page's body text. The client says so itself by giving no document
     /// access, and the words are refused rather than lost. [LAW:no-silent-failure]
     @Test func aCursorGivingNoDocumentAccessIsRefusedAsNoTextField() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(FakeTextInputClient(in: "com.apple.calculator", .noTextField).cursor())
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: "com.apple.calculator").get() }
@@ -79,7 +79,7 @@ import Testing
     /// no window, which takes the words where nobody can see them. Its caret is on no
     /// screen, and that is what refuses it. [LAW:no-silent-failure]
     @Test func aCaretOnNoScreenIsRefusedAsNoTextField() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(FakeTextInputClient(in: "com.apple.finder", caretLine: Self.typeSelectLine).cursor())
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: "com.apple.finder").get() }
@@ -87,7 +87,7 @@ import Testing
 
     /// Any screen will do: a field on a second display, wherever it is arranged, is a field.
     @Test func aCaretOnAnyScreenIsTaken() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try FakeTextInputClient(caretLine: CGRect(x: 2000, y: -300, width: 1, height: 16)).cursor()
         client.took(cursor)
         let below = CGRect(x: 1600, y: -1080, width: 1920, height: 1080)
@@ -99,7 +99,7 @@ import Testing
     /// A field reporting no caret line is a field: nothing it said places the caret off the
     /// screens, and real fields answer that way between activating and their first answer.
     @Test func aFieldReportingNoCaretIsTaken() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try FakeTextInputClient(caretLine: nil).cursor()
         client.took(cursor)
 
@@ -109,7 +109,7 @@ import Testing
     /// The field is asked about when the words are, not when the cursor arrived: a page
     /// whose body was clicked after its field had focus answers no from then on.
     @Test func theFieldIsTheAnswerAtTheMomentOfTheInsert() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let field = FakeTextInputClient(in: "com.google.Chrome", .webKitTextArea)
         let cursor = try field.cursor()
         client.took(cursor)
@@ -123,7 +123,7 @@ import Testing
     /// the cursor the words would go to, and once: never of one left in an app the person
     /// has moved away from or after the dictation moved apps.
     @Test func theFieldIsAskedOnceAndOnlyOfTheCursorTheWordsWouldGoTo() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let field = FakeTextInputClient(in: "com.apple.TextEdit")
         try client.took(field.cursor())
 
@@ -143,7 +143,7 @@ import Testing
     @Test func whatTheInsertSawNamesTheCursorAndWhatItsClientAnswered() throws {
         func seen(_ field: FakeTextInputClient?, inFront frontmost: String? = "com.apple.finder",
                   selected: Bool = true, screens: [CGRect] = [Self.display]) throws -> InFront {
-            let client = FocusedClient()
+            let client = FocusedClient { _ in }
             try field.map { try client.took($0.cursor()) }
             return client.inFront(for: .cursorInFront, whileInFrontIs: frontmost, selected: selected,
                                   screens: screens)
@@ -187,7 +187,7 @@ import Testing
     /// `inserted` into a client whose process no longer exists - the app names would match
     /// and nothing else would object. [LAW:no-silent-failure]
     @Test func aCursorDiesWithItsApp() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(FakeTextInputClient(in: "com.apple.TextEdit").cursor())
         client.applicationQuit("com.apple.TextEdit")
 
@@ -196,7 +196,7 @@ import Testing
 
     /// Some other app quitting is not this cursor's business.
     @Test func anotherAppQuittingLeavesTheCursorAlone() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try FakeTextInputClient().cursor()
         client.took(cursor)
         client.applicationQuit("com.apple.Safari")
@@ -205,7 +205,7 @@ import Testing
     }
 
     @Test func aCursorThatLeavesTakesTheFocusWithIt() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try FakeTextInputClient().cursor()
         client.took(cursor)
         client.left(cursor)
@@ -219,7 +219,7 @@ import Testing
     /// here and not by a reading - on this Mac every app tried, the Finder's desktop
     /// included, presented a client of its own. [LAW:no-silent-failure]
     @Test func aCursorLeftBehindInAnotherAppIsRefusedRatherThanInsertedInto() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(FakeTextInputClient(in: "com.apple.TextEdit").cursor())
 
         #expect(throws: Refusal.cursorIsInAnotherApp) { try cursor(client, whileInFrontIs: "com.apple.finder").get() }
@@ -229,7 +229,7 @@ import Testing
     /// to the Finder mid-press is refused there - the case measured on studious, where the
     /// Finder presents a client and took the rest of a TextEdit dictation.
     @Test func wordsBoundToAnotherAppAreRefusedAtTheCursorInFront() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(FakeTextInputClient(in: "com.apple.finder").cursor())
 
         #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(client, for: .app("com.apple.TextEdit"), whileInFrontIs: "com.apple.finder").get() }
@@ -240,14 +240,14 @@ import Testing
     /// None of those is where the words were going, so none is the thing to fix.
     @Test func aMoveIsTheReasonOverWhatTheAppMovedToHolds() throws {
         let bound = Destination.app("com.apple.TextEdit")
-        #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(FocusedClient(), for: bound, whileInFrontIs: "com.apple.finder").get() }
-        let client = FocusedClient()
+        #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(FocusedClient { _ in }, for: bound, whileInFrontIs: "com.apple.finder").get() }
+        let client = FocusedClient { _ in }
         try client.took(FakeTextInputClient(in: "com.apple.TextEdit").cursor())
         #expect(throws: Refusal.dictationIsInAnotherApp) { try cursor(client, for: bound, whileInFrontIs: "com.apple.finder").get() }
     }
 
     @Test func wordsBoundToTheAppInFrontGoToItsCursor() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try FakeTextInputClient(in: "com.apple.TextEdit").cursor()
         client.took(cursor)
 
@@ -259,7 +259,7 @@ import Testing
     /// client that just arrived. The insert would then be refused with a live cursor
     /// sitting right there, and nothing would say why. [LAW:no-silent-failure]
     @Test func aCursorLeavingAfterAnotherArrivedDoesNotTakeTheNewOnesFocus() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let old = try FakeTextInputClient().cursor()
         let new = try FakeTextInputClient().cursor()
         client.took(old)
@@ -267,6 +267,161 @@ import Testing
         client.left(old)
 
         #expect(try self.cursor(client).get() === new)
+    }
+
+    // MARK: several cursors of the app in front (low-reliability-z2z.n8z)
+
+    private static let textEdit = "com.apple.TextEdit"
+
+    /// A controller, as `IMKServer` builds one per client: only its identity is used.
+    private final class Controller {}
+
+    /// A `FocusedClient` that records each app it tells of a cursor arrival.
+    @MainActor private final class Told {
+        var arrivals: [String] = []
+        lazy var client = FocusedClient { [unowned self] in self.arrivals.append($0) }
+    }
+
+    /// TextEdit launched with restored windows: the key window's client and the one behind it
+    /// both activated in the same millisecond, and neither was deactivated. Nothing says which is
+    /// the key window, so neither takes the words, and neither is asked about its field: the
+    /// refusal is decided before any call into the app. The case seen on studious, where the
+    /// words went to the window behind and were answered inserted.
+    @Test func twoLiveCursorsOfTheAppInFrontAreRefusedAndNeitherIsWrittenTo() throws {
+        let client = FocusedClient { _ in }
+        let key = FakeTextInputClient(in: Self.textEdit)
+        let behind = FakeTextInputClient(in: Self.textEdit)
+        try client.took(key.cursor())
+        try client.took(behind.cursor())
+
+        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
+        #expect(key.documentAccessAsked == 0 && behind.documentAccessAsked == 0)
+        #expect(key.text.isEmpty && behind.text.isEmpty)
+    }
+
+    /// A key reaches only the controller of the client it is typed into, so that client has the
+    /// keyboard, and it is where the words go from then on.
+    @Test func aKeyTypedIntoOneOfThemMakesItTheCursor() throws {
+        let client = FocusedClient { _ in }
+        let key = try FakeTextInputClient(in: Self.textEdit).cursor()
+        let behind = try FakeTextInputClient(in: Self.textEdit).cursor()
+        client.took(key)
+        client.took(behind)
+        client.typedInto(key)
+
+        #expect(try cursor(client, whileInFrontIs: Self.textEdit).get() === key)
+    }
+
+    /// The refusal's way out offers the words again: the key that settles it tells the app a
+    /// cursor arrived, once. A key typed where there was only ever one cursor tells nothing, so
+    /// typing is not an arrival per keystroke.
+    @Test func theKeyThatSettlesItIsToldAsAnArrivalAndNoOtherKeyIs() throws {
+        let told = Told()
+        let key = try FakeTextInputClient(in: Self.textEdit).cursor()
+        let behind = try FakeTextInputClient(in: Self.textEdit).cursor()
+        told.client.took(key)
+        told.client.took(behind)
+        #expect(told.arrivals == [Self.textEdit], "only the first activation found a cursor alone")
+
+        told.client.typedInto(key)
+        told.client.typedInto(key)
+        told.client.typedInto(key)
+        #expect(told.arrivals == [Self.textEdit, Self.textEdit])
+    }
+
+    /// A switch between two windows that activates the new client before it deactivates the old:
+    /// for that moment both are live and words are refused, and the deactivation that leaves the
+    /// new one alone is the arrival that offers them again. Seen in Safari in this Mac's log,
+    /// twelve times in a day, each for a millisecond or less.
+    @Test func aSwitchThatActivatesFirstIsToldOnceTheOldOneLeaves() throws {
+        let told = Told()
+        let old = try FakeTextInputClient(in: Self.textEdit).cursor()
+        let new = try FakeTextInputClient(in: Self.textEdit).cursor()
+        told.client.took(old)
+        told.client.took(new)
+        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+
+        told.client.left(old)
+        #expect(told.arrivals == [Self.textEdit, Self.textEdit])
+        #expect(try cursor(told.client, whileInFrontIs: Self.textEdit).get() === new)
+    }
+
+    /// A controller activated again replaces its own cursor rather than standing beside it, and
+    /// that is an arrival as every activation alone is.
+    @Test func aControllerActivatedAgainIsOneCursor() throws {
+        let told = Told()
+        let controller = Controller()
+        let first = try FakeTextInputClient(in: Self.textEdit).cursor()
+        let again = try FakeTextInputClient(in: Self.textEdit).cursor()
+        told.client.took(first, by: controller)
+        told.client.took(again, by: controller)
+
+        #expect(try cursor(told.client, whileInFrontIs: Self.textEdit).get() === again)
+        #expect(told.arrivals == [Self.textEdit, Self.textEdit])
+    }
+
+    /// A deactivation removes only its own controller's cursor, in either order: an orphan's late
+    /// deactivation never takes the cursor of the controller that replaced it, and the controller
+    /// that replaced its own cursor removes it when it leaves.
+    @Test func aDeactivationRemovesOnlyItsOwnControllersCursor() throws {
+        let orphan = Controller()
+        let replacement = Controller()
+        let client = FocusedClient { _ in }
+        let current = try FakeTextInputClient(in: Self.textEdit).cursor()
+        try client.took(FakeTextInputClient(in: Self.textEdit).cursor(), by: orphan)
+        client.took(current, by: replacement)
+        client.typedInto(replacement)
+        client.left(orphan)
+        #expect(try cursor(client, whileInFrontIs: Self.textEdit).get() === current)
+
+        client.left(replacement)
+        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
+    }
+
+    /// Focus is in one app at a time, so a client activating in another app ends every cursor
+    /// left here, whether or not they are ever deactivated: back in TextEdit, its cursors are not
+    /// standing to be inserted into or argued over.
+    @Test func anActivationInAnotherAppEndsEveryCursorHere() throws {
+        let client = FocusedClient { _ in }
+        try client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+        try client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+        let safari = try FakeTextInputClient(in: "com.apple.Safari").cursor()
+        client.took(safari)
+
+        #expect(try cursor(client, whileInFrontIs: "com.apple.Safari").get() === safari)
+        #expect(throws: Refusal.cursorIsInAnotherApp) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
+    }
+
+    /// A key that reaches a controller holding no live cursor - one deactivated, or past its
+    /// memory ceiling - says nothing about the cursors that are, and changes nothing.
+    @Test func aKeyIntoAControllerHoldingNoCursorChangesNothing() throws {
+        let told = Told()
+        try told.client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+        try told.client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+        told.client.typedInto(Controller())
+
+        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(told.client, whileInFrontIs: Self.textEdit).get() }
+        #expect(told.arrivals == [Self.textEdit])
+    }
+
+    /// The app quitting takes every one of its cursors with it.
+    @Test func anAppQuittingTakesAllItsCursors() throws {
+        let client = FocusedClient { _ in }
+        try client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+        try client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+        client.applicationQuit(Self.textEdit)
+
+        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.textEdit).get() }
+    }
+
+    /// The insert's log line says how many cursors were live, which is the fact that decided it.
+    @Test func whatTheInsertSawNamesHowManyCursorsWereLive() throws {
+        let client = FocusedClient { _ in }
+        try client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+        try client.took(FakeTextInputClient(in: Self.textEdit).cursor())
+
+        let seen = client.inFront(for: .cursorInFront, whileInFrontIs: Self.textEdit, selected: true, screens: [Self.display])
+        #expect(seen.description == "with com.apple.TextEdit in front and 2 cursors in com.apple.TextEdit")
     }
 
     // MARK: an Open or Save panel's field, whose client is the service that draws the panel
@@ -281,7 +436,7 @@ import Testing
 
     /// The case measured on studious: Installer in front, its Open panel's name field focused.
     @Test func wordsGoToThePanelsFieldWhileItsHostIsInFront() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try panelCursor()
         client.took(cursor)
 
@@ -291,7 +446,7 @@ import Testing
     /// The panel's file list gives document access from a type-select buffer with its caret on
     /// no screen, which is what keeps words out of it now that the panel is in front.
     @Test func thePanelsFileListIsStillNotAField() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(panelCursor(caretLine: Self.typeSelectLine))
 
         #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: Self.installer).get() }
@@ -299,7 +454,7 @@ import Testing
 
     /// A person who left the app the panel belongs to is refused, as for any cursor left behind.
     @Test func aPanelLeftBehindIsRefusedOnceAnotherAppIsInFront() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(panelCursor())
 
         #expect(throws: Refusal.cursorIsInAnotherApp) { try cursor(client, whileInFrontIs: "com.apple.Safari").get() }
@@ -308,17 +463,30 @@ import Testing
     /// The words after a dictation's first are bound to the app the first went to, and what
     /// the cursor reports as that is the host - the service is never in front.
     @Test func laterWordsOfADictationIntoThePanelStillGoToIt() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         let cursor = try panelCursor()
         client.took(cursor)
 
         #expect(try self.cursor(client, for: .app(cursor.application), whileInFrontIs: Self.installer).get() === cursor)
     }
 
+    /// A Save panel over a document whose client was never deactivated is a second cursor of the
+    /// host, and refused as one; typing the file's name into the panel's field settles it there.
+    @Test func aPanelBesideItsHostsLiveDocumentIsSettledByTypingInIt() throws {
+        let client = FocusedClient { _ in }
+        try client.took(FakeTextInputClient(in: Self.installer).cursor())
+        let panel = try panelCursor()
+        client.took(panel)
+        #expect(throws: Refusal.cursorIsInSeveralPlaces) { try cursor(client, whileInFrontIs: Self.installer).get() }
+
+        client.typedInto(panel)
+        #expect(try cursor(client, whileInFrontIs: Self.installer).get() === panel)
+    }
+
     /// The host quitting takes its panel's cursor with it, so the same app relaunched into
     /// front is not committed into through a proxy for a process that is gone.
     @Test func theHostQuittingClearsThePanelsCursor() throws {
-        let client = FocusedClient()
+        let client = FocusedClient { _ in }
         try client.took(panelCursor())
         client.applicationQuit(Self.installer)
 

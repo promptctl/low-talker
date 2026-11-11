@@ -83,38 +83,80 @@ public enum FieldAnswer: Sendable, Equatable {
     }
 }
 
-/// The client the text input system has given focus to, and the one thing in this process
-/// that can commit text into it.
+/// The clients the text input system has given focus to, and the one thing in this process
+/// that can commit text into them.
 ///
 /// [LAW:no-shared-mutable-globals] One owner with an explicit API, and shared because it
 /// has to be: `IMKServer` builds a controller per client out of the class name in the
 /// bundle's `Info.plist`, so there is no constructor of ours to hand anything to. Every
-/// controller reports focus here, and the insert port asks here; those are the only two
-/// doors, and both are on the main actor.
+/// controller reports focus and typing here, and the insert port asks here; those are the only
+/// doors, and all of them are on the main actor.
 ///
-/// Its whole state is which cursor is in front, which is a fact macOS owns and this only
-/// mirrors. [FRAMING:representation] Nothing is remembered about text already inserted -
-/// the client is the document, and a second copy of what it holds could only disagree.
+/// Its whole state is the cursors macOS has activated and not deactivated, one per controller,
+/// all in one app: a fact macOS owns and this only mirrors. Usually there is one. Two windows of
+/// one app can both be activated with neither deactivated: TextEdit launched with restored
+/// windows put every word into the one behind the key window, because the cursor activated last
+/// was the one taken (low-reliability-z2z.n8z). Nothing the client says names the key window, so
+/// activation order is not taken as an answer: several live cursors refuse the words, and a key
+/// typed into one settles it, since a key reaches only the controller of the client it is typed
+/// into. [FRAMING:representation] Nothing is remembered about text already inserted - the
+/// client is the document, and a second copy of what it holds could only disagree.
 public final class FocusedClient {
-    public static let shared = FocusedClient()
+    public static let shared = FocusedClient(arrived: Notices.shared.cursorArrived(in:))
 
-    /// The cursor in front, which carries the app it belongs to.
-    private var focus: Client?
+    /// Each controller's live cursor, by the controller. Keyed by the controller rather than by
+    /// the client's own identifier, because that identifier is minted anew at activation: in this
+    /// Mac's log of 2026-11-10 to 11, 64 of 88 controller lives named more than one. A controller
+    /// activated again replaces its own entry, and one deactivated late removes only its own.
+    private var live: [ObjectIdentifier: Client] = [:]
 
-    /// The text input system gave this cursor focus.
+    /// Told the app of a cursor that has become the one words go to, so words no cursor took are
+    /// offered to it.
+    private let arrived: (String) -> Void
+
+    public init(arrived: @escaping (String) -> Void) { self.arrived = arrived }
+
+    /// The text input system gave `controller`'s client focus, as `cursor`.
     ///
     /// Unconditional, because there is no half-cursor left for it to sort out: a client that
     /// will not name its app is refused by `Client.init`, so the rule lives at the one place
     /// a cursor comes into being rather than at every place one is handled.
     /// [LAW:parse-dont-validate] [LAW:single-enforcer]
-    public func took(_ cursor: Client) { focus = cursor }
+    ///
+    /// A cursor in another app is gone: focus is in one app at a time, so an activation there
+    /// is the end of every cursor here, whether or not they are ever deactivated. A cursor of the
+    /// same app is no such proof, and stays.
+    public func took(_ cursor: Client, by controller: AnyObject) {
+        changing {
+            live = live.filter { $0.value.application == cursor.application }
+            live[ObjectIdentifier(controller)] = cursor
+        }
+    }
 
-    /// The text input system took focus away from this cursor.
-    public func left(_ leaving: Client) {
-        // Not unconditional: focus can move by activating the new client before
-        // deactivating the old, and clearing on the old one's word would then drop the
-        // client that just arrived and refuse the next insert for no reason.
-        focus = focus === leaving ? nil : focus
+    /// The text input system took focus away from `controller`'s client.
+    ///
+    /// By the controller, so a cursor left behind by one that was replaced - activated again, or
+    /// orphaned beside another of the same client (IMK rule 5) - is removed by its own and never
+    /// takes another's with it: focus can move by activating the new client before deactivating
+    /// the old.
+    public func left(_ controller: AnyObject) {
+        changing { live[ObjectIdentifier(controller)] = nil }
+    }
+
+    /// A key reached `controller`, which IMK hands only the keys typed into its client: that
+    /// client has the keyboard, and every other cursor is gone.
+    ///
+    /// This is the way out of the refusal that several live cursors are: the key is evidence of
+    /// where the person is that no activation is. A controller holding no live cursor - one
+    /// deactivated, or past its memory ceiling - changes nothing. [LAW:dataflow-not-control-flow]
+    public func typedInto(_ controller: AnyObject) {
+        let key = ObjectIdentifier(controller)
+        live[key].map { typed in
+            // [LAW:nothing-unseen] The one change to which cursors are live that no activation or
+            // deactivation line says.
+            if live.count > 1 { Self.log.notice("a key typed into \(typed, privacy: .public) leaves it the one cursor of \(self.live.count, privacy: .public)") }
+            changing { live = [key: typed] }
+        }
     }
 
     /// An app quit. Any cursor of its is gone with it, whatever the text input system did
@@ -133,12 +175,26 @@ public final class FocusedClient {
     /// live - and it is the direction chosen, because a refusal is seen and answered while a
     /// commit into a proxy for a dead process is answered `inserted` and vanishes.
     public func applicationQuit(_ application: String) {
-        focus = focus?.application == application ? nil : focus
+        changing { live = live.filter { $0.value.application != application } }
     }
 
+    /// Makes `change`, and tells the app when it leaves one cursor that was not the one before:
+    /// an activation in a new place, or the deactivation or typed key that leaves one of several.
+    /// [LAW:single-enforcer] Decided here, whichever door changed it, so words refused while
+    /// several cursors were live are offered again the moment one is left, and never while several
+    /// are.
+    private func changing(_ change: () -> Void) {
+        let before = sole
+        change()
+        if let after = sole, after !== before { arrived(after.application) }
+    }
+
+    /// The live cursor, when there is exactly one.
+    private var sole: Client? { live.count == 1 ? live.values.first : nil }
+
     /// What an insert sees on the main actor: the cursor words go to, provided it is in the
-    /// app that is actually in front and its client is a text field, or the refusal that says
-    /// why there is none, with the facts that decided it.
+    /// app that is actually in front, it is the only one live and its client is a text field, or
+    /// the refusal that says why there is none, with the facts that decided it.
     ///
     /// Only the decision: the commit is `Committer`'s, made in the same main-actor turn, and
     /// what the answer claims once it is made is said there.
@@ -167,6 +223,10 @@ public final class FocusedClient {
     /// input method no client, so the cursor last held is one it has stopped routing to. The
     /// refusal names the Input menu, which is the fix, and not a field, which is not.
     ///
+    /// Then the cursor has to be the only one live: of two, either could be the window the
+    /// person is in, and committing into the other is answered `inserted` while the words go
+    /// somewhere they are not looking.
+    ///
     /// Last, the cursor's client has to answer that a text field is behind it. Every app
     /// hands the input method a client, a window with no field focused included, and what is
     /// committed into such a client goes nowhere while the commit returns as if it landed.
@@ -175,21 +235,26 @@ public final class FocusedClient {
     /// [LAW:no-silent-failure] [LAW:one-source-of-truth]
     public func inFront(for destination: Destination, whileInFrontIs frontmost: String?, selected: Bool,
                         screens: [CGRect]) -> InFront {
+        let cursors = Array(live.values)
         func seen(_ field: FieldAnswer?, _ cursor: Result<Client, Refusal>) -> InFront {
-            InFront(frontmost: frontmost, selected: selected, cursorApplication: self.focus?.application,
-                    field: field, screens: screens, cursor: cursor)
+            InFront(frontmost: frontmost, selected: selected, cursorApplication: cursors.first?.application,
+                    cursors: cursors.count, field: field, screens: screens, cursor: cursor)
         }
         guard destination.admits(frontmost) else { return seen(nil, .failure(.dictationIsInAnotherApp)) }
         guard selected else { return seen(nil, .failure(.inputSourceIsNotSelected)) }
-        guard let focus else { return seen(nil, .failure(.noTextFieldHasFocus)) }
-        guard focus.application == frontmost else { return seen(nil, .failure(.cursorIsInAnotherApp)) }
+        guard let application = cursors.first?.application else { return seen(nil, .failure(.noTextFieldHasFocus)) }
+        guard application == frontmost else { return seen(nil, .failure(.cursorIsInAnotherApp)) }
+        guard let focus = sole else { return seen(nil, .failure(.cursorIsInSeveralPlaces)) }
         let field = focus.field
         return seen(field, field.isAField(on: screens) ? .success(focus) : .failure(.noTextFieldHasFocus))
     }
+
+    private static let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "insert")
 }
 
-/// What an insert saw on the main actor: the app in front, whether this source was selected, the cursor held, what its client answered about its field, and the decision made from
-/// them.
+/// What an insert saw on the main actor: the app in front, whether this source was selected, the
+/// cursors held, what the client of the one words would go to answered about its field, and the
+/// decision made from them.
 ///
 /// The app in front is named because the refusal that matters most is the one where it is
 /// not the app holding the cursor, and a line saying only the outcome leaves a reader with
@@ -201,6 +266,8 @@ public struct InFront: CustomStringConvertible {
     let frontmost: String?
     let selected: Bool
     let cursorApplication: String?
+    /// How many cursors are live, all of them in `cursorApplication`.
+    let cursors: Int
     /// Asked only of the cursor the words would go to, so absent for every refusal decided
     /// before it.
     let field: FieldAnswer?
@@ -209,7 +276,7 @@ public struct InFront: CustomStringConvertible {
 
     public var description: String {
         "with \(frontmost ?? "nothing") in front and "
-            + (cursorApplication.map { "the cursor in \($0)" } ?? "no cursor")
+            + (cursorApplication.map { cursors == 1 ? "the cursor in \($0)" : "\(cursors) cursors in \($0)" } ?? "no cursor")
             + (field.map(said) ?? "")
             + (selected ? "" : ", another input source selected")
     }
@@ -229,9 +296,8 @@ public struct InFront: CustomStringConvertible {
 /// How a client is said in the log: the identifier the text input system calls it by, and its
 /// app, so two windows of one app are two names.
 ///
-/// Only said, never compared or kept as a key: whether the identifier is stable per client or
-/// minted anew per read is a fact about macOS that has to be measured before anything can rely
-/// on it (low-reliability-z2z.vh4). [LAW:nothing-unseen]
+/// Only said, never compared or kept as a key: it is minted anew at activation, so one client
+/// is several names over its life (`FocusedClient` keys by controller). [LAW:nothing-unseen]
 nonisolated struct ClientName: CustomStringConvertible {
     let identifier: String?
     let application: String
