@@ -492,7 +492,7 @@ public final class Dictation {
 
         /// What stopped the press, which the hold tells beside the words and the report tells
         /// beside what became of them.
-        var cause: any Accounted {
+        var cause: any WordFree {
             switch self {
             case .lapsed: PressLapsed()
             case .lost(let lost): SpeechLost(lost: lost)
@@ -1267,7 +1267,7 @@ public struct PressStopped: Accounted {
     /// [LAW:types-are-the-program] Each ending carries the causes it can have, in the order the
     /// press met them: a commit refused during the hold, the ending, and a reading the decode
     /// then failed. [LAW:no-silent-failure] Each tells what the others cannot.
-    public enum Cause {
+    public enum Cause: Sendable {
         /// An insert left its words held: key-up's, which carried what any refused commit left,
         /// so its failure is the one told, as in the hold, or a commit's that nothing after carried.
         case insert(InsertFailure)
@@ -1275,15 +1275,18 @@ public struct PressStopped: Accounted {
         case reading(any Accounted, after: InsertFailure?)
         /// The hotkey stopped or the audio came apart, so what was said after it was not heard,
         /// and the decode may then have failed to read what was.
-        case cut(any Accounted, after: InsertFailure?, unread: (any Accounted)?)
+        case cut(any WordFree, after: InsertFailure?, unread: (any Accounted)?)
     }
 
     /// Each cause, in the order the press met them.
-    public var causes: [any Accounted] {
+    public var causes: [any Accounted] { (insert.map { [$0] } ?? []) + ending }
+
+    /// What ended it, after any insert that left its words held.
+    private var ending: [any Accounted] {
         switch cause {
-        case .insert(let insert): [insert]
-        case .reading(let reading, let unplaced): [unplaced as (any Accounted)?, reading].compactMap { $0 }
-        case .cut(let cut, let unplaced, let unread): [unplaced as (any Accounted)?, cut, unread].compactMap { $0 }
+        case .insert: []
+        case .reading(let reading, _): [reading]
+        case .cut(let cut, _, let unread): unread.map { [cut, $0] } ?? [cut]
         }
     }
 
@@ -1296,12 +1299,11 @@ public struct PressStopped: Accounted {
     /// or a failed reading's, so the press tells the remedy beside the words it offers. Until then,
     /// an insert's fate is the account: none of the press's words is at a cursor, and the fate says
     /// that and how the hold offers them again, which a cut or a failed reading holding more words
-    /// after it leaves true.
+    /// after it leaves true, so what ended it is told as having stopped it, not as a second fate.
     var stoppedBy: String {
-        causes.map { cause in
-            guard let insert = cause as? InsertFailure, reached else { return framed("\(cause)", stopped: reached) }
-            return "WARNING: \(insert.reason)"
-        }.joined(separator: " ")
+        let insert = insert.map { reached ? "WARNING: \($0.reason)" : "\($0)" }
+        let ending = ending.map { framed("\($0)", fateTold: reached || insert != nil) }
+        return ((insert.map { [$0] } ?? []) + ending).joined(separator: " ")
     }
 
     /// The insert that left its words held, when one did.
@@ -1309,15 +1311,6 @@ public struct PressStopped: Accounted {
         switch cause {
         case .insert(let insert): insert
         case .reading(_, let unplaced), .cut(_, let unplaced, _): unplaced
-        }
-    }
-
-    /// The reading that failed, the one cause that can carry what was dictated.
-    var reading: (any Accounted)? {
-        switch cause {
-        case .insert: nil
-        case .reading(let reading, _): reading
-        case .cut(_, _, let unread): unread
         }
     }
 
@@ -1341,11 +1334,14 @@ public struct PressStopped: Accounted {
     }
 
     public var description: String { stoppedBy + told }
-    /// What it left at the cursor, which is counts, and then each cause's account.
+    /// What it left at the cursor, which is counts, and then each cause's account, the words any
+    /// carries kept apart as the facts are.
     public var account: Account {
-        Account(
-            facts: "\(counted(landed, "word", "words")) inserted, \(standing) that may have been, \(held) held, before: \(causes.map(\.account.facts).joined(separator: "; "))",
-            dictated: reading?.account.dictated)
+        let accounts = causes.map(\.account)
+        let dictated = accounts.compactMap(\.dictated)
+        return Account(
+            facts: "\(counted(landed, "word", "words")) inserted, \(standing) that may have been, \(held) held, before: \(accounts.map(\.facts).joined(separator: "; "))",
+            dictated: dictated.isEmpty ? nil : dictated.joined(separator: "; "))
     }
 }
 
@@ -1374,11 +1370,12 @@ extension Dictation {
 /// What the menu tells the person who dictated about a press that failed: what stopped it,
 /// in full, since only they read it, and what became of their words.
 public func failureLine(_ failure: any Accounted) -> String {
-    (failure as? PressStopped)?.description ?? framed("\(failure)", stopped: false)
+    (failure as? PressStopped)?.description ?? framed("\(failure)", fateTold: false)
 }
 
 /// One cause, as a sentence the person reads: one that opens with WARNING already is, and a bare
-/// technical line is told what it is, a press `stopped` part way or one that placed nothing.
-private func framed(_ cause: String, stopped: Bool) -> String {
-    cause.hasPrefix("WARNING:") ? cause : "Your last dictation \(stopped ? "stopped" : "was not placed"): \(cause)."
+/// technical line is told what it is: what stopped the press, where what became of its words is
+/// told beside it, and otherwise why they were not placed.
+private func framed(_ cause: String, fateTold: Bool) -> String {
+    cause.hasPrefix("WARNING:") ? cause : "Your last dictation \(fateTold ? "stopped" : "was not placed"): \(cause)."
 }

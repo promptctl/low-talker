@@ -710,6 +710,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(stopped.landed == 1)
         guard case .cut(is PressLapsed, after: nil, unread: let unread?) = stopped.cause, case .unreadable(.speechWithoutWords)? = unread as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
         #expect(failureLine(stopped) == "WARNING: The hotkey stopped listening during your dictation. Your last dictation stopped: \(unread). 1 word of your dictation was inserted before it. 2 words are held. No others were inserted or held.")
+        #expect(stopped.account == Account(facts: "1 word inserted, 0 that may have been, 2 held, before: WARNING: The hotkey stopped listening during your dictation.; \(unread.account.facts)", dictated: " friend"))
         #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The hotkey stopped listening during your dictation. WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing.")))
     }
 
@@ -796,6 +797,23 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(stopped.landed == 1)
         guard case .reading(let reading, after: .refused(.cursorIsInAnotherApp)?) = stopped.cause, case .unreadable(.speechWithoutWords)? = reading as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
         #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) Your last dictation stopped: \(reading). 1 word of your dictation was inserted before it. 1 word is held. No others were inserted or held.")
+        #expect(stopped.account == Account(facts: "1 word inserted, 0 that may have been, 1 held, before: \(InsertFailure.refused(.cursorIsInAnotherApp)); \(reading.account.facts)", dictated: " friend"))
+    }
+
+    /// A press none of whose words reached a cursor tells their fate once, in the refusal that
+    /// held them: a reading that then fails is told as what stopped it, not as words not placed.
+    @Test func aFailedReadingAfterARefusalThatHeldEveryWordIsWhatStoppedIt() async throws {
+        let engine = FakeTranscriber(confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) }
+        let rig = try await Rig(hearing: engine)
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        await rig.until { rig.hold.held != nil }
+        rig.keyUp()
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        guard case .reading(let reading, after: .refused(.noTextFieldHasFocus)?) = stopped.cause else { Issue.record("stopped by \(stopped.causes)"); return }
+        #expect(engineFailed(reading, with: NoEngine.self))
+        #expect(failureLine(stopped) == "\(Refusal.noTextFieldHasFocus) Your last dictation stopped: NoEngine().")
     }
 
     /// A key-up told late is timed from where the key came up, as a key-down is: the input
