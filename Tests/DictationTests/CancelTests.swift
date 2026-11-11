@@ -352,6 +352,7 @@ import TestProbes
         let left = try #require(await rig.report().failure as? CancelLeftWords)
 
         #expect(left.left == 1)
+        #expect(failureLine(left).hasPrefix("WARNING: You cancelled a dictation, but 1 of its words is still in com.apple.TextEdit, and nothing more was done to it. "))
         #expect(rig.inputMethod.field == " hello")
         #expect(rig.hold.held == nil)
     }
@@ -368,7 +369,7 @@ import TestProbes
         let left = try #require(await rig.report().failure as? CancelLeftWords)
 
         #expect(rig.inputMethod.takeBacks == [" hello"])
-        #expect("\(left)".contains("may have been taken back, or may still be"))
+        #expect("\(left)".hasPrefix("WARNING: You cancelled a dictation, but 1 of its words may have been taken back, or may still be in com.apple.TextEdit, and nothing more was done to it. "))
     }
 
     /// A take-back is not an insert, so a failed one says why, and what became of the words in the
@@ -390,5 +391,12 @@ import TestProbes
         for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "land if"] {
             #expect(!line.contains(fate), "\(line)")
         }
+    }
+
+    /// A cancelled press's account agrees with each of its counts, a count of one included.
+    @Test func aCancelledPressTellsEachCountOfOneAsOne() {
+        let one = Cancelled(takenBack: 1, earlierWordsLanded: 1, forgotten: 1, dismissed: 1, standing: 1, discarded: 1)
+        #expect("\(one)" == "1 word taken back, 1 held word let go, 1 heard after the commits dropped; "
+            + "1 earlier word delivered with its first insert stays, 1 dismissed word stays dismissed, 1 word that may have landed stands")
     }
 }

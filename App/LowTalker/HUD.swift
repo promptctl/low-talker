@@ -227,7 +227,7 @@ final class HUD {
     /// any that may have landed, which the panel shows ahead of them.
     private static func offer(_ held: Held) -> String? {
         held.offered.map { offered in
-            " Click into a text field to insert \(held.standing == nil ? "these" : "the last \(offered.words.words.count)") words."
+            " Click into a text field to insert \(held.standing == nil ? "these words" : "the last \(counted(offered.words.words.count, "word", "words"))")."
         }
     }
 

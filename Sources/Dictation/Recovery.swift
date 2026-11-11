@@ -168,7 +168,7 @@ public final class Recovery {
             preconditionFailure("kept speech could not be handed to the hold: \(error)")
         }
         if handed {
-            Self.log.notice("read \(entry.seconds, privacy: .public) s of kept speech into \(words.words.count, privacy: .public) held words in \(began.duration(to: .now), privacy: .public)")
+            Self.log.notice("read \(entry.seconds, privacy: .public) s of kept speech into \(counted(words.words.count, "held word", "held words"), privacy: .public) in \(began.duration(to: .now), privacy: .public)")
             finish(entry)
         } else {
             Self.log.notice("kept speech \(entry.id, privacy: .public) was discarded while it was being read, so its words were dropped")

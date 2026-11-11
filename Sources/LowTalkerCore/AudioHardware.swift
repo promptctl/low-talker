@@ -101,7 +101,7 @@ public struct MicrophoneInput: Sendable, Equatable, CustomStringConvertible {
         case .success(let name): "\"\(name)\""
         case .failure(let error): "an input whose name is unknown (\(error))"
         }
-        return "\(named) (device \(device), \(Int(sampleRate)) Hz, \(channels) channel\(channels == 1 ? "" : "s"), \(heard))"
+        return "\(named) (device \(device), \(Int(sampleRate)) Hz, \(counted(channels, "channel", "channels")), \(heard))"
     }
 }
 

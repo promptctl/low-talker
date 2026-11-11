@@ -98,7 +98,7 @@ public struct Mode: Hashable, Sendable, CustomStringConvertible {
     /// The mode as a log line names it: its name, its chord, and how many terms it expects,
     /// never the terms, which can be the names of people.
     public var description: String {
-        "mode \"\(name)\" (\(Hotkey.named(chord)), \(vocabulary.terms.count) vocabulary term\(vocabulary.terms.count == 1 ? "" : "s"))"
+        "mode \"\(name)\" (\(Hotkey.named(chord)), \(counted(vocabulary.terms.count, "vocabulary term", "vocabulary terms")))"
     }
 
     /// Hold the hotkey, speak, and the words are typed wherever the focus is, on the
