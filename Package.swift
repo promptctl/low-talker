@@ -122,8 +122,8 @@ let package = Package(
         // `make test` the way App/LowTalker's sources are.
         .target(name: "InputMethod", dependencies: ["Insertion", "Identity", "GrammaticalNumber"], swiftSettings: inputMethodIsolation),
         // The one fake of the input method's text client port, answering as the measured
-        // clients do, and the port's contract it is held to. Beside the port and depending only on it; in no product, and never
-        // copied into a bundle. [LAW:one-source-of-truth]
+        // clients do, and the port's contract it is held to. Beside the port and depending only
+        // on it; in no product, and never copied into a bundle. [LAW:one-source-of-truth]
         .target(name: "InputMethodFakes", dependencies: ["InputMethod"], swiftSettings: inputMethodIsolation),
         .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "InputMethodFakes", "Insertion", "Identity", "TestProbes"]),
         // The two calls that cross between the app and the input method - words one way, the

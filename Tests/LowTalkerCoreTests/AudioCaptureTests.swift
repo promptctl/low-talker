@@ -1445,6 +1445,13 @@ private struct Authorized: MicrophoneAuthority {
         #expect(hardware.engines[1].disposed)
         #expect(!hardware.engines[2].disposed)
         #expect(hardware.engines[2].readying == 3)
+        #expect(hardware.prepared == 3)
+
+        hardware.engines[2].appending([6, 7], after(5))
+        let next = try capture.beginSession(at: after(6), preRoll: 0)
+        #expect(hardware.engines.count == 3)
+        hardware.engines[2].appending([8], after(7))
+        #expect(capture.endSession(next) == .whole(AudioClip(samples: [7, 8])))
     }
 
     /// With nobody pressing, both reports reach code that acts at once, so neither ordering

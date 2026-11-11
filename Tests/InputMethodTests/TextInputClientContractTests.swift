@@ -10,7 +10,7 @@ import Testing
     @Test(arguments: ContractCase.measured + ContractCase.unsettled)
     func theFakeAnswersAsTheCaseSays(_ statement: ContractCase) {
         let field = statement.fake()
-        #expect(statement.disagreements(of: field) == [])
+        #expect(statement.disagreements(of: field, reading: { field.text }) == [])
     }
 
     /// A case says when the client disagrees with it: a profile that answers wrongly turns its
@@ -19,7 +19,7 @@ import Testing
         let statement = try #require(ContractCase.measured.first { $0.profile.access == .none })
         let field = FakeTextInputClient(.appKit, holding: statement.holding, maxLength: statement.maxLength)
 
-        #expect(!statement.disagreements(of: field).isEmpty)
+        #expect(!statement.disagreements(of: field, reading: { field.text }).isEmpty)
     }
 
     /// No client was measured answering a range past the end of its field, so the fake fails the

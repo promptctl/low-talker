@@ -47,15 +47,15 @@ public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
     }
 
     /// Makes the call on `client` and says every way it disagreed with the case; nothing, when it
-    /// agreed.
+    /// agreed. `reading` reads what the field holds once the call is made.
     @MainActor
-    public func disagreements(of client: FakeTextInputClient) -> [String] {
+    public func disagreements(of client: any TextInputClient, reading: () -> String) -> [String] {
         switch act {
         case .read: break
         case let .insert(text, range): client.insertText(text, replacementRange: range)
         }
         let answered = Answers(documentAccess: client.givesDocumentAccess(), selection: client.selectedRange(), text: client.string(in: Self.readRange))
-        let held = client.text
+        let held = reading()
         return (answered == answers ? [] : ["the client answered \(answered), and the case says \(answers)"])
             + (held == holds ? [] : ["the field holds \(held.debugDescription), and the case says \(holds.debugDescription)"])
     }
