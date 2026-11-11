@@ -431,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.
-                    asked: { KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { [returnHold = self.returnHold] in returnHold.isOn }, panelShown: { [unowned self] in self.hud.isShown }).answer($0, through: $1) },
+                    asked: { KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting.isOn }, panelShown: { [unowned self] in self.hud.isShown }).answer($0, through: $1) },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
             } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }
         }
@@ -461,10 +461,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The menu's checkbox for holding a Return until the dictated words land. The input method
     /// asks for it at each Return, so a change here needs no word to the input method.
-    private let returnHold = ReturnHoldSetting()
-
     @objc private func toggleReturnHold() {
-        returnHold.set(!returnHold.isOn)
+        ReturnHoldSetting.set(!ReturnHoldSetting.isOn)
     }
 
     /// What each steering key the input method reports does. The switch is exhaustive, so a key
@@ -1107,7 +1105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Off by default. On, a Return typed while dictating is sent after the dictated words, so
         // the message goes out with them in it; the input method holds a Return only when this is on.
         let holdItem = menu.addItem(withTitle: "Hold Return for Dictated Words", action: #selector(toggleReturnHold), keyEquivalent: "")
-        holdItem.state = returnHold.isOn ? .on : .off
+        holdItem.state = ReturnHoldSetting.isOn ? .on : .off
         if let serving {
             let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
             item.state = serving.chosen ? .on : .off

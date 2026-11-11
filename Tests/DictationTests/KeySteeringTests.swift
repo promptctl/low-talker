@@ -63,8 +63,8 @@ import Testing
         let feed: Feed
         let steering: KeySteering
 
-        init(refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false) async throws {
-            rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        init(hearing engine: FakeTranscriber = FakeTranscriber { _ in Transcript(typed: "a") }, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false) async throws {
+            rig = try await Rig(hearing: engine)
             rig.inputMethod.refusing(refusal)
             feed = Feed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
@@ -131,6 +131,22 @@ import Testing
 
     /// And into a held one, the chord still down: the press ends as cancelled, and the chord's
     /// release after it ends nothing.
+    /// An Escape typed after words landed takes them back out of the field: the take-back is the
+    /// press's own, reached through the key.
+    @Test(.timeLimit(.minutes(1))) func anEscapeTypedAfterWordsLandedTakesThemBack() async throws {
+        let loop = try await Loop(hearing: FakeTranscriber(confirming: { $0.count >= 2 ? Transcript(typed: " hello") : Transcript(typed: "") }) { _ in Transcript(typed: " hello") })
+        await loop.latchedPress()
+        await loop.rig.until { loop.rig.inputMethod.field == " hello" }
+
+        KeySteering.escape(loop.hotkey)
+
+        let cancelled = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+        #expect(loop.rig.inputMethod.takeBacks == [" hello"])
+        #expect(cancelled.takenBack == 1)
+        #expect(loop.rig.hold.held == nil)
+    }
+
     @Test(.timeLimit(.minutes(1))) func anEscapeTypedIntoAHeldPressCancelsIt() async throws {
         let loop = try await Loop()
         loop.chord(.down, atMilliseconds: 0)
