@@ -6,7 +6,8 @@ import Testing
 
 /// An IMK callback reaches the main actor however IMK called it, and says which way it came in
 /// this process's own log. Each test names its callback with a name no other test uses, so the
-/// line it reads back is its own.
+/// line it reads back is its own. The store can hand one entry back twice (low-unfiled-50ff.88w),
+/// so how often the body ran is counted where it runs, not in lines read back.
 @Suite struct MainActorHopTests {
     /// Called on the main thread, as IMK calls, the body runs right there: no queue is waited
     /// on, so a callback can never wait out its own thread.
@@ -19,24 +20,22 @@ import Testing
         #expect(try await Self.lines(since: since).contains("MainActorHopTests.inline reached the main actor \(Hop.inline)"))
     }
 
-    /// Called from another thread, the body still runs on the main thread, with the argument
-    /// it was handed, before the call returns.
+    /// Called from another thread, the body still runs once, on the main thread, with the
+    /// argument it was handed, before the call returns.
     @Test(.timeLimit(.minutes(1))) func aCallbackFromAnotherThreadRunsOnTheMainThreadBeforeReturning() async throws {
         let since = Date.now
-        let seen = OSAllocatedUnfairLock<(onMain: Bool, argument: Int)?>(initialState: nil)
+        let runs = OSAllocatedUnfairLock<[(onMain: Bool, argument: Int)]>(initialState: [])
         await withCheckedContinuation { done in
             Thread.detachNewThread {
                 onMainActor("MainActorHopTests.offThread", 7) { argument in
-                    seen.withLock { $0 = (Thread.isMainThread, argument) }
+                    runs.withLock { $0.append((Thread.isMainThread, argument)) }
                 }
                 done.resume()
             }
         }
-        #expect(seen.withLock { $0?.onMain } == true)
-        #expect(seen.withLock { $0?.argument } == 7)
-        let said = try await Self.lines(since: since).filter { $0.hasPrefix("MainActorHopTests.offThread ") }
-        #expect(said.count == 1)
-        #expect(said.allSatisfy { $0.hasPrefix("MainActorHopTests.offThread reached the main actor from another thread, after waiting ") })
+        #expect(runs.withLock { $0.map(\.onMain) } == [true])
+        #expect(runs.withLock { $0.map(\.argument) } == [7])
+        #expect(try await Self.lines(since: since).contains { $0.hasPrefix("MainActorHopTests.offThread reached the main actor from another thread, after waiting ") })
     }
 
     private static func lines(since: Date) async throws -> [String] {
