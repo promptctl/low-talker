@@ -143,12 +143,16 @@ actor Utterance {
     private var recent: [Float] = []
     private static let roomFrames = Int((roomSpan / frame).rounded())
     private var ended = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-    /// Run with how many waits are parked each time a wait parks and each time a wake
-    /// runs, whether or not one was, so an observer awaits a wait parked before the event
-    /// that must wake it rather than trusting the scheduler to have run it first. Defaults
-    /// to doing nothing, so production is unchanged. [LAW:no-ambient-temporal-coupling] The actor's own
-    /// state, reported as it moves, as `EngineTurns` reports its `reading`.
+    /// [LAW:single-enforcer] Every change to the waits reports itself, so no path that
+    /// parks or wakes one can leave an observer's count behind.
+    private var waiting: [CheckedContinuation<Void, Never>] = [] {
+        didSet { onWaitingChanged(waiting.count) }
+    }
+    /// Run with how many waits are parked each time the list of them is set, so an observer
+    /// awaits a wait parked before the event that must wake it rather than trusting the
+    /// scheduler to have run it first. Defaults to doing nothing, so production is
+    /// unchanged. [LAW:no-ambient-temporal-coupling] The count is pushed, not read, because
+    /// an actor's state cannot be read without awaiting it.
     private let onWaitingChanged: @Sendable (_ parked: Int) -> Void
 
     init(onWaitingChanged: @escaping @Sendable (_ parked: Int) -> Void = { _ in }) {
@@ -264,10 +268,7 @@ actor Utterance {
     /// samples it places, so words are never timed by a timeline other than their audio's.
     func audio(beyond count: Int) async -> (samples: [Float], arrived: Int, ended: Bool, timeline: Timeline) {
         while speechCount <= count && !ended {
-            await withCheckedContinuation {
-                waiting.append($0)
-                onWaitingChanged(waiting.count)
-            }
+            await withCheckedContinuation { waiting.append($0) }
         }
         let arrived = min(speechCount, samples.count)
         return (Array(samples.prefix(arrived)) + Array(repeating: 0, count: speechCount - arrived), arrived, ended, timeline)
@@ -276,7 +277,6 @@ actor Utterance {
     private func wake() {
         let woken = waiting
         waiting = []
-        onWaitingChanged(waiting.count)
         for continuation in woken {
             continuation.resume()
         }
