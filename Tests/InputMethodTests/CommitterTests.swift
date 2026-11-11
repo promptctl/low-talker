@@ -171,14 +171,13 @@ import Testing
 
     /// Through the main queue while something else holds it - another app's stalled commit, or
     /// anything at all: the port answers busy at its bound, and the main actor, reaching the
-    /// insert after that, lets it go without asking any app.
+    /// insert after that, lets it go without asking any app and says how long it waited.
     @Test func anInsertTheMainActorDoesNotReachInTimeIsBusyAndAsksNoApp() async throws {
         let field = FakeTextInputClient()
         let cursor = try await field.cursor()
         let decided = OSAllocatedUnfairLock(initialState: 0)
         let ends = OSAllocatedUnfairLock(initialState: [Ended]())
-        // A bound of nothing: the main queue is held, so the wait is over before the turn is reached.
-        let committer = Committer(bound: .zero) { ended in ends.withLock { $0.append(ended) } }
+        let committer = Committer(bound: .milliseconds(50)) { ended in ends.withLock { $0.append(ended) } }
         let held = DispatchSemaphore(value: 0)
         let released = DispatchSemaphore(value: 0)
         DispatchQueue.main.async {
@@ -200,35 +199,36 @@ import Testing
         #expect(placed.answer == .refused(.inputMethodIsBusy))
         let said = ends.withLock { $0 }
         #expect(said.map(\.did) == [.letGo])
+        #expect(said.allSatisfy { $0.waited >= .milliseconds(50) })
         #expect(decided.withLock { $0 } == 0)
         #expect(await field.text.isEmpty)
     }
 
     // MARK: a field that keeps less than it is handed (low-reliability-z2z.rgy)
 
-    /// Thirty characters dictated into `field`, through the decision and the commit as an insert
-    /// arriving on the port is, with the field's app in front on studious's one display.
+    /// Thirty characters dictated into `field` through an assembled process, as an insert arriving on
+    /// the port is, with the field's app in front on studious's one display.
     @MainActor
-    private static func dictate(into field: FakeTextInputClient) throws -> Placed.Outcome {
-        let client = FocusedClient { _ in }
-        let cursor = try field.cursor()
-        client.took(cursor)
-        let turn = Turn()
-        _ = Committer.place(InsertRequest("alpha bravo charlie delta echo", into: .cursorInFront), turn: turn, inFront: {
-            client.inFront(for: .cursorInFront, whileInFrontIs: cursor.application, selected: true,
-                           screens: [CGRect(x: 0, y: 0, width: 1600, height: 900)])
-        })
-        return turn.wait(.zero)
+    private static func dictate(into field: FakeTextInputClient) async throws -> InsertionAnswer {
+        let assembled = AssembledProcess()
+        assembled.frontmost = try field.cursor().application
+        assembled.screens = [CGRect(x: 0, y: 0, width: 1600, height: 900)]
+        let controller = assembled.controller()
+        controller.activate(field)
+        let process = assembled.process!
+        let answer = await onAThreadOfItsOwn { process.insert(InsertRequest("alpha bravo charlie delta echo", into: .cursorInFront)).answer }
+        withExtendedLifetime(controller) {}
+        return answer
     }
 
     /// Safari's and Chrome's `<input maxlength=10>` gives no document access, as measured, so the
     /// words are refused before any commit, as for a window with no text field, and the app holds
     /// them: the field is left empty, and cannot be dictated into at all.
     @MainActor
-    @Test func aDictationIntoAWebKitInputIsRefusedAsNoTextField() throws {
+    @Test func aDictationIntoAWebKitInputIsRefusedAsNoTextField() async throws {
         let field = FakeTextInputClient(in: "com.apple.Safari", .webKitInput, maxLength: 10)
 
-        guard case .answered(.refused(.noTextFieldHasFocus), _) = try Self.dictate(into: field) else { Issue.record("not refused"); return }
+        #expect(try await Self.dictate(into: field) == .refused(.noTextFieldHasFocus))
         #expect(field.text.isEmpty)
     }
 
@@ -237,13 +237,10 @@ import Testing
     /// inserted with all 30, while 20 never reached the field and nothing holds them. What the
     /// input method answers today, and the answer low-reliability-z2z.rgy changes.
     @MainActor
-    @Test func aDictationIntoATextAreaThatKeepsTenOfThirtyIsAnsweredInsertedWithThirty() throws {
+    @Test func aDictationIntoATextAreaThatKeepsTenOfThirtyIsAnsweredInsertedWithThirty() async throws {
         let field = FakeTextInputClient(in: "com.apple.Safari", .webKitTextArea, maxLength: 10)
 
-        guard case .answered(.inserted(characters: 30, into: "com.apple.Safari"), _) = try Self.dictate(into: field) else {
-            Issue.record("not answered inserted")
-            return
-        }
+        #expect(try await Self.dictate(into: field) == .inserted(characters: 30, into: "com.apple.Safari"))
         #expect(field.text == "alpha brav")
     }
 

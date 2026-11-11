@@ -66,7 +66,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
 
     /// A command that is no steering key is declined, and the record says so.
     @Test(.timeLimit(.minutes(1))) func aCommandThatIsNoSteeringKeySaysSo() async throws {
-        let said = try await events(of: { DictationInputController() }) { controller in
+        let said = try await events(of: { AssembledProcess().controller() }) { controller in
             #expect(controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: [], typedAt: 0) == false)
         }
         try #require(said.count == 3)
@@ -75,7 +75,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
 
     /// A key typed as text leaves a record that says it was declined, and nothing of what was typed.
     @Test(.timeLimit(.minutes(1))) func aKeyTypedAsTextIsDeclinedAndNotRecorded() async throws {
-        let said = try await events(of: { DictationInputController() }) { controller in
+        let said = try await events(of: { AssembledProcess().controller() }) { controller in
             #expect(controller.inputText("secret", client: nil) == false)
         }
         try #require(said.count == 3)

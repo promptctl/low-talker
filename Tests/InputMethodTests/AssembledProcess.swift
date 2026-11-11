@@ -4,7 +4,7 @@ import Insertion
 import os
 
 /// An input method process assembled from fakes: readings the case sets, notices recorded as values,
-/// steering whose gate asks `asking` and whose effects are recorded, and a committer of `bound`.
+/// a gate that asks `asking`, beeps counted, and a committer of `bound`.
 ///
 /// Every reading is read when the process asks for it, so a case changes what the Mac looks like
 /// between two steps by setting it.
@@ -15,18 +15,18 @@ import os
     var footprint: UInt64? = 0
     /// What the process recorded of its notices, in order.
     let recorded = OSAllocatedUnfairLock(initialState: [Notices.Record]())
-    /// What the steering's verdicts asked for, in order.
-    private(set) var performed: [SteeringEffect] = []
+    /// How many times the process beeped.
+    private(set) var beeps = 0
     private(set) var process: InputMethodProcess!
 
+    /// The readings and the beep hold this fixture strongly, as the process holds them, so a case
+    /// that keeps only the process or a controller still reads them.
     init(asking: any SteeringAsking = SteeringGate.Unconnected(), bound: Duration = .seconds(20)) {
-        let readings = Readings(frontmost: { [unowned self] in frontmost }, selected: { [unowned self] in selected },
-                                screens: { [unowned self] in screens }, footprint: { [unowned self] in footprint })
+        let readings = Readings(frontmost: { self.frontmost }, selected: { self.selected },
+                                screens: { self.screens }, footprint: { self.footprint })
         process = InputMethodProcess(
-            readings: readings,
-            notices: Notices { [recorded] record in recorded.withLock { $0.append(record) } },
-            steering: { _ in Steering(gate: SteeringGate(ceiling: .seconds(30), asking: asking)) { [unowned self] in performed.append($0) } },
-            committer: { steering in Committer(bound: bound, turns: steering.gate.turns) { _ in } })
+            readings: readings, notices: Notices { [recorded] record in recorded.withLock { $0.append(record) } },
+            gate: SteeringGate(ceiling: .seconds(30), asking: asking), beep: { self.beeps += 1 }, bound: bound, told: { _ in })
     }
 
     /// A controller of this process, as `IMKServer` builds one per client.

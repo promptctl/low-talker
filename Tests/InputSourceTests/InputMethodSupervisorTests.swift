@@ -74,12 +74,12 @@ final class ManualClock: MonotonicClock {
             self.clock = clock
         }
 
-        func open() throws -> InputMethodProcess {
+        func open() throws -> RunningInputMethod {
             opens.append(clock.now)
             guard let pid = answers.removeFirst() else { throw Refused() }
             let (ending, end) = AsyncStream<Never>.makeStream()
             endings[pid] = end
-            return InputMethodProcess(pid: pid, launched: nil) { for await _ in ending {} }
+            return RunningInputMethod(pid: pid, launched: nil) { for await _ in ending {} }
         }
 
         func end(_ pid: Int32) { endings[pid]?.finish() }

@@ -26,8 +26,8 @@ public nonisolated enum SteeringEffect: Equatable, Sendable {
 /// out the effect a verdict asks for.
 ///
 /// [LAW:no-shared-mutable-globals] `IMKServer` builds controllers out of a class name, so the
-/// shipped process's controllers take `InputMethodProcess.shipped`'s; a test builds its own
-/// with a gate of its own and a `perform` that records.
+/// shipped process's controllers take `InputMethodProcess.shipped`'s; a test assembles a process
+/// of its own, with its own gate.
 public nonisolated struct Steering: Sendable {
     public let gate: SteeringGate
     public let perform: @MainActor @Sendable (SteeringEffect) -> Void

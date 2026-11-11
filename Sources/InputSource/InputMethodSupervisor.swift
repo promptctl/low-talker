@@ -52,7 +52,7 @@ public final class InputMethodSupervisor {
         // [LAW:effects-at-boundaries] The throttle's clock is an effect the watch takes as a
         // parameter, not the global one it reaches for, so a test drives it on controllable time.
         clock: any MonotonicClock = SystemMonotonicClock(),
-        open: @escaping @MainActor () async throws -> InputMethodProcess = { try await .open(InstalledInputMethod().bundle()) },
+        open: @escaping @MainActor () async throws -> RunningInputMethod = { try await .open(InstalledInputMethod().bundle()) },
         told: @escaping @MainActor (Event) -> Void
     ) {
         self.told = told
@@ -107,7 +107,7 @@ public struct SystemMonotonicClock: MonotonicClock {
 }
 
 /// One process of the input method, as LaunchServices answered for it.
-public struct InputMethodProcess {
+public struct RunningInputMethod {
     public let pid: Int32
     public let launched: Date?
     /// Returns once the process has ended, or the task awaiting it is cancelled.
@@ -126,12 +126,12 @@ public struct InputMethodProcess {
     /// studious, NSWorkspace posts neither its launch nor its end for an input method, which
     /// runs as a UIElement, while `isTerminated` changes the moment it dies.
     @MainActor
-    public static func open(_ bundle: URL) async throws -> InputMethodProcess {
+    public static func open(_ bundle: URL) async throws -> RunningInputMethod {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         configuration.addsToRecentItems = false
         let app = try await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
-        return InputMethodProcess(pid: app.processIdentifier, launched: app.launchDate) {
+        return RunningInputMethod(pid: app.processIdentifier, launched: app.launchDate) {
             let (ending, end) = AsyncStream<Never>.makeStream()
             // `.initial`, so a process that ended before the observation began is seen ending.
             // Sendable, so it is isolated to no actor: written here it would otherwise be the

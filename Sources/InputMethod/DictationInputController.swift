@@ -56,7 +56,7 @@ public final class DictationInputController: IMKInputController, InputController
     }
 
     /// A controller in `process`: a test's, assembled from fakes.
-    nonisolated public init(process: InputMethodProcess) {
+    nonisolated init(process: InputMethodProcess) {
         (records, recording) = AsyncStream.makeStream(bufferingPolicy: .bufferingOldest(32))
         self.process = process
         super.init()
@@ -162,7 +162,7 @@ public final class DictationInputController: IMKInputController, InputController
     }
 
     /// `activateServer` with `client`, the text client a test hands in where IMK hands its sender.
-    nonisolated public func activate(_ client: (any TextInputClient)?) {
+    nonisolated func activate(_ client: (any TextInputClient)?) {
         entered(client) { client in self.activated(by: client) }
     }
 

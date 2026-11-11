@@ -13,7 +13,7 @@ import Testing
 /// Mac's keyboard holds while the suite runs.
 ///
 /// On the main actor because the controller is an `IMKInputController`, which is built and answered there.
-/// Each case builds its controller with a gate of its own and records the effects its verdicts ask for.
+/// Each case builds its controller in a process of its own, whose gate asks what the case gave it.
 @Suite @MainActor struct DictationInputControllerTests {
     /// The commands the text input system binds Return and Escape to.
     static let insertNewline = NSSelectorFromString("insertNewline:")
@@ -36,12 +36,14 @@ import Testing
         return (assembled.controller(), assembled)
     }
 
-    /// `selector` answered by a controller asking `app`, typed with `modifiers` held, and what it performed.
+    /// `selector` answered by a controller asking `app`, typed with `modifiers` held, and what the
+    /// process was heard to do: each beep, and each key the app was told of.
     private func answer(_ selector: Selector, holding modifiers: NSEvent.ModifierFlags = [],
                         asking app: App) -> (kept: Bool, performed: [SteeringEffect]) {
-        let (controller, performed) = controller(asking: app)
+        let (controller, assembled) = controller(asking: app)
         let kept = controller.didCommand(by: selector, holding: modifiers, typedAt: 1)
-        return (kept, performed.performed)
+        let told = assembled.recorded.withLock { $0 }.filter { $0 == .keyTyped(.escape) }.map { _ in SteeringEffect.tellTheApp }
+        return (kept, Array(repeating: .beep, count: assembled.beeps) + told)
     }
 
     /// Key-downs are always asked for, so Escape reaches the controller whatever the Return setting says.

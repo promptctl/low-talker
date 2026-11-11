@@ -26,6 +26,8 @@ public nonisolated final class Notices: Sendable {
     public enum Record: Equatable, Sendable {
         /// A cursor in this app became the one words go to.
         case cursorArrived(in: String)
+        /// The app was told this key was pressed.
+        case keyTyped(SteeringKey)
         /// An activation read this footprint, in bytes, against the ceiling.
         case footprint(UInt64)
         /// An activation found the process over its ceiling, which it ends over.
@@ -40,6 +42,7 @@ public nonisolated final class Notices: Sendable {
         public var rendering: (level: OSLogType, line: String) {
             switch self {
             case let .cursorArrived(application): (.info, "a cursor arrived in \(application)")
+            case let .keyTyped(key): (.info, "told the app \(key) was pressed")
             case let .footprint(footprint): (.info, "activated holding \(footprint) bytes of a \(Notices.memoryCeiling) byte ceiling")
             case let .overrun(overrun): (.fault, "ending this process: \(overrun)")
             case let .told(told): (told.isFault ? .error : .default, told.description)
@@ -77,6 +80,7 @@ public nonisolated final class Notices: Sendable {
     /// A key the app asked to hear of was pressed. Yielded and not waited for, so the key handler
     /// that reports it returns at once and the key goes on to the app as it would have.
     public func keyTyped(_ key: SteeringKey) {
+        recorded(.keyTyped(key))
         continuation.yield(.keyTyped(key))
     }
 
