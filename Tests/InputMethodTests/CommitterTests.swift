@@ -19,7 +19,7 @@ import Testing
     /// What `FocusedClient` would have seen: the cursor chosen, or the refusal.
     @MainActor
     private static func seen(_ cursor: Result<Client, Refusal>) -> InFront {
-        InFront(frontmost: "com.example.editor", secureInputHolder: nil, selected: true, cursorApplication: "com.example.editor",
+        InFront(frontmost: "com.example.editor", selected: true, cursorApplication: "com.example.editor",
                 field: nil, screens: [], cursor: cursor)
     }
 
@@ -125,10 +125,10 @@ import Testing
 
         let did = Committer.place(Self.request, turn: turn, inFront: {
             _ = turn.wait(.zero)
-            return Self.seen(.failure(.secureInputIsOn))
+            return Self.seen(.failure(.noTextFieldHasFocus))
         })
 
-        guard case .refused(.secureInputIsOn, _, late: true) = did else { Issue.record("\(did)"); return }
+        guard case .refused(.noTextFieldHasFocus, _, late: true) = did else { Issue.record("\(did)"); return }
     }
 
     /// The port gave up while the app was taking the words: it answered that the app has not
@@ -215,7 +215,7 @@ import Testing
         client.took(cursor)
         let turn = Turn()
         _ = Committer.place(InsertRequest("alpha bravo charlie delta echo", into: .cursorInFront), turn: turn, inFront: {
-            client.inFront(for: .cursorInFront, whileInFrontIs: cursor.application, secureInputHeldBy: nil, selected: true,
+            client.inFront(for: .cursorInFront, whileInFrontIs: cursor.application, selected: true,
                            screens: [CGRect(x: 0, y: 0, width: 1600, height: 900)])
         })
         return turn.wait(.zero)

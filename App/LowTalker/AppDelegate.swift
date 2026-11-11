@@ -1,6 +1,5 @@
 import AppKit
 import Bench
-import Carbon
 import Dictation
 import Identity
 import Grants
@@ -977,17 +976,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Why the words of a press would be held rather than typed right now, read at the moment
-    /// the menu opens: the input method types only while its source is the one in use, and
-    /// into nothing while an app holds Secure Event Input. Empty when neither stands in the way.
-    /// The chord is heard either way.
+    /// the menu opens: the input method types only while its source is the one in use. Empty while
+    /// it is. The chord is heard either way.
     ///
     /// [LAW:no-silent-failure] A hotkey line that read as working while nothing could type
-    /// would send the person after a broken app rather than the Input menu or the password
-    /// field in front of them.
+    /// would send the person after a broken app rather than the Input menu.
     private func untypedBecause() -> [String] {
         let reasons: [String?] = [
             InstalledInputMethod.isSelected() ? nil : "\(AppIdentity.displayName) is not the selected input source",
-            IsSecureEventInputEnabled() ? "an app holds Secure Event Input, as a password field does" : nil,
         ]
         let found = reasons.compactMap { $0 }
         log.notice("hotkey: words held, not typed, because [\(found.joined(separator: "; "), privacy: .public)]")
