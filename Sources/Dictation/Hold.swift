@@ -216,6 +216,8 @@ public final class Hold {
     public private(set) var state = HoldState()
 
     public var held: Held? { state.held }
+    /// How many words the hold offers to the next cursor.
+    var offeredWords: Int { held?.offered?.words.words.count ?? 0 }
     public var dismissed: Held? { state.dismissed }
 
     /// Where the held words an insert on its way carries are now. The loop makes one insert at

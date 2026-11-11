@@ -372,7 +372,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
         #expect(stopped.cause as? InsertFailure == .refused(.cursorIsInAnotherApp))
-        #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) 1 words of your dictation were inserted before it. 2 words are held.")
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) 1 words of your dictation were inserted before it. 2 words are held. No others were inserted or held.")
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held == .unplaced(part(" there friend", "\(Refusal.cursorIsInAnotherApp)")))
     }
@@ -417,7 +417,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
         #expect(stopped.cause as? InsertFailure == .refused(.dictationIsInAnotherApp))
-        #expect(failureLine(stopped) == "WARNING: \(Refusal.dictationIsInAnotherApp.reason) 1 words of your dictation were inserted before it. 2 words are held.")
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.dictationIsInAnotherApp.reason) 1 words of your dictation were inserted before it. 2 words are held. No others were inserted or held.")
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held?.words == Transcript(typed: " there friend"))
     }
@@ -441,8 +441,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         let told = failed.mayHaveLanded
-            ? "1 words of your dictation were inserted before it. 2 words may have been inserted; do not dictate them again."
-            : "1 words of your dictation were inserted before it. 2 words are held."
+            ? "1 words of your dictation were inserted before it. 2 words may have been inserted; do not dictate them again. No others were inserted or held."
+            : "1 words of your dictation were inserted before it. 2 words are held\(failed.failure.remedy.map { "; \($0) and they are offered again" } ?? ""). No others were inserted or held."
         #expect("\(stopped)" == "WARNING: \(failed.failure.reason) \(told)")
         #expect(failureLine(stopped) == "\(stopped)")
         let rest = part(" there friend", "\(failed.failure)")
@@ -474,6 +474,25 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(duringPress.wordsCommitted == 3)
         #expect(rig.hold.held == nil)
         #expect(rig.shown.held.last == .some(nil))
+    }
+
+    /// A press cut after words landed and a refusal held the rest gives the hold the cut's
+    /// warning, so the press itself tells what offers the held words again.
+    @Test func aCutAfterARefusalTellsTheRefusalsRemedyBesideTheHeldWords() async throws {
+        let engine = FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
+        }) { _ in Transcript(typed: "hello there friend") }
+        let rig = try await Rig(hearing: engine)
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
+        rig.inputMethod.refusing(.refused(.cursorIsNotSettled))
+        rig.speak([3, 4])
+        await rig.until { rig.hold.held != nil }
+        rig.dictation.press(.ended(.lapsed))
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The hotkey stopped listening during your dictation.")))
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsNotSettled.reason) 1 words of your dictation were inserted before it. 2 words are held; press an arrow key where you want it and they are offered again. No others were inserted or held.")
     }
 
     /// A refusal while the press is open is what the report names even when the press then
@@ -528,7 +547,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(engineFailed(stopped.cause, with: NoEngine.self))
         #expect(stopped.landed == 2)
-        #expect(failureLine(stopped) == "Your last dictation stopped: NoEngine(). 2 words of your dictation were inserted before it.")
+        #expect(failureLine(stopped) == "Your last dictation stopped: NoEngine(). 2 words of your dictation were inserted before it. No others were inserted or held.")
     }
 
     /// [LAW:no-silent-failure] A press whose microphone opened after the words it was pressed
