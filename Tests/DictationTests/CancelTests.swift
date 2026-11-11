@@ -219,7 +219,7 @@ import TestProbes
 
     /// An insert carrying the earlier words and the press's first is in the air when the person
     /// dismisses what is held, and then fails without landing: the hold rebuilds its offered part
-    /// from the press's words alone, so the counts are read back from it, not trusted.
+    /// from the press's words alone.
     private static func dismissedWhileAnInsertIsInTheAir(_ rig: Rig) async throws -> Held {
         try await holdingEarlierWords(rig)
         let earlier = try #require(rig.hold.held)
@@ -279,6 +279,60 @@ import TestProbes
         #expect(cancelled.forgotten == 2)
         #expect(rig.hold.held == nil)
         #expect(rig.hold.dismissed == earlier)
+    }
+
+    /// The press holds one word and the person dismisses it; then, with the commits stopped by a
+    /// device change, kept speech is read into one held word while the key is still down. The hold
+    /// offers one word, as it did before the dismissal, but it is not the press's, so the cancel
+    /// leaves the recovered word held and says the press's word stays dismissed.
+    @Test func anotherDictationsWordsHeldMidPressAreNotLetGo() async throws {
+        let kept = FakeUnheardStore()
+        _ = try kept.keep(UnheardSpeech(said: .now, vocabulary: [], samples: [7]))
+        let rig = try await Rig(hearing: Self.engine(), keepingSpeech: kept)
+        rig.inputMethod.refusing(Self.refusal)
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.hold.held != nil }
+        rig.hold.dismiss()
+        rig.changeDevice()
+        rig.speak([3, 4])
+        rig.recovery.landed(FakeTranscriber { _ in Transcript(typed: " first") })
+        await rig.recovery.settled()
+        let recovered = try #require(rig.hold.held)
+        #expect(recovered.words == Transcript(typed: " first"))
+
+        Self.cancel(rig)
+        let cancelled = try #require(await rig.report().cancelled)
+
+        #expect(cancelled.forgotten == 0)
+        #expect(cancelled.dismissed == 1)
+        #expect(rig.hold.held == recovered)
+    }
+
+    /// The press holds one word; then, with the commits stopped by a device change, kept speech is
+    /// read into one held word after it while the key is still down. The press's word is let go,
+    /// and the recovered one stays held under the warning it was held with.
+    @Test func thePresssWordsAreLetGoFromAmongWordsAnotherDictationHeldMidPress() async throws {
+        let kept = FakeUnheardStore()
+        _ = try kept.keep(UnheardSpeech(said: .now, vocabulary: [], samples: [7]))
+        let rig = try await Rig(hearing: Self.engine(), keepingSpeech: kept)
+        rig.inputMethod.refusing(Self.refusal)
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.hold.held != nil }
+        rig.changeDevice()
+        rig.speak([3, 4])
+        rig.recovery.landed(FakeTranscriber { _ in Transcript(typed: " first") })
+        await rig.recovery.settled()
+        let recovered = try #require(rig.hold.held)
+        #expect(recovered.words == Transcript(typed: " hello first"))
+
+        Self.cancel(rig)
+        let cancelled = try #require(await rig.report().cancelled)
+
+        #expect(cancelled.forgotten == 1)
+        #expect(cancelled.dismissed == 0)
+        #expect(rig.hold.held?.words == Transcript(typed: " first"))
+        #expect(rig.hold.held?.warnings == recovered.warnings)
+        #expect(rig.hold.dismissed == nil)
     }
 
     // MARK: - what may have landed, and what could not be taken back
