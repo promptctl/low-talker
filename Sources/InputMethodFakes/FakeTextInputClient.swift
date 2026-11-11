@@ -9,37 +9,95 @@ import Testing
 /// One type and its rows as values: two rows the port cannot tell apart today are still two rows,
 /// because they part ways once the port reads more of the field than it does now.
 /// [LAW:one-type-per-behavior]
-public nonisolated struct ClientProfile: Sendable, CustomStringConvertible {
+public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConvertible {
     /// What the client gives the input method of the field behind it.
     public enum Access: Sendable {
         /// No document access: `selectedRange` answers NSNotFound and the text nil whatever the
         /// field holds, and a replacement range is ignored, the words going in at the cursor.
         case none
+        /// Document access and a real selection, and no text over any range.
+        case selectionOnly
         /// Document access, and the reads answer what the field holds.
         case toTheField
     }
 
+    /// What the field does with words that do not fit its `maxlength`, where someone said; nil where
+    /// nobody did, and the fake fails the case that overflows it rather than guess.
+    public enum Overflow: Sendable {
+        /// It keeps what fits.
+        case keepsWhatFits
+        /// It keeps them all, as though it had no `maxlength`.
+        case keepsThemAll
+        /// It keeps none of them, and the field is left as it was.
+        case keepsNone
+    }
+
     public let description: String
     public let access: Access
+    public let overflow: Overflow?
+
+    init(_ description: String, access: Access, overflow: Overflow? = nil) {
+        self.description = description
+        self.access = access
+        self.overflow = overflow
+    }
 
     /// TextEdit and Notes: the full tier.
-    public static let appKit = ClientProfile(description: "an AppKit text view", access: .toTheField)
+    public static let appKit = ClientProfile("an AppKit text view", access: .toTheField)
     /// Safari's and Chrome's `<textarea>` and contenteditable: the partial tier. Its `length()` of 0
     /// is not a call the port makes, so it is not modelled.
-    public static let webKitTextArea = ClientProfile(description: "a WebKit <textarea>", access: .toTheField)
+    public static let webKitTextArea = ClientProfile("a WebKit <textarea>", access: .toTheField)
     /// Safari's and Chrome's `<input>`, measured as `<input maxlength=10>`: the none tier, before and
-    /// after an insert.
-    public static let webKitInput = ClientProfile(description: "a WebKit <input>", access: .none)
-    /// iTerm2's terminal, where words land in plain sight: document access and a real
-    /// `selectedRange`, as low-reliability-z2z.sk9 measured it, its words seen landing once a
-    /// client without document access was refused. bem's row reads none, and the text it says is
-    /// in a range is unmeasured: `ContractCase.unsettled`. Its `length()` of 0 (Committer) is not a
-    /// call the port makes, so it is not modelled.
-    public static let iTerm2 = ClientProfile(description: "iTerm2's terminal", access: .toTheField)
+    /// after an insert. What it keeps of words past its `maxlength` is unmeasured, and the profiles
+    /// in `possible` give each answer.
+    public static let webKitInput = ClientProfile("a WebKit <input>", access: .none)
     /// A window with no text field focused, which still hands the input method a client: Calculator,
     /// Installer, Activity Monitor with every window closed, a page whose body text was clicked
     /// (low-reliability-z2z.sk9).
-    public static let noTextField = ClientProfile(description: "a window with no text field focused", access: .none)
+    public static let noTextField = ClientProfile("a window with no text field focused", access: .none)
+
+    /// The rows bem and sk9 measured alike.
+    public static let measured: [ClientProfile] = [appKit, webKitTextArea, webKitInput, noTextField]
+
+    // Each answer a client nobody measured could give, as a profile of its own.
+
+    /// A WebKit `<input>` handed more than its `maxlength`, if it keeps what fits.
+    public static let webKitInputKeepingWhatFits = ClientProfile("a WebKit <input> keeping what fits", access: .none, overflow: .keepsWhatFits)
+    /// If it keeps it all.
+    public static let webKitInputKeepingAll = ClientProfile("a WebKit <input> keeping all it is handed", access: .none, overflow: .keepsThemAll)
+    /// If it keeps none of it.
+    public static let webKitInputKeepingNone = ClientProfile("a WebKit <input> keeping none of what overflows it", access: .none, overflow: .keepsNone)
+    /// A WebKit `<textarea>` with a `maxlength` (low-reliability-z2z.rgy), if it keeps what fits.
+    public static let webKitLimitedTextArea = ClientProfile("a WebKit <textarea maxlength> keeping what fits", access: .toTheField,
+                                                                   overflow: .keepsWhatFits)
+    /// If it keeps it all.
+    public static let webKitLimitedTextAreaKeepingAll = ClientProfile("a WebKit <textarea maxlength> keeping all it is handed", access: .toTheField,
+                                                                      overflow: .keepsThemAll)
+    /// If it keeps none of it.
+    public static let webKitLimitedTextAreaKeepingNone = ClientProfile("a WebKit <textarea maxlength> keeping none of what overflows it",
+                                                                       access: .toTheField, overflow: .keepsNone)
+    /// If its `maxlength` takes its document access away, as the `<input>`'s is measured without.
+    public static let webKitLimitedTextAreaBlind = ClientProfile("a WebKit <textarea maxlength> giving no document access", access: .none,
+                                                                       overflow: .keepsWhatFits)
+    /// iTerm2's terminal, where words land in plain sight, as bem read it: no document access.
+    /// Its `length()` of 0 (Committer) is not a call the port makes, so it is not modelled.
+    public static let iTerm2Blind = ClientProfile("iTerm2's terminal giving no document access", access: .none)
+    /// As sk9 read it, document access and a real selection, if it says no text is in a range.
+    public static let iTerm2SelectionOnly = ClientProfile("iTerm2's terminal giving a selection and no text", access: .selectionOnly)
+    /// As sk9 read it, if it says what is in a range.
+    public static let iTerm2 = ClientProfile("iTerm2's terminal reading as the field", access: .toTheField)
+
+    /// Every answer nobody measured, so a behavior run under all of them holds whichever the
+    /// client gives.
+    public static let possible: [ClientProfile] = [
+        webKitInputKeepingWhatFits, webKitInputKeepingAll, webKitInputKeepingNone,
+        webKitLimitedTextArea, webKitLimitedTextAreaKeepingAll, webKitLimitedTextAreaKeepingNone, webKitLimitedTextAreaBlind,
+        iTerm2Blind, iTerm2SelectionOnly, iTerm2,
+    ]
+
+    /// Every profile, measured and possible: what a behavior that depends on a client's answers
+    /// runs under.
+    public static let all = measured + possible
 }
 
 /// A text field and the client in front of it, held in memory: the one fake of `TextInputClient`.
@@ -57,8 +115,8 @@ public final class FakeTextInputClient: TextInputClient {
     public private(set) var text: String
     /// The selection, in UTF-16 units as `NSRange` counts; a caret is a selection of length 0.
     public private(set) var selection: NSRange
-    /// The most UTF-16 units the field holds, as an HTML `maxlength` counts them. An insert past it
-    /// keeps what fits, and the client answers the same either way.
+    /// The most UTF-16 units the field holds, as an HTML `maxlength` counts them. What an insert past
+    /// it keeps is the profile's `overflow`.
     public let maxLength: Int?
     /// Where the client says the caret's line is, in screen coordinates, or nil for a client that
     /// reports none.
@@ -99,13 +157,13 @@ public final class FakeTextInputClient: TextInputClient {
     public func selectedRange() -> NSRange {
         switch profile.access {
         case .none: NSRange(location: NSNotFound, length: NSNotFound)
-        case .toTheField: selection
+        case .selectionOnly, .toTheField: selection
         }
     }
 
     public func string(in range: NSRange) -> String? {
         switch profile.access {
-        case .none: nil
+        case .none, .selectionOnly: nil
         case .toTheField: holds(range) ? (text as NSString).substring(with: range) : nil
         }
     }
@@ -117,23 +175,46 @@ public final class FakeTextInputClient: TextInputClient {
     }
 
     /// As the measured clients take it: at NSNotFound the words replace the selection, an explicit
-    /// range is honoured only with document access, and the field keeps what its `maxLength` has
-    /// room for, leaving the caret after it.
+    /// range is honoured only with document access, and the field keeps of what its `maxLength` has
+    /// no room for what the profile's overflow says, leaving the caret after what it kept.
     public func insertText(_ words: String, replacementRange range: NSRange) {
         duringInsert()
         let replaced = range.location == NSNotFound || profile.access == .none ? selection : range
+        // No selection-only client was measured taking an explicit range, so the fake answers none.
+        guard range.location == NSNotFound || profile.access != .selectionOnly else {
+            Issue.record("insertText into \(profile) was given \(range), and nobody measured a selection-only client taking one")
+            return
+        }
         // No client was measured answering a range past the end of its field, so the fake answers
         // none: it fails the case that handed it one, naming the range, rather than guess.
         guard holds(replaced) else {
             Issue.record("insertText into \(profile) holding \(text.utf16.count) units was given \(replaced), past the field")
             return
         }
-        var room = maxLength.map { $0 - (text.utf16.count - replaced.length) } ?? .max
-        let kept = String(words.prefix { character in
-            room -= character.utf16.count
-            return room >= 0
-        })
+        let room = maxLength.map { $0 - (text.utf16.count - replaced.length) } ?? .max
+        let kept: String
+        if words.utf16.count <= room {
+            kept = words
+        } else {
+            switch profile.overflow {
+            case .keepsWhatFits: kept = Self.prefix(of: words, fitting: room)
+            case .keepsThemAll: kept = words
+            case .keepsNone: return
+            case nil:
+                Issue.record("insertText into \(profile) overflowed its maxlength, and nobody said what it keeps")
+                return
+            }
+        }
         text = (text as NSString).replacingCharacters(in: replaced, with: kept)
         selection = NSRange(location: replaced.location + kept.utf16.count, length: 0)
+    }
+
+    /// The most whole characters of `words` that fit in `room` UTF-16 units.
+    private static func prefix(of words: String, fitting room: Int) -> String {
+        var left = room
+        return String(words.prefix { character in
+            left -= character.utf16.count
+            return left >= 0
+        })
     }
 }

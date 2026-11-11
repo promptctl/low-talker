@@ -67,12 +67,18 @@ import Testing
     /// A window with no field focused still hands the input method a client, and what is
     /// committed into it goes nowhere while the commit answers that it landed: Calculator,
     /// Installer, a page's body text. The client says so itself by giving no document
-    /// access, and the words are refused rather than lost. [LAW:no-silent-failure]
-    @Test func aCursorGivingNoDocumentAccessIsRefusedAsNoTextField() throws {
+    /// access, and the words are refused rather than lost; a client giving it is the cursor chosen,
+    /// under every profile. [LAW:no-silent-failure]
+    @Test(arguments: ClientProfile.all)
+    func aCursorIsChosenByWhetherItGivesDocumentAccess(_ profile: ClientProfile) throws {
         let client = FocusedClient { _ in }
-        try client.took(FakeTextInputClient(in: "com.apple.calculator", .noTextField).cursor())
+        let taken = try FakeTextInputClient(in: Self.inFront, profile).cursor()
+        client.took(taken)
 
-        #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client, whileInFrontIs: "com.apple.calculator").get() }
+        switch profile.access {
+        case .none: #expect(throws: Refusal.noTextFieldHasFocus) { try cursor(client).get() }
+        case .selectionOnly, .toTheField: #expect(try cursor(client).get() === taken)
+        }
     }
 
     /// The Finder's desktop and file lists give document access to a type-select buffer in
