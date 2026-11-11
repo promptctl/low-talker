@@ -36,16 +36,6 @@ public nonisolated struct SteeringDecision: Equatable, Sendable, CustomStringCon
     }
 }
 
-/// The questions a held key asks the app, as the gate asks them: `Asker` is the real one, a test's
-/// is a fake with no port and no app. [LAW:decomposition]
-public nonisolated protocol SteeringAsking: Sendable {
-    func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
-    func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
-    func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered>
-}
-
-extension Asker: SteeringAsking {}
-
 /// Holds a Return in `didCommand(by:)` while the app is asked what it means for the dictation, and keeps an
 /// Escape while the app's word box is open.
 ///

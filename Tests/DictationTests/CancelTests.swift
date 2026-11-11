@@ -1,6 +1,7 @@
 import Dictation
 import Foundation
 import Insertion
+import InsertionFakes
 import LowTalkerCore
 import Testing
 import TestProbes

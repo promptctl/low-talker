@@ -102,6 +102,14 @@ public enum NotAnswered: Error, Equatable, Sendable, CustomStringConvertible {
     }
 }
 
+/// The questions a held key asks the app: `Asker` is the real one, `FakeApp` the one a test asks,
+/// and `QuestionsContract` holds the two to the same answers. [LAW:decomposition]
+public protocol SteeringAsking: Sendable {
+    func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
+    func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
+    func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered>
+}
+
 /// The input method's end of the questions: one round trip to the app per question, answered
 /// only by this installation's app.
 ///
@@ -114,7 +122,7 @@ public enum NotAnswered: Error, Equatable, Sendable, CustomStringConvertible {
 /// The answerer is checked before its bytes are read, as the app checks the input method: a
 /// name anyone can compute is a name anyone can register first, and a process holding it could
 /// otherwise make every Return typed anywhere wait. [LAW:single-enforcer]
-public struct Asker: Sendable {
+public struct Asker: SteeringAsking {
     private let portName: String
     private let answerer: Result<PeerIdentity, PeerIdentity.Unreadable>
 

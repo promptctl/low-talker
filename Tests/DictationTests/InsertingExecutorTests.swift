@@ -1,5 +1,6 @@
 import Foundation
 import Insertion
+import InsertionFakes
 import LowTalkerCore
 import Testing
 @testable import Dictation
@@ -17,36 +18,10 @@ import Testing
     nonisolated static let textEdit = BundleID(rawValue: "com.apple.TextEdit")
     nonisolated static let slack = BundleID(rawValue: "com.tinyspeck.slackmacgap")
 
-    /// An input method that answers however the case needs and remembers what it was asked.
-    ///
-    /// Locked and `@unchecked Sendable` because it is asked on a thread of the executor's
-    /// choosing: `Inserter`'s awaited overload puts the blocking call on a thread of its
-    /// own, which is the whole reason the executor can ask from the main actor at all.
-    private final class AnInputMethod: Inserter, @unchecked Sendable {
-        private let lock = NSLock()
-        private let answering: @Sendable (String) throws(InsertFailure) -> Inserted
-        private var asked: [(text: String, destination: Destination)] = []
-
-        init(_ answering: @escaping @Sendable (String) throws(InsertFailure) -> Inserted) {
-            self.answering = answering
-        }
-
-        var texts: [String] {
-            lock.withLock { asked.map(\.text) }
-        }
-
-        var destinations: [Destination] {
-            lock.withLock { asked.map(\.destination) }
-        }
-
-        func insert(_ request: InsertRequest) throws(InsertFailure) -> Inserted {
-            lock.withLock { asked.append((request.text, request.destination)) }
-            return try answering(request.text)
-        }
-    }
-
-    private static func inserting(into app: BundleID) -> AnInputMethod {
-        AnInputMethod { Inserted(characters: $0.count, into: app.rawValue) }
+    private static func inserting(into app: BundleID) -> FakeInputMethod {
+        let inputMethod = FakeInputMethod()
+        inputMethod.reaching(app.rawValue)
+        return inputMethod
     }
 
     @Test func wordsAtTheFocusAreInsertedAtTheCursor() async throws {
@@ -54,7 +29,7 @@ import Testing
         let performed = try #require(await Executor(insertingThrough: inputMethod)
             .insert(Transcript(typed: "héllo there"), following: nil, since: .keyUp(.now)))
 
-        #expect(inputMethod.texts == ["héllo there"])
+        #expect(inputMethod.inserted == ["héllo there"])
         #expect(performed.into == Self.textEdit)
         #expect(performed.characters == 11)
         #expect("\(performed)".hasPrefix("inserted 11 characters at the cursor in com.apple.TextEdit, key-up to acknowledged "))
@@ -91,14 +66,15 @@ import Testing
         for blank in [Transcript(words: []), Transcript(words: [.init(text: " ", time: 0...0, confidence: 1.0)])] {
             #expect(try await executor.insert(blank, following: nil, since: .keyUp(.now)) == nil)
         }
-        #expect(inputMethod.texts.isEmpty)
+        #expect(inputMethod.asked == 0)
     }
 
     /// Every way an insert fails is thrown as it is, with nothing performed: the words are not
     /// at the cursor, and nothing puts them anywhere else.
     @Test(arguments: failedInserts)
     func aFailedInsertIsThrownAsItIs(failed: FailedInsert) async throws {
-        let inputMethod = AnInputMethod { _ throws(InsertFailure) in throw failed.failure }
+        let inputMethod = FakeInputMethod()
+        inputMethod.refusing(failed.failure)
         let thrown = try await #require(throws: InsertFailure.self) {
             try await Executor(insertingThrough: inputMethod)
                 .insert(Transcript(typed: "héllo there"), following: nil, since: .keyUp(.now))

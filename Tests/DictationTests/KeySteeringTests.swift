@@ -2,6 +2,7 @@ import Dictation
 import Dispatch
 import Foundation
 import Insertion
+import InsertionFakes
 import LowTalkerCore
 import TestProbes
 import Testing
@@ -15,40 +16,6 @@ private struct BadBuffer: Error {}
 /// that the words are at the cursor by the time it is told they landed.
 @MainActor
 @Suite struct KeySteeringTests {
-    private enum Said: Equatable {
-        case owing(Owing)
-        case settlement(Settlement)
-        case panel(PanelState)
-    }
-
-    /// The answers the input method would hear, in order.
-    private final class Answers: Answering {
-        private let stream: AsyncStream<Said>
-        private let continuation: AsyncStream<Said>.Continuation
-
-        init() { (stream, continuation) = AsyncStream.makeStream() }
-
-        func send(_ owing: Owing) -> Reply.Delivery {
-            continuation.yield(.owing(owing))
-            return .delivered
-        }
-
-        func send(_ settlement: Settlement) -> Reply.Delivery {
-            continuation.yield(.settlement(settlement))
-            return .delivered
-        }
-
-        func send(_ panel: PanelState) -> Reply.Delivery {
-            continuation.yield(.panel(panel))
-            return .delivered
-        }
-
-        func next() async -> Said {
-            for await said in stream { return said }
-            preconditionFailure("the answers ended while a test was still reading them")
-        }
-    }
-
     /// A feed the test types the chord on.
     private final class Feed: ModifierFeed {
         var handle: (@MainActor (KeyEvent) -> Void)?
@@ -124,13 +91,13 @@ private struct BadBuffer: Error {}
     @Test(.timeLimit(.minutes(1))) func aReturnTypedIntoALatchedPressSettlesOnceItsWordsHaveLanded() async throws {
         let loop = try await Loop()
         await loop.latchedPress()
-        let answers = Answers()
+        let (owed, settled) = (FakeReply(), FakeReply())
 
-        loop.steering.answer(.owed(at: loop.typedNow), through: answers)
-        #expect(await answers.next() == .owing(.words))
-        loop.steering.answer(.settled(at: loop.typedNow), through: answers)
+        loop.steering.answer(.owed(at: loop.typedNow), through: owed)
+        #expect(await owed.said() == .owing(.words))
+        loop.steering.answer(.settled(at: loop.typedNow), through: settled)
 
-        #expect(await answers.next() == .settlement(.landed))
+        #expect(await settled.said() == .settlement(.landed))
         #expect(loop.rig.inputMethod.inserted == ["a"])
         #expect(loop.hotkey.phase == .idle)
         #expect(!loop.rig.dictation.owes)
@@ -436,34 +403,34 @@ private struct BadBuffer: Error {}
 
     @Test(.timeLimit(.minutes(1))) func nothingIsOwedWhenNoPressIsOpen() async throws {
         let loop = try await Loop()
-        let answers = Answers()
+        let (owed, settled) = (FakeReply(), FakeReply())
 
-        loop.steering.answer(.owed(at: loop.typedNow), through: answers)
-        loop.steering.answer(.settled(at: loop.typedNow), through: answers)
+        loop.steering.answer(.owed(at: loop.typedNow), through: owed)
+        loop.steering.answer(.settled(at: loop.typedNow), through: settled)
 
-        #expect(await answers.next() == .owing(.nothing))
-        #expect(await answers.next() == .settlement(.landed))
+        #expect(await owed.said() == .owing(.nothing))
+        #expect(await settled.said() == .settlement(.landed))
     }
 
     /// With the Return setting off a Return is never held, so nothing is owed even while words are.
     @Test(.timeLimit(.minutes(1))) func nothingIsOwedWhileTheReturnSettingIsOff() async throws {
         let loop = try await Loop(holdsReturn: false)
         await loop.latchedPress()
-        let answers = Answers()
+        let answers = FakeReply()
 
         loop.steering.answer(.owed(at: loop.typedNow), through: answers)
 
-        #expect(await answers.next() == .owing(.nothing))
+        #expect(await answers.said() == .owing(.nothing))
     }
 
     /// The word box is asked about on the main actor and answered with whether it is open.
     @Test(.timeLimit(.minutes(1))) func theBoxIsAnsweredWithWhetherItIsOpen() async throws {
         let loop = try await Loop(panelOpen: true)
-        let answers = Answers()
+        let answers = FakeReply()
 
         loop.steering.answer(.panel(at: loop.typedNow), through: answers)
 
-        #expect(await answers.next() == .panel(.shown))
+        #expect(await answers.said() == .panel(.shown))
     }
 
     /// A press that ended on its own and is still decoding is owed too, though no key steered it.
@@ -484,11 +451,11 @@ private struct BadBuffer: Error {}
     @Test(.timeLimit(.minutes(1))) func wordsThatReachedNoCursorDidNotLand() async throws {
         let loop = try await Loop(refusing: .refused(.noTextFieldHasFocus))
         await loop.latchedPress()
-        let answers = Answers()
+        let answers = FakeReply()
 
         loop.steering.answer(.settled(at: loop.typedNow), through: answers)
 
-        #expect(await answers.next() == .settlement(.notLanded))
+        #expect(await answers.said() == .settlement(.notLanded))
         #expect(loop.rig.inputMethod.inserted.isEmpty)
     }
 
@@ -499,11 +466,11 @@ private struct BadBuffer: Error {}
         loop.chord(.down, atMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
-        let answers = Answers()
+        let answers = FakeReply()
 
         loop.steering.answer(.settled(at: loop.typedNow), through: answers)
 
-        #expect(await answers.next() == .settlement(.notLanded))
+        #expect(await answers.said() == .settlement(.notLanded))
         #expect(loop.rig.dictation.owes)
         // The chord coming up ends the press as it always did.
         loop.chord(.up, atMilliseconds: 400)

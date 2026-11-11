@@ -116,7 +116,7 @@ let package = Package(
         // app links it and hands over the real microphone, engine and inserter - the input
         // method in the app, a fake in a test. [LAW:decomposition] [LAW:composability]
         .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber"]),
-        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "Grants", "Insertion", "TestProbes"]),
+        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "Grants", "Insertion", "InsertionFakes", "TestProbes"]),
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
@@ -125,7 +125,7 @@ let package = Package(
         // clients do, and the port's contract it is held to. Beside the port and depending only
         // on it; in no product, and never copied into a bundle. [LAW:one-source-of-truth]
         .target(name: "InputMethodFakes", dependencies: ["InputMethod"], swiftSettings: inputMethodIsolation),
-        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "InputMethodFakes", "Insertion", "Identity", "TestProbes"]),
+        .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "InputMethodFakes", "Insertion", "InsertionFakes", "Identity", "TestProbes"]),
         // The two calls that cross between the app and the input method - words one way, the
         // modifier keys the other - and both ends of each port. It links Identity for the
         // ports' names and the Darwin calls beneath them, and nothing else - in particular no
@@ -133,6 +133,9 @@ let package = Package(
         // business linking the text input system.
         // [LAW:one-way-deps]
         .target(name: "Insertion", dependencies: ["Identity", "DarwinCalls", "GrammaticalNumber"]),
+        // The one fake of each port on the wire between the app and the input method, beside the
+        // ports, so every test that stands in an end uses the fake the contracts check.
+        .target(name: "InsertionFakes", dependencies: ["Insertion", "TestProbes"]),
         // The bootstrap calls the SDK keeps from Swift, the Mach macros Swift cannot import
         // and the kernel's code signing call, each passed through by a line of C and nothing
         // more.
@@ -148,7 +151,7 @@ let package = Package(
         // A sender that is not the test process, so the insert port's refusal is held by a
         // request that really crossed from another process. In no product: nothing ships it.
         .executableTarget(name: "insertion-probe", dependencies: ["Insertion", "Identity"], path: "Tests/InsertionProbe"),
-        .testTarget(name: "InsertionTests", dependencies: ["Insertion", "Identity", "DarwinCalls", "insertion-probe", "TestProbes"]),
+        .testTarget(name: "InsertionTests", dependencies: ["Insertion", "Identity", "DarwinCalls", "insertion-probe", "InsertionFakes", "TestProbes"]),
         // The process macOS launches out of the input method bundle. It holds the effects -
         // reading the bundle, opening the port, running the loop - and nothing else.
         .executableTarget(name: "lowtalker-inputmethod", dependencies: ["InputMethod", "Insertion", "Identity"], swiftSettings: inputMethodIsolation),

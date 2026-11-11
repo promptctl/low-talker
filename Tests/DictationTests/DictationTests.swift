@@ -2,6 +2,7 @@ import Dictation
 import Foundation
 import Grants
 import Insertion
+import InsertionFakes
 import LowTalkerCore
 import Synchronization
 import Testing
@@ -402,7 +403,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.speak([1, 2])
         await rig.until { rig.inputMethod.inserted == ["hello"] }
         // The move is a cursor arriving in the Finder, which the input method tells the app.
-        rig.inputMethod.reaching(BundleID(rawValue: "com.apple.finder"))
+        rig.inputMethod.reaching("com.apple.finder")
         rig.dictation.cursorArrived()
         rig.speak([3, 4])
         await rig.until { engine.hearing == [1, 2, 3, 4] }
@@ -425,7 +426,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         await rig.until { rig.inputMethod.inserted == ["hello"] }
-        rig.inputMethod.reaching(BundleID(rawValue: "com.apple.finder"))
+        rig.inputMethod.reaching("com.apple.finder")
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
@@ -1176,7 +1177,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// one that happened to be in front at key-down.
     @Test func aSessionsLineNamesTheAppTheWordsReachedNotTheOneInFront() async throws {
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
-        rig.inputMethod.reaching(BundleID(rawValue: "com.apple.Safari"))
+        rig.inputMethod.reaching("com.apple.Safari")
         rig.hold()
         #expect(try await rig.session().description.hasSuffix("1 insert into com.apple.Safari, 0 words that may have been inserted"))
     }
