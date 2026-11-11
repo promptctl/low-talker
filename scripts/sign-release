@@ -62,9 +62,11 @@ fail() {
 }
 
 # What the notary service refuses, asked of one binary: no Developer ID signature from the
-# team, no Hardened Runtime, no secure timestamp, or the get-task-allow entitlement.
+# team, no Hardened Runtime, or no secure timestamp. The get-task-allow entitlement it also
+# refuses is scripts/variant's, which make-pkg ran first and which refuses every key it does
+# not name. [LAW:single-enforcer]
 check() {
-  local binary=$1 signature entitlements
+  local binary=$1 signature
   signature=$(codesign -dvv "$binary" 2>&1)
   grep -qx "Authority=Developer ID Application: .* ($team)" <<<"$signature" \
     || fail "$binary is not signed with a Developer ID Application certificate for team $team"
@@ -72,9 +74,6 @@ check() {
     || fail "$binary is not signed with Hardened Runtime"
   grep -q '^Timestamp=' <<<"$signature" \
     || fail "$binary has no secure timestamp"
-  entitlements=$(codesign -d --entitlements - --xml "$binary" 2>/dev/null)
-  ! grep -q 'com.apple.security.get-task-allow' <<<"$entitlements" \
-    || fail "$binary carries com.apple.security.get-task-allow"
 }
 
 resources=$(xcodegen dump --type json | jq -er '.targets.LowTalker.settings.base')

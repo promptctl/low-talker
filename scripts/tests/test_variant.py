@@ -13,19 +13,19 @@ from pathlib import Path
 reader = Path(__file__).resolve().parent.parent / "variant"
 
 SANDBOX = {"com.apple.security.app-sandbox": True}
-# The keys every app build signs in, the offline build's whole set. The names are variant's to
-# ignore, so they are examples rather than the ones AppIdentity owns.
+# The keys every app build signs in, the offline build's whole set. The Mach services are named
+# under the test app's identifier, as the product's own are under the app's.
 APP = {
     **SANDBOX,
     "com.apple.security.device.audio-input": True,
     "com.apple.security.files.user-selected.read-only": True,
-    "com.apple.security.temporary-exception.mach-register.global-name": ["example.app-port"],
-    "com.apple.security.temporary-exception.mach-lookup.global-name": ["example.input-method-port"],
+    "com.apple.security.temporary-exception.mach-register.global-name": ["example.app.hotkey"],
+    "com.apple.security.temporary-exception.mach-lookup.global-name": ["example.app.insert"],
 }
 INPUT_METHOD = {
     **SANDBOX,
-    "com.apple.security.temporary-exception.mach-register.global-name": ["example.input-method-port"],
-    "com.apple.security.temporary-exception.mach-lookup.global-name": ["example.app-port"],
+    "com.apple.security.temporary-exception.mach-register.global-name": ["example.app.insert"],
+    "com.apple.security.temporary-exception.mach-lookup.global-name": ["example.app.hotkey"],
 }
 SERVER = {"com.apple.security.network.server": True}
 CLIENT = {"com.apple.security.network.client": True}
@@ -38,18 +38,19 @@ class VariantTests(unittest.TestCase):
         self.directory = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.directory)
 
-    def bundle(self, name, programs=()):
-        """A bundle whose executable, and each of `programs` placed inside it, is a copy of a real one."""
+    def bundle(self, name, programs={}):
+        """A bundle whose executable is a copy of a real one, holding each of `programs`, a path
+        in it mapped to the file copied there."""
         bundle = Path(tempfile.mkdtemp(dir=self.directory)) / f"{name}.app"
         (bundle / "Contents").mkdir(parents=True)
         (bundle / "Contents/Info.plist").write_bytes(
             plistlib.dumps({"CFBundleExecutable": name, "CFBundleIdentifier": f"example.{name}"}))
-        for program in [f"Contents/MacOS/{name}", *programs]:
+        for program, source in {f"Contents/MacOS/{name}": "/usr/bin/true", **programs}.items():
             (bundle / program).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy("/usr/bin/true", bundle / program)
+            shutil.copy(source, bundle / program)
         return bundle
 
-    def signed(self, name, entitlements, programs=()):
+    def signed(self, name, entitlements, programs={}):
         """A bundle signed ad hoc with `entitlements`, or with none for None."""
         bundle = self.bundle(name, programs)
         command = ["codesign", "--force", "--sign", "-"]
@@ -118,12 +119,25 @@ class VariantTests(unittest.TestCase):
         self.assertAppRefused({**APP, **SBPL})
         self.assertInputMethodRefused({**INPUT_METHOD, **SBPL})
 
+    def test_a_mach_service_not_the_products_own_is_refused(self):
+        foreign = ["example.app.insert", "com.example.fetcher"]
+        self.assertAppRefused({**APP, "com.apple.security.temporary-exception.mach-lookup.global-name": foreign})
+        self.assertInputMethodRefused(
+            {**INPUT_METHOD, "com.apple.security.temporary-exception.mach-register.global-name": foreign})
+        # A name that only begins with the identifier is another product's.
+        self.assertAppRefused(
+            {**APP, "com.apple.security.temporary-exception.mach-lookup.global-name": "example.apple.insert"})
+
     def test_a_bundle_carrying_a_program_besides_its_own_is_refused(self):
-        service = ["Contents/XPCServices/Service.xpc/Contents/MacOS/Service"]
-        self.assertRefused(self.signed("app", APP, service), self.signed("input-method", INPUT_METHOD),
-                           "its one program is Contents/MacOS/app")
-        self.assertRefused(self.signed("app", APP), self.signed("input-method", INPUT_METHOD, service),
-                           "its one program is Contents/MacOS/input-method")
+        script = self.directory / "helper"
+        script.write_text("#!/bin/sh\n")
+        script.chmod(0o755)
+        for programs in ({"Contents/XPCServices/Service.xpc/Contents/MacOS/Service": "/usr/bin/true"},
+                         {"Contents/Resources/helper": script}):
+            self.assertRefused(self.signed("app", APP, programs), self.signed("input-method", INPUT_METHOD),
+                               "its one program is Contents/MacOS/app")
+            self.assertRefused(self.signed("app", APP), self.signed("input-method", INPUT_METHOD, programs),
+                               "its one program is Contents/MacOS/input-method")
 
     def test_a_bundle_signed_with_no_entitlements_is_refused(self):
         self.assertRefused(self.signed("app", APP), self.signed("input-method", None), "signed with no entitlements")
