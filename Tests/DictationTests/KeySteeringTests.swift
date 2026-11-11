@@ -54,6 +54,9 @@ import Testing
             self.handle = handle
             return {}
         }
+
+        /// No key typed since long before the test, as each event the test types says.
+        func lastKeyDown() -> HostTime { HostTime(uptime: .seconds(-60)) }
     }
 
     /// The loop and the hotkey that feeds it, with a keyboard.

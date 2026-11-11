@@ -20,6 +20,9 @@ private struct BadBuffer: Error {}
             self.handle = handle
             return {}
         }
+
+        /// No key typed since long before the test, as each event the test types says.
+        func lastKeyDown() -> HostTime { HostTime(uptime: .seconds(-60)) }
     }
 
     @MainActor private struct Loop {
@@ -127,6 +130,7 @@ private struct BadBuffer: Error {}
         loop.chord(.up, atMilliseconds: 100)
         await loop.delivered()
 
-        #expect(loop.hotkey.phase == .latched(Mode.dictation, since: Rig.origin))
+        guard case .latched(let mode, let since, _, _) = loop.hotkey.phase else { Issue.record("the tap did not latch: \(loop.hotkey.phase)"); return }
+        #expect(mode == Mode.dictation && since == Rig.origin)
     }
 }
