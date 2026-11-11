@@ -180,7 +180,7 @@ public final class Recovery {
     /// from while it was being read: that is seen here, in the turn, and not before it.
     private func handOver(_ words: Transcript, of entry: UnheardEntry) -> Bool {
         guard kept.contains(entry) else { return false }
-        hold.heldBack(words, warning: Self.warning)
+        hold.heldBack(words, by: nil, warning: Self.warning)
         return true
     }
 

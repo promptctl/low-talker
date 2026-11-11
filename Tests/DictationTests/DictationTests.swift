@@ -684,8 +684,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     }
 
     /// The press's refused word is dismissed, the commits stop at a device change, and kept speech
-    /// is read into one held word while the key is still down: the hold then offers as many words
-    /// ahead of what key-up holds as the press last knew, but none of them is the press's, so the
+    /// is read into one held word while the key is still down: the hold then offers one word ahead
+    /// of what key-up holds, as it did before the dismissal, but it is not the press's, so the
     /// press says it holds only what key-up held.
     @Test func wordsAnotherDictationHeldMidPressAreNotCountedAsThePresss() async throws {
         let engine = FakeTranscriber(confirming: { samples in
@@ -709,6 +709,32 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.held == 2)
         #expect(rig.hold.held?.words == Transcript(typed: " first there friend"))
+    }
+
+    /// The press's refused word stays held, the commits stop at a device change, and kept speech is
+    /// read into one held word after it while the key is still down: the press's words on either
+    /// side of the recovered one are all its own, and the press counts them.
+    @Test func thePresssWordsAroundWordsAnotherDictationHeldMidPressAreCountedAsThePresss() async throws {
+        let engine = FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
+        }) { _ in Transcript(typed: "hello there friend") }
+        let kept = FakeUnheardStore()
+        _ = try kept.keep(UnheardSpeech(said: .now, vocabulary: [], samples: [7]))
+        let rig = try await Rig(hearing: engine, keepingSpeech: kept)
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        await rig.until { rig.hold.held != nil }
+        rig.changeDevice()
+        rig.speak([3, 4])
+        rig.recovery.landed(FakeTranscriber { _ in Transcript(typed: " first") })
+        await rig.recovery.settled()
+        await rig.until { engine.hearing == [1, 2, 3, 4] }
+        rig.keyUp()
+
+        let stopped = try #require(await rig.report().failure as? PressStopped)
+        #expect(stopped.held == 3)
+        #expect(rig.hold.held?.words == Transcript(typed: "hello first there friend"))
     }
 
     /// A press cut short whose decode fails names both, with how many words had landed: the
