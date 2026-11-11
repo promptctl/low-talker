@@ -93,6 +93,7 @@ public nonisolated extension ContractCase {
         overflowing(.webKitLimitedTextAreaKeepingAll, answers: reads(caret: 30, text: "alpha"), holds: thirty),
         overflowing(.webKitLimitedTextAreaKeepingNone, answers: reads(caret: 0, text: nil), holds: ""),
         overflowing(.webKitLimitedTextAreaBlind, answers: blind, holds: "alpha brav"),
+        overflowing(.webKitLimitedTextAreaAnsweringAll, answers: reads(caret: 30, text: "alpha"), holds: "alpha brav"),
         // bem read no document access where sk9 read it with a real selection, and the text over a
         // range under document access is unmeasured.
         typed(into: .iTerm2Blind, answers: blind),

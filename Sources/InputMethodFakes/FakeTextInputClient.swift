@@ -30,6 +30,8 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
         case keepsThemAll
         /// It keeps none of them, and the field is left as it was.
         case keepsNone
+        /// It keeps what fits, and its reads answer as though it had kept them all.
+        case keepsWhatFitsAnsweringAll
     }
 
     public let description: String
@@ -79,6 +81,9 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
     /// If its `maxlength` takes its document access away, as the `<input>`'s is measured without.
     public static let webKitLimitedTextAreaBlind = ClientProfile("a WebKit <textarea maxlength> giving no document access", access: .none,
                                                                        overflow: .keepsWhatFits)
+    /// If its reads answer what it was handed rather than what it kept.
+    public static let webKitLimitedTextAreaAnsweringAll = ClientProfile("a WebKit <textarea maxlength> answering all it was handed",
+                                                                        access: .toTheField, overflow: .keepsWhatFitsAnsweringAll)
     /// iTerm2's terminal, where words land in plain sight, as bem read it: no document access.
     /// Its `length()` of 0 (Committer) is not a call the port makes, so it is not modelled.
     public static let iTerm2Blind = ClientProfile("iTerm2's terminal giving no document access", access: .none)
@@ -92,6 +97,7 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
     public static let possible: [ClientProfile] = [
         webKitInputKeepingWhatFits, webKitInputKeepingAll, webKitInputKeepingNone,
         webKitLimitedTextArea, webKitLimitedTextAreaKeepingAll, webKitLimitedTextAreaKeepingNone, webKitLimitedTextAreaBlind,
+        webKitLimitedTextAreaAnsweringAll,
         iTerm2Blind, iTerm2SelectionOnly, iTerm2,
     ]
 
@@ -115,6 +121,11 @@ public final class FakeTextInputClient: TextInputClient {
     public private(set) var text: String
     /// The selection, in UTF-16 units as `NSRange` counts; a caret is a selection of length 0.
     public private(set) var selection: NSRange
+    /// What an overflow dropped that the client still answers as there, just after the caret, while
+    /// its profile is the one that answers it; or nil.
+    /// The field and its reads part here and nowhere else; nobody said what such a client does with
+    /// a later selection or insert, so the fake fails the case that makes one.
+    private var unkept: String?
     /// The most UTF-16 units the field holds, as an HTML `maxlength` counts them. What an insert past
     /// it keeps is the profile's `overflow`.
     public let maxLength: Int?
@@ -142,7 +153,10 @@ public final class FakeTextInputClient: TextInputClient {
     }
 
     /// The person selects `range` of the field.
-    public func select(_ range: NSRange) { selection = range }
+    public func select(_ range: NSRange) {
+        guard unkept == nil else { return answeredAfterUnkept("select(\(range))") }
+        selection = range
+    }
 
     public func bundleIdentifier() -> String? { application }
     public func uniqueClientIdentifierString() -> String? { nil }
@@ -157,21 +171,35 @@ public final class FakeTextInputClient: TextInputClient {
     public func selectedRange() -> NSRange {
         switch profile.access {
         case .none: NSRange(location: NSNotFound, length: NSNotFound)
-        case .selectionOnly, .toTheField: selection
+        case .selectionOnly, .toTheField: answered.selection
         }
     }
 
     public func string(in range: NSRange) -> String? {
         switch profile.access {
-        case .none, .selectionOnly: nil
-        case .toTheField: holds(range) ? (text as NSString).substring(with: range) : nil
+        case .none, .selectionOnly: return nil
+        case .toTheField:
+            let field = answered.field
+            return Self.holds(range, in: field) ? (field as NSString).substring(with: range) : nil
         }
     }
 
-    /// Whether `range` lies within the field, asked without `NSMaxRange`, which overflows on a
+    /// The field and selection the client's reads answer: what it holds, with any unkept words put
+    /// back at the caret and the caret after them.
+    private var answered: (field: String, selection: NSRange) {
+        guard let unkept, profile.overflow == .keepsWhatFitsAnsweringAll else { return (text, selection) }
+        return ((text as NSString).replacingCharacters(in: selection, with: unkept),
+                NSRange(location: selection.location + unkept.utf16.count, length: 0))
+    }
+
+    /// Whether `range` lies within `field`, asked without `NSMaxRange`, which overflows on a
     /// location of NSNotFound.
-    private func holds(_ range: NSRange) -> Bool {
-        range.location >= 0 && range.location <= text.utf16.count && range.length <= text.utf16.count - range.location
+    private static func holds(_ range: NSRange, in field: String) -> Bool {
+        range.location >= 0 && range.location <= field.utf16.count && range.length <= field.utf16.count - range.location
+    }
+
+    private func answeredAfterUnkept(_ call: String) {
+        Issue.record("\(call) on \(profile) after it answered words it did not keep, and nobody said what it does then")
     }
 
     /// As the measured clients take it: at NSNotFound the words replace the selection, an explicit
@@ -179,6 +207,7 @@ public final class FakeTextInputClient: TextInputClient {
     /// no room for what the profile's overflow says, leaving the caret after what it kept.
     public func insertText(_ words: String, replacementRange range: NSRange) {
         duringInsert()
+        guard unkept == nil else { return answeredAfterUnkept("insertText(\(words.debugDescription), \(range))") }
         let replaced = range.location == NSNotFound || profile.access == .none ? selection : range
         // No selection-only client was measured taking an explicit range, so the fake answers none.
         guard range.location == NSNotFound || profile.access != .selectionOnly else {
@@ -187,12 +216,13 @@ public final class FakeTextInputClient: TextInputClient {
         }
         // No client was measured answering a range past the end of its field, so the fake answers
         // none: it fails the case that handed it one, naming the range, rather than guess.
-        guard holds(replaced) else {
+        guard Self.holds(replaced, in: text) else {
             Issue.record("insertText into \(profile) holding \(text.utf16.count) units was given \(replaced), past the field")
             return
         }
         let room = maxLength.map { $0 - (text.utf16.count - replaced.length) } ?? .max
         let kept: String
+        var dropped: String?
         if words.utf16.count <= room {
             kept = words
         } else {
@@ -200,6 +230,9 @@ public final class FakeTextInputClient: TextInputClient {
             case .keepsWhatFits: kept = Self.prefix(of: words, fitting: room)
             case .keepsThemAll: kept = words
             case .keepsNone: return
+            case .keepsWhatFitsAnsweringAll:
+                kept = Self.prefix(of: words, fitting: room)
+                dropped = String(words.dropFirst(kept.count))
             case nil:
                 Issue.record("insertText into \(profile) overflowed its maxlength, and nobody said what it keeps")
                 return
@@ -207,6 +240,7 @@ public final class FakeTextInputClient: TextInputClient {
         }
         text = (text as NSString).replacingCharacters(in: replaced, with: kept)
         selection = NSRange(location: replaced.location + kept.utf16.count, length: 0)
+        unkept = dropped
     }
 
     /// The most whole characters of `words` that fit in `room` UTF-16 units.
