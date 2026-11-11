@@ -151,8 +151,8 @@ public nonisolated final class SteeringGate: Sendable {
     /// slot and is read by nobody, and a key typed while an earlier one's thread is still blocked is
     /// not queued behind it. [LAW:no-ambient-temporal-coupling]
     ///
-    /// Held until `ceiling` after the key was typed at `timestamp` (system uptime), not after the
-    /// gate was reached: the keyboard has been waiting since the key went down.
+    /// Held until `ceiling` after IMK handed the key over at `timestamp` (system uptime), not after
+    /// the gate was reached: the keyboard has been waiting since then, and `waited` says so.
     @MainActor
     private func answered(typedAt timestamp: TimeInterval, unanswered: SteeringDecision,
                           _ decide: @escaping @Sendable (any SteeringAsking) -> SteeringDecision) -> SteeringDecision {
@@ -168,7 +168,7 @@ public nonisolated final class SteeringGate: Sendable {
         }.start()
         let sinceTyped = Duration.seconds(ProcessInfo.processInfo.systemUptime - timestamp)
         turns.hold(until: started - sinceTyped + ceiling, while: { slot.decided.withLock { $0 } == nil })
-        return (slot.decided.withLock { $0 } ?? unanswered).held(for: ContinuousClock.now - started)
+        return (slot.decided.withLock { $0 } ?? unanswered).held(for: sinceTyped + (ContinuousClock.now - started))
     }
 
     /// Whether an app that is not there, which is how an app that is not running looks from here

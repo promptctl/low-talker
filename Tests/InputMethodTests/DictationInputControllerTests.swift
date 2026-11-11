@@ -91,10 +91,10 @@ import Testing
         #expect(answered.performed == [.beep])
     }
 
-    /// Each modifier that makes a Return another key, one at a time, as single bits of the set
-    /// `SteeringKey` names.
-    nonisolated static let modifiersThatMakeAnotherKey: [UInt] = (0..<UInt.bitWidth).map { UInt(1) << $0 }
-        .filter { SteeringKey.makesAnotherKey.contains(NSEvent.ModifierFlags(rawValue: $0)) }
+    /// Each modifier that makes a Return another key, named here rather than read from
+    /// `SteeringKey`, so one dropped from its set fails a case instead of removing it.
+    nonisolated static let modifiersThatMakeAnotherKey: [UInt] =
+        [NSEvent.ModifierFlags.shift, .control, .option, .command, .function].map(\.rawValue)
 
     /// A Return typed with a modifier is another key: it passes even when the owed words did not land.
     @Test(arguments: modifiersThatMakeAnotherKey)
@@ -128,10 +128,16 @@ import Testing
     }
 
     /// A cursor given focus is told to the app, which offers it words no cursor took. Other notices
-    /// the shared stream holds, such as a reported Escape, are passed over.
+    /// the shared stream holds, such as the Escape the process's steering tells, are passed over.
     @Test(.timeLimit(.minutes(1))) func aCursorArrivingIsTold() async {
         Notices.shared.cursorArrived(in: "com.apple.TextEdit")
         #expect(await Notices.shared.notices.first { @Sendable notice in notice == .cursorArrived } == .cursorArrived)
+    }
+
+    /// The shipped process's steering tells the app of a kept Escape, through the notices it hears.
+    @Test(.timeLimit(.minutes(1))) func theProcessSteeringTellsTheAppOfAKeptEscape() async {
+        await Steering.process.perform(.tellTheApp)
+        #expect(await Notices.shared.notices.first { @Sendable notice in notice == .keyTyped(.escape) } == .keyTyped(.escape))
     }
 
     /// The bundle's `InputMethodServerControllerClass` is a string macOS resolves through

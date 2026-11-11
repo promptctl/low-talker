@@ -115,9 +115,22 @@ import Testing
         defer { release.signal() }
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { release.wait(); return .success(.landed) }))
 
+        let started = ContinuousClock.now
         let decided = gate.verdict(at: Self.aCeilingAgo)
         #expect(decided.verdict == .keep)
         #expect(decided.because.contains("had not answered"), "\(decided)")
+        #expect(ContinuousClock.now - started < Self.farOff / 2, "the ceiling was counted from the gate, not from the Return")
+        #expect(decided.waited >= Self.farOff, "the wait reads from the Return, as the reason does")
+    }
+
+    /// A Return just typed is held for the app's answer, not decided unanswered at once.
+    @MainActor
+    @Test(.timeLimit(.minutes(1))) func aReturnJustTypedIsHeldForTheAnswer() {
+        let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: {
+            Thread.sleep(forTimeInterval: 0.05)
+            return .success(.landed)
+        }))
+        #expect(gate.verdict(at: Self.now).verdict == .pass)
     }
 
     /// A Return typed after one the gate gave up on is decided on its own answers: the earlier
