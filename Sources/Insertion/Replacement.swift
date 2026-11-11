@@ -11,8 +11,8 @@ import GrammaticalNumber
 /// out, or the reason there is none.
 ///
 /// [LAW:effects-at-boundaries] Pure over two readings of the client, which the input method's
-/// `Client` makes and a test or `FakeInputMethod` supplies from a string, so a take-back on the
-/// fake is refused by this rule and no copy of it. [LAW:one-source-of-truth]
+/// `Client` makes and anything standing in for a client supplies from a string.
+/// [LAW:one-source-of-truth]
 public enum Replacement {
     /// Why a request to take words back is refused, in the words the log says.
     public enum Unfound: Error, Equatable, CustomStringConvertible {

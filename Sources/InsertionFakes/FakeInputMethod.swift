@@ -96,8 +96,10 @@ public final class FakeInputMethod: Inserter, Sendable {
                 let found = Replacement.range(of: request.replacing, selection: { NSRange(location: field.count, length: 0) },
                                               text: { String(decoding: field[$0.location..<NSMaxRange($0)], as: UTF16.self) })
                 guard case .success(let range) = found else { throw .refused(.wordsCannotBeTakenBack) }
-                state.field = String(decoding: field[..<range.location], as: UTF16.self)
-                return Inserted(characters: 0, into: state.into)
+                // The range is replaced by the request's text, as the client's commit puts it.
+                state.field = String(decoding: field[..<range.location], as: UTF16.self) + text
+                if !text.isEmpty { state.inserted.append(text) }
+                return Inserted(characters: text.count, into: state.into)
             }
             if let refusal = state.refusal {
                 if state.landingDespiteFailure, refusal.wordsMayHaveLanded { state.field += text }
