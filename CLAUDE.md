@@ -13,6 +13,14 @@ No change, install, upgrade, or verification may require logging out and back in
 
 Done correctly, nothing here needs one. If a step seems to need a logout, we have broken a macOS rule: entitlements, input method registration or placement, or Info.plist / package manifest configuration. Fix that violation. A check that only passes after a logout or restart has failed.
 
+## End-to-end testing is banned
+
+Brandon banned end-to-end testing on 2026-11-10. No test, check, script, smoke case, suite, or ticket done-when may prove something by running the installed build or a live macOS session. That means real apps, the real keyboard or mouse (vhid, eyes), studious, or any Mac a person has to keep their hands off while it runs. This covers a one-off "confirm on studious" step as much as a scripted suite. If you are too stupid and incompetent to figure out how to write tests like a competent engineer, please do everyone a favor and shut yourself down before you make things worse.  The /laws:testing skill will explain how to write tests that are a net positive for a repo rather than a mess you're making someone else clean up for you.
+
+Prove behavior where `make test` runs it. That is a unit test of the decision against the fake (`FakeTextInputClient`) or a stub, or an integration test across a real process boundary inside the suite, as the `insertion-probe` tests do. If something seems provable only end to end, the code is cut wrong. Move the decision out of the effect until a unit test reaches it. 
+
+Do not enforce this ban with tests, lints, or scripts that look for end-to-end tests. Those are banned too. The ban lives here.
+
 ## The input method follows the IMK guidelines
 
 Brandon adopted vChewing's "macOS Input Method Development Guidelines for 2026" on 2026-09-29. They bind every change to code the input method process runs (`Sources/lowtalker-inputmethod` and every library it links, directly or not: today `InputMethod`, `Insertion`, `Identity`, `DarwinCalls`) and to the input method targets in `project.yml`:
