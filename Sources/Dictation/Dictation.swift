@@ -857,17 +857,29 @@ public final class Dictation {
         streaming.began(offering: hold.held?.offered)
         for await _ in streaming.wakes {
             guard let run = streaming.take() else { continue }
-            streaming.sending(carried: hold.held?.offered?.words.words.count ?? 0)
             do throws(InsertFailure) {
-                let placed = try await place(run.words, following: streaming.landed.performed.last, since: run.since)
-                streaming.landed(placed)
+                let placed = try await place(run.words, for: streaming, since: run.since)
                 unplaced = placed.performed == nil ? unplaced : nil
             } catch {
                 unplaced = error
-                streaming.failed(run: run.words.words.count, mayHaveLanded: error.wordsMayHaveLanded, offered: hold.held?.offered?.words.words.count ?? 0)
             }
         }
         return unplaced
+    }
+
+    /// Places `words` for the press `streaming` hears, and counts what became of them.
+    /// [LAW:single-enforcer] Every insert a press makes passes here, its commits and what key-up
+    /// leaves alike, so its counts of words landed and words that may have landed are of all of them.
+    private func place(_ words: Transcript, for streaming: Streaming, since: Executor.Since) async throws(InsertFailure) -> Placed {
+        streaming.sending(carried: hold.offeredWords)
+        do throws(InsertFailure) {
+            let placed = try await place(words, following: streaming.landed.performed.last, since: since)
+            streaming.landed(placed)
+            return placed
+        } catch {
+            streaming.failed(run: words.words.count, mayHaveLanded: error.wordsMayHaveLanded, offered: hold.offeredWords)
+            throw error
+        }
     }
 
     /// Inserts what is held, then `words`, as one insert. [LAW:single-enforcer] Every insert
@@ -1025,10 +1037,11 @@ public final class Dictation {
         // when it is cancelled and not after a decode that may be loading a model.
         if case .cancelled = heard.ending { return try await cancel(heard) }
         let decoded = await heard.decode.value
-        let landed = heard.streaming.landed
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
-        // words are already at the cursor.
-        func stopped(_ cause: any Accounted) -> Failed { Failed(PressStopped(landed: landed.words, cause: cause)) }
+        // words are already at the cursor, how many may be, and how many the hold offers.
+        func stopped(_ cause: any Accounted) -> Failed {
+            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: hold.offeredWords, cause: cause))
+        }
         switch heard.ending {
         case .released(let press, let keyUp, let delivery):
             let transcription: Transcription
@@ -1046,11 +1059,11 @@ public final class Dictation {
             }
             let placed: Placed
             do throws(InsertFailure) {
-                placed = try await place(heard.streaming.rest(of: transcription.transcript), following: landed.performed.last, since: .keyUp(keyUp))
+                placed = try await place(heard.streaming.rest(of: transcription.transcript), for: heard.streaming, since: .keyUp(keyUp))
             } catch { throw stopped(error) }
             // A rest of nothing leaves what the commits could not place where it was.
             if placed.performed == nil, let unplaced { throw stopped(unplaced) }
-            return .session(Session(press: press, transcription: transcription, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: landed.performed + [placed.performed].compactMap { $0 }))
+            return .session(Session(press: press, transcription: transcription, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: heard.streaming.landed.performed))
         case .usedAsModifier:
             // [LAW:types-are-the-program] The person was typing, so what the microphone heard
             // is not theirs to be shown and not theirs to be warned of: it is dropped, and the
@@ -1059,7 +1072,7 @@ public final class Dictation {
             let dropped = words(past: heard.streaming, in: decoded)
             let discarded = dropped.isBlank ? 0 : dropped.words.count
             if let unplaced { throw stopped(unplaced) }
-            return .usedAsModifier(landed: landed.words, discarded: discarded)
+            return .usedAsModifier(landed: heard.streaming.landed.words, discarded: discarded)
         case .cancelled:
             // Taken above, before the decode was waited on; this is the same answer, never a trap.
             return try await cancel(heard)
@@ -1084,8 +1097,8 @@ public final class Dictation {
             // commit came before the decode's end, and either before the cut was known.
             if let cause = unplaced ?? unread { throw stopped(cause) }
             switch cut {
-            case .lapsed: throw Failed(PressLapsed(landed: landed.words, held: held))
-            case .lost(let lost): throw Failed(SpeechLost(lost: lost, landed: landed.words, held: held))
+            case .lapsed: throw Failed(PressLapsed(landed: heard.streaming.landed.words, held: held))
+            case .lost(let lost): throw Failed(SpeechLost(lost: lost, landed: heard.streaming.landed.words, held: held))
             }
         }
     }
@@ -1220,23 +1233,57 @@ public struct AudioKept: WordFree {
 }
 
 /// A press that stopped after it began: an insert refused, the engine failed, or what was
-/// left at key-up would not go in. The words before it are at the cursor, and the ones an
-/// insert failed on are held until a cursor takes them. [LAW:no-silent-failure]
+/// left at key-up would not go in. The words before it are at the cursor, those in inserts that
+/// may have landed stand, and the rest the hold offers until a cursor takes them.
+/// [LAW:no-silent-failure]
 ///
 /// Its description is the person's, and carries any words its cause read; the log reads its
 /// account.
 public struct PressStopped: Accounted {
     /// The words committed before it stopped.
     public let landed: Int
+    /// The words in its inserts that may have landed, which stand in the hold.
+    public let standing: Int
+    /// The words the hold offers when it stopped.
+    public let held: Int
     public let cause: any Accounted
 
     /// What the hold shows beside the words the passes during the hold read, when the decode failed.
     static let readingFailed = "WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing."
 
-    public var description: String { "\(cause)" + insertedBefore(landed) }
-    /// What it left at the cursor, which is a count, and then the cause's account.
+    /// What stopped it. [LAW:one-source-of-truth] Once any of its words are or may be at a cursor,
+    /// an insert's fate would be a second account of them, so the press tells them and the insert
+    /// its reason. The hold's warning can be a later one, a cut's or a failed reading's, so the
+    /// press tells the remedy beside the words it offers.
+    var stoppedBy: String {
+        guard let insert, reached else { return "\(cause)" }
+        return "WARNING: \(insert.reason)"
+    }
+
+    /// The insert that stopped it, when one did.
+    var insert: InsertFailure? { cause as? InsertFailure }
+
+    /// Whether any of its words are or may be at a cursor.
+    var reached: Bool { landed + standing > 0 }
+
+    /// What became of its words, once any are or may be at a cursor: one account of each, those
+    /// neither inserted nor held, unread or let go, last. Before then, the cause's own fate is
+    /// that account.
+    var told: String {
+        guard reached else { return "" }
+        let offered = insert?.remedy.map { "words are held; \($0) and they are offered again." } ?? "words are held."
+        let fates = [
+            (landed, "words of your dictation were inserted before it."),
+            (standing, "words may have been inserted; do not dictate them again."),
+            (held, offered),
+        ]
+        return fates.filter { $0.0 > 0 }.map { " \($0.0) \($0.1)" }.joined() + " No others were inserted or held."
+    }
+
+    public var description: String { stoppedBy + told }
+    /// What it left at the cursor, which is counts, and then the cause's account.
     public var account: Account {
-        Account(facts: "\(landed) words inserted before: \(cause.account.facts)", dictated: cause.account.dictated)
+        Account(facts: "\(landed) words inserted, \(standing) that may have been, \(held) held, before: \(cause.account.facts)", dictated: cause.account.dictated)
     }
 }
 
@@ -1256,19 +1303,14 @@ extension Dictation {
 }
 
 /// What the menu tells the person who dictated about a press that failed: what stopped it,
-/// in full, since only they read it, and how many of their words it left at the cursor.
+/// in full, since only they read it, and what became of their words.
 /// A failure written as fact then consequence opens with WARNING and carries its own framing;
 /// any other is a bare technical line, so it is told what it is and ended as a sentence.
 public func failureLine(_ failure: any Accounted) -> String {
-    let root = "\((failure as? PressStopped)?.cause ?? failure)"
-    let landed = (failure as? PressStopped)?.landed ?? 0
-    let framed = root.hasPrefix("WARNING:") ? root : "Your last dictation \(landed == 0 ? "was not placed" : "stopped"): \(root)."
-    return framed + insertedBefore(landed)
-}
-
-/// How many of a press's words reached the cursor before what stopped it, when any did.
-private func insertedBefore(_ landed: Int) -> String {
-    landed == 0 ? "" : " \(landed) words of your dictation were inserted before it; the rest were not."
+    let stopped = failure as? PressStopped
+    let root = stopped?.stoppedBy ?? "\(failure)"
+    let framed = root.hasPrefix("WARNING:") ? root : "Your last dictation \(stopped?.reached == true ? "stopped" : "was not placed"): \(root)."
+    return framed + (stopped?.told ?? "")
 }
 
 /// What became of a cut press's words: how many landed, and how many heard after them are held.

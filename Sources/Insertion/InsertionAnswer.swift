@@ -227,23 +227,33 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// stopped which says what became of its words, and the refusal names only the cause.
     public var fate: String? {
         switch self {
-        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy: Self.notInserted()
-        case .cursorIsNotSettled: Self.notInserted(offeredAgainWhen: "press an arrow key where you want it")
-        case .requestWasNotReadable: Self.offeredAgainOnReinstall
-        case .inputSourceIsNotSelected: Self.notInserted(offeredAgainWhen: "select \(AppIdentity.displayName) in the Input menu")
+        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy,
+             .cursorIsNotSettled, .requestWasNotReadable, .inputSourceIsNotSelected:
+            Self.notInserted(offeredAgainWhen: remedy)
         case .dictationIsInAnotherApp, .wordsCannotBeTakenBack: nil
+        }
+    }
+
+    /// What the person does to have the refused words offered again, where they have one to make.
+    public var remedy: String? {
+        switch self {
+        case .cursorIsNotSettled: "press an arrow key where you want it"
+        case .requestWasNotReadable: Self.reinstall
+        case .inputSourceIsNotSelected: "select \(AppIdentity.displayName) in the Input menu"
+        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .dictationIsInAnotherApp, .senderIsNotThisInstallationsApp,
+             .inputMethodIsBusy, .wordsCannotBeTakenBack: nil
         }
     }
 
     /// A refusal commits nothing, so an insert's words are not at the cursor; `fix` is what offers
     /// them again, where the person has one to make.
-    static func notInserted(offeredAgainWhen fix: String? = nil) -> String {
+    static func notInserted(offeredAgainWhen fix: String?) -> String {
         fix.map { "Your dictation was not inserted; \($0) and it is offered again." } ?? "Your dictation was not inserted."
     }
 
-    /// The fate of words an input method of another build would not insert, whether it could
+    /// The remedy for words an input method of another build would not insert, whether it could
     /// not read the request or refused it for a reason this build has no name for.
-    static let offeredAgainOnReinstall = notInserted(offeredAgainWhen: "reinstall \(AppIdentity.displayName)")
+    static let reinstall = "reinstall \(AppIdentity.displayName)"
 }
 
 /// Where the words were when the channel failed, which is what decides whether saying them
@@ -345,10 +355,20 @@ public enum InsertFailure: Error, Equatable, Sendable, InsertWarning {
     public var fate: String? {
         switch self {
         case .refused(let refusal): refusal.fate
-        case .refusedForAnUnknownReason: Refusal.offeredAgainOnReinstall
+        case .refusedForAnUnknownReason: Refusal.notInserted(offeredAgainWhen: remedy)
         case .notYetTaken(let notYetTaken): notYetTaken.fate
         case .unreachable(let unreachable): unreachable.fate
         case .answererUnreadable: "\(Words.notSent)"
+        }
+    }
+
+    /// What the person does to have the words offered again: only a refusal has one, since every
+    /// other failure is the channel's, and no step of theirs mends it.
+    public var remedy: String? {
+        switch self {
+        case .refused(let refusal): refusal.remedy
+        case .refusedForAnUnknownReason: Refusal.reinstall
+        case .notYetTaken, .unreachable, .answererUnreadable: nil
         }
     }
 
