@@ -12,10 +12,11 @@
 #
 # It is also where "neither process can open an outbound connection" is held. Under App Sandbox
 # without com.apple.security.network.client, connect() and getaddrinfo are refused (project.yml
-# records the measurement), so both bundles must be sandboxed and neither may carry that key.
-# Read off what is signed, because every way to add an entitlement - project.yml, a setting on
-# the xcodebuild command line, an xcconfig - ends there. The input method is the same bytes in
-# both builds and never listens, so it carries no network key at all. [LAW:single-enforcer]
+# records the measurement), so both bundles must be sandboxed and carry nothing that could
+# reopen the network. Read off what is signed, because every way to add an entitlement -
+# project.yml, a setting on the xcodebuild command line, an xcconfig - ends there. The input
+# method is the same bytes in both builds and never listens, so it carries no network key at
+# all. [LAW:single-enforcer]
 set -euo pipefail
 
 usage="usage: scripts/variant <path to .app> <path to input method .app>"
@@ -27,26 +28,46 @@ fail() {
   exit 1
 }
 
-# The sandbox key and every network key a bundle's signature carries, as the one line the
-# judgements below match.
+# The keys the sandbox is known to keep off the network with. Any other key counts as one that
+# may open it - temporary-exception.sbpl can allow network-outbound outright - so a key the
+# builds come to carry is refused here until someone judges it. [LAW:types-are-the-program]
+inert='[
+  "com.apple.security.device.audio-input",
+  "com.apple.security.files.user-selected.read-only",
+  "com.apple.security.temporary-exception.mach-lookup.global-name",
+  "com.apple.security.temporary-exception.mach-register.global-name"
+]'
+
+# The sandbox key and every key a bundle's signature carries beyond the inert ones, as the one
+# line the judgements below match.
 carries() {
-  local signed
-  signed=$(codesign -d --entitlements - --xml "$1") || fail "$1 is not signed"
+  local executable programs signed
+  executable=$(plutil -extract CFBundleExecutable raw -o - "$1/Contents/Info.plist") \
+    || fail "$1 has no Contents/Info.plist naming its executable"
+  # A program in the bundle besides its executable runs under a signature of its own - an XPC
+  # service or login item under a sandbox of its own - that nothing below reads. So the bundle
+  # carries no program but itself (low-builds-b4e.tvx), which also refuses what a warm
+  # DerivedData kept from an earlier build.
+  programs=$(find "$1" -type f -exec sh -c 'file -b "$1" | grep -q Mach-O' _ {} \; -print) \
+    || fail "cannot list the programs in $1"
+  [[ $programs == "$1/Contents/MacOS/$executable" ]] \
+    || fail "$1 carries the programs [$programs], and its one program is Contents/MacOS/$executable; build it clean"
+  signed=$(codesign -d --entitlements - --xml "$1") || fail "codesign cannot read the signature of $1"
   # codesign answers a signature with no entitlements with nothing at all, and exits 0.
   [[ -n $signed ]] || fail "$1 is signed with no entitlements, so it runs outside the sandbox"
-  plutil -convert json -o - - <<<"$signed" | jq -c '{
+  plutil -convert json -o - - <<<"$signed" | jq -c --argjson inert "$inert" '{
     sandbox: .["com.apple.security.app-sandbox"],
-    network: [to_entries[] | select(.key | startswith("com.apple.security.network.")) | [.key, .value]]
+    others: [to_entries[] | select(.key != "com.apple.security.app-sandbox" and (.key | IN($inert[]) | not)) | [.key, .value]]
   }'
 }
 
 input_method_carries=$(carries "$input_method")
-[[ $input_method_carries == '{"sandbox":true,"network":[]}' ]] \
-  || fail "the input method $input_method carries $input_method_carries; in either build it is sandboxed with no network key"
+[[ $input_method_carries == '{"sandbox":true,"others":[]}' ]] \
+  || fail "the input method $input_method carries $input_method_carries; in either build it is sandboxed and carries nothing else that could reach the network"
 
 app_carries=$(carries "$app")
 case "$app_carries" in
-  '{"sandbox":true,"network":[]}') echo offline ;;
-  '{"sandbox":true,"network":[["com.apple.security.network.server",true]]}') echo network ;;
+  '{"sandbox":true,"others":[]}') echo offline ;;
+  '{"sandbox":true,"others":[["com.apple.security.network.server",true]]}') echo network ;;
   *) fail "$app carries $app_carries, which is neither the offline nor the network build's" ;;
 esac

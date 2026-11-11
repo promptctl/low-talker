@@ -13,19 +13,24 @@ from pathlib import Path
 reader = Path(__file__).resolve().parent.parent / "variant"
 
 SANDBOX = {"com.apple.security.app-sandbox": True}
-# What every app build signs in, the offline build's whole set.
+# The keys every app build signs in, the offline build's whole set. The names are variant's to
+# ignore, so they are examples rather than the ones AppIdentity owns.
 APP = {
     **SANDBOX,
     "com.apple.security.device.audio-input": True,
-    "com.apple.security.temporary-exception.mach-register.global-name": ["ai.promptctl.low-talker.hotkey"],
-    "com.apple.security.temporary-exception.mach-lookup.global-name": ["ai.promptctl.low-talker.inputmethod.dictation.insert"],
+    "com.apple.security.files.user-selected.read-only": True,
+    "com.apple.security.temporary-exception.mach-register.global-name": ["example.app-port"],
+    "com.apple.security.temporary-exception.mach-lookup.global-name": ["example.input-method-port"],
 }
 INPUT_METHOD = {
     **SANDBOX,
-    "com.apple.security.temporary-exception.mach-lookup.global-name": ["ai.promptctl.low-talker.hotkey"],
+    "com.apple.security.temporary-exception.mach-register.global-name": ["example.input-method-port"],
+    "com.apple.security.temporary-exception.mach-lookup.global-name": ["example.app-port"],
 }
 SERVER = {"com.apple.security.network.server": True}
 CLIENT = {"com.apple.security.network.client": True}
+# A sandbox rule of the bundle's own, which needs no network key to let it connect out.
+SBPL = {"com.apple.security.temporary-exception.sbpl": ["(allow network-outbound)"]}
 
 
 class VariantTests(unittest.TestCase):
@@ -33,23 +38,40 @@ class VariantTests(unittest.TestCase):
         self.directory = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.directory)
 
-    def signed(self, name, entitlements):
-        """A copy of a real executable, signed ad hoc with `entitlements`, or with none for None."""
-        binary = self.directory / name
-        shutil.copy("/usr/bin/true", binary)
+    def bundle(self, name, programs=()):
+        """A bundle whose executable, and each of `programs` placed inside it, is a copy of a real one."""
+        bundle = Path(tempfile.mkdtemp(dir=self.directory)) / f"{name}.app"
+        (bundle / "Contents").mkdir(parents=True)
+        (bundle / "Contents/Info.plist").write_bytes(
+            plistlib.dumps({"CFBundleExecutable": name, "CFBundleIdentifier": f"example.{name}"}))
+        for program in [f"Contents/MacOS/{name}", *programs]:
+            (bundle / program).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy("/usr/bin/true", bundle / program)
+        return bundle
+
+    def signed(self, name, entitlements, programs=()):
+        """A bundle signed ad hoc with `entitlements`, or with none for None."""
+        bundle = self.bundle(name, programs)
         command = ["codesign", "--force", "--sign", "-"]
         if entitlements is not None:
-            plist = self.directory / f"{name}.entitlements"
+            plist = bundle.parent / f"{name}.entitlements"
             plist.write_bytes(plistlib.dumps(entitlements))
             command += ["--entitlements", str(plist)]
-        subprocess.run([*command, str(binary)], check=True, capture_output=True)
-        return binary
+        subprocess.run([*command, str(bundle)], check=True, capture_output=True)
+        return bundle
+
+    def unsigned(self, name):
+        """A bundle with no signature at all, its executable's own removed."""
+        bundle = self.bundle(name)
+        subprocess.run(["codesign", "--remove-signature", str(bundle / "Contents/MacOS" / name)],
+                       check=True, capture_output=True)
+        return bundle
 
     def read(self, app, input_method):
         return subprocess.run([str(reader), str(app), str(input_method)], capture_output=True)
 
-    def assertVariant(self, app, variant, input_method=INPUT_METHOD):
-        result = self.read(self.signed("app", app), self.signed("input-method", input_method))
+    def assertVariant(self, app, variant):
+        result = self.read(self.signed("app", app), self.signed("input-method", INPUT_METHOD))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.decode(), variant + "\n")
 
@@ -65,7 +87,7 @@ class VariantTests(unittest.TestCase):
 
     def assertInputMethodRefused(self, input_method):
         self.assertRefused(self.signed("app", APP), self.signed("input-method", input_method),
-                           "in either build it is sandboxed with no network key")
+                           "in either build it is sandboxed and carries nothing else that could reach the network")
 
     def test_no_network_key_is_offline(self):
         self.assertVariant(APP, "offline")
@@ -92,16 +114,24 @@ class VariantTests(unittest.TestCase):
         self.assertInputMethodRefused({**INPUT_METHOD, **CLIENT})
         self.assertInputMethodRefused({**INPUT_METHOD, **SERVER})
 
+    def test_a_sandbox_rule_of_its_own_is_refused(self):
+        self.assertAppRefused({**APP, **SBPL})
+        self.assertInputMethodRefused({**INPUT_METHOD, **SBPL})
+
+    def test_a_bundle_carrying_a_program_besides_its_own_is_refused(self):
+        service = ["Contents/XPCServices/Service.xpc/Contents/MacOS/Service"]
+        self.assertRefused(self.signed("app", APP, service), self.signed("input-method", INPUT_METHOD),
+                           "its one program is Contents/MacOS/app")
+        self.assertRefused(self.signed("app", APP), self.signed("input-method", INPUT_METHOD, service),
+                           "its one program is Contents/MacOS/input-method")
+
     def test_a_bundle_signed_with_no_entitlements_is_refused(self):
         self.assertRefused(self.signed("app", APP), self.signed("input-method", None), "signed with no entitlements")
         self.assertRefused(self.signed("app", None), self.signed("input-method", INPUT_METHOD), "signed with no entitlements")
 
     def test_a_bundle_that_is_not_signed_is_refused(self):
-        unsigned = self.directory / "unsigned"
-        unsigned.write_bytes(b"")
-        self.assertRefused(self.signed("app", APP), unsigned, "is not signed")
-        self.assertRefused(unsigned, self.signed("input-method", INPUT_METHOD), "is not signed")
-
+        self.assertRefused(self.signed("app", APP), self.unsigned("input-method"), "cannot read the signature")
+        self.assertRefused(self.unsigned("app"), self.signed("input-method", INPUT_METHOD), "cannot read the signature")
 
 if __name__ == "__main__":
     unittest.main()
