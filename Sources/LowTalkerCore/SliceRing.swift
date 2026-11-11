@@ -79,7 +79,9 @@ final class SliceRing: @unchecked Sendable {
         }
         guard let slot = claim() else { return drop() }
         let at = start % capacity
-        layout.mix(list, frames: frames, into: samples + at, min(frames, capacity - at), then: samples)
+        let head = min(frames, capacity - at)
+        layout.mix(list, from: 0, frames: head, into: samples + at)
+        layout.mix(list, from: head, frames: frames - head, into: samples)
         framesPushed = start + frames
         publish(.slice(frames: frames, stamp: stamp), at: slot)
     }

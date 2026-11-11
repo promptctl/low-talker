@@ -17,13 +17,41 @@ struct InputLayout: Sendable, Equatable {
     /// The channels of each buffer, in the order the IOProc is handed them.
     let buffers: [Int]
     let sampleRate: Double
+    /// The device's channels for stereo, which are what it is heard as.
+    let stereo: StereoPair
+    /// Where each of them is in a render: its buffer, and its lane among that buffer's
+    /// interleaved channels.
+    private let left: Lane
+    private let right: Lane
+
+    private struct Lane: Sendable, Equatable {
+        let buffer: Int
+        let lane: Int
+    }
 
     var channels: Int { buffers.reduce(0, +) }
 
+    /// Refused when the device names a channel for stereo that it does not have.
+    init(buffers: [Int], sampleRate: Double, stereo: StereoPair) throws(InputRefusal) {
+        func locate(_ channel: Int) throws(InputRefusal) -> Lane {
+            var first = 1
+            for (buffer, width) in buffers.enumerated() {
+                if (first..<first + width).contains(channel) { return Lane(buffer: buffer, lane: channel - first) }
+                first += width
+            }
+            throw .noStereoChannel(channel, channels: first - 1)
+        }
+        self.buffers = buffers
+        self.sampleRate = sampleRate
+        self.stereo = stereo
+        left = try locate(stereo.left)
+        right = try locate(stereo.right)
+    }
+
     /// The shape of what a device offers, from the virtual format of each of its input
-    /// streams in stream order: what the HAL presents to a client, as opposed to what the
-    /// hardware stores.
-    static func parse(_ streams: [AudioStreamBasicDescription]) -> Result<InputLayout, InputRefusal> {
+    /// streams in stream order, what the HAL presents to a client as opposed to what the
+    /// hardware stores, and the channels it names for stereo.
+    static func parse(_ streams: [AudioStreamBasicDescription], stereo: StereoPair) -> Result<InputLayout, InputRefusal> {
         guard let first = streams.first else { return .failure(.noStream) }
         var buffers: [Int] = []
         for stream in streams {
@@ -42,31 +70,30 @@ struct InputLayout: Sendable, Equatable {
             }
         }
         guard !buffers.isEmpty else { return .failure(.noChannels) }
-        return .success(InputLayout(buffers: buffers, sampleRate: first.mSampleRate))
+        return Result { () throws(InputRefusal) in try InputLayout(buffers: buffers, sampleRate: first.mSampleRate, stereo: stereo) }
     }
 
-    /// The one channel a render of this shape is heard as: the sum of its channels, `frames` of
-    /// them, `count` into `first` and the rest into `rest`. Reads only what `verdict` has held
-    /// the list to, so it allocates nothing and runs on the IO thread.
+    /// The one channel `frames` frames of a render are heard as, from frame `start`: the mean of
+    /// the device's channels for stereo. A mono device names its one channel twice and passes as
+    /// it is; a stereo device is mixed as AVAudioConverter mixed it before (half of each,
+    /// measured); a wider one, an audio interface or a loopback, is heard on the two channels
+    /// macOS treats as its stereo, and its other channels, and their hiss, are not mixed in.
     ///
-    /// A sum, so a voice on any one channel, as an audio interface or a loopback carries it, is
-    /// heard at its own level, and channels that carry one signal, as a stereo microphone's do,
-    /// are heard at twice it. A mean puts a voice on one channel of sixteen under
-    /// `Utterance.audible`, and it is AVAudioConverter's downmix, which given a channel layout
-    /// for more than two channels mixes them to silence (low-reliability-z2z.n4b). Fixed rather
-    /// than weighted by each channel's level, which moves the gain with the speech and the
-    /// room `Utterance` measures between words with it.
-    func mix(_ list: UnsafePointer<AudioBufferList>, frames: Int, into first: UnsafeMutablePointer<Float>, _ count: Int, then rest: UnsafeMutablePointer<Float>) {
-        first.update(repeating: 0, count: count)
-        rest.update(repeating: 0, count: frames - count)
+    /// Mixed here because AVAudioConverter cannot be handed a device wider than two channels:
+    /// AVAudioFormat describes no such format without a channel layout, and given one the
+    /// converter mixes it to silence (low-reliability-z2z.n4b). Reads only what `verdict` has
+    /// held the list to, so it allocates nothing and runs on the IO thread.
+    func mix(_ list: UnsafePointer<AudioBufferList>, from start: Int, frames: Int, into destination: UnsafeMutablePointer<Float>) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
-        for (index, width) in buffers.enumerated() {
-            let source = list[index].mData!.assumingMemoryBound(to: Float.self)
-            for lane in 0..<width {
-                vDSP_vadd(source + lane, vDSP_Stride(width), first, 1, first, 1, vDSP_Length(count))
-                vDSP_vadd(source + lane + count * width, vDSP_Stride(width), rest, 1, rest, 1, vDSP_Length(frames - count))
-            }
+        func samples(_ channel: Lane) -> UnsafePointer<Float> {
+            UnsafePointer(list[channel.buffer].mData!.assumingMemoryBound(to: Float.self) + start * buffers[channel.buffer] + channel.lane)
         }
+        var half: Float = 0.5
+        vDSP_vasm(
+            samples(left), vDSP_Stride(buffers[left.buffer]),
+            samples(right), vDSP_Stride(buffers[right.buffer]),
+            &half, destination, 1, vDSP_Length(frames)
+        )
     }
 
     /// What one render's buffer list comes to against this shape.
@@ -160,6 +187,8 @@ public enum InputRefusal: Error, Equatable, Sendable, CustomStringConvertible {
     case bigEndian
     case mixedSampleRates(Double, Double)
     case noChannels
+    /// The device names a channel for stereo past the channels it has.
+    case noStereoChannel(Int, channels: Int)
 
     public var description: String {
         switch self {
@@ -170,6 +199,21 @@ public enum InputRefusal: Error, Equatable, Sendable, CustomStringConvertible {
         case .bigEndian: "its input samples are big-endian"
         case .mixedSampleRates(let a, let b): "its input streams run at different sample rates (\(a) and \(b) Hz)"
         case .noChannels: "its input carries no channels"
+        case .noStereoChannel(let channel, let channels): "it names channel \(channel) for stereo and has \(channels) input channel\(channels == 1 ? "" : "s")"
         }
     }
+}
+
+/// The two channels a device names for stereo input (`kAudioDevicePropertyPreferredChannelsForStereo`),
+/// numbered from 1 as CoreAudio numbers them. A mono device names its one channel twice.
+public struct StereoPair: Sendable, Equatable, CustomStringConvertible {
+    public let left: Int
+    public let right: Int
+
+    public init(left: Int, right: Int) {
+        self.left = left
+        self.right = right
+    }
+
+    public var description: String { left == right ? "channel \(left)" : "channels \(left) and \(right)" }
 }

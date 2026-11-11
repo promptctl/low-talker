@@ -8,6 +8,9 @@ import Testing
 /// readied, and what each render's buffer list may be against that. Both are tables, so each
 /// row is a test.
 @Suite struct InputLayoutTests {
+    /// What a mono device names for stereo: its one channel, twice.
+    static let mono = StereoPair(left: 1, right: 1)
+
     /// A virtual format as a device presents one.
     static func stream(
         channels: UInt32,
@@ -47,42 +50,48 @@ import Testing
         ([stream(channels: 1), stream(channels: 2, interleaved: false)], [1, 1, 1]),
     ])
     func aFloatPackedInputIsAcceptedAsTheBuffersTheIOProcWillBeHanded(streams: [AudioStreamBasicDescription], buffers: [Int]) throws {
-        let layout = try InputLayout.parse(streams).get()
+        let layout = try InputLayout.parse(streams, stereo: Self.mono).get()
         #expect(layout.buffers == buffers)
         #expect(layout.channels == buffers.reduce(0, +))
         #expect(layout.sampleRate == 48_000)
     }
 
+    /// A channel named for stereo that the device does not have is refused, by number.
+    @Test(arguments: [(StereoPair(left: 1, right: 3), 3), (StereoPair(left: 0, right: 1), 0)])
+    func aStereoChannelTheDeviceDoesNotHaveIsRefused(stereo: StereoPair, missing: Int) {
+        #expect(InputLayout.parse([Self.stream(channels: 2)], stereo: stereo) == .failure(.noStereoChannel(missing, channels: 2)))
+    }
+
     @Test func noInputStreamIsRefused() {
-        #expect(InputLayout.parse([]) == .failure(.noStream))
+        #expect(InputLayout.parse([], stereo: Self.mono) == .failure(.noStream))
     }
 
     @Test func aStreamThatIsNotLinearPCMIsRefusedByName() {
         let id = kAudioFormatMPEG4AAC
-        #expect(InputLayout.parse([Self.stream(channels: 1, id: id)]) == .failure(.notLinearPCM(formatID: id)))
+        #expect(InputLayout.parse([Self.stream(channels: 1, id: id)], stereo: Self.mono) == .failure(.notLinearPCM(formatID: id)))
     }
 
     @Test func aStreamThatIsNotThirtyTwoBitFloatIsRefused() {
-        #expect(InputLayout.parse([Self.stream(channels: 1, float: false, bits: 16)]) == .failure(.notFloat32(bits: 16)))
-        #expect(InputLayout.parse([Self.stream(channels: 1, float: true, bits: 64)]) == .failure(.notFloat32(bits: 64)))
+        #expect(InputLayout.parse([Self.stream(channels: 1, float: false, bits: 16)], stereo: Self.mono) == .failure(.notFloat32(bits: 16)))
+        #expect(InputLayout.parse([Self.stream(channels: 1, float: true, bits: 64)], stereo: Self.mono) == .failure(.notFloat32(bits: 64)))
     }
 
     @Test func aStreamThatIsNotPackedIsRefused() {
-        #expect(InputLayout.parse([Self.stream(channels: 1, packed: false)]) == .failure(.notPacked))
+        #expect(InputLayout.parse([Self.stream(channels: 1, packed: false)], stereo: Self.mono) == .failure(.notPacked))
     }
 
     @Test func aBigEndianStreamIsRefused() {
         var stream = Self.stream(channels: 1)
         stream.mFormatFlags |= kAudioFormatFlagIsBigEndian
-        #expect(InputLayout.parse([stream]) == .failure(.bigEndian))
+        #expect(InputLayout.parse([stream], stereo: Self.mono) == .failure(.bigEndian))
     }
 
     @Test func streamsAtDifferentRatesAreRefused() {
-        #expect(InputLayout.parse([Self.stream(channels: 1, rate: 48_000), Self.stream(channels: 1, rate: 44_100)]) == .failure(.mixedSampleRates(48_000, 44_100)))
+        #expect(InputLayout.parse([Self.stream(channels: 1, rate: 48_000), Self.stream(channels: 1, rate: 44_100)], stereo: Self.mono) == .failure(.mixedSampleRates(48_000, 44_100)))
     }
 
     @Test func aDeviceWithNoChannelsIsRefused() {
-        #expect(InputLayout.parse([Self.stream(channels: 0)]) == .failure(.noChannels))
+        #expect(InputLayout.parse([Self.stream(channels: 0)], stereo: Self.mono) == .failure(.noChannels))
     }
 
     // MARK: what a render hands over
@@ -117,7 +126,7 @@ import Testing
         }
     }
 
-    static let stereoAndMono = InputLayout(buffers: [2, 1], sampleRate: 48_000)
+    static let stereoAndMono = try! InputLayout(buffers: [2, 1], sampleRate: 48_000, stereo: StereoPair(left: 1, right: 2))
 
     @Test func aListOfTheShapeIsItsFramesPerChannel() {
         let list = List([(2, 8), (1, 4)])
@@ -195,10 +204,10 @@ import Testing
         return Array(UnsafeBufferPointer(start: popped.floatChannelData![0], count: Int(popped.frameLength)))
     }
 
-    /// A render of `layout` whose channel `channel` of `frame` holds `value(channel, frame)`.
+    /// A render of `layout` whose channel `channel`, numbered from 1, holds `value(channel, frame)`.
     static func render(_ layout: InputLayout, frames: Int, _ value: (Int, Int) -> Float) -> List {
         let list = List(layout.buffers.map { ($0, $0 * frames) })
-        var first = 0
+        var first = 1
         for (index, width) in layout.buffers.enumerated() {
             for frame in 0..<frames {
                 for lane in 0..<width {
@@ -215,39 +224,48 @@ import Testing
         ring.push(list.base, frames: frames, stamp: AudioTimeStamp())
     }
 
-    /// A voice on any one channel of a device, its other channels silent, is heard at its own
-    /// level, whichever buffer and lane carries it and across the ring's wrap. Buffer 0 is stereo
-    /// interleaved, buffer 1 mono: channels 0 and 1, then 2.
-    @Test(arguments: [0, 1, 2])
-    func aVoiceOnOneChannelIsHeardAtItsLevelAcrossTheWrap(voiced: Int) {
-        let ring = SliceRing(InputLayout(buffers: [2, 1], sampleRate: 48_000), frames: 5, entries: 8)
+    /// A mono device names its one channel for stereo twice, and is heard as it is, across the
+    /// ring's wrap.
+    @Test func aMonoDeviceIsHeardAsItIs() throws {
+        let ring = SliceRing(try InputLayout(buffers: [1], sampleRate: 48_000, stereo: Self.mono), frames: 5, entries: 8)
         // Four frames, then four more: the second wraps the five-frame ring.
         for round in 0..<2 {
-            Self.push(ring, frames: 4) { channel, frame in channel == voiced ? Float(round * 4 + frame + 1) : 0 }
-            #expect(Self.popped(ring, frames: 5) == (0..<4).map { Float(round * 4 + $0 + 1) })
+            Self.push(ring, frames: 4) { _, frame in Float(round * 4 + frame) / 3 }
+            #expect(Self.popped(ring, frames: 5) == (0..<4).map { Float(round * 4 + $0) / 3 })
         }
     }
 
-    /// Every channel is heard at one gain, however loud the others are: a hum on an idle channel
-    /// is as loud in the pauses as under the speech, so the room `Utterance` reads between words
-    /// is the room, and a word is heard whole from its first frame.
-    @Test func everyChannelIsHeardAtOneGainHoweverLoudTheOthers() {
-        let ring = SliceRing(InputLayout(buffers: [1, 1], sampleRate: 48_000), frames: 8, entries: 4)
-        Self.push(ring, frames: 4) { channel, _ in channel == 1 ? 0.25 : 0 }
-        #expect(Self.popped(ring, frames: 8) == [0.25, 0.25, 0.25, 0.25])
-        Self.push(ring, frames: 4) { channel, _ in channel == 1 ? 0.25 : 0.5 }
-        #expect(Self.popped(ring, frames: 8) == [0.75, 0.75, 0.75, 0.75])
+    /// A device is heard as the mean of its channels for stereo, half of each as AVAudioConverter
+    /// mixed a stereo device, wherever the two lie: here the second lane of an interleaved
+    /// buffer and a mono buffer after it, with the first channel left out, across the wrap.
+    @Test func aDeviceIsHeardAsTheMeanOfItsStereoChannelsWhereverTheyLie() throws {
+        let layout = try InputLayout(buffers: [2, 1], sampleRate: 48_000, stereo: StereoPair(left: 2, right: 3))
+        let ring = SliceRing(layout, frames: 5, entries: 8)
+        for round in 0..<2 {
+            Self.push(ring, frames: 4) { channel, frame in
+                let n = Float(round * 4 + frame + 1)
+                return [1: 100, 2: n, 3: 3 * n][channel]!
+            }
+            #expect(Self.popped(ring, frames: 5) == (0..<4).map { 2 * Float(round * 4 + $0 + 1) })
+        }
     }
 
-    /// A device of any channel count is heard at the voice's level once converted, an audio
-    /// interface or a 16-channel loopback with the voice on its last channel included: what it
-    /// pops as is a shape the converter reads, and the converter hands back the voice rather than
-    /// silence or a share of it.
+    /// A device of any channel count is heard on its channels for stereo at the voice's level,
+    /// and an audio interface's or a loopback's other channels, and their hiss, are not mixed in.
     @Test(arguments: [1, 2, 3, 4, 16])
-    func everyChannelCountIsHeardAtTheVoicesLevel(channels: Int) throws {
-        let layout = InputLayout(buffers: [channels], sampleRate: 48_000)
+    func aDeviceOfAnyChannelCountIsHeardOnItsStereoChannelsAlone(channels: Int) throws {
+        let stereo = StereoPair(left: 1, right: min(2, channels))
+        let ring = SliceRing(try InputLayout(buffers: [channels], sampleRate: 48_000, stereo: stereo), frames: 8, entries: 4)
+        Self.push(ring, frames: 4) { channel, _ in channel <= 2 ? 0.5 : 0.25 }
+        #expect(Self.popped(ring, frames: 8) == [0.5, 0.5, 0.5, 0.5])
+    }
+
+    /// What a 16-channel device pops as is a shape the converter reads, and the converter hands
+    /// back the voice rather than silence or a share of it.
+    @Test func aSixteenChannelDeviceIsConvertedAtTheVoicesLevel() throws {
+        let layout = try InputLayout(buffers: [16], sampleRate: 48_000, stereo: StereoPair(left: 1, right: 2))
         let ring = SliceRing(layout, frames: 4_800, entries: 4)
-        Self.push(ring, frames: 4_800) { channel, _ in channel == channels - 1 ? 0.5 : 0 }
+        Self.push(ring, frames: 4_800) { channel, _ in channel <= 2 ? 0.5 : 0 }
         let popped = AVAudioPCMBuffer(pcmFormat: try #require(SliceRing.format(sampleRate: layout.sampleRate)), frameCapacity: 4_800)!
         _ = ring.pop(into: popped)
         let converted = try AudioClip.Converter(from: popped.format).convert(popped)

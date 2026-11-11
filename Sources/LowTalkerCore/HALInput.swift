@@ -162,7 +162,7 @@ final class HALInput: PreparedInput {
                 // The ring mixes every render down to one channel, so the converter only
                 // resamples, whatever the device's channel count.
                 guard let format = SliceRing.format(sampleRate: layout.sampleRate) else {
-                    throw AudioClipError.unconvertibleFormat(sampleRate: layout.sampleRate, channels: UInt32(layout.channels))
+                    throw AudioClipError.unconvertibleFormat(sampleRate: layout.sampleRate, channels: 1)
                 }
                 let built = Sink(converter: try AudioClip.Converter(from: format))
                 try AudioHardwareError.check(
@@ -187,6 +187,8 @@ final class HALInput: PreparedInput {
                 // the same way every other claim about preparing is: by reading the device back.
                 registered.append(try HALInput.watch(device, kAudioDevicePropertyDeviceIsAlive, scope: kAudioObjectPropertyScopeGlobal, onStale))
                 registered.append(try HALInput.watch(device, kAudioDevicePropertyStreamFormat, scope: kAudioObjectPropertyScopeInput, onStale))
+                // The channels it is heard on, which a person can name again under it.
+                registered.append(try HALInput.watch(device, kAudioDevicePropertyPreferredChannelsForStereo, scope: kAudioObjectPropertyScopeInput, onStale))
 
                 // [LAW:parse-dont-validate] The border between a microphone reached and a
                 // microphone taken. Everything above claims to cross it without opening a
@@ -214,7 +216,7 @@ final class HALInput: PreparedInput {
             self.queue = queue
             self.procID = created!
             self.watches = registered
-            input = MicrophoneInput(device: device, name: Result { () throws(AudioHardwareError) in try HALInput.name(of: device) }, sampleRate: layout.sampleRate, channels: layout.channels)
+            input = MicrophoneInput(device: device, name: Result { () throws(AudioHardwareError) in try HALInput.name(of: device) }, sampleRate: layout.sampleRate, channels: layout.channels, stereo: layout.stereo)
         }
 
         /// What a press hands its audio over through: a delivery whose slices are as large as
@@ -587,7 +589,8 @@ final class HALInput: PreparedInput {
 
     /// The shape of what `device`'s IOProc will be handed, from the virtual format of each of
     /// its input streams - what the HAL presents to a client rather than what the hardware
-    /// stores. Refused, naming the device, when it is a shape nothing here can read.
+    /// stores - and the channels it names for stereo. Refused, naming the device, when it is a
+    /// shape nothing here can read.
     /// [LAW:parse-dont-validate]
     private nonisolated static func layout(of device: AudioObjectID) throws -> InputLayout {
         var streamsAddress = AudioObjectPropertyAddress(
@@ -612,7 +615,15 @@ final class HALInput: PreparedInput {
             try AudioHardwareError.check(AudioObjectGetPropertyData(stream, &address, 0, nil, &size, &format), AudioHardwareError.inputUnavailable)
             formats.append(format)
         }
-        switch InputLayout.parse(formats) {
+        var pair: (UInt32, UInt32) = (0, 0)
+        var pairSize = UInt32(MemoryLayout<(UInt32, UInt32)>.size)
+        var pairAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyPreferredChannelsForStereo,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        try AudioHardwareError.check(AudioObjectGetPropertyData(device, &pairAddress, 0, nil, &pairSize, &pair), AudioHardwareError.inputUnavailable)
+        switch InputLayout.parse(formats, stereo: StereoPair(left: Int(pair.0), right: Int(pair.1))) {
         case .success(let layout): return layout
         case .failure(let why): throw AudioHardwareError.unsupportedInput(device: device, why: why)
         }

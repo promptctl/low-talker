@@ -51,7 +51,9 @@ final class SliceDelivery: @unchecked Sendable {
         appending: @escaping @Sendable ([Float], HostTime) -> Void,
         onFailure: @escaping @Sendable (any Error) -> Void
     ) throws {
-        precondition(converter.source == SliceRing.format(sampleRate: ring.layout.sampleRate), "a delivery converts what its ring pops")
+        guard converter.source == SliceRing.format(sampleRate: ring.layout.sampleRate) else {
+            throw AudioClipError.unconvertibleFormat(sampleRate: ring.layout.sampleRate, channels: 1)
+        }
         guard let popped = AVAudioPCMBuffer(pcmFormat: converter.source, frameCapacity: AVAudioFrameCount(slice)) else {
             throw AudioClipError.bufferAllocationFailed
         }

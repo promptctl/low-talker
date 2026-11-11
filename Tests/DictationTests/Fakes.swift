@@ -83,7 +83,7 @@ final class FakeHardware: AudioHardware {
     }
 
     /// The one device this hardware has.
-    static let microphone = MicrophoneInput(device: 1, name: .success("Fake Microphone"), sampleRate: 48_000, channels: 1)
+    static let microphone = MicrophoneInput(device: 1, name: .success("Fake Microphone"), sampleRate: 48_000, channels: 1, stereo: StereoPair(left: 1, right: 1))
 
     private(set) var engines: [Engine] = []
     /// What a launch does, once set: throw, as a device that cannot feed the pipeline
