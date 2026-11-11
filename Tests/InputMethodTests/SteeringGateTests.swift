@@ -107,11 +107,13 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func aDebtNotSettledByTheCeilingKeepsTheReturnAtTheCeiling() {
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
-        let gate = SteeringGate(ceiling: .milliseconds(150), asking: App(settling: { release.wait(); return .success(.landed) }))
+        let gate = SteeringGate(ceiling: .milliseconds(20), asking: App(settling: { release.wait(); return .success(.landed) }))
 
         let started = ContinuousClock.now
-        #expect(gate.verdict(at: 1).verdict == .keep)
-        #expect(ContinuousClock.now - started >= .milliseconds(150))
+        let decided = gate.verdict(at: 1)
+        #expect(decided.verdict == .keep)
+        #expect(decided.because.contains("had not answered"), "\(decided)")
+        #expect(ContinuousClock.now - started >= .milliseconds(20))
     }
 
     /// A Return typed after one the gate gave up on is decided on its own answers: the earlier
@@ -120,6 +122,7 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func anEarlierReturnsLateAnswerIsNotTheNextOnes() {
         let release = DispatchSemaphore(value: 0)
         let earlierAnswered = DispatchSemaphore(value: 0)
+        // Long enough for the second Return's handshake with the first's thread under a loaded suite.
         let gate = SteeringGate(ceiling: .milliseconds(500), asking: App(settling: {
             release.wait()
             defer { earlierAnswered.signal() }

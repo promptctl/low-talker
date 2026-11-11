@@ -72,7 +72,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
     /// A command that is no steering key is declined, and the record says so.
     @Test(.timeLimit(.minutes(1))) func aCommandThatIsNoSteeringKeySaysSo() async throws {
         let said = try await events(of: { DictationInputController() }) { controller in
-            #expect(controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: []) == false)
+            #expect(controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: [], typedAt: 0) == false)
         }
         try #require(said.count == 3)
         #expect(said[1] == .callback(.inline, .command("moveLeft:", steered: nil, holding: "holding no client")))
