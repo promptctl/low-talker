@@ -2131,6 +2131,27 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         }
     }
 
+    /// Copy takes every word held, those that may have landed first, without the whitespace the
+    /// engine put before the first.
+    @Test func copyTakesEveryHeldWordAsALine() throws {
+        let landed = try #require(Held.Part(words: Transcript(typed: " may have"), warning: "may have landed"))
+        let refused = try #require(Held.Part(words: Transcript(typed: " landed."), warning: "refused"))
+        #expect(Held.unplaced(refused, unaccounted: landed).clipboardText == "may have landed.")
+        #expect(Held.unaccounted(landed).clipboardText == "may have")
+    }
+
+    /// Copy is offered only with no press on its way, since a press on its way carries the held
+    /// words in its own insert and a copy taken then could be pasted beside them.
+    @Test func copyIsOfferedOnlyWithNoPressOnItsWay() {
+        let heard = Transcript(typed: "hi")
+        for readiness in [EngineReadiness.preparing(.loading, since: .now), .failed("no model"), .ready(.default, after: .seconds(2))] {
+            #expect(Dictation.Activity.idle.box(over: readiness).offersCopy, "idle over \(readiness)")
+            for activity in [Dictation.Activity.transcribing, .refused(why: "x"), .listening(heard: heard)] {
+                #expect(!activity.box(over: readiness).offersCopy, "\(activity) over \(readiness)")
+            }
+        }
+    }
+
     /// The icon is the press's while there is one and the engine's otherwise, except that a
     /// press ended before the engine is ready shows the wait it is in.
 

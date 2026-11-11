@@ -75,6 +75,12 @@ public enum Held: Sendable, Equatable {
         Transcript(words: [standing, offered].compactMap { $0?.words.words }.flatMap { $0 })
     }
 
+    /// What Copy puts on the clipboard: every word held, those that may have landed first, as a
+    /// line shows them. All of them, where the box's face may show only the newest.
+    public var clipboardText: String {
+        allWords.line
+    }
+
     /// What the person is told, oldest first.
     public var warnings: [String] {
         [standing, offered].compactMap { $0?.warning }

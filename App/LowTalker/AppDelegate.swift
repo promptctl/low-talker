@@ -61,6 +61,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let unheard = listening == nil ? ", with no loop listening to insert them" : ""
         sessions.notice("asked to insert \(words) held words\(unheard, privacy: .public)")
         listening?.dictation.insertHeld()
+    }, copy: { [unowned self] in
+        // A click is the person asking for the copy, so replacing what the clipboard held is what
+        // they asked for; NSPasteboard writes only after a clear.
+        // [LAW:nothing-unseen] The count, not the text, which is the person's dictated words.
+        guard let text = hold.held?.clipboardText else {
+            return sessions.notice("asked to copy the held words with none held, so the clipboard is left as it was")
+        }
+        NSPasteboard.general.clearContents()
+        if NSPasteboard.general.setString(text, forType: .string) {
+            sessions.notice("copied \(text.count, privacy: .public) characters of held words, and dismissed them")
+            // The words are the person's to paste now. Held, the next press would type them ahead
+            // of its own, beside the paste; dismissed, the box closes and the menu brings them back.
+            hold.dismiss()
+        } else {
+            sessions.error("the pasteboard refused \(text.count, privacy: .public) characters of held words")
+        }
     })
     /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
     /// new config keeps offering them, and so does the next launch.
