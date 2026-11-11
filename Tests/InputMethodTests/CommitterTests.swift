@@ -233,7 +233,7 @@ import Testing
     }
 
     /// A `<textarea>` gives document access, and one that keeps 10 of the 30 characters it is
-    /// handed (a `maxlength`, unmeasured on a textarea: low-test-layers-sqm.8m3) is answered
+    /// handed (a `maxlength`, unmeasured on a textarea: `ContractCase.unsettled`) is answered
     /// inserted with all 30, while 20 never reached the field and nothing holds them. What the
     /// input method answers today, and the answer low-reliability-z2z.rgy changes.
     @MainActor

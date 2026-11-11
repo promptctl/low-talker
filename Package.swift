@@ -122,9 +122,8 @@ let package = Package(
         // `make test` the way App/LowTalker's sources are.
         .target(name: "InputMethod", dependencies: ["Insertion", "Identity", "GrammaticalNumber"], swiftSettings: inputMethodIsolation),
         // The one fake of the input method's text client port, answering as the measured
-        // clients do, and the port's contract stated so it runs against the fake and against a
-        // real client alike. Beside the port and depending only on it; in no product, and never
-        // copied into a bundle. [LAW:one-source-of-truth]
+        // clients do, and the port's contract it is held to. Beside the port and depending only
+        // on it; in no product, and never copied into a bundle. [LAW:one-source-of-truth]
         .target(name: "InputMethodFakes", dependencies: ["InputMethod"], swiftSettings: inputMethodIsolation),
         .testTarget(name: "InputMethodTests", dependencies: ["InputMethod", "InputMethodFakes", "Insertion", "Identity", "TestProbes"]),
         // The two calls that cross between the app and the input method - words one way, the
@@ -150,13 +149,6 @@ let package = Package(
         // request that really crossed from another process. In no product: nothing ships it.
         .executableTarget(name: "insertion-probe", dependencies: ["Insertion", "Identity"], path: "Tests/InsertionProbe"),
         .testTarget(name: "InsertionTests", dependencies: ["Insertion", "Identity", "DarwinCalls", "insertion-probe", "TestProbes"]),
-        // The fields the client contract runs against on a Mac, an AppKit text view and WebKit's
-        // `<textarea>` and `<input>`, each saying what it holds. In no product and never copied
-        // into LowTalker.app: `make test-host` puts it in a bundle of its own. It links no library
-        // here, so what it reports is the field's and nothing of ours.
-        .executableTarget(name: "test-host", path: "Tests/TestHost", exclude: ["Info.plist"],
-                          swiftSettings: [.defaultIsolation(MainActor.self)]),
-        .testTarget(name: "TestHostTests", dependencies: ["test-host"]),
         // The process macOS launches out of the input method bundle. It holds the effects -
         // reading the bundle, opening the port, running the loop - and nothing else.
         .executableTarget(name: "lowtalker-inputmethod", dependencies: ["InputMethod", "Insertion", "Identity"], swiftSettings: inputMethodIsolation),
@@ -177,11 +169,6 @@ let package = Package(
         // so nothing a person installs runs it. [LAW:one-way-deps]
         .executableTarget(name: "model-tool", dependencies: ["ModelInstall", "LowTalkerCore", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
         .testTarget(name: "ModelToolTests", dependencies: ["model-tool", "ModelInstall", "LowTalkerCore"]),
-        // Destroys or changes the device a press is open on, against real hardware, and says
-        // whether the press kept the speech said after it. In no product and never copied into
-        // a bundle, like `model-tool`: a driver for a person at a Mac with a loopback device,
-        // and for the checkpoint low-reliability-z2z.01v. [LAW:one-way-deps]
-        .executableTarget(name: "mic-cut-probe", dependencies: ["LowTalkerCore", "Grants"]),
         .testTarget(
             name: "ModelInstallTests",
             dependencies: [

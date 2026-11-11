@@ -4,10 +4,9 @@ import InputMethod
 /// One statement of the text client port's contract: a field set up as the case says, one call
 /// made through the port, and what the client answers and the field holds after it.
 ///
-/// Stated through the port's own calls plus what the field holds, which is the one reading a real
-/// client cannot give. The fake gives it in `make test`, and on studious the test host app gives it
-/// for its fields (low-test-layers-sqm.if6), so the same cases run against both, and a case a real
-/// client fails is the fake to change. [LAW:one-source-of-truth]
+/// Stated through the port's own calls plus what the field holds. A `measured` case is what a
+/// profiled client was measured doing; an `unsettled` one is the fake's guess where none was.
+/// [LAW:one-source-of-truth]
 public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
     /// The call the case makes through the port before the client is read.
     public enum Act: Sendable, CustomStringConvertible {
@@ -80,9 +79,8 @@ public nonisolated extension ContractCase {
         ContractCase(profile: .noTextField, holding: "", act: .read, answers: blind, holds: ""),
     ]
 
-    /// What the fake answers where no client was measured, each case for the studious run to
-    /// settle (low-test-layers-sqm.8m3): a real client disagreeing with one of these is the guess
-    /// corrected, not a client that changed.
+    /// What the fake answers where no client was measured: a measurement that disagrees with one
+    /// of these is the guess corrected, not a client that changed.
     static let unsettled: [ContractCase] = [
         // bem's `<input maxlength=10>` row has no insert: what the field keeps of 30.
         ContractCase(profile: .webKitInput, holding: "", maxLength: 10, act: .insert(thirty, replacementRange: atThePoint), answers: blind, holds: "alpha brav"),
