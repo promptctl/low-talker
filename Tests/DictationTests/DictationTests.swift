@@ -2140,15 +2140,15 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(Held.unaccounted(landed).clipboardText == "may have")
     }
 
-    /// Copy is offered for held words wherever the box shows them, a press waiting on the load
-    /// included, since a copy waits on nothing; never while the box shows a press's own words.
-    @Test func copyIsOfferedWhereverTheBoxShowsTheHeldWords() {
+    /// Copy is offered only with nothing on its way, since a press on its way carries the held
+    /// words in its own insert and a copy taken then could be pasted beside them.
+    @Test func copyIsOfferedOnlyWithNothingOnItsWay() {
         let heard = Transcript(typed: "hi")
         for readiness in [EngineReadiness.preparing(.loading, since: .now), .failed("no model"), .ready(.default, after: .seconds(2))] {
-            for activity in [Dictation.Activity.idle, .transcribing, .refused(why: "x")] {
-                #expect(activity.box(over: readiness).offersCopy, "\(activity) over \(readiness)")
+            #expect(Dictation.Activity.idle.box(over: readiness).offersCopy, "idle over \(readiness)")
+            for activity in [Dictation.Activity.transcribing, .refused(why: "x"), .listening(heard: heard)] {
+                #expect(!activity.box(over: readiness).offersCopy, "\(activity) over \(readiness)")
             }
-            #expect(!Dictation.Activity.listening(heard: heard).box(over: readiness).offersCopy)
         }
     }
 

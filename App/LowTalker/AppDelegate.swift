@@ -70,7 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(text, forType: .string) {
-            sessions.notice("copied \(text.count, privacy: .public) characters of held words")
+            sessions.notice("copied \(text.count, privacy: .public) characters of held words, and dismissed them")
+            // The words are the person's to paste now. Held, the next press would type them ahead
+            // of its own, beside the paste; dismissed, the box closes and the menu brings them back.
+            hold.dismiss()
         } else {
             sessions.error("the pasteboard refused \(text.count, privacy: .public) characters of held words")
         }

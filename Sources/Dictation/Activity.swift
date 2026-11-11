@@ -75,7 +75,7 @@ extension Dictation {
         /// any; the words being spoken, which it shows in place of any held; why a press is not
         /// heard; whether held words are offered to a click into a text field, which only a box
         /// with nothing on its way does; whether Insert may be offered for them; and whether
-        /// Copy is, which follows from the words shown.
+        /// Copy is, which follows from the click.
         public struct Box: Equatable, Sendable {
             public let state: String?
             public let heard: Transcript?
@@ -91,11 +91,11 @@ extension Dictation {
                 self.offersInsert = offersInsert
             }
 
-            /// Whether Copy is offered for the held words: wherever the box shows them, and so not
-            /// while it shows a press's own. A copy needs no loop and waits on nothing, so neither
-            /// a press on its way nor the load holds it back. [LAW:one-source-of-truth] Read from
-            /// what the box shows, never set beside it.
-            public var offersCopy: Bool { heard == nil }
+            /// Whether Copy is offered for the held words: where a click into a text field is, with
+            /// nothing on its way. A press on its way carries the held words in its own insert, so
+            /// words copied then could land as well and be pasted twice. [LAW:one-source-of-truth]
+            /// One rule for when the held words are the person's to place.
+            public var offersCopy: Bool { offersClick }
         }
 
         /// The activity without the words, which are what the user dictated, so a log may
