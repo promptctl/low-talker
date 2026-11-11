@@ -21,7 +21,8 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
         case toTheField
     }
 
-    /// What the field does with words that do not fit its `maxlength`.
+    /// What the field does with words that do not fit its `maxlength`, where someone said; nil where
+    /// nobody did, and the fake fails the case that overflows it rather than guess.
     public enum Overflow: Sendable {
         /// It keeps what fits.
         case keepsWhatFits
@@ -33,9 +34,9 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
 
     public let description: String
     public let access: Access
-    public let overflow: Overflow
+    public let overflow: Overflow?
 
-    init(_ description: String, access: Access, overflow: Overflow = .keepsWhatFits) {
+    init(_ description: String, access: Access, overflow: Overflow? = nil) {
         self.description = description
         self.access = access
         self.overflow = overflow
@@ -47,9 +48,8 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
     /// is not a call the port makes, so it is not modelled.
     public static let webKitTextArea = ClientProfile("a WebKit <textarea>", access: .toTheField)
     /// Safari's and Chrome's `<input>`, measured as `<input maxlength=10>`: the none tier, before and
-    /// after an insert. What it keeps of words past its `maxlength` is unmeasured: this row keeps what
-    /// fits, `webKitInputKeepingAll` and `webKitInputKeepingNone` give the other answers, and
-    /// `ContractCase.possible` states all three.
+    /// after an insert. What it keeps of words past its `maxlength` is unmeasured, and the profiles
+    /// in `possible` give each answer.
     public static let webKitInput = ClientProfile("a WebKit <input>", access: .none)
     /// A window with no text field focused, which still hands the input method a client: Calculator,
     /// Installer, Activity Monitor with every window closed, a page whose body text was clicked
@@ -61,12 +61,15 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
 
     // Each answer a client nobody measured could give, as a profile of its own.
 
-    /// A WebKit `<input>` handed more than its `maxlength`, if it keeps it all.
+    /// A WebKit `<input>` handed more than its `maxlength`, if it keeps what fits.
+    public static let webKitInputKeepingWhatFits = ClientProfile("a WebKit <input> keeping what fits", access: .none, overflow: .keepsWhatFits)
+    /// If it keeps it all.
     public static let webKitInputKeepingAll = ClientProfile("a WebKit <input> keeping all it is handed", access: .none, overflow: .keepsThemAll)
     /// If it keeps none of it.
     public static let webKitInputKeepingNone = ClientProfile("a WebKit <input> keeping none of what overflows it", access: .none, overflow: .keepsNone)
     /// A WebKit `<textarea>` with a `maxlength` (low-reliability-z2z.rgy), if it keeps what fits.
-    public static let webKitLimitedTextArea = ClientProfile("a WebKit <textarea maxlength> keeping what fits", access: .toTheField)
+    public static let webKitLimitedTextArea = ClientProfile("a WebKit <textarea maxlength> keeping what fits", access: .toTheField,
+                                                                   overflow: .keepsWhatFits)
     /// If it keeps it all.
     public static let webKitLimitedTextAreaKeepingAll = ClientProfile("a WebKit <textarea maxlength> keeping all it is handed", access: .toTheField,
                                                                       overflow: .keepsThemAll)
@@ -74,7 +77,8 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
     public static let webKitLimitedTextAreaKeepingNone = ClientProfile("a WebKit <textarea maxlength> keeping none of what overflows it",
                                                                        access: .toTheField, overflow: .keepsNone)
     /// If its `maxlength` takes its document access away, as the `<input>`'s is measured without.
-    public static let webKitLimitedTextAreaBlind = ClientProfile("a WebKit <textarea maxlength> giving no document access", access: .none)
+    public static let webKitLimitedTextAreaBlind = ClientProfile("a WebKit <textarea maxlength> giving no document access", access: .none,
+                                                                       overflow: .keepsWhatFits)
     /// iTerm2's terminal, where words land in plain sight, as bem read it: no document access.
     /// Its `length()` of 0 (Committer) is not a call the port makes, so it is not modelled.
     public static let iTerm2Blind = ClientProfile("iTerm2's terminal giving no document access", access: .none)
@@ -86,7 +90,7 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
     /// Every answer nobody measured, so a behavior run under all of them holds whichever the
     /// client gives.
     public static let possible: [ClientProfile] = [
-        webKitInputKeepingAll, webKitInputKeepingNone,
+        webKitInputKeepingWhatFits, webKitInputKeepingAll, webKitInputKeepingNone,
         webKitLimitedTextArea, webKitLimitedTextAreaKeepingAll, webKitLimitedTextAreaKeepingNone, webKitLimitedTextAreaBlind,
         iTerm2Blind, iTerm2SelectionOnly, iTerm2,
     ]
@@ -188,11 +192,17 @@ public final class FakeTextInputClient: TextInputClient {
             return
         }
         let room = maxLength.map { $0 - (text.utf16.count - replaced.length) } ?? .max
-        let kept = if words.utf16.count <= room { words } else {
+        let kept: String
+        if words.utf16.count <= room {
+            kept = words
+        } else {
             switch profile.overflow {
-            case .keepsWhatFits: Self.prefix(of: words, fitting: room)
-            case .keepsThemAll: words
-            case .keepsNone: ""
+            case .keepsWhatFits: kept = Self.prefix(of: words, fitting: room)
+            case .keepsThemAll: kept = words
+            case .keepsNone: kept = ""
+            case nil:
+                Issue.record("insertText into \(profile) overflowed its maxlength, and nobody said what it keeps")
+                return
             }
         }
         text = (text as NSString).replacingCharacters(in: replaced, with: kept)

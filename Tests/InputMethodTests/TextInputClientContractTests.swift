@@ -28,6 +28,24 @@ import Testing
         #expect(!statement.disagreements(of: field, reading: { field.text }).isEmpty)
     }
 
+    /// No selection-only client was measured taking an explicit range, so the fake fails the case
+    /// that handed it one, and leaves the field as it was.
+    @Test func anExplicitRangeIntoASelectionOnlyClientFailsTheCaseThatGaveIt() {
+        let field = FakeTextInputClient(.iTerm2SelectionOnly, holding: "alpha")
+
+        withKnownIssue { field.insertText("RNG", replacementRange: NSRange(location: 0, length: 3)) }
+        #expect(field.text == "alpha")
+    }
+
+    /// Nobody said what a measured field keeps past its `maxlength`, so the fake fails the case
+    /// that overflows one, and leaves the field as it was.
+    @Test func anOverflowNobodyStatedFailsTheCaseThatGaveIt() {
+        let field = FakeTextInputClient(.webKitInput, maxLength: 3)
+
+        withKnownIssue { field.insertText("alpha", replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        #expect(field.text.isEmpty)
+    }
+
     /// No client was measured answering a range past the end of its field, so the fake fails the
     /// one case that handed it such a range, and leaves the field as it was, rather than guess.
     @Test func aRangePastTheFieldFailsTheCaseThatGaveIt() {

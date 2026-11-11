@@ -80,12 +80,11 @@ public nonisolated extension ContractCase {
         ContractCase(profile: .noTextField, holding: "", act: .read, answers: blind, holds: ""),
     ]
 
-    /// What each profile in `ClientProfile.possible` answers to the question nobody measured, and
-    /// for the `<input>`, the measured profile's own guess: a measurement settles which of a
-    /// question's profiles the client is, and the rest are deleted.
+    /// What each profile in `ClientProfile.possible` answers to the question nobody measured: a
+    /// measurement settles which of a question's profiles the client is, and the rest are deleted.
     static let possible: [ContractCase] = [
         // bem's `<input maxlength=10>` row has no insert: what the field keeps of 30.
-        overflowing(.webKitInput, answers: blind, holds: "alpha brav"),
+        overflowing(.webKitInputKeepingWhatFits, answers: blind, holds: "alpha brav"),
         overflowing(.webKitInputKeepingAll, answers: blind, holds: thirty),
         overflowing(.webKitInputKeepingNone, answers: blind, holds: ""),
         // bem measured the textarea without `maxlength`: whether one with it still gives document

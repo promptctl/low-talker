@@ -221,33 +221,26 @@ import Testing
         return answer
     }
 
-    /// Thirty characters dictated into a field with a `maxlength` of 10. A client giving no document
-    /// access is no cursor, so the words are refused before any commit and the app holds them. One
-    /// giving it is answered inserted with all 30, whatever the field kept: under a profile keeping
-    /// 10, 20 never reached the field and nothing holds them, the loss low-reliability-z2z.rgy
-    /// ends, and this case is its proof.
+    /// Words dictated past a field's `maxlength`, under each stated answer of what the field keeps. A
+    /// client giving no document access is no cursor, so the words are refused before any commit
+    /// and the app holds them. One giving it is answered inserted with all of them, whatever the
+    /// field kept: under a profile keeping less, the rest never reached the field and nothing holds
+    /// them, the loss low-reliability-z2z.rgy ends, and this case is its proof.
     @MainActor
-    @Test(arguments: ClientProfile.all)
-    func aDictationIsAnsweredByWhetherTheClientGivesDocumentAccess(_ profile: ClientProfile) async throws {
-        let field = FakeTextInputClient(in: "com.apple.Safari", profile, maxLength: 10)
+    @Test(arguments: ContractCase.possible.filter { $0.maxLength != nil })
+    func aDictationIsAnsweredByWhetherTheClientGivesDocumentAccess(_ statement: ContractCase) async throws {
+        guard case let .insert(words, _) = statement.act else { Issue.record("\(statement) dictates nothing"); return }
+        let field = statement.fake()
 
-        let answer = try await Self.send(InsertRequest("alpha bravo charlie delta echo", into: .cursorInFront), to: field)
+        let answer = try await Self.send(InsertRequest(words, into: .cursorInFront), to: field)
 
-        switch profile.access {
+        switch statement.profile.access {
         case .none:
             #expect(answer == .refused(.noTextFieldHasFocus))
             #expect(field.text.isEmpty)
         case .selectionOnly, .toTheField:
-            #expect(answer == .inserted(characters: 30, into: "com.apple.Safari"))
-            #expect(field.text == Self.kept(of: "alpha bravo charlie delta echo", fitting: 10, by: profile.overflow))
-        }
-    }
-
-    private static func kept(of words: String, fitting room: Int, by overflow: ClientProfile.Overflow) -> String {
-        switch overflow {
-        case .keepsWhatFits: String(words.prefix(room))
-        case .keepsThemAll: words
-        case .keepsNone: ""
+            #expect(answer == .inserted(characters: words.count, into: try #require(field.application)))
+            #expect(field.text == statement.holds)
         }
     }
 
