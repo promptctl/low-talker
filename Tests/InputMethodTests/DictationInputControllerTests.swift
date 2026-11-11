@@ -8,7 +8,8 @@ import Testing
 /// Every other command, and all text, is declined, so it reaches the app as it would have.
 ///
 /// [LAW:behavior-not-structure] Asked by naming the command and reading the answer, not by checking which
-/// methods the class overrides.
+/// methods the class overrides. A Return is asked with the modifiers the case holds, never the ones this Mac's
+/// keyboard holds while the suite runs.
 ///
 /// On the main actor because the controller is an `IMKInputController`, which is built and answered there.
 ///
@@ -67,21 +68,28 @@ import Testing
     /// A Return passes when the app owes nothing, as it did before the hold.
     @Test func aReturnPassesWhenNothingIsOwed() throws {
         try withApp(App(owing: .success(.nothing))) { controller in
-            #expect(controller.didCommand(by: Self.insertNewline, client: nil) == false)
+            #expect(controller.didCommand(by: Self.insertNewline, holding: []) == false)
         }
     }
 
     /// A Return passes once the words the app owes have landed.
     @Test func aReturnPassesWhenTheOwedWordsLand() throws {
         try withApp(App(owing: .success(.words), settling: .success(.landed))) { controller in
-            #expect(controller.didCommand(by: Self.insertNewline, client: nil) == false)
+            #expect(controller.didCommand(by: Self.insertNewline, holding: []) == false)
         }
     }
 
     /// A Return is kept when the words the app owes did not all reach a cursor.
     @Test func aReturnIsKeptWhenTheOwedWordsDoNotLand() throws {
         try withApp(App(owing: .success(.words), settling: .success(.notLanded))) { controller in
-            #expect(controller.didCommand(by: Self.insertNewline, client: nil) == true)
+            #expect(controller.didCommand(by: Self.insertNewline, holding: []) == true)
+        }
+    }
+
+    /// A Return typed with a modifier is another key, and passes even when the owed words did not land.
+    @Test func aReturnWithAModifierPassesWhenTheOwedWordsDoNotLand() throws {
+        try withApp(App(owing: .success(.words), settling: .success(.notLanded))) { controller in
+            #expect(controller.didCommand(by: Self.insertNewline, holding: .option) == false)
         }
     }
 

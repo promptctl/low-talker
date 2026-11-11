@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 @testable import InputMethod
 import InputMethodFakes
 import Insertion
@@ -43,7 +43,7 @@ import Testing
             owing: { asked.add("owing"); return .success(.nothing) },
             settling: { asked.add("settled"); return .success(.landed) }))
 
-        #expect(gate.verdict(at: 1) == .pass)
+        #expect(gate.verdict(at: 1, holding: []) == .pass)
         #expect(asked.all == ["owing"])
     }
 
@@ -63,7 +63,7 @@ import Testing
             return .success(.landed)
         }))
 
-        let verdict = gate.verdict(at: 1)
+        let verdict = gate.verdict(at: 1, holding: [])
         order.add("the Return was let through: \(verdict == .pass)")
 
         #expect(field.text == "the tail")
@@ -76,7 +76,20 @@ import Testing
     @MainActor
     @Test func wordsThatDidNotAllLandKeepTheReturn() {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .success(.notLanded) }))
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1, holding: []) == .keep)
+    }
+
+    /// A Return with a modifier is another key: it passes as typed, and the app is not asked about a
+    /// debt even when it owes words that did not land.
+    @MainActor
+    @Test func aReturnWithAModifierPassesWithoutTheAppBeingAsked() {
+        let asked = Log()
+        let gate = SteeringGate(ceiling: Self.farOff, asking: App(
+            owing: { asked.add("owing"); return .success(.words) },
+            settling: { asked.add("settled"); return .success(.notLanded) }))
+
+        #expect(gate.verdict(at: 1, holding: .shift) == .pass)
+        #expect(asked.all.isEmpty)
     }
 
     /// A debt the app admitted and then did not settle is not a debt that was settled.
@@ -84,7 +97,7 @@ import Testing
     @Test(arguments: [NotAnswered.silent(after: .seconds(5)), .abandoned, .notReadable(bytes: 3)])
     func aDebtTheAppAdmittedAndDidNotSettleKeepsTheReturn(why: NotAnswered) {
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(settling: { .failure(why) }))
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1, holding: []) == .keep)
     }
 
     /// The Return is held only against a debt the app has admitted to: an app that cannot be
@@ -97,7 +110,7 @@ import Testing
         let gate = SteeringGate(ceiling: Self.farOff, asking: App(
             owing: { .failure(why) }, settling: { asked.add("settled"); return .success(.notLanded) }))
 
-        #expect(gate.verdict(at: 1) == .pass)
+        #expect(gate.verdict(at: 1, holding: []) == .pass)
         #expect(asked.all.isEmpty)
     }
 
@@ -110,7 +123,7 @@ import Testing
         let gate = SteeringGate(ceiling: .milliseconds(150), asking: App(settling: { release.wait(); return .success(.landed) }))
 
         let started = ContinuousClock.now
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1, holding: []) == .keep)
         #expect(ContinuousClock.now - started >= .milliseconds(150))
     }
 
@@ -125,20 +138,20 @@ import Testing
             defer { earlierAnswered.signal() }
             return .success(.notLanded)
         }))
-        #expect(gate.verdict(at: 1) == .keep)
+        #expect(gate.verdict(at: 1, holding: []) == .keep)
 
         gate.connect(App(settling: {
             release.signal()
             earlierAnswered.wait()
             return .success(.landed)
         }))
-        #expect(gate.verdict(at: 2) == .pass)
+        #expect(gate.verdict(at: 2, holding: []) == .pass)
     }
 
     /// Before an app is connected nobody admits anything, so every Return passes.
     @MainActor
     @Test func aGateNoAppWasConnectedToPassesEveryReturn() {
-        #expect(SteeringGate().verdict(at: 1) == .pass)
+        #expect(SteeringGate().verdict(at: 1, holding: []) == .pass)
     }
 
     // MARK: - Escape

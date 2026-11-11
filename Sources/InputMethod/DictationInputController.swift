@@ -95,17 +95,24 @@ public final class DictationInputController: IMKInputController, InputController
     nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {
         // Debug level: this is made once per key typed anywhere.
         return onMainActor("didCommand", selector, level: .debug) { selector in
-            FocusedClient.shared.typedInto(self)
-            imkLog.debug("\(self.said("was handed a command"), privacy: .public)")
-            if selector == NSSelectorFromString("insertNewline:") { return self.holdReturn() }
-            if selector == NSSelectorFromString("cancelOperation:") {
-                let kept = SteeringGate.shared.escapeVerdict(at: ProcessInfo.processInfo.systemUptime) == .keep
-                // The app cancels the open press when told, and is told only of an Escape it is kept. [LAW:single-enforcer]
-                if kept { Notices.shared.keyTyped(.escape) }
-                return kept
-            }
-            return false
+            // IMK hands the command while the key is still down, so the modifiers held now are the key's
+            // own. Read here, at the edge, and handed on as a value. [LAW:effects-at-boundaries]
+            self.didCommand(by: selector, holding: NSEvent.modifierFlags)
         }
+    }
+
+    /// The answer to the command `selector`, bound to a key typed with `modifiers` held.
+    public func didCommand(by selector: Selector?, holding modifiers: NSEvent.ModifierFlags) -> Bool {
+        FocusedClient.shared.typedInto(self)
+        imkLog.debug("\(self.said("was handed a command"), privacy: .public)")
+        if selector == NSSelectorFromString("insertNewline:") { return holdReturn(holding: modifiers) }
+        if selector == NSSelectorFromString("cancelOperation:") {
+            let kept = SteeringGate.shared.escapeVerdict(at: ProcessInfo.processInfo.systemUptime) == .keep
+            // The app cancels the open press when told, and is told only of an Escape it is kept. [LAW:single-enforcer]
+            if kept { Notices.shared.keyTyped(.escape) }
+            return kept
+        }
+        return false
     }
 
     /// A key typed as text, which is declined, so it reaches the app as the person typed it.
@@ -118,11 +125,8 @@ public final class DictationInputController: IMKInputController, InputController
     }
 
     /// The held Return: kept, and the system's beep said, when the gate keeps it.
-    @MainActor private func holdReturn() -> Bool {
-        // A Return with a modifier is another key and passes as typed. IMK hands the command while the
-        // key is still down, so the modifiers held now are the key's own. [LAW:single-enforcer]
-        guard !SteeringKey.makesAnotherKey(NSEvent.modifierFlags) else { return false }
-        let kept = SteeringGate.shared.verdict(at: ProcessInfo.processInfo.systemUptime) == .keep
+    private func holdReturn(holding modifiers: NSEvent.ModifierFlags) -> Bool {
+        let kept = SteeringGate.shared.verdict(at: ProcessInfo.processInfo.systemUptime, holding: modifiers) == .keep
         // The system's own answer to a Return that did nothing, so a kept one is heard at the moment it
         // was typed and not only found in a log. [LAW:no-silent-failure]
         if kept { NSSound.beep() }

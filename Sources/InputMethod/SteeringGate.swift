@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Identity
 import Insertion
 import os
@@ -112,11 +112,19 @@ public nonisolated final class SteeringGate: Sendable {
         let decided = Mutex<Decided?>(nil)
     }
 
-    /// What the gate does with a Return typed at `timestamp`, on the main thread, where `handle` is
-    /// called. Returns once the Return passes or is kept, and in between runs the commits the app's
-    /// inserts ask for.
+    /// What the gate does with a Return typed at `timestamp` with `modifiers` held, on the main thread,
+    /// where `didCommand` is called. Returns once the Return passes or is kept, and in between runs the
+    /// commits the app's inserts ask for.
+    ///
+    /// A Return with a modifier is another key, and passes as typed without the app being asked.
     @MainActor
-    public func verdict(at timestamp: TimeInterval) -> SteeringVerdict {
+    public func verdict(at timestamp: TimeInterval, holding modifiers: NSEvent.ModifierFlags) -> SteeringVerdict {
+        guard !SteeringKey.makesAnotherKey(modifiers) else {
+            // [LAW:nothing-unseen] Routine, as Shift+Return in a chat box is, so at debug level like a
+            // Return with nothing owed.
+            log.debug("a Return passes: the modifiers held, 0x\(String(modifiers.rawValue, radix: 16), privacy: .public), make it another key")
+            return .pass
+        }
         let (question, ceiling) = (self.question, self.ceiling)
         return answered("a Return", unanswered: Decided(verdict: .keep, because: "the app had not answered after \(ceiling)")) { asker in
             Self.decide(asker, at: timestamp, question: question, ceiling: ceiling)
