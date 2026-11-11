@@ -382,11 +382,13 @@ import TestProbes
         .unreachable(.answerWasAbandoned(port: "port")),
         .unreachable(.failed(port: "port", status: 268_435_459, words: .notSent)),
         .unreachable(.answerWasNotReadable(port: "port", bytes: 3, words: .mayHaveLanded)),
+        .unreachable(.answeredByAStranger(port: "port", pid: 1, because: .someoneElse(.adHoc(cdhash: "0a")), required: .adHoc(cdhash: "0b"), words: .mayHaveLanded)),
+        .answererUnreadable(.notValid),
     ]
 
-    /// A take-back is not an insert, so a failed one says what became of the words in the field and
-    /// nothing of what becomes of an insert's: not that a dictation was not inserted or not sent,
-    /// nor that it is offered again, nor that it may have landed and must not be said again.
+    /// A take-back is not an insert, so a failed one says why, and what became of the words in the
+    /// field, and nothing of what becomes of an insert's: not that a dictation was not inserted or
+    /// not sent, nor that it is offered again, nor that it may have landed and must not be said again.
     @Test(arguments: takeBackFailures)
     func aFailedTakeBackSaysNothingOfAnInsertsFate(_ failure: InsertFailure) async throws {
         let rig = try await Rig(hearing: Self.engine())
@@ -399,6 +401,7 @@ import TestProbes
 
         let line = failureLine(left)
         #expect(line.hasPrefix("WARNING: You cancelled a dictation, but 1 of its words "))
+        #expect(line.contains(failure.reason), "\(line)")
         for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "land if"] {
             #expect(!line.contains(fate), "\(line)")
         }

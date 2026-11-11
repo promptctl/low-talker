@@ -109,7 +109,7 @@ public struct NotYetTaken: Error, Equatable, Sendable, CustomStringConvertible {
     public var reason: String { "\(into) did not take what it was handed in time." }
 
     public var description: String {
-        "WARNING: \(into) did not take the \(characters) characters in time. They land if it recovers; do not dictate them again."
+        "WARNING: \(reason) The \(characters) characters land if it recovers; do not dictate them again."
     }
 }
 
@@ -212,20 +212,23 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
         }
     }
 
-    /// What became of the words the request carried, and how to have them offered again.
+    /// What became of an insert's words, and how to have them offered again; nil where whoever
+    /// sent the request tells it: the press that stopped, or the cancel whose take-back it was.
     private var fate: String? {
         switch self {
         case .noTextFieldHasFocus, .cursorIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy:
             "Your dictation was not inserted."
-        case .dictationIsInAnotherApp: nil
+        case .dictationIsInAnotherApp, .wordsCannotBeTakenBack: nil
         case .cursorIsNotSettled: "Your dictation was not inserted; press an arrow key where you want it and it is offered again."
-        case .requestWasNotReadable:
-            "Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
+        case .requestWasNotReadable: Self.offeredAgainOnReinstall
         case .inputSourceIsNotSelected:
             "Your dictation was not inserted; select \(AppIdentity.displayName) in the Input menu and it is offered again."
-        case .wordsCannotBeTakenBack: "Nothing was changed."
         }
     }
+
+    /// The fate of words an input method of another build would not insert, whether it could
+    /// not read the request or refused it for a reason this build has no name for.
+    static let offeredAgainOnReinstall = "Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
 
     public var description: String { ["WARNING: \(reason)", fate].compactMap { $0 }.joined(separator: " ") }
 }
@@ -333,8 +336,7 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .refused(let refusal): "\(refusal)"
-        case .refusedForAnUnknownReason:
-            "WARNING: \(reason) Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
+        case .refusedForAnUnknownReason: "WARNING: \(reason) \(Refusal.offeredAgainOnReinstall)"
         case .notYetTaken(let notYetTaken): "\(notYetTaken)"
         case .unreachable(let unreachable): "\(unreachable)"
         case .answererUnreadable: "WARNING: \(reason) \(Words.notSent)"
