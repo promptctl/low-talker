@@ -876,7 +876,8 @@ public final class AudioCapture {
         }
     }
 
-    /// The device a readied microphone is bound to went away or changed shape. It can happen
+    /// The device a readied microphone is bound to went away, changed shape, or named other
+    /// channels to be heard on. It can happen
     /// at any point in that microphone's life and not only while a press holds it open, which
     /// is the whole of why the watch behind this belongs to the input - see
     /// `AudioHardware.prepareInput`. Either way the input is no longer one to open, so both
@@ -1112,8 +1113,9 @@ public struct DeviceReport: CustomStringConvertible {
     public enum Cause: String {
         /// The system default input moved to another device.
         case defaultInputChanged = "the default input changed"
-        /// The device a readied microphone is bound to went away or changed shape.
-        case boundDeviceChanged = "the microphone's device went away or changed shape"
+        /// The device a readied microphone is bound to went away, changed shape, or named other
+        /// channels to be heard on.
+        case boundDeviceChanged = "the microphone's device went away, changed shape, or named other channels for stereo"
         /// The microphone came to rest - at a key-up, at `start`, or at a move of the resting
         /// mode - on a device that is no longer the default.
         case restedOffTheDefault = "the microphone came to rest on an input that is no longer the default"

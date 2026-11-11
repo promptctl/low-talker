@@ -178,7 +178,7 @@ final class HALInput: PreparedInput {
 
                 // This IOProc is bound to one device, so a device that goes away or changes
                 // shape under it is capture's cue to ready another against whatever replaced
-                // it. Both watches live here rather than in `open()` because what they watch is
+                // it. The watches live here rather than in `open()` because what they watch is
                 // the binding, and the binding lasts as long as this input: registered at the
                 // press they left the resting stretch between presses unwatched, and a device
                 // that renegotiated its format there was heard by nobody. See

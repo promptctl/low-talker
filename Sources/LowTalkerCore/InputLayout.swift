@@ -192,17 +192,23 @@ public enum StereoChannels: Sendable, Equatable {
 /// stereo, or the one it names twice, since AVAudioFormat describes no more than two without a
 /// channel layout. One that names none it has is heard on its first two rather than refused,
 /// because a refused device fails every press.
-public enum HeardChannels: Sendable, Equatable, CustomStringConvertible {
-    /// Every channel of a device of one or two.
-    case every(Int)
-    /// The channels a wider device names for stereo.
-    case named(Int, Int)
-    /// The first two channels of a wider device that names none it has, and what it named.
-    case first(StereoChannels)
+public struct HeardChannels: Sendable, Equatable, CustomStringConvertible {
+    /// Why these channels. Private, so `init` is the one way to make one and no case is held with
+    /// a count or a pair it did not check.
+    private let source: Source
+
+    private enum Source: Sendable, Equatable {
+        /// Every channel of a device of one or two.
+        case every(Int)
+        /// The channels a wider device names for stereo.
+        case named(Int, Int)
+        /// The first two channels of a wider device that names none it has, and what it named.
+        case first(StereoChannels)
+    }
 
     /// For a device of `count` channels, at least one.
     public init(of count: Int, stereo: StereoChannels) {
-        self = switch stereo {
+        source = switch stereo {
         case _ where count <= 2: .every(count)
         case .named(let left, let right) where (1...count).contains(left) && (1...count).contains(right): .named(left, right)
         default: .first(stereo)
@@ -210,7 +216,7 @@ public enum HeardChannels: Sendable, Equatable, CustomStringConvertible {
     }
 
     public var channels: [Int] {
-        switch self {
+        switch source {
         case .every(let count): Array(1...count)
         case .named(let left, let right): left == right ? [left] : [left, right]
         case .first: [1, 2]
@@ -220,7 +226,7 @@ public enum HeardChannels: Sendable, Equatable, CustomStringConvertible {
     /// Whether naming other channels for stereo would change which are heard, which is when the
     /// pair is watched.
     var followsStereo: Bool {
-        switch self {
+        switch source {
         case .every, .first(.unpublished): false
         case .named, .first(.named): true
         }
@@ -228,7 +234,7 @@ public enum HeardChannels: Sendable, Equatable, CustomStringConvertible {
 
     public var description: String {
         let heard = channels.count == 1 ? "heard on channel \(channels[0])" : "heard on channels \(channels[0]) and \(channels[1])"
-        return switch self {
+        return switch source {
         case .every, .named: heard
         case .first(.named(let left, let right)): "\(heard), its first: it names channels \(left) and \(right) for stereo"
         case .first(.unpublished(let status)): "\(heard), its first: it names no channels for stereo (status \(status))"
