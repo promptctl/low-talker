@@ -1,6 +1,7 @@
 import AppKit
 import Bench
 import Dictation
+import GrammaticalNumber
 import Identity
 import Grants
 import InputSource
@@ -59,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
         let words = hold.held?.allWords.words.count ?? 0
         let unheard = listening == nil ? ", with no loop listening to insert them" : ""
-        sessions.notice("asked to insert \(words) held words\(unheard, privacy: .public)")
+        sessions.notice("asked to insert \(counted(words, "held word", "held words"), privacy: .public)\(unheard, privacy: .public)")
         listening?.dictation.insertHeld()
     }, copy: { [unowned self] in
         // A click is the person asking for the copy, so replacing what the clipboard held is what
@@ -70,12 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(text, forType: .string) {
-            sessions.notice("copied \(text.count, privacy: .public) characters of held words, and dismissed them")
+            sessions.notice("copied \(counted(text.count, "character", "characters"), privacy: .public) of held words, and dismissed them")
             // The words are the person's to paste now. Held, the next press would type them ahead
             // of its own, beside the paste; dismissed, the box closes and the menu brings them back.
             hold.dismiss()
         } else {
-            sessions.error("the pasteboard refused \(text.count, privacy: .public) characters of held words")
+            sessions.error("the pasteboard refused \(counted(text.count, "character", "characters"), privacy: .public) of held words")
         }
     })
     /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
@@ -939,7 +940,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .session(let session):
             sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); \(press.record, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
         case .usedAsModifier(let landed, let standing, let discarded):
-            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so the press was not dictation and nothing heard past its inserts is held or shown; \(landed, privacy: .public) words inserted before, \(standing, privacy: .public) that may have been, \(discarded, privacy: .public) heard after them discarded; \(press.record, privacy: .public)")
+            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so the press was not dictation and nothing heard past its inserts is held or shown; \(counted(landed, "word", "words"), privacy: .public) inserted before, \(standing, privacy: .public) that may have been, \(discarded, privacy: .public) heard after them discarded; \(press.record, privacy: .public)")
         case .cancelled(let cancelled):
             sessions.notice("\(press.mode, privacy: .public): the press was cancelled with Escape, so nothing of it is held, offered or shown; \(cancelled.description, privacy: .public); \(press.record, privacy: .public)")
         case .failed(let failed):
@@ -1123,7 +1124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func bringBackDismissed() {
         // [LAW:nothing-unseen] A click with no loop to bring them back through moves nothing, and says so.
         let unheard = listening == nil ? ", with no loop listening to bring them back" : ""
-        sessions.notice("asked to bring back \(self.hold.dismissed?.allWords.words.count ?? 0, privacy: .public) dismissed words\(unheard, privacy: .public)")
+        sessions.notice("asked to bring back \(counted(self.hold.dismissed?.allWords.words.count ?? 0, "dismissed word", "dismissed words"), privacy: .public)\(unheard, privacy: .public)")
         // The panel opens again only where a loop will bring the words back to show.
         if let listening {
             hud.offerAgain()
@@ -1147,9 +1148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ErrorRow(text, copyingTo: .general) { [menuBarLog] copied in
             // [LAW:nothing-unseen] The count, not the text: a failure line can carry dictated words.
             if copied.taken {
-                menuBarLog.notice("menu: copied the \(line.rawValue, privacy: .public) error row, \(copied.characters, privacy: .public) characters")
+                menuBarLog.notice("menu: copied the \(line.rawValue, privacy: .public) error row, \(counted(copied.characters, "character", "characters"), privacy: .public)")
             } else {
-                menuBarLog.error("menu: the pasteboard refused the \(line.rawValue, privacy: .public) error row's \(copied.characters, privacy: .public) characters")
+                menuBarLog.error("menu: the pasteboard refused the \(line.rawValue, privacy: .public) error row's \(counted(copied.characters, "character", "characters"), privacy: .public)")
             }
         }
     }

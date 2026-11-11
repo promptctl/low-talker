@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 import LowTalkerCore
 import WhisperKit
 
@@ -202,7 +203,7 @@ extension ModelStore {
             case .downloading(let fraction): "downloading \(Int(fraction * 100))%"
             case .unpacking: "unpacking model"
             case .copying: "copying model"
-            case .evicting(let paths): "removing \(paths.count) damaged file\(paths.count == 1 ? "" : "s"): \(paths.joined(separator: ", "))"
+            case .evicting(let paths): "removing \(counted(paths.count, "damaged file", "damaged files")): \(paths.joined(separator: ", "))"
             }
         }
     }

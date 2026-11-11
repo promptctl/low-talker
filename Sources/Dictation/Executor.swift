@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 import Insertion
 import LowTalkerCore
 import os
@@ -58,7 +59,7 @@ public struct Executor {
         public let since: Since.Key
 
         public var description: String {
-            "inserted \(characters) characters at the cursor in \(into.rawValue), \(since.rawValue) to acknowledged \(Int(acknowledged / .milliseconds(1))) ms"
+            "inserted \(counted(characters, "character", "characters")) at the cursor in \(into.rawValue), \(since.rawValue) to acknowledged \(Int(acknowledged / .milliseconds(1))) ms"
         }
     }
 

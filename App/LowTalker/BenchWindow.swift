@@ -1,5 +1,6 @@
 import AppKit
 import Bench
+import GrammaticalNumber
 import LowTalkerCore
 
 /// The Benchmark window: every option `LowTalker --bench` takes, a run started and cancelled
@@ -287,7 +288,7 @@ final class BenchWindow: NSObject, NSTableViewDataSource {
             }
             rows.append(row)
             table.reloadData()
-            status.stringValue = "\(rows.count) rows; \(row.narration)"
+            status.stringValue = "\(counted(rows.count, "row", "rows")); \(row.narration)"
         }
     }
 

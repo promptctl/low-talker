@@ -1,3 +1,4 @@
+import GrammaticalNumber
 import LowTalkerCore
 
 extension Dictation {
@@ -105,7 +106,7 @@ extension Dictation {
         public var description: String {
             switch self {
             case .idle: "idle"
-            case .listening(let heard): "listening, \(heard.words.count) words heard"
+            case .listening(let heard): "listening, \(counted(heard.words.count, "word", "words")) heard"
             case .refused(let why): "refused: \(why)"
             case .transcribing: "transcribing"
             }

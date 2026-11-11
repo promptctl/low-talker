@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 import Insertion
 import os
 
@@ -211,7 +212,7 @@ public nonisolated struct Placed: Sendable, CustomStringConvertible {
         case let .notYetTaken(_, _, seen): "\(seen), still committing when time ran out"
         case let .answered(_, seen): seen
         }
-        return "insert \(insert) of \(request.text.count) characters into \(request.destination): \(answer), \(context)"
+        return "insert \(insert) of \(counted(request.text.count, "character", "characters")) into \(request.destination): \(answer), \(context)"
     }
 }
 
@@ -245,7 +246,7 @@ public nonisolated struct Ended: Sendable, CustomStringConvertible {
         case let .refused(refusal, deciding, late):
             "\(main): refused \(refusal.rawValue) after \(Self.ms(deciding)) deciding" + (late ? ", after the port had answered that the input method is busy" : "")
         case let .committed(characters, application, deciding, committing, late):
-            "\(main): \(Self.ms(deciding)) deciding, then \(Self.ms(committing)) committing \(characters) characters into \(application)"
+            "\(main): \(Self.ms(deciding)) deciding, then \(Self.ms(committing)) committing \(counted(characters, "character", "characters")) into \(application)"
                 + (late ? ", finishing after the port had answered that they were not yet taken" : "")
         }
     }

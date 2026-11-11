@@ -352,6 +352,7 @@ import TestProbes
         let left = try #require(await rig.report().failure as? CancelLeftWords)
 
         #expect(left.left == 1)
+        #expect(failureLine(left).hasPrefix("WARNING: You cancelled a dictation, but 1 of its words is still in com.apple.TextEdit, and nothing more was done. "))
         #expect(rig.inputMethod.field == " hello")
         #expect(rig.hold.held == nil)
     }
@@ -368,7 +369,7 @@ import TestProbes
         let left = try #require(await rig.report().failure as? CancelLeftWords)
 
         #expect(rig.inputMethod.takeBacks == [" hello"])
-        #expect("\(left)".contains("may have been taken back, or may still be"))
+        #expect("\(left)".hasPrefix("WARNING: You cancelled a dictation, but 1 of its words may have been taken back, or may still be in com.apple.TextEdit, and nothing more was done. "))
     }
 
     /// A take-back is not an insert, so a failed one says why, and what became of the words in the
@@ -387,8 +388,20 @@ import TestProbes
         let line = failureLine(left)
         #expect(line.hasPrefix("WARNING: You cancelled a dictation, but 1 of its words "))
         #expect(line.contains(failure.reason), "\(line)")
-        for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "land if"] {
+        for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "if it recovers"] {
             #expect(!line.contains(fate), "\(line)")
         }
+    }
+
+    /// A cancelled press's account agrees with each of its counts, one and more than one.
+    @Test(arguments: [
+        (1, "1 word taken back, 1 held word let go, 1 heard after the commits dropped; "
+            + "1 earlier word delivered with its first insert stays, 1 dismissed word stays dismissed, 1 word that may have landed stands"),
+        (2, "2 words taken back, 2 held words let go, 2 heard after the commits dropped; "
+            + "2 earlier words delivered with its first insert stay, 2 dismissed words stay dismissed, 2 words that may have landed stand"),
+    ])
+    func aCancelledPressTellsEachCountInItsNumber(_ count: Int, _ told: String) {
+        let cancelled = Cancelled(takenBack: count, earlierWordsLanded: count, forgotten: count, dismissed: count, standing: count, discarded: count)
+        #expect("\(cancelled)" == told)
     }
 }

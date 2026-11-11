@@ -1,3 +1,4 @@
+import GrammaticalNumber
 import WhisperKit
 
 /// What a failure tells the log: its facts, in the clear, and the words the person dictated,
@@ -46,7 +47,7 @@ extension WhisperKitTranscriberError: Accounted {
         switch self {
         case .tokenizerNotLoaded: Account(facts: description)
         case .speechWithoutWords(let text):
-            Account(facts: "WhisperKit returned a segment of \(text.count) characters without word timings", dictated: text)
+            Account(facts: "WhisperKit returned a segment of \(counted(text.count, "character", "characters")) without word timings", dictated: text)
         case .probabilityOutsideUnitInterval(let word):
             Account(facts: "WhisperKit gave a word probability \(word.probability), outside \(Confidence.range)", dictated: word.word)
         case .wordEndsBeforeStart(let word):

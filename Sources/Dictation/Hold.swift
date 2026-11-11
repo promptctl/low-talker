@@ -1,3 +1,4 @@
+import GrammaticalNumber
 import Insertion
 import LowTalkerCore
 
@@ -143,8 +144,8 @@ public struct HoldState: Sendable, Equatable, CustomStringConvertible {
 
     /// Words counted, never the words themselves: they are what the person dictated.
     public var description: String {
-        let held = held.map { "\($0.allWords.words.count) words, \($0.standing?.words.words.count ?? 0) of them may have been typed, \($0.warnings.joined(separator: " "))" } ?? "nothing"
-        return "\(held); dismissed: \(dismissed.map { "\($0.allWords.words.count) words" } ?? "nothing")"
+        let held = held.map { "\(counted($0.allWords.words.count, "word", "words")), \($0.standing?.words.words.count ?? 0) of which may have been typed, \($0.warnings.joined(separator: " "))" } ?? "nothing"
+        return "\(held); dismissed: \(dismissed.map { counted($0.allWords.words.count, "word", "words") } ?? "nothing")"
     }
 }
 

@@ -23,7 +23,7 @@ Do not enforce this ban with tests, lints, or scripts that look for end-to-end t
 
 ## The input method follows the IMK guidelines
 
-Brandon adopted vChewing's "macOS Input Method Development Guidelines for 2026" on 2026-09-29. They bind every change to code the input method process runs (`Sources/lowtalker-inputmethod` and every library it links, directly or not: today `InputMethod`, `Insertion`, `Identity`, `DarwinCalls`) and to the input method targets in `project.yml`:
+Brandon adopted vChewing's "macOS Input Method Development Guidelines for 2026" on 2026-09-29. They bind every change to code the input method process runs (`Sources/lowtalker-inputmethod` and every library it links, directly or not: today `InputMethod`, `Insertion`, `Identity`, `DarwinCalls`, `GrammaticalNumber`) and to the input method targets in `project.yml`:
 
 1. **Connection name.** `InputMethodConnectionName` is the input method's bundle identifier plus `_Connection`, and no other string. `AppIdentity.inputMethodConnectionName` derives it.
 2. **Always sandboxed.** The sandbox is what stops a process that is handed the keyboard from reaching anything else. Each entitlement must name the failure that needed it. The guide's sample list (network client, user-selected files, bookmarks) belongs to vChewing, which uses those things. Copying it here grants access nothing uses. If the input method ever reads its own `UserDefaults` and the sandbox refuses the read, the guide's fix is the `shared-preference.read-only` and preferences-plist exceptions for its own identifier.

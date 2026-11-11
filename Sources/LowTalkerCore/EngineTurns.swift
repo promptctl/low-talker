@@ -54,14 +54,14 @@ public final class EngineTurns: Sendable {
     /// with `EngineTurns.$ledger.withValue`, the way a trace context rides one: this owner
     /// counts where it decides, and the request reads the count when it is answered.
     public final class Ledger: Sendable {
-        private let counted = Mutex(Tally())
+        private let counts = Mutex(Tally())
 
         public init() {}
 
-        public var tally: Tally { counted.withLock { $0 } }
+        public var tally: Tally { counts.withLock { $0 } }
 
         fileprivate func count(_ fact: WritableKeyPath<Tally, Int>) {
-            counted.withLock { $0[keyPath: fact] += 1 }
+            counts.withLock { $0[keyPath: fact] += 1 }
         }
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import GrammaticalNumber
 import Insertion
 import LowTalkerCore
 import Synchronization
@@ -64,7 +65,7 @@ public final class Dictation {
             let destination = performed.first.map { " into \($0.into.rawValue)" } ?? ""
             let quiet = transcription.quiet
             let room = quiet.room.map { String(format: "%.1f dBFS", 20 * log10($0)) } ?? "none heard"
-            return "heard \(transcription.transcript.words.count) words in a \(press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room, \(quiet.transients.count) transient\(quiet.transients.count == 1 ? "" : "s") refused, the longest sounding \(String(format: "%.2f", quiet.transients.longest)) s) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(displaced)), \(performed.count) insert\(performed.count == 1 ? "" : "s")\(destination), \(standing) words that may have been inserted"
+            return "heard \(counted(transcription.transcript.words.count, "word", "words")) in a \(press) past \(String(format: "%.1f", quiet.letGo)) s of quiet (room \(room), \(String(format: "%.1f", quiet.refusedAsRoom)) s refused as room, \(counted(quiet.transients.count, "transient", "transients")) refused, the longest sounding \(String(format: "%.2f", quiet.transients.longest)) s) \(Int(keyUpToTranscript / .milliseconds(1))) ms after key-up (delivered \(Int(keyUpDelivery / .milliseconds(1))) ms after it; \(displaced)), \(counted(performed.count, "insert", "inserts"))\(destination), \(counted(standing, "word that may have been inserted", "words that may have been inserted"))"
         }
     }
 
@@ -122,7 +123,7 @@ public final class Dictation {
         public var record: String {
             let microphone = "microphone: \(self.microphone)"
             return opened.map { opened in
-                let unread = opened.unread.map { "\($0.passes) pass\($0.passes == 1 ? "" : "es") the engine failed to read, the latest as \($0.latest.account.facts)" } ?? "0 passes the engine failed to read"
+                let unread = opened.unread.map { "\(counted($0.passes, "pass", "passes")) the engine failed to read, the latest as \($0.latest.account.facts)" } ?? "0 passes the engine failed to read"
                 return "\(opened.duringPress), \(unread); \(microphone)"
             } ?? microphone
         }
@@ -147,8 +148,8 @@ public final class Dictation {
 
         public var description: String {
             let words = firstWords.map { "first words \(Int($0 / .milliseconds(1))) ms after key-down" } ?? "no words before key-up"
-            let committed = firstCommit.map { "\(commits) commits of \(wordsCommitted) words, the first \(Int($0 / .milliseconds(1))) ms after key-down" } ?? "nothing committed before key-up"
-            return "\(passes) passes during the press, \(repunctuated) repunctuating a settled word, \(words), \(committed)"
+            let committed = firstCommit.map { "\(counted(commits, "commit", "commits")) of \(counted(wordsCommitted, "word", "words")), the first \(Int($0 / .milliseconds(1))) ms after key-down" } ?? "nothing committed before key-up"
+            return "\(counted(passes, "pass", "passes")) during the press, \(repunctuated) repunctuating a settled word, \(words), \(committed)"
         }
     }
 
@@ -1154,8 +1155,10 @@ public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
     }
 
     public var description: String {
-        "\(takenBack) words taken back, \(forgotten) held words let go, \(discarded) heard after the commits dropped; "
-            + "\(earlierWordsLanded) earlier words delivered with its first insert stay, \(dismissed) dismissed words stay dismissed, \(standing) words that may have landed stand"
+        "\(counted(takenBack, "word", "words")) taken back, \(counted(forgotten, "held word", "held words")) let go, \(discarded) heard after the commits dropped; "
+            + "\(counted(earlierWordsLanded, "earlier word delivered with its first insert stays", "earlier words delivered with its first insert stay")), "
+            + "\(counted(dismissed, "dismissed word stays dismissed", "dismissed words stay dismissed")), "
+            + "\(counted(standing, "word that may have landed stands", "words that may have landed stand"))"
     }
 }
 
@@ -1164,7 +1167,7 @@ public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
 /// words were still dealt with, as `cancelled` says.
 ///
 /// [LAW:no-silent-failure] Says how many words stay, in which app, and why, and that nothing more
-/// was done to them.
+/// was done.
 public struct CancelLeftWords: WordFree {
     /// The press's own words that landed, which the take-back was to remove.
     public let left: Int
@@ -1173,8 +1176,10 @@ public struct CancelLeftWords: WordFree {
     public let cancelled: Cancelled
 
     public var description: String {
-        let still = cause.wordsMayHaveLanded ? "may have been taken back, or may still be" : "are still"
-        return "WARNING: You cancelled a dictation, but \(left) of its words \(still) in \(app.rawValue), and nothing more was done to them. \(cause.reason) (\(cancelled))"
+        let stay = cause.wordsMayHaveLanded
+            ? "\(left) of its words may have been taken back, or may still be"
+            : counted(left, "of its words is still", "of its words are still")
+        return "WARNING: You cancelled a dictation, but \(stay) in \(app.rawValue), and nothing more was done. \(cause.reason) (\(cancelled))"
     }
 }
 
@@ -1287,20 +1292,21 @@ public struct PressStopped: Accounted {
     /// instead.
     var told: String {
         guard reached || insert == nil else { return "" }
-        let offered = insert?.remedy.map { "words are held; \($0) and they are offered again." } ?? "words are held."
+        let offered = insert?.remedy.map { (one: "word is held; \($0) and it is offered again.", many: "words are held; \($0) and they are offered again.") }
+            ?? (one: "word is held.", many: "words are held.")
         let fates = [
-            (landed, "words of your dictation were inserted before it."),
-            (standing, "words may have been inserted; do not dictate them again."),
-            (held, offered),
+            (landed, "word of your dictation was inserted before it.", "words of your dictation were inserted before it."),
+            (standing, "word may have been inserted; do not dictate it again.", "words may have been inserted; do not dictate them again."),
+            (held, offered.one, offered.many),
         ]
-        let each = fates.filter { $0.0 > 0 }.map { " \($0.0) \($0.1)" }
+        let each = fates.filter { $0.0 > 0 }.map { " \(counted($0.0, $0.1, $0.2))" }
         return each.isEmpty ? " No words of this dictation were inserted or held." : each.joined() + " No others were inserted or held."
     }
 
     public var description: String { stoppedBy + told }
     /// What it left at the cursor, which is counts, and then the cause's account.
     public var account: Account {
-        Account(facts: "\(landed) words inserted, \(standing) that may have been, \(held) held, before: \(cause.account.facts)", dictated: cause.account.dictated)
+        Account(facts: "\(counted(landed, "word", "words")) inserted, \(standing) that may have been, \(held) held, before: \(cause.account.facts)", dictated: cause.account.dictated)
     }
 }
 

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import GrammaticalNumber
 import Identity
 
 /// Which cursor an insert's words may go to.
@@ -123,7 +124,7 @@ public struct NotYetTaken: Error, Equatable, Sendable, InsertWarning {
     }
 
     public var reason: String { "\(into) did not take what it was handed in time." }
-    public var fate: String? { "The \(characters) characters land if it recovers; do not dictate them again." }
+    public var fate: String? { "The \(counted(characters, "character lands if it recovers; do not dictate it again.", "characters land if it recovers; do not dictate them again."))" }
 }
 
 /// Words committed at the cursor: how many, and the app whose client took them.

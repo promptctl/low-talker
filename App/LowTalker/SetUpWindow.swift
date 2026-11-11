@@ -1,4 +1,5 @@
 import AppKit
+import GrammaticalNumber
 import Identity
 import Onboarding
 import os
@@ -144,7 +145,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         // (`Requirement.Row.reAskable`) - so its button stays and it gets neither line.
         let askedAlready = asked.contains(row) && !row.reAskable
         let ask = askedAlready ? nil : button(row.askTitle) { [unowned self] in request(row) }
-        add(label(left == 1 ? "1 step left" : "\(left) steps left", size: 11, color: .secondaryLabelColor))
+        add(label(counted(left, "step left", "steps left"), size: 11, color: .secondaryLabelColor))
         add(label(requirement.name, size: 20, weight: .semibold))
         add(label("Now: \(requirement.reads)", size: 12, color: .secondaryLabelColor))
         add(label(explanation.why, size: 13))
