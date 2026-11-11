@@ -75,7 +75,7 @@ private struct LoadFailed: Error, CustomStringConvertible {
         rig.keyUp()
 
         let stopped = try #require(await rig.report().failure as? PressStopped)
-        let kept = try #require(stopped.cause as? AudioKept)
+        let kept = try #require(stopped.soleCause as? AudioKept)
         #expect(kept.trouble == nil)
         #expect(kept.description.contains("is kept"))
         #expect(rig.inputMethod.inserted.isEmpty)
@@ -95,7 +95,7 @@ private struct LoadFailed: Error, CustomStringConvertible {
         rig.hold()
 
         let stopped = try #require(await rig.report().failure as? PressStopped)
-        let kept = try #require(stopped.cause as? AudioKept)
+        let kept = try #require(stopped.soleCause as? AudioKept)
         #expect(kept.trouble == UnheardFault("the disk is full"))
         #expect(kept.description.contains("it is lost"))
         #expect(rig.unheard.kept.isEmpty)
