@@ -62,12 +62,7 @@ public nonisolated struct InputMethodProcess: Sendable {
         self.readings = readings
         self.notices = notices
         self.focused = FocusedClient(arrived: notices.cursorArrived(in:))
-        self.steering = Steering(gate: gate) { effect in
-            switch effect {
-            case .beep: beep()
-            case .tellTheApp: notices.keyTyped(.escape)
-            }
-        }
+        self.steering = Steering(gate: gate, notices: notices, beep: beep)
         self.committer = Committer(bound: bound, turns: gate.turns, told: told)
     }
 
@@ -87,4 +82,5 @@ public nonisolated struct InputMethodProcess: Sendable {
     }
 }
 
-private nonisolated let processLog = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "inputmethod")
+/// The input method's own lines: its entry point's and each commit's end. [LAW:one-source-of-truth]
+public nonisolated let processLog = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "inputmethod")

@@ -18,7 +18,6 @@ import os
 ///
 ///     log show --last 10m --predicate 'subsystem BEGINSWITH "ai.promptctl.low-talker"'
 
-private let logger = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "inputmethod")
 
 /// This process's build, read off its bundle before anything else here runs, so it is the
 /// build that was launched and not one an install has since put on disk. Said to the app in
@@ -30,7 +29,7 @@ private let logger = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, 
 let build: Build? = {
     let build = Build(of: .main)
     if build == nil {
-        logger.fault("this bundle carries no build number or source revision, so the app cannot say which build answers it; it was not built by `make app`")
+        processLog.fault("this bundle carries no build number or source revision, so the app cannot say which build answers it; it was not built by `make app`")
     }
     return build
 }()
@@ -44,7 +43,7 @@ let build: Build? = {
 /// silently never answers. [LAW:no-silent-failure]
 let server: IMKServer = {
     guard let server = IMKServer(name: AppIdentity.inputMethodConnectionName, bundleIdentifier: AppIdentity.inputMethodBundleIdentifier) else {
-        logger.fault("will not start: no server could be opened on \(AppIdentity.inputMethodConnectionName, privacy: .public)")
+        processLog.fault("will not start: no server could be opened on \(AppIdentity.inputMethodConnectionName, privacy: .public)")
         exit(1)
     }
     return server
@@ -80,16 +79,16 @@ let process = InputMethodProcess.shipped
 let insertions = Task.detached { () -> InsertionPort? in
     do {
         let port = try await InsertionPort(build: build, queue: DispatchQueue(label: AppIdentity.inputMethodPortName), told: { event in
-            logger.error("\(String(describing: event), privacy: .public)")
+            processLog.error("\(String(describing: event), privacy: .public)")
         }) { request in
             let placed = process.insert(request)
-            logger.notice("\(placed.description, privacy: .public)")
+            processLog.notice("\(placed.description, privacy: .public)")
             return placed.answer
         }
-        logger.notice("answering inserts on \(AppIdentity.inputMethodPortName, privacy: .public)")
+        processLog.notice("answering inserts on \(AppIdentity.inputMethodPortName, privacy: .public)")
         return port
     } catch {
-        logger.fault("""
+        processLog.fault("""
             no insert port on \(AppIdentity.inputMethodPortName, privacy: .public): \
             \(String(describing: error), privacy: .public); keys still pass through
             """)
@@ -123,7 +122,7 @@ let askingTheApp = Task.detached {
     do throws(PeerIdentity.Unreadable) {
         answerer = .success(try await .signedLikeThisProcess(identifier: AppIdentity.bundleIdentifier))
     } catch {
-        logger.fault("no Return will be held for the app's words: this installation's app cannot be recognised: \(String(describing: error), privacy: .public)")
+        processLog.fault("no Return will be held for the app's words: this installation's app cannot be recognised: \(String(describing: error), privacy: .public)")
         answerer = .failure(error)
     }
     process.steering.gate.connect(Asker(answerer: answerer))
@@ -140,7 +139,7 @@ let quits = NSWorkspace.shared.notificationCenter.addObserver(
 }
 
 // The insert port is said by the task opening it, once it is open or has failed to.
-logger.notice("""
+processLog.notice("""
     serving \(AppIdentity.inputMethodConnectionName, privacy: .public) \
     as \(build.map(\.description) ?? "no build", privacy: .public)
     """)
