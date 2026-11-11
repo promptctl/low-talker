@@ -182,16 +182,11 @@ final class HUD {
         // that may have landed. Insert is offered once the press is closed, since an ask is
         // queued behind its insert; while it is open the face shows what it heard instead.
         // A refused press's reason is warned of first, above why any words are held.
-        let allHeld = held?.allWords ?? Transcript(words: [])
         let box = activity.box(over: readiness)
-        let (words, refusal): (Transcript, String?) = switch activity {
-        case .listening(let heard): (heard, nil)
-        case .refused(let why): (allHeld, why)
-        case .idle, .transcribing: (allHeld, nil)
-        }
         let offer = box.offersClick ? held.flatMap(Self.offer) ?? "" : ""
         guard box.state != nil || held != nil else { return hide() }
-        draw(state: box.state, warnings: [refusal].compactMap { $0 } + (held?.warnings ?? []), held: held, words: words, offer: offer, insert: box.offersInsert && insertable)
+        draw(state: box.state, warnings: [box.refusal].compactMap { $0 } + (held?.warnings ?? []), held: held,
+             words: box.heard ?? held?.allWords ?? Transcript(words: []), offer: offer, insert: box.offersInsert && insertable)
     }
 
     /// What a click into a text field places of what is held, shown after it: the words after
