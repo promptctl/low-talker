@@ -367,8 +367,10 @@ public final class Hold {
         return held?.offered
     }
 
+    /// What is offered, then `words` under `warning`. A run of no words only carries the warning
+    /// the part shows, which the run after it replaces, so none is kept behind another.
     private func offering(_ words: Transcript, warning: String, by owner: Held.Owner?) -> [Held.Run] {
-        (held?.offered?.runs ?? []) + [Held.Run(words: words.words, warning: warning, by: owner)]
+        (held?.offered?.runs ?? []).filter { !$0.words.isEmpty } + [Held.Run(words: words.words, warning: warning, by: owner)]
     }
 
     /// An insert carrying the held words it was sent with landed, which places those words and
