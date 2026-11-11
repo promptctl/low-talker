@@ -17,9 +17,11 @@ public enum Held: Sendable, Equatable {
 
     /// The press that said held words, while it is open to tell them from every other word held.
     /// [LAW:types-are-the-program] Its identity is the object's, and a run keeps it, so no later
-    /// press is ever taken for it.
-    public final class Owner: Sendable {
-        public init() {}
+    /// press is ever taken for it. [LAW:one-source-of-truth] It is the press itself, so whether the
+    /// person threw it away is read off the press and kept nowhere else.
+    public protocol Owner: AnyObject, Sendable {
+        /// Whether the person threw the press away, with Escape or the word box's circle.
+        var cancelled: Bool { get }
     }
 
     /// Words held together, why, and who said them.
@@ -27,7 +29,9 @@ public enum Held: Sendable, Equatable {
         let words: [Transcript.Word]
         let warning: String
         /// Nil for words no press here said: read back from the store, or read from kept speech.
-        let by: Owner?
+        /// Kept weakly: nothing asks which words a press said once it is reported, and a press is
+        /// far more than its identity.
+        weak var by: (any Owner)?
     }
 
     /// Words held, and why the latest of them were.
@@ -62,13 +66,13 @@ public enum Held: Sendable, Equatable {
         }
 
         /// How many of the words `owner` said.
-        func count(by owner: Owner) -> Int {
+        func count(by owner: any Owner) -> Int {
             runs.filter { $0.by === owner }.reduce(0) { $0 + $1.words.count }
         }
 
         /// What is held without the words `owner` said, each word left under the warning it was
         /// held with, or nothing when those are all.
-        func without(_ owner: Owner) -> Part? {
+        func without(_ owner: any Owner) -> Part? {
             Part(runs: runs.filter { $0.by !== owner })
         }
 
@@ -154,6 +158,12 @@ public enum Held: Sendable, Equatable {
     /// Every word held, in the order said, under the latest warning.
     var whole: Part {
         Part(holding: allRuns)
+    }
+
+    /// What is held without the words at no cursor that `owner` said. Words that may have landed
+    /// always stand.
+    func without(_ owner: any Owner) -> Held? {
+        Held(unplaced: offered?.without(owner), unaccounted: standing)
     }
 
     /// What is left once an insert carrying the words at no cursor landed.
@@ -255,7 +265,7 @@ public enum HeldUnkept: Error, Equatable, Sendable, CustomStringConvertible {
 /// The words no cursor has taken, kept until one does, and the words the person dismissed last,
 /// kept until one step brings them back or a later dismissal replaces them. Brandon, 2026-10-15:
 /// a dictation's words are never thrown away. The one exception is the person's own Escape, which
-/// throws a dictation away on purpose: `forget` lets go of the words it left held.
+/// throws a dictation away on purpose: `forget` lets go of the words it left at no cursor.
 ///
 /// [LAW:no-shared-mutable-globals] One for the life of the app, so a loop rebuilt over a new
 /// config keeps what the old one held. Written by the loop as it places words and by the
@@ -369,7 +379,7 @@ public final class Hold {
 
     /// What is offered, then `words` under `warning`. A run of no words only carries the warning
     /// the part shows, which the run after it replaces, so none is kept behind another.
-    private func offering(_ words: Transcript, warning: String, by owner: Held.Owner?) -> [Held.Run] {
+    private func offering(_ words: Transcript, warning: String, by owner: (any Held.Owner)?) -> [Held.Run] {
         (held?.offered?.runs ?? []).filter { !$0.words.isEmpty } + [Held.Run(words: words.words, warning: warning, by: owner)]
     }
 
@@ -405,8 +415,9 @@ public final class Hold {
     /// and its warning stands in for theirs, which told the person the same thing.
     ///
     /// The person reads the warning, and the app logs it, so it is the failure's facts, which
-    /// its account keeps clear of the words.
-    func failed(_ words: Transcript, by owner: Held.Owner?, with failure: InsertFailure) {
+    /// its account keeps clear of the words. Says how many of `words` it let go, as `heldBack` does.
+    @discardableResult
+    func failed(_ words: Transcript, by owner: (any Held.Owner)?, with failure: InsertFailure) -> Int {
         let warning = failure.account.facts
         guard failure.wordsMayHaveLanded else { return heldBack(words, by: owner, warning: warning) }
         let unanswered = Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: held?.standing)
@@ -416,18 +427,27 @@ public final class Hold {
         }
         standingGeneration += 1
         move(to: HoldState(held: unanswered?.mayHaveLanded(warning), dismissed: dismissed), carrying: nil)
+        return 0
     }
 
-    /// A cancelled press's own words that no cursor took are let go: the words `owner` said leave
-    /// what the hold offers, and every other word stays, under the warning it was held with.
-    /// Says how many it let go.
+    /// The person threw `owner` away: its own words that no cursor took are let go, from what is
+    /// held and from what the person dismissed, since an Escape throws its dictation away wherever
+    /// its words are, and every other word stays, under the warning it was held with. Says how
+    /// many it let go.
     ///
-    /// Words that may have landed stand and are never touched, and neither are the dismissed,
-    /// which are the person's. Standing words are unchanged, so `standingGeneration` is too.
-    func forget(_ owner: Held.Owner) -> Int {
-        let offered = held?.offered
-        move(to: HoldState(held: Held(unplaced: offered?.without(owner), unaccounted: held?.standing), dismissed: dismissed), carrying: carried)
-        return offered?.count(by: owner) ?? 0
+    /// Words that may have landed stand and are never touched. Standing words are unchanged, so
+    /// `standingGeneration` is too. [LAW:one-source-of-truth] Words an insert on its way carries
+    /// are where its answer says: taken back by the press once landed, standing once they may
+    /// have, and let go by `heldBack` once handed back.
+    func forget(_ owner: any Held.Owner) -> Int {
+        let next = switch carried {
+        case nil: state.without(owner)
+        case .held?: HoldState(held: held, dismissed: dismissed?.without(owner))
+        case .dismissed?: HoldState(held: held?.without(owner), dismissed: dismissed)
+        }
+        let forgotten = state.offered(by: owner) - next.offered(by: owner)
+        move(to: next, carrying: carried)
+        return forgotten
     }
 
     /// What is held and then `words`, which `owner` said, are at no cursor, for the reason `warning` gives the
@@ -435,7 +455,27 @@ public final class Hold {
     /// those a press cut short never offered. Nothing said leaves the hold as it was. An insert
     /// that failed placing nothing is answered here, so the words it carried are at no cursor
     /// wherever they are now.
-    func heldBack(_ words: Transcript, by owner: Held.Owner?, warning: String) {
-        move(to: HoldState(held: Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: held?.standing), dismissed: dismissed), carrying: nil)
+    ///
+    /// A press the person threw away holds none of its words at no cursor: an insert it began
+    /// before the throw hands back its words and those it carried, which `forget` left to its
+    /// answer, and they are let go with nothing shown. Says how many it let go.
+    @discardableResult
+    func heldBack(_ words: Transcript, by owner: (any Held.Owner)?, warning: String) -> Int {
+        let next = HoldState(held: Held(unplaced: Held.Part(runs: offering(words, warning: warning, by: owner)), unaccounted: held?.standing), dismissed: dismissed)
+        let thrown = owner.flatMap { $0.cancelled ? $0 : nil }
+        move(to: thrown.map(next.without) ?? next, carrying: nil)
+        return thrown.map(next.offered) ?? 0
+    }
+}
+
+private extension HoldState {
+    /// Without the words at no cursor that `owner` said, held or dismissed.
+    func without(_ owner: any Held.Owner) -> HoldState {
+        HoldState(held: held?.without(owner), dismissed: dismissed?.without(owner))
+    }
+
+    /// How many of the words at no cursor, held or dismissed, `owner` said.
+    func offered(by owner: any Held.Owner) -> Int {
+        [held, dismissed].reduce(0) { $0 + ($1?.offered?.count(by: owner) ?? 0) }
     }
 }

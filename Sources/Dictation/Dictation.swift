@@ -159,7 +159,7 @@ public final class Dictation {
     ///
     /// What the press showed is read once, at key-up: a pass or a commit that ends after it
     /// changes nothing that is read again.
-    private final class Streaming: Sendable {
+    private final class Streaming: Held.Owner {
         /// The confirmed words not yet handed out.
         struct Run {
             let words: Transcript
@@ -203,7 +203,7 @@ public final class Dictation {
 
         /// What the press's inserts did with its words, from facts recorded as each is answered, so
         /// that cancelling it can take back exactly what it put at the cursor. What it failed to put
-        /// there is the hold's to tell, by `owner`. [LAW:one-source-of-truth]
+        /// there is the hold's to tell, by the press. [LAW:one-source-of-truth]
         struct Provenance: Sendable {
             /// The press's own words that landed, as the text the field holds, and how many.
             var landedText = ""
@@ -213,10 +213,18 @@ public final class Dictation {
             /// Words in inserts that may have landed, the press's own and the earlier ones they
             /// carried: the hold stands them, as it does for any such insert.
             var standingWords = 0
+            /// The press's own words no cursor took that the hold let go once the person threw it
+            /// away: held or dismissed at the throw, and handed back by an insert after it.
+            var forgotten = 0
         }
 
-        /// Who the hold says said the press's words.
-        let owner = Held.Owner()
+        /// Whether the person threw the press away. [LAW:one-source-of-truth] Read off its phase, so
+        /// the hold and the loop's activity leave it out from the moment the loop knows.
+        var cancelled: Bool {
+            state.withLock { state in
+                if case .ended(.cancelled) = state.phase { true } else { false }
+            }
+        }
 
         /// [LAW:one-source-of-truth] The key event's own stamp, on the clock every insert is
         /// timed by: a key-down told late is timed from where the key went down, by every
@@ -331,7 +339,7 @@ public final class Dictation {
             state.withLock { state in
                 if let performed = placed.performed {
                     state.performed.append(performed)
-                    let own = (placed.carried?.runs ?? []).filter { $0.by === owner }.flatMap(\.words) + words.words
+                    let own = (placed.carried?.runs ?? []).filter { $0.by === self }.flatMap(\.words) + words.words
                     state.provenance.landedText += own.map(\.text).joined()
                     state.provenance.landedWords += own.count
                     state.provenance.earlierWordsLanded += placed.offered.words.count - own.count
@@ -341,11 +349,18 @@ public final class Dictation {
         }
 
         /// An insert failed. One that may have landed covers everything it carried, which stands;
-        /// one that cannot have landed left its words with the hold, which tells them by `owner`.
+        /// one that cannot have landed left its words with the hold, which tells them by the press,
+        /// or let them go, for a press thrown away.
         func failed(_ unplaced: Unplaced) {
-            if unplaced.failure.wordsMayHaveLanded {
-                state.withLock { $0.provenance.standingWords += unplaced.carried }
+            state.withLock { state in
+                if unplaced.failure.wordsMayHaveLanded { state.provenance.standingWords += unplaced.carried }
+                state.provenance.forgotten += unplaced.forgotten
             }
+        }
+
+        /// The hold let go of `count` of the press's words no cursor took, since the person threw it away.
+        func forgot(_ count: Int) {
+            state.withLock { $0.provenance.forgotten += count }
         }
 
         /// What this press knows of its own words.
@@ -378,14 +393,17 @@ public final class Dictation {
         /// The key-up ended the press as `ending`, unless an Escape reached it first: a cancel
         /// stands. A press that commits nothing more stops its commits here; its decode goes on
         /// to the end of its audio, and each pass is still shown, so what it hears past the
-        /// commits is held. [LAW:no-silent-failure]
-        func end(_ ending: Ending) {
+        /// commits is held. [LAW:no-silent-failure] An ending that is a cancel is one, so it says
+        /// whether this threw the press away, as `cancel` does.
+        func end(_ ending: Ending) -> Bool {
+            if case .cancelled = ending { return cancel() }
             enter { phase in
                 switch phase {
                 case .ended(.cancelled): phase
                 case .open, .lost, .ended: .ended(ending)
                 }
             }
+            return false
         }
 
         /// The person threw the press away with Escape, whether its key is down or it is on its
@@ -436,6 +454,8 @@ public final class Dictation {
     private struct Unplaced: Error {
         let failure: InsertFailure
         let carried: Int
+        /// Of the words the press said, how many the hold let go, since the press was thrown away.
+        let forgotten: Int
     }
 
     /// What key-down left for key-up: the mode its chord began it in, and the marks on the
@@ -588,20 +608,25 @@ public final class Dictation {
 
     /// [LAW:one-source-of-truth] Read off the open press, so a refused one is shown for as long
     /// as it is open, which a tap ends as its chord comes up, and the person learns it before speaking into it.
+    /// A press the person threw away is not shown at all: it inserts nothing more, so nothing it
+    /// does is theirs to see, and what is shown is what is still coming, which the next Escape
+    /// throws away.
     private var activity: Activity {
         switch press {
-        case .down(_, let open): .listening(heard: open.streaming.heard)
+        case .down(_, let open) where !open.streaming.cancelled: .listening(heard: open.streaming.heard)
         case .refused(_, let failed): .refused(why: failed.failure.account.facts)
         // A chord pressed over another held modifier is that modifier's own use, Shift and
         // Right Option for a special character, not dictation: it shows no panel, and once up
-        // it names nothing in the menu either. [LAW:comments-carry-meaning]
-        case .up, .blocked: unreported.isEmpty ? .idle : .transcribing
+        // it names nothing in the menu either. An open press thrown away is only ever one whose
+        // ending is still in delivery. [LAW:comments-carry-meaning]
+        case .up, .blocked, .down: unreported.allSatisfy(\.cancelled) ? .idle : .transcribing
         }
     }
 
     /// The person threw away the dictation the box shows, with Escape or the circle, once the
-    /// detector holds no press open: the press whose ending is still in delivery, or with none
-    /// open every press on its way, which the box shows as one Transcribing. A refused press shows
+    /// detector holds no press open: the press whose ending is still in delivery, or, once that is
+    /// thrown away or with none open, every press on its way, which the box shows as one
+    /// Transcribing. A refused press shows
     /// its refusal, so there is nothing to throw away. What each put at the cursor is taken back,
     /// and nothing of it is held, by its own path. Says how many presses it threw away that no
     /// Escape had before.
@@ -610,11 +635,22 @@ public final class Dictation {
     /// is newer than anything the box has shown yet, and `KeySteering.escape` gives it the Escape.
     func cancel() -> Int {
         let shown: [Streaming] = switch press {
-        case .down(_, let open): [open.streaming]
+        case .down(_, let open) where !open.streaming.cancelled: [open.streaming]
         case .refused: []
-        case .up, .blocked: unreported
+        case .up, .blocked, .down: unreported
         }
-        return shown.reduce(0) { thrown, streaming in thrown + (streaming.cancel() ? 1 : 0) }
+        let thrown = shown.filter { $0.cancel() }
+        // The activity first, so what the hold shows as it lets go is drawn over what is still coming.
+        show()
+        thrown.forEach(threwAway)
+        return thrown.count
+    }
+
+    /// The person threw `streaming` away: its words no cursor took leave the hold now, held or
+    /// dismissed, in the turn the loop learns of it, so no one is offered them while it drains,
+    /// and the press counts them for its report. [LAW:single-enforcer] Every throw passes here.
+    private func threwAway(_ streaming: Streaming) {
+        streaming.forgot(hold.forget(streaming))
     }
 
     /// Tells `showing` the activity when it differs from what it last heard. Every change
@@ -704,7 +740,6 @@ public final class Dictation {
             let open = press
             press = .up
             if case .down(_, let down) = open { unreported.append(down.streaming) }
-            show()
             // What there is to hear, or what came of a press nothing heard. One value, so a
             // press that was refused at key-down and one that was heard leave here by
             // the same path: the outcome is told inside the queued operation, which
@@ -760,9 +795,11 @@ public final class Dictation {
                 // its audio for the hold. What it already committed stays: the person watched
                 // it arrive. Ended here on the main actor, where every run is taken, so a
                 // pass the ended audio lets the engine finish is never committed.
-                down.streaming.end(ended)
+                if down.streaming.end(ended) { threwAway(down.streaming) }
                 pending = .heard(Heard(decode: down.decode, streaming: down.streaming, committing: down.committing))
             }
+            // Once the press knows how it ended, so one thrown away is not shown on its way.
+            show()
             do throws(SerialQueueError) {
                 // Handed over before key-up returns, so a `finish` that comes next
                 // cannot miss this press. Reported from inside the operation, so the
@@ -905,7 +942,7 @@ public final class Dictation {
     /// leaves alike, so its counts of words landed and words that may have landed are of all of them.
     private func place(_ words: Transcript, for streaming: Streaming, since: Executor.Since) async throws(InsertFailure) -> Placed {
         do throws(Unplaced) {
-            let placed = try await place(words, by: streaming.owner, following: streaming.landed.performed.last, since: since)
+            let placed = try await place(words, by: streaming, following: streaming.landed.performed.last, since: since)
             streaming.landed(placed, words)
             return placed
         } catch {
@@ -918,7 +955,7 @@ public final class Dictation {
     /// [LAW:single-enforcer] Every insert the loop makes passes through here, so held words land
     /// ahead of every word said after them, and a failed insert's words are held rather than lost.
     /// Throws as the executor does.
-    private func place(_ words: Transcript, by owner: Held.Owner?, following last: Executor.Performed?, since: Executor.Since) async throws(Unplaced) -> Placed {
+    private func place(_ words: Transcript, by owner: (any Held.Owner)?, following last: Executor.Performed?, since: Executor.Since) async throws(Unplaced) -> Placed {
         let carried = hold.sending()
         let offered = Transcript(words: (carried?.words.words ?? []) + words.words)
         do throws(InsertFailure) {
@@ -927,8 +964,8 @@ public final class Dictation {
             performed.map { _ in hold.landed() }
             return Placed(performed: performed, words: performed.map { _ in offered.words.count } ?? 0, offered: offered, carried: carried)
         } catch {
-            hold.failed(words, by: owner, with: error)
-            throw Unplaced(failure: error, carried: offered.words.count)
+            let forgotten = hold.failed(words, by: owner, with: error)
+            throw Unplaced(failure: error, carried: offered.words.count, forgotten: forgotten)
         }
     }
 
@@ -1016,12 +1053,12 @@ public final class Dictation {
     /// Throws a cancelled press away, as soon as its commits have drained.
     ///
     /// What it put at the cursor is taken back by one request through the executor, never through
-    /// `place`, which would carry held words into it. What no cursor took of its own words is let
-    /// go from the hold, whether or not the take-back happened, since a cancel discards what is not
-    /// in the field. What was said past the commits is dropped, as for a chord that was a typed
-    /// key's modifier. Words an insert may have landed stand with the hold's warning, and earlier
-    /// dictation that landed with the press's first insert stays in the field: the report counts
-    /// both, and a person's dismissal is theirs.
+    /// `place`, which would carry held words into it. What no cursor took of its own words the hold
+    /// let go at the throw (`threwAway`), held or dismissed, since a cancel discards what is not in
+    /// the field, and the report counts it. What was said past the commits is dropped, as for a chord
+    /// that was a typed key's modifier. Words an insert may have landed stand with the hold's
+    /// warning, and earlier dictation that landed with the press's first insert stays in the
+    /// field: the report counts both.
     ///
     /// [LAW:no-silent-failure] A take-back that did not happen is a failure saying how many words
     /// stay at the cursor, and it is never retried: a second one could remove words that are not
@@ -1032,13 +1069,12 @@ public final class Dictation {
         if let last = heard.streaming.landed.performed.last {
             do throws(InsertFailure) { try await executor.takeBack(own.landedText, from: last) } catch { couldNot = (last.into, error) }
         }
-        let forgotten = hold.forget(heard.streaming.owner)
         // The engine's turn passes on only when the decode ends, so it is waited out, and what it
         // heard past the commits is counted as dropped.
         let dropped = words(past: heard.streaming, in: await heard.decode.value)
         let cancelled = Cancelled(
             takenBack: couldNot == nil ? own.landedWords : 0, earlierWordsLanded: own.earlierWordsLanded,
-            forgotten: forgotten, dismissed: hold.dismissed?.offered?.count(by: heard.streaming.owner) ?? 0,
+            forgotten: own.forgotten,
             standing: own.standingWords, discarded: dropped.isBlank ? 0 : dropped.words.count)
         if let couldNot {
             throw Failed(CancelLeftWords(left: own.landedWords, app: couldNot.app, cause: couldNot.cause, cancelled: cancelled))
@@ -1079,14 +1115,14 @@ public final class Dictation {
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
         // words are already at the cursor, how many may be, and how many the hold offers.
         func stopped(_ cause: PressStopped.Cause) -> Failed {
-            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: hold.held?.offered?.count(by: heard.streaming.owner) ?? 0, cause: cause))
+            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: hold.held?.offered?.count(by: heard.streaming) ?? 0, cause: cause))
         }
         // [LAW:single-enforcer] What the press heard and never sent is held here, and counted as
         // its own. A press that heard nothing more leaves the hold's warning on the words it
         // already holds, which that warning is about.
         func holdBack(_ rest: Transcript, warning: String) {
             if rest.isBlank { return }
-            hold.heldBack(rest, by: heard.streaming.owner, warning: warning)
+            heard.streaming.forgot(hold.heldBack(rest, by: heard.streaming, warning: warning))
         }
         switch heard.streaming.ending {
         case .released(let press, let keyUp, let delivery):
@@ -1148,20 +1184,17 @@ public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
     public let takenBack: Int
     /// Earlier dictation its first insert carried into the field: delivered, not this press's, so it stays.
     public let earlierWordsLanded: Int
-    /// Its own words no cursor took, let go from the hold.
+    /// Its own words no cursor took, let go from the hold, held or dismissed.
     public let forgotten: Int
-    /// Its own words no cursor took that the person dismissed before cancelling: theirs, so they stay dismissed.
-    public let dismissed: Int
     /// Words in inserts that may have landed, its own and the earlier ones they carried: they stand with its warning, in the hold, or among the dismissed when the person dismissed them on their way.
     public let standing: Int
     /// What was said past the commits, dropped.
     public let discarded: Int
 
-    public init(takenBack: Int, earlierWordsLanded: Int, forgotten: Int, dismissed: Int, standing: Int, discarded: Int) {
+    public init(takenBack: Int, earlierWordsLanded: Int, forgotten: Int, standing: Int, discarded: Int) {
         self.takenBack = takenBack
         self.earlierWordsLanded = earlierWordsLanded
         self.forgotten = forgotten
-        self.dismissed = dismissed
         self.standing = standing
         self.discarded = discarded
     }
@@ -1169,7 +1202,6 @@ public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
     public var description: String {
         "\(counted(takenBack, "word", "words")) taken back, \(counted(forgotten, "held word", "held words")) let go, \(discarded) heard after the commits dropped; "
             + "\(counted(earlierWordsLanded, "earlier word delivered with its first insert stays", "earlier words delivered with its first insert stay")), "
-            + "\(counted(dismissed, "dismissed word stays dismissed", "dismissed words stay dismissed")), "
             + "\(counted(standing, "word that may have landed stands", "words that may have landed stand"))"
     }
 }

@@ -214,6 +214,60 @@ private struct BadBuffer: Error {}
         #expect(loop.rig.hold.dismissed == nil)
     }
 
+    /// The case low-dictation-keys-652.6nx exists for: an Escape into a latched press while its
+    /// first commit is in the air, which is then refused. Once the Escape is delivered the press
+    /// is not shown on its way, and the refused word is never held: the hold lets it go and the
+    /// report counts it. So a circle clicked while the press drains finds nothing held, and the
+    /// person's earlier dismissal is still theirs to bring back.
+    @Test(.timeLimit(.minutes(1))) func anEscapedPressIsShownToNoOneWhileItDrains() async throws {
+        let earlier = Held.unplaced(part(" before", "\(Refusal.noTextFieldHasFocus)"))
+        let loop = try await Loop(hearing: FakeTranscriber(confirming: { $0.count >= 2 ? Transcript(typed: " hello") : Transcript(typed: "") }) { _ in
+            Transcript(typed: " hello")
+        }, keeping: FakeHeldStore(dismissed: earlier))
+        loop.rig.inputMethod.hold()
+        await loop.latchedPress()
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+
+        loop.escapeTheBox()
+        await loop.delivered()
+        #expect(loop.rig.shown.activities.last == .idle)
+        let shownBefore = loop.rig.shown.states.count
+        loop.rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        loop.rig.inputMethod.letGo()
+        await loop.rig.until { loop.rig.inputMethod.holding == 0 }
+        loop.rig.hold.dismiss()
+
+        let cancelled = try #require(await loop.rig.report().cancelled)
+        #expect(cancelled.forgotten == 1)
+        #expect(loop.rig.shown.states.dropFirst(shownBefore).allSatisfy { $0.held == nil && $0.dismissed == earlier })
+        #expect(loop.rig.hold.held == nil)
+        #expect(loop.rig.hold.dismissed == earlier)
+        #expect(loop.rig.store.kept == nil)
+    }
+
+    /// An Escape throws away the press whose key-up is still in delivery, and the box then shows
+    /// the press before it, still on its way, as Transcribing: a second Escape throws that one away.
+    @Test(.timeLimit(.minutes(1))) func aSecondEscapeThrowsAwayWhatTheFirstLeftShown() async throws {
+        let loop = try await Loop()
+        loop.rig.inputMethod.hold()
+        await loop.release(speaking: [1, 2, 3])
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+        loop.chord(.down, atMilliseconds: 1000)
+        await loop.delivered()
+        loop.rig.speak([4, 5, 6])
+        loop.chord(.up, atMilliseconds: 1400)
+
+        loop.escapeTheBox()
+        #expect(loop.rig.shown.activities.last == .transcribing)
+        loop.escapeTheBox()
+        #expect(loop.rig.shown.activities.last == .idle)
+        loop.rig.inputMethod.letGo()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+    }
+
     /// A press cut short, its engine still loading when Escape comes and then failing: nothing of
     /// it is held, and its speech is not kept to be read later.
     @Test(.timeLimit(.minutes(1))) func anEscapeWhileACutPressWaitsOnItsEngineKeepsNothing() async throws {

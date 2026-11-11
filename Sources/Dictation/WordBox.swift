@@ -12,11 +12,12 @@ public protocol WordBoxPanel: AnyObject {
 
 /// The word box: the panel near the bottom of the screen while a press is on its way, or while
 /// words no cursor took are held, and the person's dismissal of it, with Escape or the circle on
-/// its corner, which keeps it away until a press opens after it or the dismissed words are asked
-/// back.
+/// its corner, which keeps what the activity alone shows away until a press opens after it.
 ///
 /// [LAW:one-source-of-truth] It draws `Dictation.Activity` and `Held` as it is handed them, and
 /// keeps only what neither says: the dismissal, and whether the press open at it has closed.
+/// Neither shows a press the person threw away, so words held after a dismissal are new to the
+/// person, and draw the box.
 @MainActor
 public final class WordBox {
     /// The box's lines and controls, as the panel draws them.
@@ -40,7 +41,7 @@ public final class WordBox {
     }
 
     private let panel: any WordBoxPanel
-    /// The person put the box away, so it stays away whatever the activity says.
+    /// The person put the box away, so what the activity alone shows stays away.
     private var dismissed = false
     /// Whether the activity last shown had a press open, so a press opening is told from one
     /// going on. A cancelled press goes on being heard until its cancellation is delivered, and a
@@ -62,23 +63,25 @@ public final class WordBox {
         // A press opening is new words to show.
         if pressIsOpen && !pressWasOpen { dismissed = false }
         pressWasOpen = pressIsOpen
-        guard !dismissed, let face = Self.face(of: activity, over: readiness, held: held, insertable: insertable) else { return panel.hide() }
+        // A press open over a dismissal is the one the Escape ended, its ending still in delivery,
+        // or a refusal, which cannot be cancelled: words held under either wait for it to close.
+        guard !dismissed || (held != nil && !pressIsOpen), let face = Self.face(of: activity, over: readiness, held: held, insertable: insertable) else { return panel.hide() }
         panel.draw(face)
     }
 
-    /// The person put the dictation away, with Escape or the circle: the press the box shows,
-    /// open or on its way, is cancelled through `steering`, the held words no cursor has taken
-    /// are let go, and the box is put away until a press opens or the dismissed words are
-    /// brought back. The words the press already put at the cursor are taken back by the press's
-    /// own path.
+    /// The person put the dictation away, with Escape or the circle: the held words no cursor has
+    /// taken are let go, the press the box shows, open or on its way, is cancelled through
+    /// `steering`, and the box is put away until a press opens or words are held again. The words
+    /// the press already put at the cursor are taken back by the press's own path.
     /// [LAW:single-enforcer] One dismissal, whichever way it was asked for, so the circle cannot
     /// let go of the words and leave the microphone open. `hold` is handed in because the hold
     /// shows the box from its own start, before a box built over it could be. Dismissed first,
-    /// so the box the hold shows as it lets go is already put away.
+    /// so the box the hold shows as it lets go is already put away, and the words let go before
+    /// the cancel, so the activity the cancel shows is drawn over nothing held.
     public func dismiss(cancelling steering: KeySteering?, hold: Hold) {
         dismissed = true
-        steering?.escape()
         hold.dismiss()
+        steering?.escape()
         panel.hide()
     }
 
@@ -92,11 +95,6 @@ public final class WordBox {
         // Return is held and sent by the input method; the app has nothing to do when it passes.
         case .return: break
         }
-    }
-
-    /// The person asked for the dismissed words back, so the box shows what is held again.
-    public func offerAgain() {
-        dismissed = false
     }
 
     /// What the box shows of `activity` over `readiness` with what is `held`, or nil when there
