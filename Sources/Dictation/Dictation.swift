@@ -1137,7 +1137,7 @@ public struct CancelLeftWords: WordFree {
 
     public var description: String {
         let still = cause.wordsMayHaveLanded ? "may have been taken back, or may still be" : "are still"
-        return "WARNING: You cancelled a dictation, but \(left) of its words \(still) in \(app.rawValue), and nothing more was done to them. \(cause) (\(cancelled))"
+        return "WARNING: You cancelled a dictation, but \(left) of its words \(still) in \(app.rawValue), and nothing more was done to them. \(cause.reason) (\(cancelled))"
     }
 }
 

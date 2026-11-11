@@ -370,4 +370,25 @@ import TestProbes
         #expect(rig.inputMethod.takeBacks == [" hello"])
         #expect("\(left)".contains("may have been taken back, or may still be"))
     }
+
+    /// A take-back is not an insert, so a failed one says why, and what became of the words in the
+    /// field, and nothing of what becomes of an insert's: not that a dictation was not inserted or
+    /// not sent, nor that it is offered again, nor that it may have landed and must not be said again.
+    @Test(arguments: failedInserts.map(\.failure))
+    func aFailedTakeBackSaysNothingOfAnInsertsFate(_ failure: InsertFailure) async throws {
+        let rig = try await Rig(hearing: Self.engine())
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
+        rig.inputMethod.refusingTakeBack(failure)
+
+        Self.cancel(rig)
+        let left = try #require(await rig.report().failure as? CancelLeftWords)
+
+        let line = failureLine(left)
+        #expect(line.hasPrefix("WARNING: You cancelled a dictation, but 1 of its words "))
+        #expect(line.contains(failure.reason), "\(line)")
+        for fate in ["not inserted", "not sent", "offered again", "may have been inserted", "do not dictate", "land if"] {
+            #expect(!line.contains(fate), "\(line)")
+        }
+    }
 }

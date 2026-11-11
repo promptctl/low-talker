@@ -93,10 +93,27 @@ public enum InsertionAnswer: Codable, Equatable, Sendable {
     case notYetTaken(characters: Int, into: String)
 }
 
+/// A failed request told to the person: why it failed, then what became of the words it carried.
+///
+/// [LAW:one-source-of-truth] The two halves are apart because only the first belongs to every
+/// request: an insert's warning is both, and a sender with its own words to account for, as a
+/// cancel's take-back has, tells the reason beside its own account of them.
+public protocol InsertWarning: CustomStringConvertible {
+    /// What happened, and nothing of what it means for the words.
+    var reason: String { get }
+    /// What became of an insert's words, and how to have them offered again; nil where whoever
+    /// sent the request tells it.
+    var fate: String? { get }
+}
+
+extension InsertWarning {
+    public var description: String { ["WARNING: \(reason)", fate].compactMap { $0 }.joined(separator: " ") }
+}
+
 /// Words handed to an app that did not take them in time: they land if it recovers.
 /// Thrown past `InputMethodInserter` like a refusal, because the words are not at the
 /// cursor now, and apart from one, because they may yet be. [LAW:types-are-the-program]
-public struct NotYetTaken: Error, Equatable, Sendable, CustomStringConvertible {
+public struct NotYetTaken: Error, Equatable, Sendable, InsertWarning {
     public let characters: Int
     public let into: String
 
@@ -105,9 +122,8 @@ public struct NotYetTaken: Error, Equatable, Sendable, CustomStringConvertible {
         self.into = into
     }
 
-    public var description: String {
-        "WARNING: \(into) did not take the \(characters) characters in time. They land if it recovers; do not dictate them again."
-    }
+    public var reason: String { "\(into) did not take what it was handed in time." }
+    public var fate: String? { "The \(characters) characters land if it recovers; do not dictate them again." }
 }
 
 /// Words committed at the cursor: how many, and the app whose client took them.
@@ -126,7 +142,7 @@ public struct Inserted: Equatable, Sendable {
 /// A closed set rather than a string, so a caller can act on a reason and the compiler
 /// says which reasons it has not considered; each one is also what the log line says, so
 /// there is one spelling of each fact. [LAW:one-source-of-truth]
-public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, CustomStringConvertible {
+public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, InsertWarning {
     /// No text field has focus, so there is nowhere for words to go. Three ways in, with one
     /// fix for the person, which is clicking into a field: no client has focus at all, the
     /// client in front answers that it gives no document access, or its caret is on no
@@ -189,25 +205,45 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// the text before it is not the words. Nothing was changed, so the words are still there.
     case wordsCannotBeTakenBack
 
-    public var description: String {
+    public var reason: String {
         switch self {
-        case .noTextFieldHasFocus: "WARNING: No text field has focus. Your dictation was not inserted."
-        case .cursorIsInAnotherApp: "WARNING: The cursor is in an app that is not in front. Your dictation was not inserted."
-        case .dictationIsInAnotherApp: "WARNING: You moved to another app while dictating."
-        case .cursorIsNotSettled:
-            "WARNING: The input method cannot tell which window or field of the app in front has the cursor. Your dictation was not inserted; press an arrow key where you want it and it is offered again."
+        case .noTextFieldHasFocus: "No text field has focus."
+        case .cursorIsInAnotherApp: "The cursor is in an app that is not in front."
+        case .dictationIsInAnotherApp: "You moved to another app while dictating."
+        case .cursorIsNotSettled: "The input method cannot tell which window or field of the app in front has the cursor."
         case .requestWasNotReadable:
-            "WARNING: The input method is from another build of \(AppIdentity.displayName) and could not read what it was asked. Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
-        case .inputSourceIsNotSelected:
-            "WARNING: \(AppIdentity.displayName) is not the selected input source, so it cannot type. Your dictation was not inserted; select \(AppIdentity.displayName) in the Input menu and it is offered again."
+            "The input method is from another build of \(AppIdentity.displayName) and could not read what it was asked."
+        case .inputSourceIsNotSelected: "\(AppIdentity.displayName) is not the selected input source, so it cannot type."
         case .senderIsNotThisInstallationsApp:
-            "WARNING: The input method takes words only from the app, signed by the certificate that signed it, and this process is not that app. Your dictation was not inserted."
-        case .inputMethodIsBusy:
-            "WARNING: An app is not answering, and it held the input method up past its time limit. Your dictation was not inserted."
+            "The input method takes words only from the app, signed by the certificate that signed it, and this process is not that app."
+        case .inputMethodIsBusy: "An app is not answering, and it held the input method up past its time limit."
         case .wordsCannotBeTakenBack:
-            "WARNING: The app in front would not give the dictated words back, or they are no longer where they were left. Nothing was changed."
+            "The app in front would not give the dictated words back, or they are no longer where they were left."
         }
     }
+
+    /// Only a take-back is refused as `wordsCannotBeTakenBack`, which the cancel tells. Moving to
+    /// another app is refused only once some of the dictation has landed, so it is the press that
+    /// stopped which says what became of its words, and the refusal names only the cause.
+    public var fate: String? {
+        switch self {
+        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy: Self.notInserted()
+        case .cursorIsNotSettled: Self.notInserted(offeredAgainWhen: "press an arrow key where you want it")
+        case .requestWasNotReadable: Self.offeredAgainOnReinstall
+        case .inputSourceIsNotSelected: Self.notInserted(offeredAgainWhen: "select \(AppIdentity.displayName) in the Input menu")
+        case .dictationIsInAnotherApp, .wordsCannotBeTakenBack: nil
+        }
+    }
+
+    /// A refusal commits nothing, so an insert's words are not at the cursor; `fix` is what offers
+    /// them again, where the person has one to make.
+    static func notInserted(offeredAgainWhen fix: String? = nil) -> String {
+        fix.map { "Your dictation was not inserted; \($0) and it is offered again." } ?? "Your dictation was not inserted."
+    }
+
+    /// The fate of words an input method of another build would not insert, whether it could
+    /// not read the request or refused it for a reason this build has no name for.
+    static let offeredAgainOnReinstall = notInserted(offeredAgainWhen: "reinstall \(AppIdentity.displayName)")
 }
 
 /// Where the words were when the channel failed, which is what decides whether saying them
@@ -225,14 +261,14 @@ public enum Words: Equatable, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .notSent: "Your dictation was not sent."
-        case .mayHaveLanded: "Your dictation may have been inserted."
+        case .mayHaveLanded: "Your dictation may have been inserted; do not dictate it again."
         }
     }
 }
 
 /// The transport failing to carry the question, which is never an answer. [LAW:no-silent-failure]
 /// Nothing here is retried and nothing is guessed: each case says what the channel did.
-public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
+public enum Unreachable: Error, Equatable, Sendable, InsertWarning {
     case nothingIsListening(port: String)
     /// The send itself timed out: the request never entered the far end's queue.
     case requestWasNotTaken(port: String, after: Duration)
@@ -253,26 +289,21 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
     /// reads.
     case answerWasNotReadable(port: String, bytes: Int, words: Words)
 
-    public var description: String {
+    public var reason: String {
         switch self {
-        case let .nothingIsListening(port):
-            "WARNING: No input method is answering on \(port); it is not installed or not selected. Your dictation was not inserted."
-        case let .requestWasNotTaken(port, after):
-            "WARNING: The input method on \(port) did not take the request within \(after). Your dictation was not inserted."
-        case let .answerDidNotArrive(port, after):
-            "WARNING: The input method on \(port) took the request but did not answer within \(after). Your dictation may have been inserted; do not dictate it again."
-        case let .didNotSayWhoItIs(port, after):
-            "WARNING: The input method on \(port) did not say who it is within \(after). Your dictation was not sent."
-        case let .answerWasAbandoned(port):
-            "WARNING: The input method on \(port) took the request and went away without answering. Your dictation may have been inserted; do not dictate it again."
-        case let .answeredByAStranger(port, pid, because, required, words):
-            "WARNING: pid \(pid) answered on \(port) and is not the input method, \(required) - \(because). \(words)"
-        case let .failed(port, status, words):
-            "WARNING: The request to \(port) failed: \(Mach.describe(status)). \(words)"
-        case let .answerWasNotReadable(port, bytes, words):
-            "WARNING: The input method on \(port) answered \(bytes) bytes that are not an answer. \(words)"
+        case let .nothingIsListening(port): "No input method is answering on \(port); it is not installed or not selected."
+        case let .requestWasNotTaken(port, after): "The input method on \(port) did not take the request within \(after)."
+        case let .answerDidNotArrive(port, after): "The input method on \(port) took the request but did not answer within \(after)."
+        case let .didNotSayWhoItIs(port, after): "The input method on \(port) did not say who it is within \(after)."
+        case let .answerWasAbandoned(port): "The input method on \(port) took the request and went away without answering."
+        case let .answeredByAStranger(port, pid, because, required, _):
+            "pid \(pid) answered on \(port) and is not the input method, \(required) - \(because)."
+        case let .failed(port, status, _): "The request to \(port) failed: \(Mach.describe(status))."
+        case let .answerWasNotReadable(port, bytes, _): "The input method on \(port) answered \(bytes) bytes that are not an answer."
         }
     }
+
+    public var fate: String? { "\(words)" }
 
     /// Where the words were when the channel failed: carried by the cases that can fail on
     /// either side of the send, and fixed by the phase for the rest.
@@ -289,7 +320,7 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
 ///
 /// [LAW:types-are-the-program] A closed set, so whoever holds one has every way an insert
 /// fails in front of it, and a new way is a new case the compiler walks every reader to.
-public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
+public enum InsertFailure: Error, Equatable, Sendable, InsertWarning {
     case refused(Refusal)
     /// Refused for a reason this build has no name for, which only an input method of another
     /// build can give. A refusal commits nothing, whatever its reason, so the words are held
@@ -300,14 +331,24 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     /// This end could not write down who may answer, so it asked nobody.
     case answererUnreadable(PeerIdentity.Unreadable)
 
-    public var description: String {
+    public var reason: String {
         switch self {
-        case .refused(let refusal): "\(refusal)"
-        case .refusedForAnUnknownReason(let reason):
-            "WARNING: The input method is from another build of \(AppIdentity.displayName) and refused your dictation for a reason this app does not know (\(reason)). Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
-        case .notYetTaken(let notYetTaken): "\(notYetTaken)"
-        case .unreachable(let unreachable): "\(unreachable)"
-        case .answererUnreadable(let unreadable): "WARNING: The app could not say which input method may answer it: \(unreadable). Your dictation was not sent."
+        case .refused(let refusal): refusal.reason
+        case .refusedForAnUnknownReason(let code):
+            "The input method is from another build of \(AppIdentity.displayName) and refused the request for a reason this app does not know (\(code))."
+        case .notYetTaken(let notYetTaken): notYetTaken.reason
+        case .unreachable(let unreachable): unreachable.reason
+        case .answererUnreadable(let unreadable): "The app could not say which input method may answer it: \(unreadable)."
+        }
+    }
+
+    public var fate: String? {
+        switch self {
+        case .refused(let refusal): refusal.fate
+        case .refusedForAnUnknownReason: Refusal.offeredAgainOnReinstall
+        case .notYetTaken(let notYetTaken): notYetTaken.fate
+        case .unreachable(let unreachable): unreachable.fate
+        case .answererUnreadable: "\(Words.notSent)"
         }
     }
 
