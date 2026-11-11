@@ -255,9 +255,9 @@ extension Dictation.Report.Outcome {
         return nil
     }
 
-    /// The press stopped by a cause of type `Cause`, and that cause, when it was the last.
+    /// The press stopped by a cause of type `Cause` and nothing else, and that cause.
     func stopped<Cause>(by: Cause.Type) -> (press: PressStopped, cause: Cause)? {
-        guard let press = failure as? PressStopped, let cause = press.causes.last as? Cause else { return nil }
+        guard let press = failure as? PressStopped, let cause = press.soleCause as? Cause else { return nil }
         return (press, cause)
     }
 }
@@ -534,6 +534,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.press(.ended(ending))
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.causes.first as? InsertFailure == .refused(.noTextFieldHasFocus))
+        #expect(stopped.causes.count == (told.isEmpty ? 1 : 2))
         #expect(failureLine(stopped) == "\(Refusal.noTextFieldHasFocus)" + told)
         #expect(rig.inputMethod.inserted == [])
         // The ending heard nothing past the refused run, so the warning stays the refusal's.
@@ -687,9 +688,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .engine(NoEngine()) })
         rig.lapse()
         guard case .failed(let failed) = await rig.report(), let stopped = failed.failure as? PressStopped else { Issue.record("expected the press to stop"); return }
-        #expect(engineFailed(stopped.causes.first, with: NoEngine.self))
-        #expect(failed.kind == "PressStopped(TranscriptionFailure, PressLapsed)")
-        #expect(failureLine(stopped) == "Your last dictation was not placed: NoEngine(). WARNING: The hotkey stopped listening during your dictation. No words of this dictation were inserted or held.")
+        guard case .cut(is PressLapsed, after: nil, unread: let unread?) = stopped.cause else { Issue.record("stopped by \(stopped.causes)"); return }
+        #expect(engineFailed(unread, with: NoEngine.self))
+        #expect(failed.kind == "PressStopped(PressLapsed, TranscriptionFailure)")
+        // The cut comes first, as in the hold's warning: the decode's audio ends at it.
+        #expect(failureLine(stopped) == "WARNING: The hotkey stopped listening during your dictation. Your last dictation was not placed: NoEngine(). No words of this dictation were inserted or held.")
         #expect(rig.hold.held == nil)
     }
 
@@ -705,8 +708,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.press(.ended(.lapsed))
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
-        guard case .unreadable(.speechWithoutWords)? = stopped.causes.first as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
-        #expect(stopped.causes.last is PressLapsed)
+        guard case .cut(is PressLapsed, after: nil, unread: let unread?) = stopped.cause, case .unreadable(.speechWithoutWords)? = unread as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
+        #expect(failureLine(stopped) == "WARNING: The hotkey stopped listening during your dictation. Your last dictation stopped: \(unread). 1 word of your dictation was inserted before it. 2 words are held. No others were inserted or held.")
         #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The hotkey stopped listening during your dictation. WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing.")))
     }
 
@@ -791,9 +794,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
-        #expect(stopped.causes.first as? InsertFailure == .refused(.cursorIsInAnotherApp))
-        guard case .unreadable(.speechWithoutWords)? = stopped.causes.last as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
-        #expect(failureLine(stopped).hasPrefix("WARNING: \(Refusal.cursorIsInAnotherApp.reason) Your last dictation stopped: "))
+        guard case .reading(let reading, after: .refused(.cursorIsInAnotherApp)?) = stopped.cause, case .unreadable(.speechWithoutWords)? = reading as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
+        #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) Your last dictation stopped: \(reading). 1 word of your dictation was inserted before it. 1 word is held. No others were inserted or held.")
     }
 
     /// A key-up told late is timed from where the key came up, as a key-down is: the input

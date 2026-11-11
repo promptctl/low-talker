@@ -1064,8 +1064,8 @@ public final class Dictation {
         let decoded = await heard.decode.value
         // [LAW:no-silent-failure] Whatever stopped the press, the report says how many of its
         // words are already at the cursor, how many may be, and how many the hold offers.
-        func stopped(after earlier: (any Accounted)?..., by cause: any Accounted) -> Failed {
-            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: heard.streaming.provenance.ownOffered(of: hold.offeredWords), causes: earlier.compactMap { $0 } + [cause]))
+        func stopped(_ cause: PressStopped.Cause) -> Failed {
+            Failed(PressStopped(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, held: heard.streaming.provenance.ownOffered(of: hold.offeredWords), cause: cause))
         }
         // [LAW:single-enforcer] What the press heard and never sent is held here, and counted as
         // its own. A press that heard nothing more leaves the hold's warning on the words it
@@ -1085,16 +1085,15 @@ public final class Dictation {
                 // read past the commits is held, the words said after them missing.
                 let rest = heard.streaming.rest(of: heard.streaming.reading)
                 holdBack(rest, warning: PressStopped.readingFailed)
-                // A refused commit came before the decode's end, so the report names it first. The
-                // audio is kept whether or not one was refused.
-                throw stopped(after: unplaced, by: keeping(failed.failure))
+                // The audio is kept whether or not a commit was refused.
+                throw stopped(.reading(keeping(failed.failure), after: unplaced))
             }
             let placed: Placed
             do throws(InsertFailure) {
                 placed = try await place(heard.streaming.rest(of: transcription.transcript), for: heard.streaming, since: .keyUp(keyUp))
-            } catch { throw stopped(by: error) }
+            } catch { throw stopped(.insert(error)) }
             // A rest of nothing leaves what the commits could not place where it was.
-            if placed.performed == nil, let unplaced { throw stopped(by: unplaced) }
+            if placed.performed == nil, let unplaced { throw stopped(.insert(unplaced)) }
             return .session(Session(press: press, transcription: transcription, keyUpToTranscript: decoded.at - keyUp, keyUpDelivery: delivery, displaced: decoded.displaced, performed: heard.streaming.landed.performed, standing: heard.streaming.provenance.standingWords))
         case .usedAsModifier:
             // [LAW:types-are-the-program] The person was typing, so what the microphone heard
@@ -1103,7 +1102,7 @@ public final class Dictation {
             // words it carried are at no cursor whatever the chord turned out to be.
             let dropped = words(past: heard.streaming, in: decoded)
             let discarded = dropped.isBlank ? 0 : dropped.words.count
-            if let unplaced { throw stopped(by: unplaced) }
+            if let unplaced { throw stopped(.insert(unplaced)) }
             return .usedAsModifier(landed: heard.streaming.landed.words, standing: heard.streaming.provenance.standingWords, discarded: discarded)
         case .cancelled:
             // Taken above, before the decode was waited on; this is the same answer, never a trap.
@@ -1121,10 +1120,7 @@ public final class Dictation {
             }
             // Words a failed decode leaves are told as missing what was said after them, beside the cut.
             holdBack(rest, warning: unread == nil ? "\(cut.cause)" : "\(cut.cause) \(PressStopped.readingFailed)")
-            // [LAW:no-silent-failure] The report names every cause, in the order each was known: a
-            // refused commit came before the decode's end, and either before the cut. Each says
-            // something the others do not: the cut, that what was said after it was not heard.
-            throw stopped(after: unplaced, unread, by: cut.cause)
+            throw stopped(.cut(cut.cause, after: unplaced, unread: unread))
         }
     }
 }
@@ -1265,9 +1261,31 @@ public struct PressStopped: Accounted {
     /// Its words the hold offers when it stopped: earlier ones no insert of it carried are told
     /// by the press that left them.
     public let held: Int
-    /// What stopped it, in the order each was known: a refused insert, a failed reading, a cut.
-    /// Never empty. [LAW:no-silent-failure] Each tells what the others cannot.
-    public let causes: [any Accounted]
+    public let cause: Cause
+
+    /// What stopped it, and what came before it that the person must also be told.
+    /// [LAW:types-are-the-program] Each ending carries the causes it can have, in the order the
+    /// press met them: a commit refused during the hold, the ending, and a reading the decode
+    /// then failed. [LAW:no-silent-failure] Each tells what the others cannot.
+    public enum Cause {
+        /// An insert left its words held: key-up's, which carried what any refused commit left,
+        /// so its failure is the one told, as in the hold, or a commit's that nothing after carried.
+        case insert(InsertFailure)
+        /// The decode failed at key-up.
+        case reading(any Accounted, after: InsertFailure?)
+        /// The hotkey stopped or the audio came apart, so what was said after it was not heard,
+        /// and the decode may then have failed to read what was.
+        case cut(any Accounted, after: InsertFailure?, unread: (any Accounted)?)
+    }
+
+    /// Each cause, in the order the press met them.
+    public var causes: [any Accounted] {
+        switch cause {
+        case .insert(let insert): [insert]
+        case .reading(let reading, let unplaced): [unplaced as (any Accounted)?, reading].compactMap { $0 }
+        case .cut(let cut, let unplaced, let unread): [unplaced as (any Accounted)?, cut, unread].compactMap { $0 }
+        }
+    }
 
     /// What the hold shows beside the words the passes during the hold read, when the decode failed.
     static let readingFailed = "WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing."
@@ -1286,8 +1304,22 @@ public struct PressStopped: Accounted {
         }.joined(separator: " ")
     }
 
-    /// The insert that stopped it, when one did.
-    var insert: InsertFailure? { causes.lazy.compactMap { $0 as? InsertFailure }.first }
+    /// The insert that left its words held, when one did.
+    var insert: InsertFailure? {
+        switch cause {
+        case .insert(let insert): insert
+        case .reading(_, let unplaced), .cut(_, let unplaced, _): unplaced
+        }
+    }
+
+    /// The reading that failed, the one cause that can carry what was dictated.
+    var reading: (any Accounted)? {
+        switch cause {
+        case .insert: nil
+        case .reading(let reading, _): reading
+        case .cut(_, _, let unread): unread
+        }
+    }
 
     /// Whether any of its words are or may be at a cursor.
     var reached: Bool { landed + standing > 0 }
@@ -1311,11 +1343,9 @@ public struct PressStopped: Accounted {
     public var description: String { stoppedBy + told }
     /// What it left at the cursor, which is counts, and then each cause's account.
     public var account: Account {
-        let accounts = causes.map(\.account)
-        let dictated = accounts.compactMap(\.dictated)
-        return Account(
-            facts: "\(counted(landed, "word", "words")) inserted, \(standing) that may have been, \(held) held, before: \(accounts.map(\.facts).joined(separator: "; "))",
-            dictated: dictated.isEmpty ? nil : dictated.joined(separator: " "))
+        Account(
+            facts: "\(counted(landed, "word", "words")) inserted, \(standing) that may have been, \(held) held, before: \(causes.map(\.account.facts).joined(separator: "; "))",
+            dictated: reading?.account.dictated)
     }
 }
 
