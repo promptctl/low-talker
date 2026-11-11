@@ -358,7 +358,7 @@ public final class Dictation {
             }
         }
 
-        /// The hold let go of `count` of the press's words no cursor took, as the person threw it away.
+        /// The hold let go of `count` of the press's words no cursor took, since the person threw it away.
         func forgot(_ count: Int) {
             state.withLock { $0.provenance.forgotten += count }
         }
@@ -393,13 +393,17 @@ public final class Dictation {
         /// The key-up ended the press as `ending`, unless an Escape reached it first: a cancel
         /// stands. A press that commits nothing more stops its commits here; its decode goes on
         /// to the end of its audio, and each pass is still shown, so what it hears past the
-        /// commits is held. [LAW:no-silent-failure]
-        func end(_ ending: Ending) {
-            enter { phase in
+        /// commits is held. [LAW:no-silent-failure] Says whether this threw it away, as `cancel` does.
+        func end(_ ending: Ending) -> Bool {
+            let left = enter { phase in
                 switch phase {
                 case .ended(.cancelled): phase
                 case .open, .lost, .ended: .ended(ending)
                 }
+            }
+            return switch (ending, left) {
+            case (.cancelled, .open), (.cancelled, .lost): true
+            case (.cancelled, .ended), (.released, _), (.cut, _), (.usedAsModifier, _): false
             }
         }
 
@@ -621,8 +625,9 @@ public final class Dictation {
     }
 
     /// The person threw away the dictation the box shows, with Escape or the circle, once the
-    /// detector holds no press open: the press whose ending is still in delivery, or with none
-    /// open every press on its way, which the box shows as one Transcribing. A refused press shows
+    /// detector holds no press open: the press whose ending is still in delivery, or, once that is
+    /// thrown away or with none open, every press on its way, which the box shows as one
+    /// Transcribing. A refused press shows
     /// its refusal, so there is nothing to throw away. What each put at the cursor is taken back,
     /// and nothing of it is held, by its own path. Says how many presses it threw away that no
     /// Escape had before.
@@ -631,9 +636,9 @@ public final class Dictation {
     /// is newer than anything the box has shown yet, and `KeySteering.escape` gives it the Escape.
     func cancel() -> Int {
         let shown: [Streaming] = switch press {
-        case .down(_, let open): [open.streaming]
+        case .down(_, let open) where !open.streaming.cancelled: [open.streaming]
         case .refused: []
-        case .up, .blocked: unreported
+        case .up, .blocked, .down: unreported
         }
         let thrown = shown.filter { $0.cancel() }
         thrown.forEach(threwAway)
@@ -790,10 +795,7 @@ public final class Dictation {
                 // its audio for the hold. What it already committed stays: the person watched
                 // it arrive. Ended here on the main actor, where every run is taken, so a
                 // pass the ended audio lets the engine finish is never committed.
-                down.streaming.end(ended)
-                // An Escape that reached the loop before this delivery has let go of what the
-                // press held then, and the hold has taken none of its words since.
-                if case .cancelled = ended { threwAway(down.streaming) }
+                if down.streaming.end(ended) { threwAway(down.streaming) }
                 pending = .heard(Heard(decode: down.decode, streaming: down.streaming, committing: down.committing))
             }
             // Once the press knows how it ended, so one thrown away is not shown on its way.
@@ -1120,7 +1122,7 @@ public final class Dictation {
         // already holds, which that warning is about.
         func holdBack(_ rest: Transcript, warning: String) {
             if rest.isBlank { return }
-            hold.heldBack(rest, by: heard.streaming, warning: warning)
+            heard.streaming.forgot(hold.heldBack(rest, by: heard.streaming, warning: warning))
         }
         switch heard.streaming.ending {
         case .released(let press, let keyUp, let delivery):

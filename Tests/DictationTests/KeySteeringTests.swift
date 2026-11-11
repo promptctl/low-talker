@@ -245,6 +245,29 @@ private struct BadBuffer: Error {}
         #expect(loop.rig.store.kept == nil)
     }
 
+    /// An Escape throws away the press whose key-up is still in delivery, and the box then shows
+    /// the press before it, still on its way, as Transcribing: a second Escape throws that one away.
+    @Test(.timeLimit(.minutes(1))) func aSecondEscapeThrowsAwayWhatTheFirstLeftShown() async throws {
+        let loop = try await Loop()
+        loop.rig.inputMethod.hold()
+        await loop.release(speaking: [1, 2, 3])
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+        loop.chord(.down, atMilliseconds: 1000)
+        await loop.delivered()
+        loop.rig.speak([4, 5, 6])
+        loop.chord(.up, atMilliseconds: 1400)
+
+        loop.escapeTheBox()
+        #expect(loop.rig.shown.activities.last == .transcribing)
+        loop.escapeTheBox()
+        #expect(loop.rig.shown.activities.last == .idle)
+        loop.rig.inputMethod.letGo()
+
+        _ = try #require(await loop.rig.report().cancelled)
+        _ = try #require(await loop.rig.report().cancelled)
+        #expect(loop.rig.inputMethod.field == "")
+    }
+
     /// A press cut short, its engine still loading when Escape comes and then failing: nothing of
     /// it is held, and its speech is not kept to be read later.
     @Test(.timeLimit(.minutes(1))) func anEscapeWhileACutPressWaitsOnItsEngineKeepsNothing() async throws {
