@@ -83,6 +83,11 @@ public enum FieldAnswer: Sendable, Equatable {
     }
 }
 
+/// What `FocusedClient` holds cursors by: the controller `IMKServer` builds for each client, and
+/// never the cursor itself, so a call handing it a `Client` does not compile.
+/// [LAW:types-are-the-program]
+public protocol InputController: AnyObject {}
+
 /// The clients the text input system has given focus to, and the one thing in this process
 /// that can commit text into them.
 ///
@@ -128,15 +133,15 @@ public final class FocusedClient {
 
     /// The text input system gave `controller`'s client focus, as `cursor`.
     ///
-    /// Unconditional, because there is no half-cursor left for it to sort out: a client that
-    /// will not name its app is refused by `Client.init`, so the rule lives at the one place
-    /// a cursor comes into being rather than at every place one is handled.
+    /// Taken whatever cursor it is, because there is no half-cursor left for it to sort out: a
+    /// client that will not name its app is refused by `Client.init`, so the rule lives at the
+    /// one place a cursor comes into being rather than at every place one is handled.
     /// [LAW:parse-dont-validate] [LAW:single-enforcer]
     ///
     /// A cursor in another app is no longer live: focus is in one app at a time, so an activation
     /// there is the end of every live cursor here, whether or not they are ever deactivated. A
     /// cursor of the same app is no such proof, and stays live.
-    public func took(_ cursor: Client, by controller: AnyObject) {
+    public func took(_ cursor: Client, by controller: any InputController) {
         changing {
             for (other, entry) in held where entry.cursor.application != cursor.application { held[other]?.live = false }
             held[ObjectIdentifier(controller)] = Held(cursor: cursor, live: true)
@@ -150,7 +155,7 @@ public final class FocusedClient {
     /// orphaned beside another of the same client (IMK rule 5) - is removed by its own and never
     /// takes another's with it: focus can move by activating the new client before deactivating
     /// the old.
-    public func left(_ controller: AnyObject) {
+    public func left(_ controller: any InputController) {
         changing { held[ObjectIdentifier(controller)] = nil }
     }
 
@@ -161,7 +166,7 @@ public final class FocusedClient {
     /// activation revived after one in another app: the key is evidence of where the person is that
     /// no activation is. A controller holding no cursor - one deactivated, or that never had a
     /// client it could use - changes nothing. [LAW:dataflow-not-control-flow]
-    public func typedInto(_ controller: AnyObject) {
+    public func typedInto(_ controller: any InputController) {
         let key = ObjectIdentifier(controller)
         held[key].map { typed in
             // [LAW:nothing-unseen] The one change to which cursors are live that no activation or
@@ -175,7 +180,7 @@ public final class FocusedClient {
 
     /// How `controller`'s lines say the cursor it holds, from here, where it is held: whether it is
     /// live is part of what it holds. [LAW:one-source-of-truth]
-    public func holding(_ controller: AnyObject) -> String {
+    public func holding(_ controller: any InputController) -> String {
         held[ObjectIdentifier(controller)].map { Self.holding($0.cursor, live: $0.live) } ?? "holding no client"
     }
 
@@ -377,9 +382,8 @@ public final class Client: CustomStringConvertible {
 
     /// Nothing at all when the client will not name its app. [LAW:parse-dont-validate] The
     /// one place the question is asked, and past it there is a cursor whose app is known
-    /// rather than one every later reader has to keep asking about - which is also what
-    /// makes `activateServer` able to keep the cursor it last reported: a cursor that exists
-    /// is one `FocusedClient` will take.
+    /// rather than one every later reader has to keep asking about: a cursor that exists is
+    /// one `FocusedClient` will take.
     ///
     /// `frontmost` is the app in front now, read by the caller where the workspace is read:
     /// `CursorApplication` says when it is the app this cursor belongs to rather than the

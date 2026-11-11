@@ -274,7 +274,7 @@ import Testing
     private static let textEdit = "com.apple.TextEdit"
 
     /// A controller, as `IMKServer` builds one per client: only its identity is used.
-    private final class Controller {}
+    private final class Controller: InputController {}
 
     /// A `FocusedClient` that records each app it tells of a cursor arrival.
     @MainActor private final class Told {

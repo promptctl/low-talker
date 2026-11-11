@@ -38,7 +38,7 @@ nonisolated func controllerLine(controller: UInt, _ event: String, client: Strin
 /// `Info.plist` names this class as a string, and the Objective-C runtime is what resolves
 /// it; `InputMethodPlistTests` holds that string to this name.
 @objc(DictationInputController)
-public final class DictationInputController: IMKInputController {
+public final class DictationInputController: IMKInputController, InputController {
     /// How `IMKServer` builds the controller. Nonisolated, as the initializers they override
     /// are, which a main-actor class does not inherit.
     nonisolated override public init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
@@ -55,11 +55,14 @@ public final class DictationInputController: IMKInputController {
 
     /// A controller that ends without being deactivated - closed with its window, or orphaned (IMK
     /// rule 5) - takes its cursor with it, so no cursor outlives its controller to be refused
-    /// beside a live one or committed into, and no later controller at the same address inherits
-    /// it: through the one hop every callback takes (IMK rule 3), before this returns.
-    deinit {
+    /// beside a live one or committed into. Isolated rather than through `onMainActor`'s
+    /// `main.sync`: an end has no answer to wait for, and waiting would hold the thread IMK
+    /// releases it on behind a commit into a stalled app (3.0 s, low-imk-rules-w3g.3ky). The
+    /// object is not freed until this has run, so no later controller at its address inherits
+    /// the cursor.
+    isolated deinit {
         logLife("ended")
-        onMainActor("deinit", ()) { FocusedClient.shared.left(self) }
+        FocusedClient.shared.left(self)
     }
 
     nonisolated private var address: UInt { UInt(bitPattern: ObjectIdentifier(self)) }
