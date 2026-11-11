@@ -68,8 +68,8 @@ final class HUD {
     }()
 
     private lazy var buttons: NSStackView = {
-        // Copy on the trailing edge, where it stays whether or not Insert is offered, so Insert
-        // appearing never moves a button under a click aimed at Copy: Insert types.
+        // Copy on the trailing edge, and dimmed rather than hidden where it is not offered, so it
+        // never leaves its place and Insert never moves into it: Insert types.
         let buttons = NSStackView(views: [place, copyButton])
         buttons.orientation = .horizontal
         buttons.spacing = 6
@@ -212,7 +212,8 @@ final class HUD {
         // A press on its way carries the words a cursor is offered in its own insert, so only a
         // panel with nothing on its way asks for a click, and only for those words: not those
         // that may have landed. Insert is offered once the press is closed, since an ask is
-        // queued behind its insert; while it is open the face shows what it heard instead.
+        // queued behind its insert; while it is open the face shows what it heard instead. Copy
+        // is offered where the click is, since a press's insert would carry what it copied.
         // A refused press's reason is warned of first, above why any words are held.
         let box = activity.box(over: readiness)
         let offer = box.offersClick ? held.flatMap(Self.offer) ?? "" : ""
@@ -270,17 +271,16 @@ final class HUD {
         isShown = true
         // The circle's centre sits on the face's top-left arc, as a Notification Center
         // banner's does, and the buttons sit under the face's right edge. They are there only
-        // while something is held, each only while it is offered.
+        // while something is held: Insert while it is offered, Copy dimmed where it is not.
         let onTheArc = Self.cornerRadius * (1 - 1 / 2.squareRoot())
         corner.setFrameOrigin(NSPoint(x: frame.minX + onTheArc - Self.circleSide / 2, y: frame.maxY - onTheArc - Self.circleSide / 2))
-        let offered = held != nil && (insert || copy)
-        if offered {
+        if held != nil {
             place.isHidden = !insert
-            copyButton.isHidden = !copy
+            copyButton.isEnabled = copy
             let size = buttons.fittingSize
             below.setFrame(NSRect(x: frame.maxX - size.width, y: frame.minY - 6 - size.height, width: size.width, height: size.height), display: true)
         }
-        for (control, shown) in [(corner, held != nil), (below, offered)] {
+        for (control, shown) in [(corner, held != nil), (below, held != nil)] {
             if shown { control.orderFrontRegardless() } else { control.orderOut(nil) }
         }
     }

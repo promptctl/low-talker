@@ -2140,9 +2140,9 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(Held.unaccounted(landed).clipboardText == "may have")
     }
 
-    /// Copy is offered only with nothing on its way, since a press on its way carries the held
+    /// Copy is offered only with no press on its way, since a press on its way carries the held
     /// words in its own insert and a copy taken then could be pasted beside them.
-    @Test func copyIsOfferedOnlyWithNothingOnItsWay() {
+    @Test func copyIsOfferedOnlyWithNoPressOnItsWay() {
         let heard = Transcript(typed: "hi")
         for readiness in [EngineReadiness.preparing(.loading, since: .now), .failed("no model"), .ready(.default, after: .seconds(2))] {
             #expect(Dictation.Activity.idle.box(over: readiness).offersCopy, "idle over \(readiness)")

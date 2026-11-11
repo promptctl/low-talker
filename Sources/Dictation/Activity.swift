@@ -92,9 +92,11 @@ extension Dictation {
             }
 
             /// Whether Copy is offered for the held words: where a click into a text field is, with
-            /// nothing on its way. A press on its way carries the held words in its own insert, so
-            /// words copied then could land as well and be pasted twice. [LAW:one-source-of-truth]
-            /// One rule for when the held words are the person's to place.
+            /// no press on its way. A press on its way carries the held words in its own insert, so
+            /// words copied then could land as well and be pasted twice. An insert the person asked
+            /// for themselves, with Insert or a click into a field, is not an activity, and a copy
+            /// made while it is answered is settled by the hold as a dismissal is.
+            /// [LAW:one-source-of-truth] One rule for when the held words are the person's to place.
             public var offersCopy: Bool { offersClick }
         }
 
