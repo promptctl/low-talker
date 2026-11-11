@@ -2131,6 +2131,18 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         }
     }
 
+    /// Copy is offered for held words wherever the box shows them, a press waiting on the load
+    /// included, since a copy waits on nothing; never while the box shows a press's own words.
+    @Test func copyIsOfferedWhereverTheBoxShowsTheHeldWords() {
+        let heard = Transcript(typed: "hi")
+        for readiness in [EngineReadiness.preparing(.loading, since: .now), .failed("no model"), .ready(.default, after: .seconds(2))] {
+            for activity in [Dictation.Activity.idle, .transcribing, .refused(why: "x")] {
+                #expect(activity.box(over: readiness).offersCopy, "\(activity) over \(readiness)")
+            }
+            #expect(!Dictation.Activity.listening(heard: heard).box(over: readiness).offersCopy)
+        }
+    }
+
     /// The icon is the press's while there is one and the engine's otherwise, except that a
     /// press ended before the engine is ready shows the wait it is in.
 

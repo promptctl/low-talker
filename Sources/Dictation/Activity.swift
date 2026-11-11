@@ -89,6 +89,12 @@ extension Dictation {
                 self.offersClick = offersClick
                 self.offersInsert = offersInsert
             }
+
+            /// Whether Copy is offered for the held words: wherever the box shows them, and so not
+            /// while it shows a press's own. Copy needs no loop and waits on nothing, so neither a
+            /// press on its way nor the load holds it back. [LAW:one-source-of-truth] Read from
+            /// what the box shows, never set beside it.
+            public var offersCopy: Bool { heard == nil }
         }
 
         /// The activity without the words, which are what the user dictated, so a log may

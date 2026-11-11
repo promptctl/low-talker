@@ -23,6 +23,13 @@ import Testing
         #expect(truncated(to: 10) == "…four")
     }
 
+    /// A line is the words without the whitespace before the first, and none of the rest dropped.
+    @Test func aLineDropsOnlyTheWhitespaceBeforeTheFirstWord() {
+        #expect(Self.transcript.line == "one two three four")
+        #expect(Transcript(typed: "\n\t two").line == "two")
+        #expect(Transcript(words: []).line == "")
+    }
+
     /// The newest word is shown even where it fits nowhere.
     @Test func keepsTheNewestWordWhenNothingFits() {
         #expect(truncated(to: 0) == "…four")

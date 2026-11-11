@@ -11,28 +11,26 @@ import Testing
         try test(pasteboard)
     }
 
-    @Test func aClickReplacesWhatWasCopiedWithTheRowsFullTextAndSaysSo() throws {
+    /// What replacing the pasteboard does is ClipboardTests'; a row copies its full text, not
+    /// the title a menu may shorten, and says what went.
+    @Test func aClickCopiesTheRowsFullTextAndSaysSo() throws {
         try withScratch { pasteboard in
-            pasteboard.clearContents()
-            pasteboard.setString("what the person had copied", forType: .string)
-            pasteboard.setData(Data([1, 2, 3]), forType: .png)
             let text = "Your last dictation was not placed: " + String(repeating: "a reason long enough that a menu would shorten it ", count: 20) + "."
-            var reported: [ErrorRow.Copied] = []
-            let row = ErrorRow(text, copyingTo: pasteboard) { reported.append($0) }
+            var reported: [Clipboard.Copied] = []
+            let row = ErrorRow(text, copyingTo: Clipboard(pasteboard)) { reported.append($0) }
 
             // A click, as AppKit sends it: the item's action to its target.
             let action = try #require(row.action)
             #expect(NSApplication.shared.sendAction(action, to: row.target, from: row))
 
-            #expect(pasteboard.data(forType: .png) == nil)
             #expect(pasteboard.string(forType: .string) == text)
-            #expect(reported == [ErrorRow.Copied(characters: text.count, taken: true)])
+            #expect(reported == [Clipboard.Copied(characters: text.count, taken: true)])
         }
     }
 
     @Test func theRowCarriesTheWarningSignInItsOwnColours() throws {
         try withScratch { pasteboard in
-            let sign = try #require(ErrorRow("Model: it did not load", copyingTo: pasteboard) { _ in }.image)
+            let sign = try #require(ErrorRow("Model: it did not load", copyingTo: Clipboard(pasteboard)) { _ in }.image)
             // A menu draws a template image, or a sign in one colour, in its text colour, as
             // plain as the rows around it.
             #expect(!sign.isTemplate)
@@ -48,7 +46,7 @@ import Testing
         _ = NSApplication.shared
         withScratch { pasteboard in
             let menu = NSMenu()
-            let row = ErrorRow("Config: it cannot be read", copyingTo: pasteboard) { _ in }
+            let row = ErrorRow("Config: it cannot be read", copyingTo: Clipboard(pasteboard)) { _ in }
             menu.addItem(row)
             menu.update()
             #expect(row.isEnabled)

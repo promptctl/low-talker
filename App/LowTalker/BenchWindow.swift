@@ -1,6 +1,7 @@
 import AppKit
 import Bench
 import LowTalkerCore
+import StatusMenu
 
 /// The Benchmark window: every option `LowTalker --bench` takes, a run started and cancelled
 /// here, and its table, which copies as the text `LowTalker --bench` prints.
@@ -247,8 +248,9 @@ final class BenchWindow: NSObject, NSTableViewDataSource {
     }
 
     @objc private func copyTable() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(BenchRow.table(rows) + "\n", forType: .string)
+        // [LAW:no-silent-failure] A refused copy says so where the person is looking.
+        let copied = Clipboard(.general).copy(BenchRow.table(rows) + "\n")
+        status.stringValue = copied.taken ? "copied \(rows.count) rows" : "the clipboard refused the table"
     }
 
     /// The options the controls show, or why they are not a run.

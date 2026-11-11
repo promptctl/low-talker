@@ -61,7 +61,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let unheard = listening == nil ? ", with no loop listening to insert them" : ""
         sessions.notice("asked to insert \(words) held words\(unheard, privacy: .public)")
         listening?.dictation.insertHeld()
+    }, copy: { [unowned self] in
+        // Every held word, those that may have landed included, without the whitespace before
+        // the first: all of what the panel holds, where its face may show only the newest. With
+        // none held, or only blank ones, the clipboard is left alone.
+        // [LAW:nothing-unseen] The count, not the text, which is the person's dictated words.
+        guard let words = hold.held?.allWords, !words.isBlank else {
+            sessions.error("asked to copy the held words with none held, so the clipboard is left as it was")
+            return nil
+        }
+        let copied = clipboard.copy(words.line)
+        if copied.taken {
+            sessions.notice("copied \(copied.characters, privacy: .public) characters of held words")
+        } else {
+            sessions.error("the pasteboard refused \(copied.characters, privacy: .public) characters of held words")
+        }
+        return copied
     })
+    /// Where a copy the person asks for goes, from the menu's error rows and the word box alike.
+    private let clipboard = Clipboard(.general)
     /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
     /// new config keeps offering them, and so does the next launch.
     private lazy var hold: Hold = Hold(store: HeldFile.app, failedToKeep: { [unowned self] unkept in
@@ -1130,7 +1148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// A line that says what failed, which a click copies whole to the clipboard.
     private func errorRow(_ text: String, _ line: FailedLine) -> NSMenuItem {
-        ErrorRow(text, copyingTo: .general) { [menuBarLog] copied in
+        ErrorRow(text, copyingTo: clipboard) { [menuBarLog] copied in
             // [LAW:nothing-unseen] The count, not the text: a failure line can carry dictated words.
             if copied.taken {
                 menuBarLog.notice("menu: copied the \(line.rawValue, privacy: .public) error row, \(copied.characters, privacy: .public) characters")
