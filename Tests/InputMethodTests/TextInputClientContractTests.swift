@@ -66,6 +66,16 @@ import Testing
         #expect(field.text == "alp")
     }
 
+    /// Nor what it does with a selection the person makes then, so the fake fails that case too,
+    /// and the caret stays after what it answered.
+    @Test func aSelectionAfterAnsweringDroppedWordsFailsTheCaseThatGaveIt() {
+        let field = FakeTextInputClient(.webKitLimitedTextAreaAnsweringAll, maxLength: 3)
+        field.insertText("alpha", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        withKnownIssue { field.select(NSRange(location: 0, length: 0)) }
+        #expect(field.selectedRange() == NSRange(location: 5, length: 0))
+    }
+
     /// No client was measured answering a range past the end of its field, so the fake fails the
     /// one case that handed it such a range, and leaves the field as it was, rather than guess.
     @Test func aRangePastTheFieldFailsTheCaseThatGaveIt() {

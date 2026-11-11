@@ -121,7 +121,8 @@ public final class FakeTextInputClient: TextInputClient {
     public private(set) var text: String
     /// The selection, in UTF-16 units as `NSRange` counts; a caret is a selection of length 0.
     public private(set) var selection: NSRange
-    /// What an overflow dropped that the client still answers as there, just after the caret, or nil.
+    /// What an overflow dropped that the client still answers as there, just after the caret, while
+    /// its profile is the one that answers it; or nil.
     /// The field and its reads part here and nowhere else; nobody said what such a client does with
     /// a later selection or insert, so the fake fails the case that makes one.
     private var unkept: String?
@@ -176,15 +177,17 @@ public final class FakeTextInputClient: TextInputClient {
 
     public func string(in range: NSRange) -> String? {
         switch profile.access {
-        case .none, .selectionOnly: nil
-        case .toTheField: Self.holds(range, in: answered.field) ? (answered.field as NSString).substring(with: range) : nil
+        case .none, .selectionOnly: return nil
+        case .toTheField:
+            let field = answered.field
+            return Self.holds(range, in: field) ? (field as NSString).substring(with: range) : nil
         }
     }
 
     /// The field and selection the client's reads answer: what it holds, with any unkept words put
     /// back at the caret and the caret after them.
     private var answered: (field: String, selection: NSRange) {
-        guard let unkept else { return (text, selection) }
+        guard let unkept, profile.overflow == .keepsWhatFitsAnsweringAll else { return (text, selection) }
         return ((text as NSString).replacingCharacters(in: selection, with: unkept),
                 NSRange(location: selection.location + unkept.utf16.count, length: 0))
     }
