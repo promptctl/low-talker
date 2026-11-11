@@ -133,7 +133,7 @@ let insertions = Task.detached { () -> InsertionPort? in
 let tellingTheApp = Task.detached {
     _ = await insertions.value
     let sender = NoticeSender(build: build)
-    await Notices.relay(Notices.shared.notices, tell: sender.tell, end: { DispatchQueue.main.async { exit(EXIT_FAILURE) } })
+    await Notices.shared.relay(tell: sender.tell, end: { DispatchQueue.main.async { exit(EXIT_FAILURE) } })
 }
 
 /// What a held Return asks the app, and whom it believes: this installation's app, by its
