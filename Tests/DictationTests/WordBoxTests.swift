@@ -123,6 +123,19 @@ final class Speaker: Held.Owner {
         #expect(hold.dismissed == Self.earlier)
     }
 
+    /// A dismissal no throw can empty hides every one before it for good, so those are let go,
+    /// and dismissals made all day keep only what could still come back.
+    @Test func noDismissalIsKeptThatNothingCanBringBack() {
+        box.dismiss(cancelling: nil, hold: hold)
+        for words in [" one", " two", " three"] {
+            hold.heldBack(Transcript(typed: words), by: nil, warning: Self.refused)
+            box.dismiss(cancelling: nil, hold: hold)
+        }
+
+        #expect(hold.dismissed?.allWords == Transcript(typed: " three"))
+        #expect(hold.state.dismissals.count == 2)
+    }
+
     /// The words the person asks back come back in the loop's turn, behind every press before:
     /// the box stays away until they are held again, then shows them.
     @Test func aBringBackShowsTheBoxWhenTheWordsAreHeldAgain() {

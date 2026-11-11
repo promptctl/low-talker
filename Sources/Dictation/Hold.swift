@@ -166,6 +166,12 @@ public enum Held: Sendable, Equatable {
         Held(unplaced: offered?.without(owner), unaccounted: standing)
     }
 
+    /// Whether no throw can take every word held: some may have landed, or were said by a press
+    /// that is gone, which no Escape can reach.
+    var outlastsEveryThrow: Bool {
+        standing != nil || offered?.runs.contains { $0.by == nil } == true
+    }
+
     /// What is left once an insert carrying the words at no cursor landed.
     var placed: Held? {
         Held(unplaced: nil, unaccounted: standing)
@@ -199,7 +205,7 @@ public struct HoldState: Sendable, Equatable, CustomStringConvertible {
     /// hold nothing that press did not take with it, and then the one before it is still the
     /// person's to bring back. Only the latest is kept by the store: once the app ends, no press
     /// that said its words can be thrown away.
-    fileprivate let dismissals: [Held]
+    let dismissals: [Held]
 
     /// The words the person dismissed last, which one step brings back. A later dismissal
     /// replaces them, until it holds nothing.
@@ -211,9 +217,13 @@ public struct HoldState: Sendable, Equatable, CustomStringConvertible {
         self.init(held: held, dismissals: [dismissed].compactMap { $0 })
     }
 
+    /// [LAW:single-enforcer] Every state with dismissals is made here, so none is kept that nothing
+    /// can bring back: below one that outlasts every throw, as only the latest can be emptied by an
+    /// insert carrying it.
     fileprivate init(held: Held?, dismissals: [Held?]) {
+        let dismissals = dismissals.compactMap { $0 }
         self.held = held
-        self.dismissals = dismissals.compactMap { $0 }
+        self.dismissals = dismissals.dropFirst().firstIndex(where: \.outlastsEveryThrow).map { Array(dismissals[...$0]) } ?? dismissals
     }
 
     fileprivate func with(held: Held?) -> HoldState {
