@@ -184,9 +184,8 @@ public final class FocusedClient {
         held[ObjectIdentifier(controller)].map { Self.holding($0.cursor, live: $0.live) } ?? "holding no client"
     }
 
-    /// The one spelling of a held cursor in a controller's line, for a cursor said before it is
-    /// taken as much as for one held.
-    public static func holding(_ cursor: Client, live: Bool = true) -> String {
+    /// The one spelling of a held cursor in a controller's line.
+    static func holding(_ cursor: Client, live: Bool = true) -> String {
         "holding \(cursor)" + (live ? "" : ", not live")
     }
 

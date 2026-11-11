@@ -20,7 +20,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
         #expect(record.controller == address)
         events.append(record.event)
     }
-    // The stream holds the oldest 32 records, so a case that ran past them would not end here.
+    // The stream holds the oldest 32 records, so a case that ran past them loses its `.ended`.
     #expect(events.first == .made)
     #expect(events.last == .ended)
     return events
@@ -40,7 +40,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
     /// A sender that is no text client makes no cursor, and the record says the controller holds none.
     @Test(.timeLimit(.minutes(1))) func anActivationAndADeactivationWithNoClientSaySo() async throws {
         let said = try await events(of: { DictationInputController() }) { controller in
-            controller.activateServer(nil)
+            controller.activate(nil, footprint: 0, makingCursor: { _ in nil })
             controller.deactivateServer(nil)
         }
         #expect(said == [
@@ -56,11 +56,11 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
         let cursor = try FakeTextInputClient(in: "com.example.ControllerRecordTests").cursor()
         let held = FocusedClient.holding(cursor)
         let said = try await events(of: { DictationInputController() }) { controller in
-            controller.activate(nil, makingCursor: { _ in cursor })
+            controller.activate(nil, footprint: 0, makingCursor: { _ in cursor })
             controller.deactivateServer(nil)
         }
         // Whether the cursor is live is `FocusedClient.shared`'s, which other cases share.
-        #expect(said.count == 4)
+        try #require(said.count == 4)
         guard case .callback(.inline, .activated(let activated)) = said[1], case .callback(.inline, .deactivated(let deactivated)) = said[2] else {
             Issue.record("not an activation and a deactivation: \(said)")
             return
@@ -74,6 +74,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
         let said = try await events(of: { DictationInputController() }) { controller in
             #expect(controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: []) == false)
         }
+        try #require(said.count == 3)
         #expect(said[1] == .callback(.inline, .command("moveLeft:", steered: nil, holding: "holding no client")))
     }
 
@@ -82,6 +83,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
         let said = try await events(of: { DictationInputController() }) { controller in
             #expect(controller.inputText("secret", client: nil) == false)
         }
+        try #require(said.count == 3)
         #expect(said[1] == .callback(.inline, .declinedText(holding: "holding no client")))
         #expect(!said.map { ControllerRecord(controller: 0xab, event: $0).rendering.line }.joined().contains("secret"))
     }

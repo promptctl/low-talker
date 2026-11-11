@@ -12,20 +12,23 @@ public nonisolated enum SteeringVerdict: Equatable, Sendable {
     case keep
 }
 
-/// The questions a held key asks the app, as the gate asks them: `Asker` is the real one, a test's
-/// is a fake with no port and no app. [LAW:decomposition]
 /// A verdict, the reason for it, and how long the key was held for it.
 public nonisolated struct SteeringDecision: Equatable, Sendable, CustomStringConvertible {
     public let verdict: SteeringVerdict
     public let because: String
     /// How long the main thread held the key while the app was asked.
-    public var waited: Duration = .zero
+    public let waited: Duration
     /// A key typed with nothing owed, which is nearly every Return and Escape: said at debug
     /// level so the log is not a record of when a person pressed them.
-    public var routine = false
+    public let routine: Bool
 
     public init(verdict: SteeringVerdict, because: String, waited: Duration = .zero, routine: Bool = false) {
         (self.verdict, self.because, self.waited, self.routine) = (verdict, because, waited, routine)
+    }
+
+    /// This decision, held for `waited`.
+    func held(for waited: Duration) -> SteeringDecision {
+        SteeringDecision(verdict: verdict, because: because, waited: waited, routine: routine)
     }
 
     public var description: String {
@@ -33,6 +36,8 @@ public nonisolated struct SteeringDecision: Equatable, Sendable, CustomStringCon
     }
 }
 
+/// The questions a held key asks the app, as the gate asks them: `Asker` is the real one, a test's
+/// is a fake with no port and no app. [LAW:decomposition]
 public nonisolated protocol SteeringAsking: Sendable {
     func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
     func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
@@ -157,9 +162,7 @@ public nonisolated final class SteeringGate: Sendable {
             turns.poke()
         }.start()
         turns.hold(until: started + ceiling, while: { slot.decided.withLock { $0 } == nil })
-        var decided = slot.decided.withLock { $0 } ?? unanswered
-        decided.waited = ContinuousClock.now - started
-        return decided
+        return (slot.decided.withLock { $0 } ?? unanswered).held(for: ContinuousClock.now - started)
     }
 
     /// Whether an app that is not there, which is how an app that is not running looks from here

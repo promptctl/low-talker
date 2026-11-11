@@ -166,7 +166,7 @@ public final class DictationInputController: IMKInputController, InputController
     /// insert that asked about it had already been refused, and the words would be lost while
     /// the cursor sat waiting. [LAW:no-ambient-temporal-coupling]
     nonisolated override public func activateServer(_ sender: Any!) {
-        activate(sender, makingCursor: Self.cursor(of:))
+        activate(sender, footprint: ownFootprint(), makingCursor: Self.cursor(of:))
     }
 
     /// The cursor IMK's `sender` makes, read where the workspace is: none for a sender that is no
@@ -177,15 +177,16 @@ public final class DictationInputController: IMKInputController, InputController
         return (sender as? IMKTextInput).flatMap { Client(IMKClient(client: $0), inFront: frontmost) }
     }
 
-    /// `activateServer` with the cursor `makingCursor` makes of `sender`: the IMK cast is the
-    /// override's, so the rest is driven by a test with a fake client.
-    nonisolated func activate(_ sender: Any?, makingCursor: @MainActor (Any?) -> Client?) {
+    /// `activateServer` at `footprint`, with the cursor `makingCursor` makes of `sender`: the
+    /// footprint read and the IMK cast are the override's, so the rest is driven by a test with a
+    /// fake client and a footprint it chose. [LAW:effects-at-boundaries]
+    nonisolated func activate(_ sender: Any?, footprint: UInt64?, makingCursor: @MainActor (Any?) -> Client?) {
         // The client is read here, and every later call on it, the commits included, is made
         // on this same actor (IMK rule 4).
         entered(sender) { sender in
             // IMK rule 7. A process past its ceiling takes no client, so an insert asked of it
             // before it ends is refused and the app holds the words for the process after it.
-            if let overrun = ownFootprint().flatMap(Notices.shared.activated(holding:)) {
+            if let overrun = footprint.flatMap(Notices.shared.activated(holding:)) {
                 return ((), .overMemoryCeiling(overrun))
             }
             // A sender no cursor can be made of changes nothing here. Not reported, because a
