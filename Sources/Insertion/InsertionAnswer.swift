@@ -93,10 +93,27 @@ public enum InsertionAnswer: Codable, Equatable, Sendable {
     case notYetTaken(characters: Int, into: String)
 }
 
+/// A failed request told to the person: why it failed, then what became of the words it carried.
+///
+/// [LAW:one-source-of-truth] The two halves are apart because only the first belongs to every
+/// request: an insert's warning is both, and a sender with its own words to account for, as a
+/// cancel's take-back has, tells the reason beside its own account of them.
+public protocol InsertWarning: CustomStringConvertible {
+    /// What happened, and nothing of what it means for the words.
+    var reason: String { get }
+    /// What became of an insert's words, and how to have them offered again; nil where the only
+    /// request that meets it is not an insert.
+    var fate: String? { get }
+}
+
+extension InsertWarning {
+    public var description: String { ["WARNING: \(reason)", fate].compactMap { $0 }.joined(separator: " ") }
+}
+
 /// Words handed to an app that did not take them in time: they land if it recovers.
 /// Thrown past `InputMethodInserter` like a refusal, because the words are not at the
 /// cursor now, and apart from one, because they may yet be. [LAW:types-are-the-program]
-public struct NotYetTaken: Error, Equatable, Sendable, CustomStringConvertible {
+public struct NotYetTaken: Error, Equatable, Sendable, InsertWarning {
     public let characters: Int
     public let into: String
 
@@ -105,12 +122,8 @@ public struct NotYetTaken: Error, Equatable, Sendable, CustomStringConvertible {
         self.into = into
     }
 
-    /// What happened, and nothing of what it means for the words. [LAW:one-source-of-truth]
     public var reason: String { "\(into) did not take what it was handed in time." }
-
-    public var description: String {
-        "WARNING: \(reason) The \(characters) characters land if it recovers; do not dictate them again."
-    }
+    public var fate: String? { "The \(characters) characters land if it recovers; do not dictate them again." }
 }
 
 /// Words committed at the cursor: how many, and the app whose client took them.
@@ -129,7 +142,7 @@ public struct Inserted: Equatable, Sendable {
 /// A closed set rather than a string, so a caller can act on a reason and the compiler
 /// says which reasons it has not considered; each one is also what the log line says, so
 /// there is one spelling of each fact. [LAW:one-source-of-truth]
-public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, CustomStringConvertible {
+public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, InsertWarning {
     /// No text field has focus, so there is nowhere for words to go. Three ways in, with one
     /// fix for the person, which is clicking into a field: no client has focus at all, the
     /// client in front answers that it gives no document access, or its caret is on no
@@ -192,9 +205,6 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
     /// the text before it is not the words. Nothing was changed, so the words are still there.
     case wordsCannotBeTakenBack
 
-    /// Why the request was refused, and nothing of what became of the words: that belongs to
-    /// whoever sent it, an insert's words being held and a take-back's left in the field.
-    /// [LAW:one-source-of-truth]
     public var reason: String {
         switch self {
         case .noTextFieldHasFocus: "No text field has focus."
@@ -212,25 +222,27 @@ public enum Refusal: String, Error, Codable, CaseIterable, Equatable, Sendable, 
         }
     }
 
-    /// What became of an insert's words, and how to have them offered again; nil where whoever
-    /// sent the request tells it: the press that stopped, or the cancel whose take-back it was.
-    private var fate: String? {
+    /// Only a take-back is refused as `wordsCannotBeTakenBack`, so it has no insert's fate.
+    public var fate: String? {
         switch self {
-        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy:
-            "Your dictation was not inserted."
-        case .dictationIsInAnotherApp, .wordsCannotBeTakenBack: nil
-        case .cursorIsNotSettled: "Your dictation was not inserted; press an arrow key where you want it and it is offered again."
+        case .noTextFieldHasFocus, .cursorIsInAnotherApp, .dictationIsInAnotherApp, .senderIsNotThisInstallationsApp, .inputMethodIsBusy:
+            Self.notInserted()
+        case .cursorIsNotSettled: Self.notInserted(offeredAgainWhen: "press an arrow key where you want it")
         case .requestWasNotReadable: Self.offeredAgainOnReinstall
-        case .inputSourceIsNotSelected:
-            "Your dictation was not inserted; select \(AppIdentity.displayName) in the Input menu and it is offered again."
+        case .inputSourceIsNotSelected: Self.notInserted(offeredAgainWhen: "select \(AppIdentity.displayName) in the Input menu")
+        case .wordsCannotBeTakenBack: nil
         }
+    }
+
+    /// A refusal commits nothing, so an insert's words are not at the cursor; `fix` is what offers
+    /// them again, where the person has one to make.
+    static func notInserted(offeredAgainWhen fix: String? = nil) -> String {
+        fix.map { "Your dictation was not inserted; \($0) and it is offered again." } ?? "Your dictation was not inserted."
     }
 
     /// The fate of words an input method of another build would not insert, whether it could
     /// not read the request or refused it for a reason this build has no name for.
-    static let offeredAgainOnReinstall = "Your dictation was not inserted; reinstall \(AppIdentity.displayName) and it is offered again."
-
-    public var description: String { ["WARNING: \(reason)", fate].compactMap { $0 }.joined(separator: " ") }
+    static let offeredAgainOnReinstall = notInserted(offeredAgainWhen: "reinstall \(AppIdentity.displayName)")
 }
 
 /// Where the words were when the channel failed, which is what decides whether saying them
@@ -255,7 +267,7 @@ public enum Words: Equatable, Sendable, CustomStringConvertible {
 
 /// The transport failing to carry the question, which is never an answer. [LAW:no-silent-failure]
 /// Nothing here is retried and nothing is guessed: each case says what the channel did.
-public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
+public enum Unreachable: Error, Equatable, Sendable, InsertWarning {
     case nothingIsListening(port: String)
     /// The send itself timed out: the request never entered the far end's queue.
     case requestWasNotTaken(port: String, after: Duration)
@@ -276,8 +288,6 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
     /// reads.
     case answerWasNotReadable(port: String, bytes: Int, words: Words)
 
-    /// What the channel did, and nothing of what it means for the words, which `words` says.
-    /// [LAW:one-source-of-truth]
     public var reason: String {
         switch self {
         case let .nothingIsListening(port): "No input method is answering on \(port); it is not installed or not selected."
@@ -292,7 +302,7 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
         }
     }
 
-    public var description: String { "WARNING: \(reason) \(words)" }
+    public var fate: String? { "\(words)" }
 
     /// Where the words were when the channel failed: carried by the cases that can fail on
     /// either side of the send, and fixed by the phase for the rest.
@@ -309,7 +319,7 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
 ///
 /// [LAW:types-are-the-program] A closed set, so whoever holds one has every way an insert
 /// fails in front of it, and a new way is a new case the compiler walks every reader to.
-public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
+public enum InsertFailure: Error, Equatable, Sendable, InsertWarning {
     case refused(Refusal)
     /// Refused for a reason this build has no name for, which only an input method of another
     /// build can give. A refusal commits nothing, whatever its reason, so the words are held
@@ -320,26 +330,24 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     /// This end could not write down who may answer, so it asked nobody.
     case answererUnreadable(PeerIdentity.Unreadable)
 
-    /// Why the request failed, and nothing of what became of the words: an insert's warning says
-    /// that in `description`, and a take-back's says it for itself. [LAW:one-source-of-truth]
     public var reason: String {
         switch self {
         case .refused(let refusal): refusal.reason
-        case .refusedForAnUnknownReason(let reason):
-            "The input method is from another build of \(AppIdentity.displayName) and refused the request for a reason this app does not know (\(reason))."
+        case .refusedForAnUnknownReason(let code):
+            "The input method is from another build of \(AppIdentity.displayName) and refused the request for a reason this app does not know (\(code))."
         case .notYetTaken(let notYetTaken): notYetTaken.reason
         case .unreachable(let unreachable): unreachable.reason
         case .answererUnreadable(let unreadable): "The app could not say which input method may answer it: \(unreadable)."
         }
     }
 
-    public var description: String {
+    public var fate: String? {
         switch self {
-        case .refused(let refusal): "\(refusal)"
-        case .refusedForAnUnknownReason: "WARNING: \(reason) \(Refusal.offeredAgainOnReinstall)"
-        case .notYetTaken(let notYetTaken): "\(notYetTaken)"
-        case .unreachable(let unreachable): "\(unreachable)"
-        case .answererUnreadable: "WARNING: \(reason) \(Words.notSent)"
+        case .refused(let refusal): refusal.fate
+        case .refusedForAnUnknownReason: Refusal.offeredAgainOnReinstall
+        case .notYetTaken(let notYetTaken): notYetTaken.fate
+        case .unreachable(let unreachable): unreachable.fate
+        case .answererUnreadable: "\(Words.notSent)"
         }
     }
 

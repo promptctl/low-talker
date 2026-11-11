@@ -1528,6 +1528,21 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(rig.hold.held == .unaccounted(part("hello", "\(notYetTaken)")))
     }
 
+    /// Words an insert failed on are held beside a warning that says why, and what became of them:
+    /// not inserted or not sent where the failure came before any cursor held them, and not to be
+    /// said again where they may have landed. Only a take-back meets `wordsCannotBeTakenBack`.
+    @Test(arguments: InsertFailure.everyShape.filter { $0 != .refused(.wordsCannotBeTakenBack) })
+    func heldWordsSayWhyAndWhatBecameOfThem(_ failure: InsertFailure) async throws {
+        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
+        rig.inputMethod.refusing(failure)
+        rig.hold()
+        _ = await rig.report()
+        let warning = try #require(rig.hold.held?.warnings.first)
+        #expect(warning.contains(failure.reason), "\(warning)")
+        let fates = failure.wordsMayHaveLanded ? ["do not dictate"] : ["not inserted", "not sent"]
+        #expect(fates.contains { warning.contains($0) }, "\(warning)")
+    }
+
     /// A later failure whose words went nowhere is held beside a warning that stands, and
     /// when its words land the warning still stands.
     @Test func aWarningThatStandsOutlivesALaterRefusalAndItsLanding() async throws {
