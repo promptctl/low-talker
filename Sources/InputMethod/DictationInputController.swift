@@ -37,19 +37,28 @@ public final class DictationInputController: IMKInputController, InputController
     /// never pushed out, and the log still receives every record.
     nonisolated public let records: AsyncStream<ControllerRecord>
     nonisolated private let recording: AsyncStream<ControllerRecord>.Continuation
+    /// What this controller decides Return and Escape with.
+    nonisolated private let steering: Steering
 
-    /// How `IMKServer` builds the controller. Nonisolated, as the initializers they override
-    /// are, which a main-actor class does not inherit.
+    /// How `IMKServer` builds the controller, with the shipped process's steering. Nonisolated, as
+    /// the initializers they override are, which a main-actor class does not inherit.
     nonisolated override public init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         (records, recording) = AsyncStream.makeStream(bufferingPolicy: .bufferingOldest(32))
+        steering = .process
         super.init(server: server, delegate: delegate, client: inputClient)
         // [LAW:nothing-unseen] A controller's whole life, so an orphaned one (IMK rule 5) is
         // seen to have been made and never to have ended.
         record(.made)
     }
 
-    nonisolated override public init() {
+    nonisolated override public convenience init() {
+        self.init(steering: .process)
+    }
+
+    /// A controller that decides Return and Escape with `steering`: a test's gate and effects.
+    nonisolated public init(steering: Steering) {
         (records, recording) = AsyncStream.makeStream(bufferingPolicy: .bufferingOldest(32))
+        self.steering = steering
         super.init()
         record(.made)
     }
@@ -109,38 +118,22 @@ public final class DictationInputController: IMKInputController, InputController
         // IMK hands the command while the key is still down, so the modifiers held as it arrives are
         // the key's own. Read before the hop, which can wait out a Return the main thread is holding,
         // and handed on as a value: a read of the window server's modifier state, not a call on the
-        // client, so off the main actor is where it belongs. [LAW:effects-at-boundaries]
-        didCommand(by: selector, holding: NSEvent.modifierFlags)
+        // client, so off the main actor is where it belongs. The moment it was typed is read beside
+        // them, so the time it waits for the hop counts against the ceiling. [LAW:effects-at-boundaries]
+        didCommand(by: selector, holding: NSEvent.modifierFlags, typedAt: ProcessInfo.processInfo.systemUptime)
     }
 
-    /// The answer to the command `selector`, bound to a key typed with `modifiers` held.
-    nonisolated public func didCommand(by selector: Selector?, holding modifiers: NSEvent.ModifierFlags) -> Bool {
-        entered((selector: selector, modifiers: modifiers)) { command in
+    /// The answer to the command `selector`, bound to a key typed with `modifiers` held at
+    /// `typedAt` (system uptime).
+    nonisolated public func didCommand(by selector: Selector?, holding modifiers: NSEvent.ModifierFlags,
+                                       typedAt timestamp: TimeInterval) -> Bool {
+        entered((selector: selector, modifiers: modifiers, timestamp: timestamp)) { command in
             FocusedClient.shared.typedInto(self)
             let named = command.selector.map(NSStringFromSelector) ?? "no command"
             let steered = SteeringKey(command: command.selector, holding: command.modifiers).map { key in
-                ControllerRecord.Steered(key: key, decision: self.decide(key))
+                ControllerRecord.Steered(key: key, decision: self.steering.decide(key, typedAt: command.timestamp))
             }
             return (steered?.decision.verdict == .keep, .command(named, steered: steered, holding: self.holding))
-        }
-    }
-
-    /// The gate's decision of `key`, and what follows from it here: a kept Return is heard, and a
-    /// kept Escape is told to the app.
-    private func decide(_ key: SteeringKey) -> SteeringDecision {
-        switch key {
-        case .return:
-            let decided = SteeringGate.shared.verdict(at: ProcessInfo.processInfo.systemUptime)
-            // The system's own answer to a Return that did nothing, so a kept one is heard at the
-            // moment it was typed and not only found in a log. [LAW:no-silent-failure]
-            if decided.verdict == .keep { NSSound.beep() }
-            return decided
-        case .escape:
-            let decided = SteeringGate.shared.escapeVerdict(at: ProcessInfo.processInfo.systemUptime)
-            // The app cancels the open press when told, and is told only of an Escape it is kept.
-            // [LAW:single-enforcer]
-            if decided.verdict == .keep { Notices.shared.keyTyped(.escape) }
-            return decided
         }
     }
 

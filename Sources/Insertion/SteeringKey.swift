@@ -30,7 +30,7 @@ public nonisolated enum SteeringKey: Codable, Equatable, Sendable, CustomStringC
     /// The one place a command becomes a steering key; the input method asks here and nowhere else.
     public init?(command: Selector?, holding modifiers: NSEvent.ModifierFlags) {
         switch command.map(NSStringFromSelector) {
-        case "insertNewline:" where modifiers.isDisjoint(with: Self.makeAnotherKey): self = .return
+        case "insertNewline:" where modifiers.isDisjoint(with: Self.makesAnotherKey): self = .return
         case "cancelOperation:": self = .escape
         default: return nil
         }
@@ -40,5 +40,5 @@ public nonisolated enum SteeringKey: Codable, Equatable, Sendable, CustomStringC
     /// and Shift+Return one in a chat box; Fn is a chord a person can choose, and a Return under
     /// the chord is the chord's, not bare. Caps lock and the numeric pad flag, which keypad
     /// Enter carries, make nothing else of it.
-    private static let makeAnotherKey: NSEvent.ModifierFlags = [.shift, .control, .option, .command, .function]
+    public static let makesAnotherKey: NSEvent.ModifierFlags = [.shift, .control, .option, .command, .function]
 }

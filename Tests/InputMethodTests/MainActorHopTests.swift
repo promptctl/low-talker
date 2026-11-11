@@ -23,7 +23,7 @@ import Testing
         let said = try await events(of: { DictationInputController() }) { controller in
             nonisolated(unsafe) let controller = controller
             let answer = await withCheckedContinuation { done in
-                Thread.detachNewThread { done.resume(returning: controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: [])) }
+                Thread.detachNewThread { done.resume(returning: controller.didCommand(by: NSSelectorFromString("moveLeft:"), holding: [], typedAt: 0)) }
             }
             #expect(answer == false)
         }
