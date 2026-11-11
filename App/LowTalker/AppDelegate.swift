@@ -938,8 +938,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch press.outcome {
         case .session(let session):
             sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); \(press.record, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
-        case .usedAsModifier(let landed, let discarded):
-            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so the press was not dictation and nothing of it is held or shown; \(landed, privacy: .public) words inserted before, \(discarded, privacy: .public) heard after them discarded; \(press.record, privacy: .public)")
+        case .usedAsModifier(let landed, let standing, let discarded):
+            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so the press was not dictation and nothing heard past its inserts is held or shown; \(landed, privacy: .public) words inserted before, \(standing, privacy: .public) that may have been, \(discarded, privacy: .public) heard after them discarded; \(press.record, privacy: .public)")
         case .cancelled(let cancelled):
             sessions.notice("\(press.mode, privacy: .public): the press was cancelled with Escape, so nothing of it is held, offered or shown; \(cancelled.description, privacy: .public); \(press.record, privacy: .public)")
         case .failed(let failed):
