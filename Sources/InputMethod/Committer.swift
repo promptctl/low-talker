@@ -27,7 +27,9 @@ import os
 ///
 /// **What `inserted` claims, exactly: `insertText` returned on the main actor, into the client
 /// of the app in front, which had answered that it gives document access with its caret on a
-/// screen or nowhere it reported.** Not that a person saw them: the text input system offers
+/// screen or nowhere it reported, and whose caret then ended after the words or was not
+/// reported.** A caret anywhere else is a field that did not keep them as handed, answered
+/// `notKept`, which the app holds as words that may have landed. Not that a person saw them: the text input system offers
 /// no delivery report, and measured on 2026-09-22 there is nothing to derive one from. iTerm2,
 /// where the words land in plain sight, answers `length()` of 0 before and after, so a check
 /// for "did the document grow" would refuse the terminal. The client's field is asked about
@@ -98,15 +100,20 @@ public nonisolated final class Committer: Sendable {
                 return .letGoAfterDeciding(deciding: deciding, seen: line)
             }
             let committed = clock.now
-            let refusal = cursor.commit(request.text, replacing: request.replacing)
+            let commit = cursor.commit(request.text, replacing: request.replacing)
             let committing = clock.now - committed
+            switch commit {
             // A commit the client's own checks refused changed nothing, said as the refusal it is.
-            if let refusal {
+            case .refused(let refusal):
                 let late = turn.answer(.refused(refusal), seen: line)
                 return .refused(refusal, deciding: deciding + committing, late: late)
+            case let .notKept(caret, expected):
+                let late = turn.answer(.notKept(characters: characters, into: cursor.application), seen: line)
+                return .notKept(characters: characters, into: cursor.application, caret: caret, expected: expected, late: late)
+            case .handed:
+                let late = turn.answer(.inserted(characters: characters, into: cursor.application), seen: line)
+                return .committed(characters: characters, into: cursor.application, deciding: deciding, committing: committing, late: late)
             }
-            let late = turn.answer(.inserted(characters: characters, into: cursor.application), seen: line)
-            return .committed(characters: characters, into: cursor.application, deciding: deciding, committing: committing, late: late)
         }
     }
 }
@@ -227,6 +234,7 @@ public nonisolated struct Ended: Sendable, CustomStringConvertible {
         case letGoAfterDeciding(deciding: Duration, seen: String)
         case refused(Refusal, deciding: Duration, late: Bool)
         case committed(characters: Int, into: String, deciding: Duration, committing: Duration, late: Bool)
+        case notKept(characters: Int, into: String, caret: Int, expected: Int, late: Bool)
     }
 
     let insert: Int
@@ -246,6 +254,9 @@ public nonisolated struct Ended: Sendable, CustomStringConvertible {
             "\(main): refused \(refusal.rawValue) after \(Self.ms(deciding)) deciding" + (late ? ", after the port had answered that the input method is busy" : "")
         case let .committed(characters, application, deciding, committing, late):
             "\(main): \(Self.ms(deciding)) deciding, then \(Self.ms(committing)) committing \(characters) characters into \(application)"
+                + (late ? ", finishing after the port had answered that they were not yet taken" : "")
+        case let .notKept(characters, application, caret, expected, late):
+            "\(main): \(application) was handed \(characters) characters and left its caret at \(caret), not after them at \(expected)"
                 + (late ? ", finishing after the port had answered that they were not yet taken" : "")
         }
     }

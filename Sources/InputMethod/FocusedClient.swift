@@ -330,17 +330,34 @@ public final class Client: CustomStringConvertible {
     /// to take back are not there.
     ///
     /// [LAW:no-silent-failure] A take-back that cannot be proved is refused with what was found,
-    /// said in the log beside the refusal the app is told.
-    func commit(_ text: String, replacing: String) -> Refusal? {
+    /// said in the log beside the refusal the app is told. A field that reports its caret and
+    /// left it anywhere but after the words did not keep them as handed: a `maxlength`, or a
+    /// field that drops what it is given.
+    func commit(_ text: String, replacing: String) -> Commit {
         let range: NSRange
         do throws(Replacement.Unfound) {
             range = try Replacement.range(of: replacing, selection: { client.selectedRange() }, text: client.string(in:)).get()
         } catch {
             Self.log.notice("words could not be taken back from \(self.application, privacy: .public): \(error.description, privacy: .public)")
-            return .wordsCannotBeTakenBack
+            return .refused(.wordsCannotBeTakenBack)
         }
+        let start = range.location == NSNotFound ? client.selectedRange().location : range.location
         client.insertText(text, replacementRange: range)
-        return nil
+        let caret = client.selectedRange().location
+        guard start != NSNotFound, caret != NSNotFound else { return .handed }
+        let expected = start + text.utf16.count
+        return caret == expected ? .handed : .notKept(caret: caret, expected: expected)
+    }
+
+    /// What a commit did with the words.
+    enum Commit: Equatable {
+        /// Changed nothing, and why.
+        case refused(Refusal)
+        /// Handed to the client, whose caret ended after them or was not reported.
+        case handed
+        /// Handed to the client, whose caret ended at `caret` rather than after the words at
+        /// `expected`, so the field holds something other than what it was handed.
+        case notKept(caret: Int, expected: Int)
     }
 
     private static let log = Logger(subsystem: AppIdentity.inputMethodBundleIdentifier, category: "insert")

@@ -232,19 +232,30 @@ import Testing
         #expect(field.text.isEmpty)
     }
 
-    /// A `<textarea>` gives document access, and one that keeps 10 of the 30 characters it is
-    /// handed (a `maxlength`, unmeasured on a textarea: low-test-layers-sqm.8m3) is answered
-    /// inserted with all 30, while 20 never reached the field and nothing holds them. What the
-    /// input method answers today, and the answer low-reliability-z2z.rgy changes.
+    /// A field with document access that keeps 10 of the 30 characters it is handed leaves its
+    /// caret after the 10, so the words are answered not kept, which the app holds as words that
+    /// may have landed, rather than inserted with 20 of them nowhere.
     @MainActor
-    @Test func aDictationIntoATextAreaThatKeepsTenOfThirtyIsAnsweredInsertedWithThirty() throws {
+    @Test func aFieldThatKeepsTenOfThirtyIsAnsweredNotKept() throws {
         let field = FakeTextInputClient(in: "com.apple.Safari", .webKitTextArea, maxLength: 10)
+
+        guard case .answered(.notKept(characters: 30, into: "com.apple.Safari"), _) = try Self.dictate(into: field) else {
+            Issue.record("not answered not kept")
+            return
+        }
+        #expect(field.text == "alpha brav")
+    }
+
+    /// The same words into a field with room for them leave the caret after them, answered
+    /// inserted.
+    @MainActor
+    @Test func aFieldWithRoomForTheWordsIsAnsweredInserted() throws {
+        let field = FakeTextInputClient(in: "com.apple.Safari", .webKitTextArea)
 
         guard case .answered(.inserted(characters: 30, into: "com.apple.Safari"), _) = try Self.dictate(into: field) else {
             Issue.record("not answered inserted")
             return
         }
-        #expect(field.text == "alpha brav")
     }
 
     /// The port's line for each way its wait can end, numbered as the main actor's line is.

@@ -143,6 +143,7 @@ public struct InputMethodInserter: Inserter {
         case .inserted(let characters, let into): return Inserted(characters: characters, into: into)
         case .refused(let refusal): throw .refused(refusal)
         case .notYetTaken(let characters, let into): throw .notYetTaken(NotYetTaken(characters: characters, into: into))
+        case .notKept(let characters, let into): throw .notKept(NotKept(characters: characters, into: into))
         }
     }
 

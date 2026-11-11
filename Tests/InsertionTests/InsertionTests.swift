@@ -22,6 +22,7 @@ import Testing
         .refused(.senderIsNotThisInstallationsApp),
         .refused(.inputMethodIsBusy),
         .notYetTaken(characters: 5, into: "com.example.editor"),
+        .notKept(characters: 5, into: "com.example.editor"),
     ])
     func everyAnswerSurvivesTheCrossing(answer: InsertionAnswer) {
         #expect(Wire.answer(of: Wire.answer(answer)) == answer)
@@ -219,6 +220,16 @@ private let anEditor = "com.example.editor"
         let port = try hostInsertion(name: name) { .notYetTaken(characters: $0.text.count, into: anEditor) }
 
         await #expect(throws: InsertFailure.notYetTaken(NotYetTaken(characters: 5, into: anEditor))) { try await inserter(name).insert("hello", into: .cursorInFront) }
+        withExtendedLifetime(port) {}
+    }
+
+    /// Words a field did not keep as handed cross as their own answer and are thrown past it by
+    /// that name: some may be in the field, so they are never a refusal.
+    @Test func wordsNotKeptAreThrownByName() async throws {
+        let name = aPortNobodyElseUses()
+        let port = try hostInsertion(name: name) { .notKept(characters: $0.text.count, into: anEditor) }
+
+        await #expect(throws: InsertFailure.notKept(NotKept(characters: 5, into: anEditor))) { try await inserter(name).insert("hello", into: .cursorInFront) }
         withExtendedLifetime(port) {}
     }
 

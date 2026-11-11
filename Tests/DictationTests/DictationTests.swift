@@ -287,6 +287,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     FailedInsert(failure: .unreachable(.answerWasNotReadable(port: port, bytes: 3, words: .notSent)), mayHaveLanded: false),
     FailedInsert(failure: .unreachable(.answerWasNotReadable(port: port, bytes: 3, words: .mayHaveLanded)), mayHaveLanded: true),
     FailedInsert(failure: .notYetTaken(NotYetTaken(characters: 11, into: "com.apple.TextEdit")), mayHaveLanded: true),
+    FailedInsert(failure: .notKept(NotKept(characters: 11, into: "com.apple.Safari")), mayHaveLanded: true),
     FailedInsert(failure: .answererUnreadable(.noCertificate), mayHaveLanded: false),
     FailedInsert(failure: .buildMismatch(BuildMismatch(app: Build(number: "9", revision: "app"), inputMethod: Build(number: "9", revision: "other"))!), mayHaveLanded: false),
     FailedInsert(failure: .buildMismatch(BuildMismatch(app: Build(number: "9", revision: "app"), inputMethod: nil)!), mayHaveLanded: false),

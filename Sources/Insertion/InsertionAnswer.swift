@@ -71,6 +71,25 @@ public enum InsertionAnswer: Codable, Equatable, Sendable {
     /// bound. Neither of the others: the words are on their way and land if the app
     /// recovers, so this is never a refusal and must never be retried.
     case notYetTaken(characters: Int, into: String)
+    /// Handed to the client in front, whose field then held something other than what it was
+    /// handed: a `maxlength` kept part of them, or the field dropped them. Some may be in
+    /// the field, so this is never a refusal and must never be retried.
+    case notKept(characters: Int, into: String)
+}
+
+/// Words handed to a field that did not keep them as handed: some may be there, some not.
+public struct NotKept: Error, Equatable, Sendable, CustomStringConvertible {
+    public let characters: Int
+    public let into: String
+
+    public init(characters: Int, into: String) {
+        self.characters = characters
+        self.into = into
+    }
+
+    public var description: String {
+        "WARNING: \(into) did not keep the \(characters) characters it was handed; some of your dictation may be missing from the field."
+    }
 }
 
 /// Words handed to an app that did not take them in time: they land if it recovers.
@@ -265,6 +284,7 @@ public enum Unreachable: Error, Equatable, Sendable, CustomStringConvertible {
 public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     case refused(Refusal)
     case notYetTaken(NotYetTaken)
+    case notKept(NotKept)
     case unreachable(Unreachable)
     /// This end could not write down who may answer, so it asked nobody.
     case answererUnreadable(PeerIdentity.Unreadable)
@@ -276,6 +296,7 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
         switch self {
         case .refused(let refusal): "\(refusal)"
         case .notYetTaken(let notYetTaken): "\(notYetTaken)"
+        case .notKept(let notKept): "\(notKept)"
         case .unreachable(let unreachable): "\(unreachable)"
         case .answererUnreadable(let unreadable): "WARNING: The app could not say which input method may answer it: \(unreadable). Your dictation was not sent."
         case .buildMismatch(let mismatch): "\(mismatch)"
@@ -289,7 +310,7 @@ public enum InsertFailure: Error, Equatable, Sendable, CustomStringConvertible {
     /// channel; this says it for every failure an `Inserter` throws.
     public var wordsMayHaveLanded: Bool {
         switch self {
-        case .notYetTaken: true
+        case .notYetTaken, .notKept: true
         case .unreachable(let unreachable): unreachable.words == .mayHaveLanded
         case .refused, .answererUnreadable, .buildMismatch: false
         }
