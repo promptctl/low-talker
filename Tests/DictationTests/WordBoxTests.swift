@@ -21,6 +21,7 @@ final class StubPanel: WordBoxPanel {
 
     func draw(_ face: WordBox.Face) { shown.append(.face(face)) }
     func hide() { shown.append(.away) }
+    var isShown: Bool { face != nil }
 }
 
 /// A press as the hold tells its words apart, which a test throws away as an Escape does, or

@@ -414,7 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         // How Return and Escape steer this loop's press, the input method's questions and the
         // word box's dismissal alike.
-        let steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting.isOn }, panelShown: { [unowned self] in self.hud.isShown })
+        let steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting.isOn }, dismissing: { [unowned self] in box.escape(cancelling: $0, hold: hold) })
         // The hotkey goes up only over an input method that installed: a hotkey over one that
         // refused would open the microphone on every press for words that go nowhere, while
         // the status line said the loop was off. [LAW:no-silent-failure]
@@ -433,7 +433,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     heard: { [unowned self] notice in
                         inputMethod.heard(notice).map(showInputMethod)
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
-                        if case let .keyTyped(_, key) = notice { box.react(to: key, cancelling: listening?.steering, hold: hold) }
                     },
                     // A Return the input method holds asks whether words are owed to it, and
                     // answers to this loop's own press and queue.

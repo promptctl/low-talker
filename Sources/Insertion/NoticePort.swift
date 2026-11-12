@@ -15,7 +15,7 @@ import Foundation
 ///
 /// A notice is not answered: the input method sends it from a task of its own and waits for
 /// nothing, and a notice that asked for an answer anyway has its reply right released
-/// unanswered. The two questions about a Return the input method holds are the exception, and
+/// unanswered. The questions about a key the input method holds are the exception, and
 /// are handed on with the right to answer them, which whoever holds it answers when the answer
 /// is known: this port's queue is never held for it, so a notice behind a question is heard
 /// at once.
@@ -102,9 +102,6 @@ public enum InputMethodNotice: Equatable, Sendable {
     case cursorArrived(CursorArrival)
     /// The input method is ending itself, holding more memory than its ceiling (IMK rule 7).
     case overMemoryCeiling(pid: pid_t, Overrun)
-    /// A steering key the input method kept was pressed. It is reported so the app can act on it;
-    /// the key itself does not reach the app in front.
-    case keyTyped(pid: pid_t, SteeringKey)
 }
 
 /// An input method's memory footprint over its ceiling, in bytes. One under or at the ceiling,
@@ -209,9 +206,6 @@ public struct NoticeSender: Sendable {
 
     /// Tells the app this input method is ending itself over its memory ceiling.
     public func tellOverMemoryCeiling(_ overrun: Overrun) -> Told { tell(Wire.overrun(overrun), id: Wire.overMemoryCeiling) }
-
-    /// Tells the app a steering key was pressed.
-    public func tellKeyTyped(_ key: SteeringKey) -> Told { tell(Wire.key(key), id: Wire.keyTyped) }
 
     private func tell(_ payload: Data, id: mach_msg_id_t) -> Told {
         var remote = mach_port_t()

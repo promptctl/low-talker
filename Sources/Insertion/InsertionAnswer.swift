@@ -410,14 +410,13 @@ enum Wire {
     // from before still running past an install is told as not understood, not misread.
     static let cursorArrived: mach_msg_id_t = 4
     static let overMemoryCeiling: mach_msg_id_t = 5
-    /// A key the app asked to hear of was pressed; reported, never answered.
-    static let keyTyped: mach_msg_id_t = 9
     /// The questions the input method asks the app about a key it holds, each answered: whether
-    /// anything is owed, then whether what is owed settled, and whether the word box is open. 8 was
-    /// the Escape cancel question, retired, and is not reused.
+    /// anything is owed, then whether what is owed settled, and to take an Escape. Retired and not
+    /// reused: 8, the Escape cancel question; 9, an Escape told after it was kept; and 10, whether
+    /// the word box was open, which 11 replaced by asking and acting in one turn.
     static let owed: mach_msg_id_t = 6
     static let settled: mach_msg_id_t = 7
-    static let panel: mach_msg_id_t = 10
+    static let escape: mach_msg_id_t = 11
 
     /// The first byte of every request, and one no UTF-8 text contains. An input method built
     /// when a request was its bare text, still running past an install, reads this as bytes
@@ -457,9 +456,6 @@ enum Wire {
         guard !data.isEmpty else { return .some(nil) }
         return (try? JSONDecoder().decode(Build.self, from: data)).map(Optional.some)
     }
-
-    /// The key a key report carries.
-    static func key(_ key: SteeringKey) -> Data { try! JSONEncoder().encode(key) }
 
     /// [LAW:parse-dont-validate] A greeting's answer, or nothing at all. The refusal is an
     /// insert's answer, because the port refuses a sender the same way whichever message
@@ -514,7 +510,7 @@ enum Wire {
         return switch id {
         case owed: .owed(at: stamp.timestamp)
         case settled: .settled(at: stamp.timestamp)
-        case panel: .panel(at: stamp.timestamp)
+        case escape: .escape(at: stamp.timestamp)
         default: nil
         }
     }
@@ -523,8 +519,8 @@ enum Wire {
     static func owing(of data: Data) -> Owing? { try? JSONDecoder().decode(Owing.self, from: data) }
     static func settlement(_ settlement: Settlement) -> Data { try! JSONEncoder().encode(settlement) }
     static func settlement(of data: Data) -> Settlement? { try? JSONDecoder().decode(Settlement.self, from: data) }
-    static func panelState(_ panel: PanelState) -> Data { try! JSONEncoder().encode(panel) }
-    static func panelState(of data: Data) -> PanelState? { try? JSONDecoder().decode(PanelState.self, from: data) }
+    static func dismissal(_ dismissal: Dismissal) -> Data { try! JSONEncoder().encode(dismissal) }
+    static func dismissal(of data: Data) -> Dismissal? { try? JSONDecoder().decode(Dismissal.self, from: data) }
 
     /// [LAW:parse-dont-validate] The notice the input method process `pid` sent, or nil when
     /// the message is none, or its payload is not what its id says. A cursor arrival carries
@@ -533,7 +529,6 @@ enum Wire {
         switch id {
         case cursorArrived: build(of: payload ?? Data()).map { .cursorArrived(CursorArrival(pid: pid, build: $0)) }
         case overMemoryCeiling: payload.flatMap { try? JSONDecoder().decode(Overrun.self, from: $0) }.map { .overMemoryCeiling(pid: pid, $0) }
-        case keyTyped: payload.flatMap { try? JSONDecoder().decode(SteeringKey.self, from: $0) }.map { .keyTyped(pid: pid, $0) }
         default: nil
         }
     }

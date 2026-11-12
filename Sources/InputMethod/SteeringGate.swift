@@ -37,7 +37,7 @@ public nonisolated struct SteeringDecision: Equatable, Sendable, CustomStringCon
 }
 
 /// Holds a Return in `didCommand(by:)` while the app is asked what it means for the dictation, and keeps an
-/// Escape while the app's word box is open.
+/// Escape the app put its word box away with.
 ///
 /// A Return is held until the words the app owes have landed, then let through.
 ///
@@ -52,9 +52,13 @@ public nonisolated struct SteeringDecision: Equatable, Sendable, CustomStringCon
 /// nothing costs a keystroke. [LAW:no-silent-failure] Every verdict is a `SteeringDecision`, which the
 /// controller's record carries with its reason.
 ///
-/// An Escape is kept only while the app says its word box is open, and then the app cancels the
-/// open press and lets go the held words itself. Anything else, including an app that does not
-/// answer, passes the Escape to the app in front as typed.
+/// An Escape is asked of the app, which takes it when its word box is shown, and in the same turn
+/// puts the box away, lets go the held words and cancels the press the box showed. It is kept only
+/// when the app says it did, so a kept Escape always did something. Anything else, including an
+/// app that does not answer, passes the Escape to the app in front as typed. An answer later than
+/// `question` passes it too, though the box may have been put away with it: the Escape is never
+/// lost, and at worst does both. [LAW:no-ambient-temporal-coupling] Deciding and acting are one
+/// turn of the app's, so nothing can change between them.
 ///
 /// While it waits the main thread commits what the app's inserts ask of it (`MainTurns`), since
 /// those are the words it is waiting for. The ceiling protects the keyboard, which the held thread
@@ -101,7 +105,7 @@ public nonisolated final class SteeringGate: Sendable {
         public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> {
             .failure(.unconnected)
         }
-        public func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> {
+        public func dismiss(at _: TimeInterval, within _: Duration) -> Result<Dismissal, NotAnswered> {
             .failure(.unconnected)
         }
     }
@@ -124,11 +128,11 @@ public nonisolated final class SteeringGate: Sendable {
     }
 
     /// What the gate does with an Escape typed, on the main thread, where `didCommand` is called:
-    /// kept while the app's word box is open, and passed otherwise.
+    /// kept when the app put its word box away with it, and passed otherwise.
     @MainActor
     public func escapeVerdict(at timestamp: TimeInterval) -> SteeringDecision {
         let question = self.question
-        return answered(unanswered: SteeringDecision(verdict: .pass, because: "the app had not answered whether its word box is open")) { asker in
+        return answered(unanswered: SteeringDecision(verdict: .pass, because: "the app had not answered what it did with the Escape")) { asker in
             Self.decideEscape(asker, at: timestamp, question: question)
         }
     }
@@ -178,13 +182,13 @@ public nonisolated final class SteeringGate: Sendable {
     }
 
     private static func decideEscape(_ asker: any SteeringAsking, at timestamp: TimeInterval, question: Duration) -> SteeringDecision {
-        switch asker.panel(at: timestamp, within: question) {
-        case .success(.shown):
-            return SteeringDecision(verdict: .keep, because: "the word box is open, so the app cancels the press with it")
-        case .success(.shut):
+        switch asker.dismiss(at: timestamp, within: question) {
+        case .success(.dismissed):
+            return SteeringDecision(verdict: .keep, because: "the app put its word box away with it and cancelled the press it showed")
+        case .success(.nothingShown):
             return SteeringDecision(verdict: .pass, because: "the word box is shut", routine: true)
         case .failure(let why):
-            return SteeringDecision(verdict: .pass, because: "the app did not say the word box is open: \(why)", routine: isAbsence(why))
+            return SteeringDecision(verdict: .pass, because: "the app did not say it took the Escape: \(why)", routine: isAbsence(why))
         }
     }
 }

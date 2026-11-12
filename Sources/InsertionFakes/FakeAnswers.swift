@@ -6,24 +6,24 @@ import Insertion
 /// to `Asker` on the one thing it decides, which answer each question reads.
 /// [LAW:one-type-per-behavior]
 ///
-/// An app that is asked nothing in particular owes nothing, has settled, and has its box shut,
+/// An app that is asked nothing in particular owes nothing, has settled, and has no box to dismiss,
 /// which is the app on any key typed while no one is dictating.
 public struct FakeApp: SteeringAsking {
     public var owing: @Sendable () -> Result<Owing, NotAnswered>
     public var settling: @Sendable () -> Result<Settlement, NotAnswered>
-    public var panelling: @Sendable () -> Result<PanelState, NotAnswered>
+    public var dismissing: @Sendable () -> Result<Dismissal, NotAnswered>
 
     public init(
         owing: @escaping @Sendable () -> Result<Owing, NotAnswered> = { .success(.nothing) },
         settling: @escaping @Sendable () -> Result<Settlement, NotAnswered> = { .success(.landed) },
-        panelling: @escaping @Sendable () -> Result<PanelState, NotAnswered> = { .success(.shut) }
+        dismissing: @escaping @Sendable () -> Result<Dismissal, NotAnswered> = { .success(.nothingShown) }
     ) {
-        (self.owing, self.settling, self.panelling) = (owing, settling, panelling)
+        (self.owing, self.settling, self.dismissing) = (owing, settling, dismissing)
     }
 
     public func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { owing() }
     public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { settling() }
-    public func panel(at _: TimeInterval, within _: Duration) -> Result<PanelState, NotAnswered> { panelling() }
+    public func dismiss(at _: TimeInterval, within _: Duration) -> Result<Dismissal, NotAnswered> { dismissing() }
 }
 
 /// The right to answer one question, as the app's steering holds it, which hands the answer to the
@@ -35,7 +35,7 @@ public final class FakeReply: Answering {
     public enum Said: Equatable, Sendable {
         case owing(Owing)
         case settlement(Settlement)
-        case panel(PanelState)
+        case dismissal(Dismissal)
     }
 
     private let stream: AsyncStream<Said>
@@ -45,7 +45,7 @@ public final class FakeReply: Answering {
 
     public func send(_ owing: Owing) -> Reply.Delivery { deliver(.owing(owing)) }
     public func send(_ settlement: Settlement) -> Reply.Delivery { deliver(.settlement(settlement)) }
-    public func send(_ panel: PanelState) -> Reply.Delivery { deliver(.panel(panel)) }
+    public func send(_ dismissal: Dismissal) -> Reply.Delivery { deliver(.dismissal(dismissal)) }
 
     private func deliver(_ said: Said) -> Reply.Delivery {
         // A second answer is the same programming error here that `Reply` stops on.

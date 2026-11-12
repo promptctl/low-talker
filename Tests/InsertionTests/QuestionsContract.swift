@@ -14,13 +14,13 @@ import Testing
     enum Asked: Sendable, CustomStringConvertible {
         case owed(Owing)
         case settled(Settlement)
-        case panel(PanelState)
+        case escape(Dismissal)
 
         var description: String {
             switch self {
             case .owed(let owing): "owed, answered \(owing)"
             case .settled(let settlement): "settled, answered \(settlement)"
-            case .panel(let panel): "panel, answered \(panel)"
+            case .escape(let dismissal): "escape, answered \(dismissal)"
             }
         }
 
@@ -29,7 +29,7 @@ import Testing
             switch self {
             case .owed(let owing): .owing(owing)
             case .settled(let settlement): .settlement(settlement)
-            case .panel(let panel): .panel(panel)
+            case .escape(let dismissal): .dismissal(dismissal)
             }
         }
 
@@ -38,7 +38,7 @@ import Testing
             switch self {
             case .owed(let owing): reply.send(owing)
             case .settled(let settlement): reply.send(settlement)
-            case .panel(let panel): reply.send(panel)
+            case .escape(let dismissal): reply.send(dismissal)
             }
         }
 
@@ -47,13 +47,13 @@ import Testing
             switch self {
             case .owed: app.owed(at: 1, within: aBudgetTheRunnerCannotSpend).map(Asked.owed)
             case .settled: app.settled(at: 1, within: aBudgetTheRunnerCannotSpend).map(Asked.settled)
-            case .panel: app.panel(at: 1, within: aBudgetTheRunnerCannotSpend).map(Asked.panel)
+            case .escape: app.dismiss(at: 1, within: aBudgetTheRunnerCannotSpend).map(Asked.escape)
             }
         }
     }
 
     static let asked: [Asked] =
-        Owing.allCases.map(Asked.owed) + Settlement.allCases.map(Asked.settled) + PanelState.allCases.map(Asked.panel)
+        Owing.allCases.map(Asked.owed) + Settlement.allCases.map(Asked.settled) + Dismissal.allCases.map(Asked.escape)
 
     @Test(arguments: asked)
     func theFakesCarryAnAnswerAsThePortDoes(question: Asked) async throws {
@@ -66,7 +66,7 @@ import Testing
         let fakeRead = question.ask(FakeApp(
             owing: { if case .owing(let owing) = said { .success(owing) } else { .failure(unasked) } },
             settling: { if case .settlement(let settlement) = said { .success(settlement) } else { .failure(unasked) } },
-            panelling: { if case .panel(let panel) = said { .success(panel) } else { .failure(unasked) } }))
+            dismissing: { if case .dismissal(let dismissal) = said { .success(dismissal) } else { .failure(unasked) } }))
 
         // The real ends, across a port.
         let name = aPortNobodyElseUses()

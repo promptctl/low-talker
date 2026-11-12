@@ -53,16 +53,15 @@ public nonisolated struct InputMethodProcess: Sendable {
     public let committer: Committer
     public let readings: Readings
 
-    /// `steering` tells `notices` of an Escape it keeps and beeps through `beep`, and the committer
-    /// waits on `gate`'s turns, so a Return held on the main actor lets the commit it waits for
-    /// run. Both are made here, of the parts handed in, so no assembly can give them others.
-    /// [LAW:single-enforcer]
+    /// `steering` beeps through `beep`, and the committer waits on `gate`'s turns, so a Return held
+    /// on the main actor lets the commit it waits for run. Both are made here, of the parts handed
+    /// in, so no assembly can give them others. [LAW:single-enforcer]
     init(readings: Readings, notices: Notices, gate: SteeringGate, beep: @escaping @MainActor @Sendable () -> Void,
          bound: Duration = Committer.standardBound, told: @escaping @Sendable (Ended) -> Void) {
         self.readings = readings
         self.notices = notices
         self.focused = FocusedClient(arrived: notices.cursorArrived(in:))
-        self.steering = Steering(gate: gate, notices: notices, beep: beep)
+        self.steering = Steering(gate: gate, beep: beep)
         self.committer = Committer(bound: bound, turns: gate.turns, told: told)
     }
 

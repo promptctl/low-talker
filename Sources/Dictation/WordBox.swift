@@ -8,6 +8,8 @@ import LowTalkerCore
 public protocol WordBoxPanel: AnyObject {
     func draw(_ face: WordBox.Face)
     func hide()
+    /// Whether the panel is on screen, which a draw with nowhere to put it is not.
+    var isShown: Bool { get }
 }
 
 /// The word box: the panel near the bottom of the screen while a press is on its way, or while
@@ -85,16 +87,14 @@ public final class WordBox {
         panel.hide()
     }
 
-    /// What each steering key the input method reports does. The switch is exhaustive, so a key
-    /// added to `SteeringKey` has to say what it does here before this builds.
-    public func react(to key: SteeringKey, cancelling steering: KeySteering?, hold: Hold) {
-        switch key {
-        // The input method keeps an Escape only while the box is shown, so one told here is
-        // the person putting it away.
-        case .escape: dismiss(cancelling: steering, hold: hold)
-        // Return is held and sent by the input method; the app has nothing to do when it passes.
-        case .return: break
-        }
+    /// An Escape the input method asks the app to take: the person putting the box away while it
+    /// is on screen, decided and done in this one turn so the answer cannot go stale, and nothing
+    /// while it is not, so the Escape is the app in front's. A box already put away does not take
+    /// a second Escape, which would throw away the presses still on their way past it.
+    public func escape(cancelling steering: KeySteering, hold: Hold) -> Dismissal {
+        guard panel.isShown else { return .nothingShown }
+        dismiss(cancelling: steering, hold: hold)
+        return .dismissed
     }
 
     /// What the box shows of `activity` over `readiness` with what is `held`, or nil when there

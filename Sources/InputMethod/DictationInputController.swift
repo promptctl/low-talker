@@ -109,8 +109,8 @@ public final class DictationInputController: IMKInputController, InputController
 
     /// The key-binding style: the text input system binds each key-down to an action and asks here
     /// for that action. Return is bound to `insertNewline:`, which is held for the words the app owes
-    /// and kept when the gate keeps it. Escape is bound to `cancelOperation:`: while the panel is
-    /// shown it is kept and told to the app, which cancels the open press and closes the panel. Every other action is declined.
+    /// and kept when the gate keeps it. Escape is bound to `cancelOperation:`, and is kept when the
+    /// app took it to put its word box away and cancel the press it showed. Every other action is declined.
     ///
     /// Overridden with an optional selector, as IMK may call with none.
     nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {

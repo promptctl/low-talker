@@ -32,19 +32,25 @@ private struct BadBuffer: Error {}
         let hotkey: Hotkey
         let feed: Feed
         let steering: KeySteering
+        /// The word box an Escape the input method asks about is taken by, as the app's is.
+        let box: WordBox
+        let panel: StubPanel
 
-        init(hearing engine: FakeTranscriber = FakeTranscriber { _ in Transcript(typed: "a") }, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false, keeping store: FakeHeldStore = FakeHeldStore()) async throws {
-            try self.init(over: try await Rig(hearing: engine, keeping: store), refusing: refusal, holdsReturn: holdsReturn, panelOpen: panelOpen)
+        init(hearing engine: FakeTranscriber = FakeTranscriber { _ in Transcript(typed: "a") }, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, keeping store: FakeHeldStore = FakeHeldStore()) async throws {
+            try self.init(over: try await Rig(hearing: engine, keeping: store), refusing: refusal, holdsReturn: holdsReturn)
         }
 
-        init(over rig: Rig, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, panelOpen: Bool = false) throws {
+        init(over rig: Rig, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true) throws {
             self.rig = rig
             rig.inputMethod.refusing(refusal)
             feed = Feed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             let dictation = rig.dictation
             try hotkey.start(feeding: dictation)
-            steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { holdsReturn }, panelShown: { panelOpen })
+            let (panel, hold) = (StubPanel(), rig.hold)
+            let box = WordBox(panel: panel)
+            (self.panel, self.box) = (panel, box)
+            steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { holdsReturn }, dismissing: { box.escape(cancelling: $0, hold: hold) })
         }
 
         /// Right Option going down or up, `held` milliseconds into the press, stamped on the
@@ -77,9 +83,21 @@ private struct BadBuffer: Error {}
             await delivered()
         }
 
-        /// The Escape the input method reports while the word box is shown.
+        /// The person putting the word box away, as an Escape the app takes does.
         func escapeTheBox() {
-            WordBox(panel: StubPanel()).react(to: .escape, cancelling: steering, hold: rig.hold)
+            WordBox(panel: StubPanel()).dismiss(cancelling: steering, hold: rig.hold)
+        }
+
+        /// The box drawn over what the loop last showed, as the app draws it.
+        func showTheBox() throws {
+            box.show(try #require(rig.shown.activities.last), over: .ready(.default, after: .seconds(1)), held: rig.hold.held, insertable: true)
+        }
+
+        /// What the app did with an Escape the input method asked it to take.
+        func escape() async -> FakeReply.Said {
+            let reply = FakeReply()
+            steering.answer(.escape(at: typedNow), through: reply)
+            return await reply.said()
         }
 
         /// Now, as a Return's stamp: on the host clock the press is ended against.
@@ -488,25 +506,23 @@ private struct BadBuffer: Error {}
         #expect(loop.rig.inputMethod.field == " one")
     }
 
-    /// The Escape the input method reports is the word box's dismissal: the press open is
-    /// cancelled, the words held before it are let go, and the box is put away, and stays away
-    /// through what the loop shows of the cancelled press after it.
-    @Test(.timeLimit(.minutes(1))) func anEscapeTheInputMethodReportsDismissesTheBox() async throws {
+    /// The case low-dictation-keys-652.9ix exists for: an Escape the app takes while the box shows
+    /// a press is the box's dismissal, done in the turn it answers. The press open is cancelled, the
+    /// words held before it are let go, and the box is put away, and stays away through what the
+    /// loop shows of the cancelled press after it.
+    @Test(.timeLimit(.minutes(1))) func anEscapeTheAppTakesCancelsThePressTheBoxShowed() async throws {
         let earlier = Held.unplaced(part(" earlier words", "WARNING: no text field took them"))
         let loop = try await Loop(keeping: FakeHeldStore(keeping: earlier))
-        let panel = StubPanel()
-        let box = WordBox(panel: panel)
-        let ready = EngineReadiness.ready(.default, after: .seconds(1))
         loop.chord(.down, atMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
-        box.show(try #require(loop.rig.shown.activities.last), over: ready, held: loop.rig.hold.held, insertable: true)
-        #expect(panel.face?.state == "Listening")
+        try loop.showTheBox()
+        #expect(loop.panel.face?.state == "Listening")
         let shownBefore = loop.rig.shown.activities.count
 
-        box.react(to: .escape, cancelling: loop.steering, hold: loop.rig.hold)
+        #expect(await loop.escape() == .dismissal(.dismissed))
 
-        #expect(panel.shown.last == .away)
+        #expect(loop.panel.shown.last == .away)
         #expect(loop.rig.hold.held == nil)
         #expect(loop.rig.hold.dismissed == earlier)
         loop.chord(.up, atMilliseconds: 400)
@@ -516,34 +532,51 @@ private struct BadBuffer: Error {}
         let after = loop.rig.shown.activities.dropFirst(shownBefore)
         #expect(!after.isEmpty)
         for activity in after {
-            box.show(activity, over: ready, held: loop.rig.hold.held, insertable: true)
-            #expect(panel.face == nil, "shown \(activity) after the Escape")
+            loop.box.show(activity, over: .ready(.default, after: .seconds(1)), held: loop.rig.hold.held, insertable: true)
+            #expect(loop.panel.face == nil, "shown \(activity) after the Escape")
         }
     }
 
-    /// A Return the input method reports passed through it, held and sent there: the press stays
-    /// open, and the box and the held words are as they were.
-    @Test(.timeLimit(.minutes(1))) func aReturnTheInputMethodReportsChangesNothing() async throws {
-        let earlier = Held.unplaced(part(" earlier words", "WARNING: no text field took them"))
-        let loop = try await Loop(keeping: FakeHeldStore(keeping: earlier))
-        let panel = StubPanel()
-        let box = WordBox(panel: panel)
-        loop.chord(.down, atMilliseconds: 0)
-        await loop.delivered()
-        box.show(.listening(heard: Transcript(words: [])), over: .ready(.default, after: .seconds(1)), held: loop.rig.hold.held, insertable: true)
-        let shown = panel.shown
-
-        box.react(to: .return, cancelling: loop.steering, hold: loop.rig.hold)
-
-        #expect(panel.shown == shown)
-        #expect(loop.rig.hold.held == earlier)
-        guard case .held = loop.hotkey.phase else {
-            Issue.record("the press is \(loop.hotkey.phase) after a Return")
-            return
-        }
-        loop.chord(.up, atMilliseconds: 400)
-        await loop.delivered()
+    /// An Escape whose box closed before the app acts on it, its press having landed since the box
+    /// last showed it, does nothing, and is the app in front's.
+    @Test(.timeLimit(.minutes(1))) func anEscapeWhoseBoxClosedBeforeTheAppActsIsTheAppInFronts() async throws {
+        let loop = try await Loop()
+        await loop.release(speaking: [1, 2, 3])
+        try loop.showTheBox()
+        #expect(loop.panel.isShown)
         #expect(await loop.rig.report().cancelled == nil)
+        try loop.showTheBox()
+        #expect(!loop.panel.isShown)
+
+        #expect(await loop.escape() == .dismissal(.nothingShown))
+
+        #expect(loop.rig.inputMethod.field == "a")
+        #expect(loop.rig.inputMethod.takeBacks.isEmpty)
+    }
+
+    /// An Escape after a dismissal, the box put away while the press before the one it threw away is
+    /// still on its way, does nothing: that press is not thrown away with it, and lands.
+    @Test(.timeLimit(.minutes(1))) func anEscapeAfterADismissalCancelsNoPressOnItsWay() async throws {
+        let loop = try await Loop()
+        loop.rig.inputMethod.hold()
+        await loop.release(speaking: [1, 2, 3])
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
+        loop.chord(.down, atMilliseconds: 1000)
+        await loop.delivered()
+        loop.rig.speak([4, 5, 6])
+        try loop.showTheBox()
+        #expect(await loop.escape() == .dismissal(.dismissed))
+        loop.chord(.up, atMilliseconds: 1400)
+        await loop.delivered()
+        try loop.showTheBox()
+        #expect(!loop.panel.isShown)
+
+        #expect(await loop.escape() == .dismissal(.nothingShown))
+
+        loop.rig.inputMethod.letGo()
+        let reports = [await loop.rig.report(), await loop.rig.report()]
+        #expect(reports.filter { $0.cancelled != nil }.count == 1)
+        await loop.rig.until { loop.rig.inputMethod.field == "a" }
     }
 
     @Test(.timeLimit(.minutes(1))) func nothingIsOwedWhenNoPressIsOpen() async throws {
@@ -566,16 +599,6 @@ private struct BadBuffer: Error {}
         loop.steering.answer(.owed(at: loop.typedNow), through: answers)
 
         #expect(await answers.said() == .owing(.nothing))
-    }
-
-    /// The word box is asked about on the main actor and answered with whether it is open.
-    @Test(.timeLimit(.minutes(1))) func theBoxIsAnsweredWithWhetherItIsOpen() async throws {
-        let loop = try await Loop(panelOpen: true)
-        let answers = FakeReply()
-
-        loop.steering.answer(.panel(at: loop.typedNow), through: answers)
-
-        #expect(await answers.said() == .panel(.shown))
     }
 
     /// A press that ended on its own and is still decoding is owed too, though no key steered it.

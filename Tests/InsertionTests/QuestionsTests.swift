@@ -148,9 +148,12 @@ import Testing
     @Test func aStampIsAFiniteMomentOnTheClock() {
         #expect(Wire.question(id: Wire.owed, payload: Wire.stamp(7.25)) == .owed(at: 7.25))
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(0)) == .settled(at: 0))
-        #expect(Wire.question(id: Wire.panel, payload: Wire.stamp(4.5)) == .panel(at: 4.5))
-        #expect(Wire.question(id: Wire.panel, payload: Wire.stamp(1e12)) == nil)
-        #expect(Wire.question(id: Wire.panel, payload: nil) == nil)
+        #expect(Wire.question(id: Wire.escape, payload: Wire.stamp(4.5)) == .escape(at: 4.5))
+        #expect(Wire.question(id: Wire.escape, payload: Wire.stamp(1e12)) == nil)
+        #expect(Wire.question(id: Wire.escape, payload: nil) == nil)
+        // An input method of an earlier build asking whether the box is open, on the retired id
+        // 10, is let go, so it hears its question dropped and passes the Escape.
+        #expect(Wire.question(id: 10, payload: Wire.stamp(4.5)) == nil)
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(-1)) == nil)
         #expect(Wire.question(id: Wire.settled, payload: Wire.stamp(1e12)) == nil)
         #expect(Wire.question(id: Wire.owed, payload: nil) == nil)
@@ -161,23 +164,23 @@ import Testing
     @Test func theAnswersCrossAsTheValuesThatWereSent() {
         for owing in [Owing.nothing, .words] { #expect(Wire.owing(of: Wire.owing(owing)) == owing) }
         for settlement in [Settlement.landed, .notLanded] { #expect(Wire.settlement(of: Wire.settlement(settlement)) == settlement) }
-        for panel in [PanelState.shut, .shown] { #expect(Wire.panelState(of: Wire.panelState(panel)) == panel) }
+        for dismissal in Dismissal.allCases { #expect(Wire.dismissal(of: Wire.dismissal(dismissal)) == dismissal) }
         #expect(Wire.owing(of: Wire.settlement(.landed)) == nil)
-        #expect(Wire.panelState(of: Wire.settlement(.landed)) == nil)
+        #expect(Wire.dismissal(of: Wire.settlement(.landed)) == nil)
     }
 
-    /// The question an Escape asks is answered with whether the word box is open, over the real port.
-    @Test(.timeLimit(.minutes(1))) func thePanelQuestionIsAnsweredWithWhetherTheBoxIsOpen() async throws {
+    /// The question an Escape asks is answered with what the app did with it, over the real port.
+    @Test(.timeLimit(.minutes(1))) func theEscapeQuestionIsAnsweredWithWhatTheAppDid() async throws {
         let name = aPortNobodyElseUses()
         let (port, _, questions) = try hostNoticesAndQuestions(name: name, senders: try OwnProcess.identity())
         let asker = try Self.asker(name)
 
-        async let asking = onAThreadOfItsOwn { asker.panel(at: 8, within: Self.bound) }
+        async let asking = onAThreadOfItsOwn { asker.dismiss(at: 8, within: Self.bound) }
         let asked = try #require(await questions.first { @Sendable _ in true })
-        #expect(asked.question == .panel(at: 8))
-        #expect(asked.reply.send(PanelState.shown) == .delivered)
+        #expect(asked.question == .escape(at: 8))
+        #expect(asked.reply.send(Dismissal.dismissed) == .delivered)
 
-        #expect(await asking == .success(.shown))
+        #expect(await asking == .success(.dismissed))
         withExtendedLifetime(port) {}
     }
 }
