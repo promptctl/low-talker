@@ -85,12 +85,17 @@ private struct BadBuffer: Error {}
 
         /// The person putting the word box away, as an Escape the app takes does.
         func escapeTheBox() {
-            WordBox(panel: StubPanel()).dismiss(cancelling: steering, hold: rig.hold)
+            box.dismiss(cancelling: steering, hold: rig.hold)
         }
 
-        /// The box drawn over what the loop last showed, as the app draws it.
+        /// The box drawn over `activity`, as the app draws it.
+        func show(_ activity: Dictation.Activity) {
+            box.show(activity, over: .ready(.default, after: .seconds(1)), held: rig.hold.held, insertable: true)
+        }
+
+        /// The box drawn over what the loop last showed.
         func showTheBox() throws {
-            box.show(try #require(rig.shown.activities.last), over: .ready(.default, after: .seconds(1)), held: rig.hold.held, insertable: true)
+            show(try #require(rig.shown.activities.last))
         }
 
         /// What the app did with an Escape the input method asked it to take.
@@ -532,7 +537,7 @@ private struct BadBuffer: Error {}
         let after = loop.rig.shown.activities.dropFirst(shownBefore)
         #expect(!after.isEmpty)
         for activity in after {
-            loop.box.show(activity, over: .ready(.default, after: .seconds(1)), held: loop.rig.hold.held, insertable: true)
+            loop.show(activity)
             #expect(loop.panel.face == nil, "shown \(activity) after the Escape")
         }
     }
