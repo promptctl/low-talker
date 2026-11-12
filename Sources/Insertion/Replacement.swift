@@ -10,12 +10,12 @@ import GrammaticalNumber
 /// changes nothing. [LAW:parse-dont-validate] The one place the question is asked; a range comes
 /// out, or the reason there is none.
 ///
-/// [LAW:effects-at-boundaries] Pure over two readings of the client, which `Client` makes and a
-/// test supplies from a string, so IMK rule 6's tests against a model of the field need no
-/// `IMKTextInput`.
-nonisolated enum Replacement {
+/// [LAW:effects-at-boundaries] Pure over two readings of the client, which the input method's
+/// `Client` makes and anything standing in for a client supplies from a string.
+/// [LAW:one-source-of-truth]
+public enum Replacement {
     /// Why a request to take words back is refused, in the words the log says.
-    enum Unfound: Error, Equatable, CustomStringConvertible {
+    public enum Unfound: Error, Equatable, CustomStringConvertible {
         /// The client reports no selection, which is how a terminal answers.
         case noSelection
         /// Text is selected, so the caret is not where the words ended.
@@ -27,7 +27,7 @@ nonisolated enum Replacement {
         /// What precedes the caret is not the words.
         case differs
 
-        var description: String {
+        public var description: String {
             switch self {
             case .noSelection: "the client reports no selection"
             case .textIsSelected(let length): "\(counted(length, "character is", "characters are")) selected, so the caret is not where the words ended"
@@ -44,7 +44,7 @@ nonisolated enum Replacement {
     /// characters and would be short by every emoji and combining mark.
     ///
     /// `selection` and `text` are called only when there is something to replace.
-    static func range(of replacing: String, selection: () -> NSRange, text: (NSRange) -> String?) -> Result<NSRange, Unfound> {
+    public static func range(of replacing: String, selection: () -> NSRange, text: (NSRange) -> String?) -> Result<NSRange, Unfound> {
         let needed = replacing.utf16.count
         guard needed > 0 else { return .success(NSRange(location: NSNotFound, length: 0)) }
         let caret = selection()

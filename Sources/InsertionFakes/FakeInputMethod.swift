@@ -1,4 +1,5 @@
 import Dispatch
+import Foundation
 import Insertion
 import Synchronization
 import TestProbes
@@ -85,15 +86,20 @@ public final class FakeInputMethod: Inserter, Sendable {
             state.withLock { $0.holding -= 1 }
         }
         return try state.withLock { state throws(InsertFailure) in
-            // A request that replaces text is a take-back: refused unless the document ends in
-            // exactly those words, as the real input method reads the field before it changes it.
+            // A request that replaces text is a take-back, proved by the input method's own rule
+            // over the document read as a client with its caret at the end and nothing selected.
+            // [LAW:one-source-of-truth]
             if !request.replacing.isEmpty {
                 if let refusal = state.takeBackRefusal { throw refusal }
                 guard destination.admits(state.into) else { throw .refused(.dictationIsInAnotherApp) }
-                guard state.field.utf16.count >= request.replacing.utf16.count,
-                      state.field.utf16.suffix(request.replacing.utf16.count).elementsEqual(request.replacing.utf16) else { throw .refused(.wordsCannotBeTakenBack) }
-                state.field = String(decoding: Array(state.field.utf16.dropLast(request.replacing.utf16.count)), as: UTF16.self)
-                return Inserted(characters: 0, into: state.into)
+                let field = Array(state.field.utf16)
+                let found = Replacement.range(of: request.replacing, selection: { NSRange(location: field.count, length: 0) },
+                                              text: { String(decoding: field[$0.location..<NSMaxRange($0)], as: UTF16.self) })
+                guard case .success(let range) = found else { throw .refused(.wordsCannotBeTakenBack) }
+                // The range is replaced by the request's text, as the client's commit puts it.
+                state.field = String(decoding: field[..<range.location], as: UTF16.self) + text
+                if !text.isEmpty { state.inserted.append(text) }
+                return Inserted(characters: text.count, into: state.into)
             }
             if let refusal = state.refusal {
                 if state.landingDespiteFailure, refusal.wordsMayHaveLanded { state.field += text }
