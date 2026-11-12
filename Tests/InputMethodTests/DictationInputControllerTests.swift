@@ -6,7 +6,7 @@ import InsertionFakes
 import Testing
 
 /// The controller answers the text input system's commands. Return and Escape are the two it decides: a
-/// Return is held for words the app owes, and an Escape is kept only while the app's word box is open.
+/// Return is held for words the app owes, and an Escape is kept only when the app put its word box away with it.
 /// Every other command, and all text, is declined, so it reaches the app as it would have.
 ///
 /// [LAW:behavior-not-structure] Asked by naming the command and reading the answer, not by checking which
@@ -27,15 +27,12 @@ import Testing
     }
 
     /// `selector` answered by a controller asking `app`, typed with `modifiers` held: whether it was
-    /// kept, how many times the process beeped, and every key the app was told of.
+    /// kept, and how many times the process beeped.
     private func answer(_ selector: Selector, holding modifiers: NSEvent.ModifierFlags = [],
-                        asking app: FakeApp) -> (kept: Bool, beeps: Int, told: [SteeringKey]) {
+                        asking app: FakeApp) -> (kept: Bool, beeps: Int) {
         let (controller, assembled) = controller(asking: app)
         let kept = controller.didCommand(by: selector, holding: modifiers, typedAt: 1)
-        let told = assembled.recorded.withLock { $0 }.compactMap { record in
-            if case let .keyTyped(key) = record { key } else { nil }
-        }
-        return (kept, assembled.beeps, told)
+        return (kept, assembled.beeps)
     }
 
     /// Key-downs are always asked for, so Escape reaches the controller whatever the Return setting says.
@@ -44,25 +41,25 @@ import Testing
         #expect(controller.recognizedEvents(nil) == 0x400)
     }
 
-    /// Escape passes while the word box is closed, and the app is told nothing.
-    @Test func escapePassesWhileTheBoxIsClosed() {
-        let answered = answer(Self.cancelOperation, asking: FakeApp(panelling: { .success(.shut) }))
+    /// Escape passes when the app had no word box to put away with it.
+    @Test func escapePassesWhenNoBoxWasShown() {
+        let answered = answer(Self.cancelOperation, asking: FakeApp(dismissing: { .success(.nothingShown) }))
         #expect(answered.kept == false)
-        #expect(answered.beeps == 0 && answered.told == [])
+        #expect(answered.beeps == 0)
     }
 
-    /// Escape is kept while the word box is open, and the app is told, so it cancels the press.
-    @Test func escapeIsKeptWhileTheBoxIsOpen() {
-        let answered = answer(Self.cancelOperation, asking: FakeApp(panelling: { .success(.shown) }))
+    /// Escape is kept, silently, when the app put its word box away with it.
+    @Test func escapeIsKeptWhenTheAppDismissedTheBox() {
+        let answered = answer(Self.cancelOperation, asking: FakeApp(dismissing: { .success(.dismissed) }))
         #expect(answered.kept == true)
-        #expect(answered.beeps == 0 && answered.told == [.escape])
+        #expect(answered.beeps == 0)
     }
 
-    /// Escape passes when no app answers whether its box is open, as it does with no app running.
+    /// Escape passes when no app answers, as it does with no app running.
     @Test func escapePassesWhenNoAppAnswers() {
-        let answered = answer(Self.cancelOperation, asking: FakeApp(panelling: { .failure(.wire(.nobodyIsListening(port: "port"))) }))
+        let answered = answer(Self.cancelOperation, asking: FakeApp(dismissing: { .failure(.wire(.nobodyIsListening(port: "port"))) }))
         #expect(answered.kept == false)
-        #expect(answered.beeps == 0 && answered.told == [])
+        #expect(answered.beeps == 0)
     }
 
     /// A Return passes, silently, when the app owes nothing and when the words it owes have landed.
@@ -70,14 +67,14 @@ import Testing
     func aReturnPassesWhenNothingIsLeftOwing(owing: Owing) {
         let answered = answer(Self.insertNewline, asking: FakeApp(owing: { .success(owing) }, settling: { .success(.landed) }))
         #expect(answered.kept == false)
-        #expect(answered.beeps == 0 && answered.told == [])
+        #expect(answered.beeps == 0)
     }
 
     /// A bare Return is kept when the words the app owes did not all reach a cursor, and is heard.
     @Test func aReturnIsKeptWhenTheOwedWordsDoNotLand() {
         let answered = answer(Self.insertNewline, asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
         #expect(answered.kept == true)
-        #expect(answered.beeps == 1 && answered.told == [])
+        #expect(answered.beeps == 1)
     }
 
     /// Each modifier that makes a Return another key, named here rather than read from
@@ -91,15 +88,15 @@ import Testing
         let answered = answer(Self.insertNewline, holding: NSEvent.ModifierFlags(rawValue: modifier),
                               asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
         #expect(answered.kept == false)
-        #expect(answered.beeps == 0 && answered.told == [])
+        #expect(answered.beeps == 0)
     }
 
     /// A command the input method does not decide is declined, so it reaches the app.
     @Test(arguments: ["moveLeft:", "deleteBackward:", "insertTab:"])
     func anOtherCommandIsDeclined(name: String) {
-        let answered = answer(NSSelectorFromString(name), asking: FakeApp(owing: { .success(.words) }, panelling: { .success(.shown) }))
+        let answered = answer(NSSelectorFromString(name), asking: FakeApp(owing: { .success(.words) }, dismissing: { .success(.dismissed) }))
         #expect(answered.kept == false, "\(name) was claimed")
-        #expect(answered.beeps == 0 && answered.told == [])
+        #expect(answered.beeps == 0)
     }
 
     /// Text is never handed to this input method as keys, so it is declined.

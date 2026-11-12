@@ -136,25 +136,26 @@ import Testing
 
     // MARK: - Escape
 
-    /// An Escape is kept while the app's word box is open, since the app cancels the press with it.
+    /// An Escape the app put its word box away with is kept: it did what it was typed for.
     @MainActor
-    @Test func anEscapeWhileTheBoxIsOpenIsKept() {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(panelling: { .success(.shown) }))
+    @Test func anEscapeTheAppDismissedTheBoxWithIsKept() {
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(dismissing: { .success(.dismissed) }))
         #expect(gate.escapeVerdict(at: 1).verdict == .keep)
     }
 
-    /// An Escape with the box shut is the app in front's, as typed.
+    /// An Escape with no box shown when the app acts on it, the box having closed since the key
+    /// was typed included, is the app in front's, as typed.
     @MainActor
-    @Test func anEscapeWithTheBoxShutPasses() {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(panelling: { .success(.shut) }))
+    @Test func anEscapeWithNoBoxShownPasses() {
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(dismissing: { .success(.nothingShown) }))
         #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 
-    /// An app that does not say whether its box is open has said nothing, so the Escape passes.
+    /// An app that does not say what it did with the Escape has said nothing, so the Escape passes.
     @MainActor
     @Test(arguments: [NotAnswered.wire(.nobodyIsListening(port: "port")), .wire(.noAnswer(port: "p", after: .milliseconds(100))), .wire(.abandoned(port: "p"))])
     func anEscapeTheAppDoesNotAnswerForPasses(why: NotAnswered) {
-        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(panelling: { .failure(why) }))
+        let gate = SteeringGate(ceiling: Self.farOff, asking: FakeApp(dismissing: { .failure(why) }))
         #expect(gate.escapeVerdict(at: 1).verdict == .pass)
     }
 

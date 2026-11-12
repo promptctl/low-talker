@@ -180,7 +180,7 @@ final class HUD: WordBoxPanel {
         return copyButton
     }()
 
-    /// Whether the panel is on screen. The input method asks for it when an Escape is typed.
+    /// Whether the panel is on screen, which the word box takes an Escape by.
     private(set) var isShown = false
 
     func hide() {

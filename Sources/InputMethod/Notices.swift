@@ -9,7 +9,7 @@ private nonisolated let noticesLog = Logger(subsystem: AppIdentity.inputMethodBu
 /// words go to (`FocusedClient`), so the app can offer words no cursor took to it, and
 /// the process ending itself over its memory ceiling, so the app can say why it went away.
 ///
-/// [LAW:no-shared-mutable-globals] One per `InputMethodProcess`. It is one stream with three writer's doors, `cursorArrived(in:)`, `keyTyped(_:)` and `activated(holding:)`,
+/// [LAW:no-shared-mutable-globals] One per `InputMethodProcess`. It is one stream with two writer's doors, `cursorArrived(in:)` and `activated(holding:)`,
 /// and one reader, `relay`, which the process's entry point runs.
 public nonisolated final class Notices: Sendable {
     /// IMK rule 7: the most memory this process holds before it ends itself, in bytes.
@@ -18,7 +18,6 @@ public nonisolated final class Notices: Sendable {
     public enum Notice: Equatable, Sendable {
         case cursorArrived
         case overMemoryCeiling(Overrun)
-        case keyTyped(SteeringKey)
     }
 
     /// What one unit of this stream's work did. A test reads it from the sink it hands in; the
@@ -26,8 +25,6 @@ public nonisolated final class Notices: Sendable {
     public enum Record: Equatable, Sendable {
         /// A cursor in this app became the one words go to.
         case cursorArrived(in: String)
-        /// The app was told this key was pressed.
-        case keyTyped(SteeringKey)
         /// An activation read this footprint, in bytes, against the ceiling.
         case footprint(UInt64)
         /// An activation found the process over its ceiling, which it ends over.
@@ -42,7 +39,6 @@ public nonisolated final class Notices: Sendable {
         public var rendering: (level: OSLogType, line: String) {
             switch self {
             case let .cursorArrived(application): (.info, "a cursor arrived in \(application)")
-            case let .keyTyped(key): (.info, "told the app \(key) was pressed")
             case let .footprint(footprint): (.info, "activated holding \(footprint) bytes of a \(Notices.memoryCeiling) byte ceiling")
             case let .overrun(overrun): (.fault, "ending this process: \(overrun)")
             case let .told(told): (told.isFault ? .error : .default, told.description)
@@ -77,13 +73,6 @@ public nonisolated final class Notices: Sendable {
         continuation.yield(.cursorArrived)
     }
 
-    /// A key the app asked to hear of was pressed. Yielded and not waited for, so the key handler
-    /// that reports it returns at once and the key goes on to the app as it would have.
-    public func keyTyped(_ key: SteeringKey) {
-        recorded(.keyTyped(key))
-        continuation.yield(.keyTyped(key))
-    }
-
     /// A controller was activated while this process held `footprint` bytes. The overrun, when
     /// it is over the ceiling, which the controller answers by taking no client.
     public func activated(holding footprint: UInt64) -> Overrun? {
@@ -106,7 +95,7 @@ public nonisolated final class Notices: Sendable {
         for await notice in notices {
             let told = tell(notice)
             switch notice {
-            case .cursorArrived, .keyTyped:
+            case .cursorArrived:
                 if told != fared { recorded(.told(told)) }
                 fared = told
             case .overMemoryCeiling(let overrun):
@@ -123,7 +112,6 @@ extension NoticeSender {
         switch notice {
         case .cursorArrived: tellCursorArrived()
         case .overMemoryCeiling(let overrun): tellOverMemoryCeiling(overrun)
-        case .keyTyped(let key): tellKeyTyped(key)
         }
     }
 }

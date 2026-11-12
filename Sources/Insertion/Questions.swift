@@ -4,8 +4,8 @@ import Foundation
 import Identity
 import os
 
-/// What the app owes the keyboard when the input method is holding a Return or an Escape: the
-/// answer to its first question, which both keys ask. [LAW:types-are-the-program] Two values and
+/// What the app owes the keyboard when the input method is holding a Return: the answer to its
+/// first question. [LAW:types-are-the-program] Two values and
 /// no third: an app that said nothing has admitted nothing, and that is the asker's to read, not
 /// a case here.
 public enum Owing: String, Codable, Sendable, CaseIterable {
@@ -22,11 +22,14 @@ public enum Settlement: String, Codable, Sendable, CaseIterable {
     case notLanded
 }
 
-/// Whether the app's word box is open: the answer to whether an Escape is the app's to cancel with.
-/// [LAW:types-are-the-program] Two values: the box is open, or it is not.
-public enum PanelState: String, Codable, Sendable, CaseIterable {
-    case shut
-    case shown
+/// What the app did with an Escape the input method asked it to take, decided and done in one
+/// main-actor turn so the answer is never stale: put its word box away with it, or nothing, the
+/// box being shut. [LAW:types-are-the-program] Two values: the Escape did something, and is kept,
+/// or it is the app in front's.
+public enum Dismissal: String, Codable, Sendable, CaseIterable {
+    /// The box was shown, and is put away: its held words let go and its press cancelled.
+    case dismissed
+    case nothingShown
 }
 
 /// What the input method asks the app about a key it is holding, stamped with the moment the
@@ -37,8 +40,8 @@ public enum Question: Equatable, Sendable {
     case owed(at: TimeInterval)
     /// Say when everything owed has settled. Answered later, from the main actor.
     case settled(at: TimeInterval)
-    /// Is the word box open? An Escape is kept for the app when it is. Answered from the main actor.
-    case panel(at: TimeInterval)
+    /// Take this Escape: put the word box away with it, if it is shown. Answered from the main actor.
+    case escape(at: TimeInterval)
 }
 
 /// Whatever can answer the questions: the right a question came with, or a test's stand-in,
@@ -46,7 +49,7 @@ public enum Question: Equatable, Sendable {
 public protocol Answering: Sendable {
     func send(_ owing: Owing) -> Reply.Delivery
     func send(_ settlement: Settlement) -> Reply.Delivery
-    func send(_ panel: PanelState) -> Reply.Delivery
+    func send(_ dismissal: Dismissal) -> Reply.Delivery
 }
 
 /// The one right to answer a question, owned by whoever holds this. Answering consumes it, and
@@ -68,7 +71,7 @@ public final class Reply: Answering {
 
     public func send(_ owing: Owing) -> Delivery { send(Wire.owing(owing)) }
     public func send(_ settlement: Settlement) -> Delivery { send(Wire.settlement(settlement)) }
-    public func send(_ panel: PanelState) -> Delivery { send(Wire.panelState(panel)) }
+    public func send(_ dismissal: Dismissal) -> Delivery { send(Wire.dismissal(dismissal)) }
 
     private func send(_ payload: Data) -> Delivery {
         let first = answered.withLock { answered in
@@ -110,7 +113,7 @@ public enum NotAnswered: Error, Equatable, Sendable, CustomStringConvertible {
 public protocol SteeringAsking: Sendable {
     func owed(at timestamp: TimeInterval, within bound: Duration) -> Result<Owing, NotAnswered>
     func settled(at timestamp: TimeInterval, within bound: Duration) -> Result<Settlement, NotAnswered>
-    func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered>
+    func dismiss(at timestamp: TimeInterval, within bound: Duration) -> Result<Dismissal, NotAnswered>
 }
 
 /// The input method's end of the questions: one round trip to the app per question, answered
@@ -150,9 +153,9 @@ public struct Asker: SteeringAsking {
         ask(Wire.settled, Wire.stamp(timestamp), within: bound, read: Wire.settlement(of:))
     }
 
-    /// Whether the app's word box is open, within `bound`.
-    public func panel(at timestamp: TimeInterval, within bound: Duration) -> Result<PanelState, NotAnswered> {
-        ask(Wire.panel, Wire.stamp(timestamp), within: bound, read: Wire.panelState(of:))
+    /// What the app did with an Escape it was asked to take, within `bound`.
+    public func dismiss(at timestamp: TimeInterval, within bound: Duration) -> Result<Dismissal, NotAnswered> {
+        ask(Wire.escape, Wire.stamp(timestamp), within: bound, read: Wire.dismissal(of:))
     }
 
     private func ask<Answer>(_ id: mach_msg_id_t, _ payload: Data, within bound: Duration, read: (Data) -> Answer?) -> Result<Answer, NotAnswered> {
