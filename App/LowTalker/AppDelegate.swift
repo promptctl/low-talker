@@ -435,7 +435,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
                     },
                     // A Return the input method holds asks whether words are owed to it, and
-                    // answers to this loop's own press and queue.
+                    // answers to this loop's own press and queue; an Escape asks the word box to
+                    // take it, which puts the box away and cancels the press it showed.
                     asked: { steering.answer($0, through: $1) },
                     superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
             } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }

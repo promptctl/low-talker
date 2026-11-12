@@ -9,14 +9,17 @@ import os
 /// loop's queue fact (`Dictation.owes`), so a main actor busy with a come-up never delays it, and
 /// it is the question a Return asks first. The second is taken to the main actor and answered
 /// when it is known: the port's queue is not held for it. For a Return, a latched press is ended
-/// at the moment the Return was typed and the loop's tail is waited out. The effect is in the
-/// second question and never the first, so no bound the input method puts on an answer can be
+/// at the moment the Return was typed and the loop's tail is waited out. A Return's effect is in
+/// the second question and never the first, so no bound the input method puts on an answer can be
 /// raced by it. [LAW:no-ambient-temporal-coupling]
 ///
-/// An Escape is taken to the main actor too, where the word box decides whether it takes it and,
-/// when it does, puts itself away and cancels the press it showed through `escape()`, in the same
-/// turn as it answers. [LAW:no-ambient-temporal-coupling] Nothing can settle between what the box
-/// said and what was done, so a kept Escape always did something.
+/// An Escape asks one question, taken to the main actor too, where the word box decides whether it
+/// takes it and, when it does, puts itself away and cancels the press it showed through
+/// `escape()`, in the same turn as it answers. [LAW:no-ambient-temporal-coupling] Nothing can
+/// settle between what the box said and what was done, so a kept Escape always did something. Its
+/// effect is under the input method's short bound, so an answer later than it is done though the
+/// Escape passes as well (`SteeringGate`): bounding it by the ceiling instead would hold every
+/// Escape typed into any app for as long as this main actor is busy.
 ///
 /// [LAW:single-enforcer] The press is ended here and nowhere else a typed key can end one, through
 /// the hotkey, which is the one thing that ends presses.
