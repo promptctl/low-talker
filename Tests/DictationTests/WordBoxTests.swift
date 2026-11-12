@@ -148,18 +148,26 @@ final class Speaker: Held.Owner {
 
     /// A reported press can never be thrown away, so its dismissal never comes to hold nothing and
     /// hides every one before it for good: a day of dismissals keeps only what could come back,
-    /// though the presses themselves are still around.
+    /// though the presses themselves are still around. What could come back still does: a later
+    /// dismissal of only a thrown press's words leaves the latest reported one, not the earliest.
     @Test func dismissalsOfReportedPressesKeepOnlyWhatCanComeBack() {
         let presses = (0..<50).map { _ in Speaker() }
         box.dismiss(cancelling: nil, hold: hold)
-        for press in presses {
-            hold.heldBack(Transcript(typed: " said"), by: press, warning: Self.refused)
+        for (index, press) in presses.enumerated() {
+            hold.heldBack(Transcript(typed: " said \(index)"), by: press, warning: Self.refused)
             press.report()
             box.dismiss(cancelling: nil, hold: hold)
         }
 
         #expect(hold.state.dismissals.count <= 2)
-        #expect(hold.dismissed?.allWords == Transcript(typed: " said"))
+
+        let thrown = Speaker()
+        hold.heldBack(Transcript(typed: " thrown"), by: thrown, warning: Self.refused)
+        box.dismiss(cancelling: nil, hold: hold)
+        thrown.throwAway()
+        #expect(hold.forget(thrown) == 1)
+
+        #expect(hold.dismissed?.allWords == Transcript(typed: " said 49"))
     }
 
     /// The loop's own presses are reported as their reports go out, so the bound holds for the
