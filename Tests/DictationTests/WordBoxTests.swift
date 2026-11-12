@@ -162,6 +162,26 @@ final class Speaker: Held.Owner {
         #expect(hold.dismissed?.allWords == Transcript(typed: " said"))
     }
 
+    /// The loop's own presses are reported as their reports go out, so the bound holds for the
+    /// presses the person actually makes. The press is kept here past its report, as anything may
+    /// keep one, so it is the report, not the press going away, that says no Escape reaches it.
+    @Test func aPressIsReportedOnceItsReportIsOut() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 2 ? "hello" : "")
+        }) { _ in Transcript(typed: "hello") })
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        await rig.until { rig.hold.held != nil }
+        let press = try #require(rig.hold.held?.offered?.runs.last?.by)
+        #expect(!press.reported)
+
+        rig.keyUp()
+        _ = await rig.report()
+
+        #expect(press.reported)
+    }
+
     /// The words the person asks back come back in the loop's turn, behind every press before:
     /// the box stays away until they are held again, then shows them.
     @Test func aBringBackShowsTheBoxWhenTheWordsAreHeldAgain() {

@@ -378,12 +378,11 @@ public final class Hold {
     /// end of the process then would leave them, so a launch after a crash mid-insert does not
     /// type them a second time, and the dismissed words as they are brought back.
     private var kept: HoldState {
-        let ended = switch carried {
-        case nil: state
-        case .held?: state.with(held: held?.sent)
-        case .dismissed?: state.withDismissed(\.sent)
+        switch carried {
+        case nil: HoldState(held: held, dismissed: dismissed)
+        case .held?: HoldState(held: held?.sent, dismissed: dismissed)
+        case .dismissed?: HoldState(held: held, dismissed: dismissed?.sent)
         }
-        return HoldState(held: ended.held, dismissed: ended.dismissed)
     }
 
     private func hold(_ held: Held?) {
