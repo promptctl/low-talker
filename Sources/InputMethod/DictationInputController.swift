@@ -16,9 +16,10 @@ import InputMethodKit
 /// the cursor, and a Return typed meanwhile would reach the app ahead of them and send the message
 /// without them; the only grant-free way for it to arrive after is this process declining it once
 /// the words are committed, so `SteeringGate` holds it here until the app says they have landed. An
-/// Escape is kept while the word box is shown, and the app cancels the open press when told; the
-/// words already at the cursor are taken back by the app afterwards. The verdict is the gate's for
-/// a Return, and this answers with it, so there is no key whose answer is a decision made here.
+/// Escape is kept when the app took it, putting its word box away and cancelling the press it
+/// showed in the turn it answered; the words already at the cursor are taken back by the app
+/// afterwards. The verdict is the gate's for either key, and this answers with it, so there is no
+/// key whose answer is a decision made here.
 /// [LAW:dataflow-not-control-flow] A swallowed key is invisible - the person sees a Return that did
 /// nothing - so every one the gate keeps is on the command's record, with the gate's reason.
 /// [LAW:no-silent-failure]
