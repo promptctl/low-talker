@@ -546,10 +546,14 @@ private struct BadBuffer: Error {}
     /// last showed it, does nothing, and is the app in front's.
     @Test(.timeLimit(.minutes(1))) func anEscapeWhoseBoxClosedBeforeTheAppActsIsTheAppInFronts() async throws {
         let loop = try await Loop()
+        loop.rig.inputMethod.hold()
         await loop.release(speaking: [1, 2, 3])
+        await loop.rig.until { loop.rig.inputMethod.holding == 1 }
         try loop.showTheBox()
         #expect(loop.panel.isShown)
+        loop.rig.inputMethod.letGo()
         #expect(await loop.rig.report().cancelled == nil)
+        await loop.rig.until { loop.rig.shown.activities.last == .idle }
         try loop.showTheBox()
         #expect(!loop.panel.isShown)
 
