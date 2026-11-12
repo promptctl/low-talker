@@ -199,6 +199,7 @@ public final class Dictation {
             var performed: [Executor.Performed] = []
             var words = 0
             var provenance = Provenance()
+            var reported = false
         }
 
         /// What the press's inserts did with its words, from facts recorded as each is answered, so
@@ -224,6 +225,16 @@ public final class Dictation {
             state.withLock { state in
                 if case .ended(.cancelled) = state.phase { true } else { false }
             }
+        }
+
+        /// Whether the loop reported the press, which takes it from every path an Escape reaches.
+        var reported: Bool {
+            state.withLock(\.reported)
+        }
+
+        /// The loop reported the press: no Escape reaches it again.
+        func report() {
+            state.withLock { $0.reported = true }
         }
 
         /// [LAW:one-source-of-truth] The key event's own stamp, on the clock every insert is
@@ -666,10 +677,12 @@ public final class Dictation {
     /// Reports a press, and then shows that a heard one is no longer on its way. Whether a
     /// microphone opened is `opening`'s to say — nil for a press that heard nothing — and the
     /// report is built from it, so the press leaving `unreported` and its report are one value.
-    /// [LAW:one-source-of-truth]
+    /// [LAW:one-source-of-truth] The press learns it is reported here too, as it leaves the
+    /// presses an Escape reaches, so what the hold reads off it is that membership.
     private func settle(_ mode: Mode, _ outcome: Report.Outcome, _ opening: Opening?) {
         report(Report(mode: mode, outcome: outcome, opened: opening?.opened))
         unreported.removeAll { $0 === opening?.streaming }
+        opening?.streaming.report()
         show()
     }
 

@@ -23,11 +23,15 @@ final class StubPanel: WordBoxPanel {
     func hide() { shown.append(.away) }
 }
 
-/// A press as the hold tells its words apart, which a test throws away as an Escape does.
+/// A press as the hold tells its words apart, which a test throws away as an Escape does, or
+/// reports as the loop does once it has settled.
 final class Speaker: Held.Owner {
     private let thrown = Mutex(false)
+    private let told = Mutex(false)
     var cancelled: Bool { thrown.withLock { $0 } }
+    var reported: Bool { told.withLock { $0 } }
     func throwAway() { thrown.withLock { $0 = true } }
+    func report() { told.withLock { $0 = true } }
 }
 
 /// When the word box is on screen and what it offers, over a real hold kept in memory, which
@@ -103,6 +107,88 @@ final class Speaker: Held.Owner {
     }
 
     private static let refused = "WARNING: no text field took them"
+
+    /// Dismissals that come to hold nothing, each the words of a press then thrown away, dismissed
+    /// nothing the person keeps: however many there were, the one before them is still theirs to
+    /// bring back.
+    @Test func dismissalsOfOnlyThrownWordsLeaveTheOneBefore() {
+        let (first, second) = (Speaker(), Speaker())
+        box.dismiss(cancelling: nil, hold: hold)
+        hold.heldBack(Transcript(typed: " one"), by: first, warning: Self.refused)
+        box.dismiss(cancelling: nil, hold: hold)
+        hold.heldBack(Transcript(typed: " two"), by: second, warning: Self.refused)
+        box.dismiss(cancelling: nil, hold: hold)
+
+        for press in [first, second] {
+            press.throwAway()
+            #expect(hold.forget(press) == 1)
+        }
+
+        #expect(hold.dismissed == Self.earlier)
+    }
+
+    /// A warning an offer left with no words is nothing the person said, so a dismissal holding
+    /// it beside a thrown press's words still comes to hold nothing.
+    @Test func aWarningWithNoWordsKeepsNoDismissal() {
+        let (first, second) = (Speaker(), Speaker())
+        box.dismiss(cancelling: nil, hold: hold)
+        hold.heldBack(Transcript(typed: " one"), by: first, warning: Self.refused)
+        hold.heldBack(Transcript(words: []), by: nil, warning: "WARNING: no text field is focused")
+        box.dismiss(cancelling: nil, hold: hold)
+        hold.heldBack(Transcript(typed: " two"), by: second, warning: Self.refused)
+        box.dismiss(cancelling: nil, hold: hold)
+
+        for press in [first, second] {
+            press.throwAway()
+            #expect(hold.forget(press) == 1)
+        }
+
+        #expect(hold.dismissed == Self.earlier)
+    }
+
+    /// A reported press can never be thrown away, so its dismissal never comes to hold nothing and
+    /// hides every one before it for good: a day of dismissals keeps only what could come back,
+    /// though the presses themselves are still around. What could come back still does: a later
+    /// dismissal of only a thrown press's words leaves the latest reported one, not the earliest.
+    @Test func dismissalsOfReportedPressesKeepOnlyWhatCanComeBack() {
+        let presses = (0..<50).map { _ in Speaker() }
+        box.dismiss(cancelling: nil, hold: hold)
+        for (index, press) in presses.enumerated() {
+            hold.heldBack(Transcript(typed: " said \(index)"), by: press, warning: Self.refused)
+            press.report()
+            box.dismiss(cancelling: nil, hold: hold)
+        }
+
+        #expect(hold.state.dismissals.count <= 2)
+
+        let thrown = Speaker()
+        hold.heldBack(Transcript(typed: " thrown"), by: thrown, warning: Self.refused)
+        box.dismiss(cancelling: nil, hold: hold)
+        thrown.throwAway()
+        #expect(hold.forget(thrown) == 1)
+
+        #expect(hold.dismissed?.allWords == Transcript(typed: " said 49"))
+    }
+
+    /// The loop's own presses are reported as their reports go out, so the bound holds for the
+    /// presses the person actually makes. The press is kept here past its report, as anything may
+    /// keep one, so it is the report, not the press going away, that says no Escape reaches it.
+    @Test func aPressIsReportedOnceItsReportIsOut() async throws {
+        let rig = try await Rig(hearing: FakeTranscriber(confirming: { samples in
+            Transcript(typed: samples.count >= 2 ? "hello" : "")
+        }) { _ in Transcript(typed: "hello") })
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.speak([1, 2])
+        await rig.until { rig.hold.held != nil }
+        let press = try #require(rig.hold.held?.offered?.runs.last?.by)
+        #expect(!press.reported)
+
+        rig.keyUp()
+        _ = await rig.report()
+
+        #expect(press.reported)
+    }
 
     /// The words the person asks back come back in the loop's turn, behind every press before:
     /// the box stays away until they are held again, then shows them.
