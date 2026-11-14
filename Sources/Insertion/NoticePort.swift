@@ -50,23 +50,10 @@ public final class NoticePort {
         }
     }
 
-    /// Hosts the hotkey port, hearing the input method and nobody else.
-    /// `heard` and `told` run on `queue`, one message at a time, in the order they were sent.
-    public convenience init(
-        queue: DispatchQueue,
-        told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void,
-        asked: @escaping @Sendable (Question, Reply) -> Void
-    ) async throws(PortNotHosted) {
-        let senders: PeerIdentity
-        do throws(PeerIdentity.Unreadable) {
-            senders = try await .signedLikeThisProcess(identifier: AppIdentity.inputMethodBundleIdentifier)
-        } catch { throw .noRequirement(error) }
-        try self.init(portName: AppIdentity.hotkeyPortName, senders: senders, queue: queue, told: told, heard: heard, asked: asked)
-    }
-
-    /// Under a name and a requirement someone else chose, which is how a test hosts one
-    /// without being the app. [LAW:decomposition]
-    init(
+    /// Hosts the port on `portName`, hearing `senders` and nobody else: the app's name and the
+    /// input method's signature, or ones a test chose. `heard` and `told` run on `queue`, one
+    /// message at a time, in the order they were sent. [LAW:decomposition]
+    package init(
         portName: String, senders: PeerIdentity, queue: DispatchQueue,
         told: @escaping @Sendable (Event) -> Void, heard: @escaping @Sendable (InputMethodNotice) -> Void,
         asked: @escaping @Sendable (Question, Reply) -> Void
@@ -196,7 +183,7 @@ public struct NoticeSender: Sendable {
         self.init(portName: AppIdentity.hotkeyPortName, build: build)
     }
 
-    init(portName: String, build: Build?) {
+    package init(portName: String, build: Build?) {
         self.portName = portName
         self.build = build
     }

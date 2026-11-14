@@ -6,26 +6,6 @@ import LowTalkerCoreFakes
 import Synchronization
 import Testing
 
-/// A panel that keeps what it was told to show, in order.
-@MainActor
-final class StubPanel: WordBoxPanel {
-    enum Shown: Equatable {
-        case face(WordBox.Face)
-        case away
-    }
-
-    private(set) var shown: [Shown] = []
-
-    /// The face on screen, nil once the box is put away or before it is shown.
-    var face: WordBox.Face? {
-        if case .face(let face)? = shown.last { face } else { nil }
-    }
-
-    func draw(_ face: WordBox.Face) { shown.append(.face(face)) }
-    func hide() { shown.append(.away) }
-    var isShown: Bool { face != nil }
-}
-
 /// A press as the hold tells its words apart, which a test throws away as an Escape does, or
 /// reports as the loop does once it has settled.
 final class Speaker: Held.Owner {
@@ -42,7 +22,7 @@ final class Speaker: Held.Owner {
 /// [LAW:behavior-not-structure] What the panel is told to draw, and where the held words are.
 @MainActor
 @Suite final class WordBoxTests {
-    private let panel = StubPanel()
+    private let panel = FakePanel()
     private lazy var box = WordBox(panel: panel)
     private var activity = Dictation.Activity.idle
     private let ready = EngineReadiness.ready(.default, after: .seconds(1))

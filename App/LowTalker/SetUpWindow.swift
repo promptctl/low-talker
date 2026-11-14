@@ -22,7 +22,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     /// The list as it stands now.
     private let read: () -> Readiness
     /// Asks macOS for one row's grant, and answers with how the request ended.
-    private let ask: (Requirement.Row) async -> Request
+    private let ask: (Requirement.Row) async -> SetUpRequest
     /// Told the reading taken after a request and on coming back to the front, the moments
     /// a grant may have arrived.
     private let settle: (Readiness) -> Void
@@ -61,7 +61,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private static let width: CGFloat = 520
 
     init(
-        read: @escaping () -> Readiness, ask: @escaping (Requirement.Row) async -> Request,
+        read: @escaping () -> Readiness, ask: @escaping (Requirement.Row) async -> SetUpRequest,
         settle: @escaping (Readiness) -> Void, log: Logger
     ) {
         self.read = read
@@ -236,27 +236,6 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         if !NSWorkspace.shared.open(row.settingsPane) {
             log.error("setup: System Settings did not open \(row.settingsPane, privacy: .public)")
         }
-    }
-
-    /// How a request for one step's grant ended, which says where the person is left.
-    ///
-    /// [LAW:types-are-the-program] Only a dialog answered before the request returned took the
-    /// front away, so only `answered` takes it back; the arm that sends the person to System
-    /// Settings cannot also pull this window over it.
-    enum Request {
-        /// macOS showed its dialog and it was answered. Answering hands the front to the app
-        /// that had it before this one, so the window takes it back, unless the person closed
-        /// it meanwhile.
-        case answered
-        /// The request went through and took nothing from the front: macOS had nothing left
-        /// to ask, or its dialog may still be up when the request returns, as the input
-        /// method's may (`InstalledInputMethod.switchOn`).
-        case made
-        /// Nothing was asked, for the reason shown on the step.
-        case failed(String)
-        /// macOS will not ask again, and the switch is in System Settings, which opens with
-        /// the reason shown on the step behind it.
-        case sentToSystemSettings(String)
     }
 
     // MARK: - pieces

@@ -43,12 +43,12 @@ public final class ServerSwitch {
     /// (`await changes.settled { ... }`) rather than polling `state` against a clock. Unset in
     /// the app, so production is unchanged. [LAW:no-ambient-temporal-coupling] The switch's own
     /// readable state, completed from a snapshot something must poll to one it can await.
-    var onStateChange: (@MainActor () -> Void)?
+    package var onStateChange: (@MainActor () -> Void)?
 
     /// Whether the person has switched serving on, kept in the app's defaults. Unset reads
     /// as off. [LAW:one-source-of-truth]
     public var chosen: Bool { defaults.bool(forKey: Self.choiceKey) }
-    static let choiceKey = "serves"
+    package static let choiceKey = "serves"
 
     /// The engine every request is answered with, read at each request: the app's own
     /// resident model once it has loaded, so there is never a second copy in memory.
@@ -62,7 +62,7 @@ public final class ServerSwitch {
     private(set) var running: Task<Void, Never>?
     private var attempts = 0
 
-    init(
+    package init(
         defaults: UserDefaults,
         listen: @escaping @Sendable (ServeBinding, @escaping @Sendable () -> ServedEngine) async throws(ListenRefused) -> TranscriptionServer
     ) {

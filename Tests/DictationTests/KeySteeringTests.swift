@@ -27,7 +27,7 @@ private struct BadBuffer: Error {}
         let steering: KeySteering
         /// The word box an Escape the input method asks about is taken by, as the app's is.
         let box: WordBox
-        let panel: StubPanel
+        let panel: FakePanel
 
         init(hearing engine: FakeTranscriber = FakeTranscriber { _ in Transcript(typed: "a") }, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true, keeping store: FakeHeldStore = FakeHeldStore()) async throws {
             try self.init(over: try await Rig(hearing: engine, keeping: store), refusing: refusal, holdsReturn: holdsReturn)
@@ -40,7 +40,7 @@ private struct BadBuffer: Error {}
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             let dictation = rig.dictation
             try hotkey.start(feeding: dictation)
-            let (panel, hold) = (StubPanel(), rig.hold)
+            let (panel, hold) = (FakePanel(), rig.hold)
             let box = WordBox(panel: panel)
             (self.panel, self.box) = (panel, box)
             steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { holdsReturn }, dismissing: { box.escape(cancelling: $0, hold: hold) })

@@ -2387,7 +2387,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// at the key's release unless words are held; every other activity reads as the box always
     /// drew it.
     @Test func aPressWaitingOnTheLoadHasNoLineInTheBoxAndOffersNothing() {
-        let preparing = EngineReadiness.preparing(.loading, since: .now)
+        let preparing = EngineReadiness.preparing(.loading, since: Rig.origin)
         let failed = EngineReadiness.failed("no model")
         let ready = EngineReadiness.ready(.default, after: .seconds(2))
         typealias Box = Dictation.Activity.Box
@@ -2415,7 +2415,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// words in its own insert and a copy taken then could be pasted beside them.
     @Test func copyIsOfferedOnlyWithNoPressOnItsWay() {
         let heard = Transcript(typed: "hi")
-        for readiness in [EngineReadiness.preparing(.loading, since: .now), .failed("no model"), .ready(.default, after: .seconds(2))] {
+        for readiness in [EngineReadiness.preparing(.loading, since: Rig.origin), .failed("no model"), .ready(.default, after: .seconds(2))] {
             #expect(Dictation.Activity.idle.box(over: readiness).offersCopy, "idle over \(readiness)")
             for activity in [Dictation.Activity.transcribing, .refused(why: "x"), .listening(heard: heard)] {
                 #expect(!activity.box(over: readiness).offersCopy, "\(activity) over \(readiness)")
@@ -2428,7 +2428,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
 
     @Test func theIconIsTheActivityOverTheEnginesReadiness() {
         let ready = EngineReadiness.ready(.default, after: .seconds(2))
-        let preparing = EngineReadiness.preparing(.loading, since: .now)
+        let preparing = EngineReadiness.preparing(.loading, since: Rig.origin)
         let failed = EngineReadiness.failed("no model")
         #expect(Dictation.Activity.idle.glyph(over: failed) == failed.statusGlyph())
         #expect(Dictation.Activity.idle.iconDescription(for: "L", over: failed) == failed.iconDescription(for: "L"))

@@ -212,6 +212,17 @@ public struct ListenRefused: Error, CustomStringConvertible {
     let address: ListenAddress
     let reason: any Error
 
+    init(address: ListenAddress, reason: any Error) {
+        self.address = address
+        self.reason = reason
+    }
+
+    /// A listen on `binding`'s fixed port refused for `reason`, which is how a test's switch
+    /// refuses without binding a socket.
+    package init(binding: ServeBinding, reason: any Error) {
+        self.init(address: ListenAddress(binding: binding), reason: reason)
+    }
+
     public var description: String {
         "\(AppIdentity.displayName) cannot serve on \(address): \(reason)"
     }
