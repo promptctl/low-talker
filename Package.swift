@@ -98,7 +98,7 @@ let package = Package(
         // The one fake of the engine port and the contract it is held to, beside the port, so
         // every caller's tests hear on the engine the contract checks. In no product.
         // [LAW:one-source-of-truth]
-        .target(name: "LowTalkerCoreFakes", dependencies: ["LowTalkerCore", "TestProbes"]),
+        .target(name: "LowTalkerCoreFakes", dependencies: ["LowTalkerCore", "TestProbes", "Uptime"]),
         // Everything that must hold before low-talker can hear and type, as a list a reader
         // can act on: what was read off this Mac, and the step for whatever is missing. It
         // links the identity, the grants and the input source's switch, and not the core - so

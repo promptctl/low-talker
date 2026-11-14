@@ -2166,7 +2166,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let report = await rig.pressReport()
         #expect(try report.outcome.get().transcription.transcript.text == "a")
         #expect(report.opened?.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 2, peak: 0.5, firstSample: .zero))
-        #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
+        #expect(report.microphone == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
     }
 
     /// The press the ticket was filed for: the microphone opened and delivered nothing, and
@@ -2178,7 +2178,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let (_, lost) = try #require(report.outcome.stopped(by: SpeechLost.self))
         #expect(lost.lost.unopened == .noAudio)
         #expect(report.opened?.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 0, peak: 0, firstSample: nil))
-        #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered nothing after the key went down")
+        #expect(report.microphone == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered nothing after the key went down")
     }
 
     /// A press refused before any microphone opened has no reading, and its record says that
