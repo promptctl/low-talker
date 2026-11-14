@@ -53,7 +53,7 @@ public final class InputMethodSupervisor {
         // [LAW:effects-at-boundaries] The throttle's clock is an effect the watch takes as a
         // parameter, not the global one it reaches for, so a test drives it on controllable time.
         clock: HostClock = .system,
-        open: @escaping @MainActor () async throws -> RunningInputMethod = { try await .open(InstalledInputMethod().bundle()) },
+        open: @escaping @MainActor () async throws -> RunningInputMethod,
         told: @escaping @MainActor (Event) -> Void
     ) {
         self.told = told

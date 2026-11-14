@@ -1,9 +1,10 @@
 import LowTalkerCore
 import Testing
+import Uptime
 
 /// The status item's face and words through the wait between launch and a loaded model.
 @Suite struct EngineReadinessTests {
-    let launch = ContinuousClock.now
+    let launch = HostTime(uptime: .seconds(100))
 
     @Test func aWaitSaysWhatItIsDoingAndHowLongItHasRun() {
         #expect(EngineReadiness.preparing(nil, since: launch).readout(at: launch + .seconds(0.4)) == "checking the model, 0 s so far")

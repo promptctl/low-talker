@@ -79,6 +79,9 @@ targets:
       # this list and Package.swift. [LAW:one-way-deps]
       - package: low-talker
         product: LowTalkerCore
+      # The app assembled from its ports, which the delegate hands the real adapters.
+      - package: low-talker
+        product: LowTalkerApp
       # The grants the menu reads, beneath both the core and the setup list.
       - package: low-talker
         product: Grants
@@ -96,9 +99,6 @@ targets:
       # The menu's error rows, which a click copies.
       - package: low-talker
         product: StatusMenu
-      # When the loop comes up, is rebuilt, or is left as it stands.
-      - package: low-talker
-        product: LoopLifecycle
       - package: low-talker
         product: Signals
       - package: low-talker

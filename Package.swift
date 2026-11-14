@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "MenuBarPresence", targets: ["MenuBarPresence"]),
         .library(name: "StatusMenu", targets: ["StatusMenu"]),
         .library(name: "LoopLifecycle", targets: ["LoopLifecycle"]),
+        .library(name: "LowTalkerApp", targets: ["LowTalkerApp"]),
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "Dictation", targets: ["Dictation"]),
         .library(name: "InputMethod", targets: ["InputMethod"]),
@@ -55,7 +56,10 @@ let package = Package(
         // input method says, so the app reaches it without the input method process linking
         // anything of the app's. [LAW:one-way-deps]
         .target(name: "InputSource", dependencies: ["Identity", "TextInputSources", "Insertion", "Uptime"]),
-        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion", "TestProbes", "Uptime"]),
+        // The one fake of the input method's installation and the contract it is held to, beside
+        // the port. In no product. [LAW:one-source-of-truth]
+        .target(name: "InputSourceFakes", dependencies: ["InputSource"]),
+        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "InputSourceFakes", "Identity", "Insertion", "TestProbes", "Uptime"]),
         // What macOS has let this process do - listen - read without ever prompting, and asked
         // for only when called. Beneath the core and the setup list alike, so both read one
         // reading. [LAW:one-way-deps]
@@ -101,10 +105,11 @@ let package = Package(
         .target(name: "LowTalkerCoreFakes", dependencies: ["LowTalkerCore", "TestProbes", "Uptime"]),
         // Everything that must hold before low-talker can hear and type, as a list a reader
         // can act on: what was read off this Mac, and the step for whatever is missing. It
-        // links the identity, the grants and the input source's switch, and not the core - so
-        // the menu and the guided setup show the same words off one list.
+        // links the identity and the grants, and not the core or the input source, whose
+        // readings the app hands in - so the menu and the guided setup show the same words off
+        // one list.
         // [LAW:one-source-of-truth] [LAW:one-way-deps]
-        .target(name: "Onboarding", dependencies: ["Identity", "Grants", "InputSource"]),
+        .target(name: "Onboarding", dependencies: ["Identity", "Grants"]),
         // The steps are what a person acts on, so they are asserted as values rather
         // than scraped off a terminal.
         .testTarget(name: "OnboardingTests", dependencies: ["Onboarding", "Identity", "Grants", "GrantsFakes"]),
@@ -123,6 +128,11 @@ let package = Package(
         // app's, taken as a closure. Out of the app target so `make test` runs it. [LAW:decomposition]
         .target(name: "LoopLifecycle"),
         .testTarget(name: "LoopLifecycleTests", dependencies: ["LoopLifecycle", "TestProbes"]),
+        // The app assembled from its ports: the one composition root, which the app target hands
+        // the real adapters and a test the one fake of each, so every decision the app makes runs
+        // under `swift test`. The app delegate keeps only what AppKit hands it. [LAW:decomposition]
+        .target(name: "LowTalkerApp", dependencies: ["Bench", "Dictation", "GrammaticalNumber", "Grants", "Identity", "InputSource", "Insertion", "LoopLifecycle", "LowTalkerCore", "Onboarding", "Serve", "Uptime"]),
+        .testTarget(name: "LowTalkerAppTests", dependencies: ["LowTalkerApp", "Dictation", "DictationFakes", "Grants", "GrantsFakes", "Identity", "InputSource", "InputSourceFakes", "Insertion", "InsertionFakes", "LoopLifecycle", "LowTalkerCore", "LowTalkerCoreFakes", "Onboarding", "Serve", "TestProbes", "Uptime"]),
         .testTarget(name: "SignalsTests", dependencies: ["Signals", "LowTalkerCore", "TestProbes"]),
         // The loop from a press to inserted text, with every collaborator taken as a value.
         // Its own target rather than app code so the loop runs under `swift test`; the

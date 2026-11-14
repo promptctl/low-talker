@@ -1,4 +1,5 @@
 import LowTalkerCore
+import TestProbes
 import Uptime
 
 /// A keyboard a test types on, standing in the window server's modifier events. Every handler
@@ -20,6 +21,10 @@ public final class FakeModifierFeed: ModifierFeed {
     /// The clock the test stamps the keys it types on.
     public let clock: HostClock
     private let refusal: (any Error)?
+    private var changes: Changes?
+
+    /// Notes `changes` at every install and disposal, so a test awaits a hotkey going up or down.
+    public func noting(_ changes: Changes) { self.changes = changes }
 
     /// A keyboard whose keys are stamped on `clock`. A feed that cannot start throws `refusal`
     /// from every install.
@@ -32,7 +37,11 @@ public final class FakeModifierFeed: ModifierFeed {
         if let refusal { throw refusal }
         let installation = Installation(handle: handle)
         installations.append(installation)
-        return { installation.disposed = true }
+        changes?.note()
+        return { [weak self] in
+            installation.disposed = true
+            self?.changes?.note()
+        }
     }
 
     /// A modifier key moved, and every handler still installed is told. [LAW:single-enforcer]

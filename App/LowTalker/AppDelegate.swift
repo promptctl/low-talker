@@ -6,7 +6,7 @@ import Identity
 import Grants
 import InputSource
 import Insertion
-import LoopLifecycle
+import LowTalkerApp
 import LowTalkerCore
 import MenuBarPresence
 import Onboarding
@@ -16,10 +16,10 @@ import Signals
 import StatusMenu
 import os
 
-/// The menu-bar agent. `LSUIElement` keeps it out of the Dock, so the status item
-/// is the app's only surface; the delegate exists to install it, to start the model
-/// loading the moment the app is up, and to hand the loop its microphone, engine and
-/// input method.
+/// The menu-bar agent. `LSUIElement` keeps it out of the Dock, so the status item is the app's
+/// only surface; the delegate exists to assemble the app from the real adapters, to install the
+/// status item and the windows, and to forward what AppKit hands it. Every decision of the app's
+/// is `LowTalkerApp`'s, where a test reaches it.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // [LAW:no-ambient-temporal-coupling] NSStatusBar is only usable once the
@@ -42,118 +42,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }()
 
-    /// What the engine is doing, and whether the hotkey is being watched. The two
-    /// things in the menu that cannot be read on demand: they arrive from the load's
-    /// and the loop's own callbacks, so they are held here while everything else is read
-    /// at the moment the menu opens.
-    ///
-    /// The engine's is also the status icon's face, since a first load runs for minutes
-    /// and an icon that looks ready through them reads as an app that is not answering.
-    /// Lazy so it can count from `launched`; only `show(_:)` sets it, which redraws the icon.
-    private lazy var engineReadiness: EngineReadiness = .preparing(nil, since: launched)
-    private var hotkeyStatus: HotkeyStatus = .starting(step: nil)
-    /// What the loop is doing with presses, which the icon shows over the engine's readiness.
-    private var activity: Dictation.Activity = .idle
-    /// When the word box is shown, what it shows, and its dismissal; `hud` puts it on screen.
-    private lazy var box = WordBox(panel: hud)
-    /// The loop's activity again, floating over the app being dictated into, with the words
-    /// no cursor took.
-    private lazy var hud: HUD = HUD(circleClicked: { [unowned self] in box.dismiss(cancelling: listening?.steering, hold: hold) }, insert: { [unowned self] in
-        // [LAW:nothing-unseen] A click with no loop to insert through places nothing, and says so.
-        let words = hold.held?.allWords.words.count ?? 0
-        let unheard = listening == nil ? ", with no loop listening to insert them" : ""
-        sessions.notice("asked to insert \(counted(words, "held word", "held words"), privacy: .public)\(unheard, privacy: .public)")
-        listening?.dictation.insertHeld()
-    }, copy: { [unowned self] in
-        // A click is the person asking for the copy, so replacing what the clipboard held is what
-        // they asked for; NSPasteboard writes only after a clear.
-        // [LAW:nothing-unseen] The count, not the text, which is the person's dictated words.
-        guard let text = hold.held?.clipboardText else {
-            return sessions.notice("asked to copy the held words with none held, so the clipboard is left as it was")
-        }
-        NSPasteboard.general.clearContents()
-        if NSPasteboard.general.setString(text, forType: .string) {
-            sessions.notice("copied \(counted(text.count, "character", "characters"), privacy: .public) of held words, and dismissed them")
-            // The words are the person's to paste now. Held, the next press would type them ahead
-            // of its own, beside the paste; dismissed, the box closes and the menu brings them back.
-            hold.dismiss()
-        } else {
-            sessions.error("the pasteboard refused \(counted(text.count, "character", "characters"), privacy: .public) of held words")
-        }
-    })
-    /// The words no cursor took, for the life of the app and past it: a loop rebuilt over a
-    /// new config keeps offering them, and so does the next launch.
-    private lazy var hold: Hold = Hold(store: HeldFile.app, failedToKeep: { [unowned self] unkept in
-        sessions.fault("held words: \(unkept, privacy: .public)")
-    }) { [unowned self] state in
-        showHUD(held: state.held)
-        // [LAW:nothing-unseen] Counted, never the words themselves: they are what the user dictated.
-        sessions.notice("held: \(state, privacy: .public)")
+    /// The store the bundle carries, read once, so the engine and the bench read one carried
+    /// model. [LAW:one-source-of-truth]
+    private let carried = ModelStore.carried(by: .main)
+
+    /// This installation's input method, which the app selects through and the menu reads.
+    private let installedInputMethod = InstalledInputMethod()
+
+    /// The app, assembled from the real adapters.
+    private lazy var app: LowTalkerApp = assemble()
+
+    /// [LAW:single-enforcer] The one place a real adapter is made: everything the app does, it does
+    /// through these.
+    private func assemble() -> LowTalkerApp {
+        LowTalkerApp(ports: LowTalkerApp.Ports(
+            clock: .system,
+            // The app's build, read off its bundle at launch, so it is the build that is running and
+            // not one an install has since put on disk. The build refuses to make a bundle without it,
+            // so its absence is a bundle this project did not make.
+            build: Build(of: .main) ?? { preconditionFailure("the app bundle carries no build number or source revision; it was not built by `make app`") }(),
+            microphone: SystemMicrophoneAuthority(),
+            audio: SystemAudioHardware(),
+            modifiers: { ModifierMonitor() },
+            model: CarriedModel(store: carried),
+            config: ConfigFileSource(),
+            inputMethod: installedInputMethod,
+            // Awaited because the inserter reads this process's own signature off the main actor to
+            // know who may answer; see `signedLikeThisProcess`.
+            inserter: { await InputMethodInserter() },
+            notices: InputMethodNotices.Host(),
+            openInputMethod: { [installedInputMethod] in try await .open(installedInputMethod.bundle()) },
+            held: HeldFile.app,
+            unheard: UnheardFiles.app,
+            // Nil in the offline build, which cannot accept a connection and so shows nothing about
+            // serving.
+            server: ServerSwitch.ifEntitled(),
+            returnHolds: { ReturnHoldSetting.isOn },
+            // NSPasteboard writes only after a clear.
+            pasteboard: { text in
+                NSPasteboard.general.clearContents()
+                return NSPasteboard.general.setString(text, forType: .string)
+            },
+            panel: hud,
+            showSetUp: { [unowned self] in setUp.show() },
+            told: { [unowned self] in record($0) }))
     }
 
-    /// The loop's one turn: every insert, offer and bring-back runs on it, and so does the hand-off
-    /// of words read from kept speech to `hold`. For the life of the app, so every loop `adopt`
-    /// rebuilds takes the same one. [LAW:single-enforcer]
-    private let loopTurn = SerialQueue()
+    /// The word box on screen, its buttons the app's.
+    private lazy var hud: HUD = HUD(
+        circleClicked: { [unowned self] in app.dismissBox() },
+        insert: { [unowned self] in app.insertHeld() },
+        copy: { [unowned self] in app.copyHeld() })
 
-    /// Speech no engine heard, for the life of the app and past it: a press the model failed to
-    /// load under keeps its audio here, and it is read into held words once a model has loaded, in
-    /// this launch or the next.
-    private lazy var keptSpeech = Recovery(store: UnheardFiles.app, hold: hold, sessions: loopTurn)
-
-    /// When this process began, which every readout of the engine's wait counts from.
-    private let launched = ContinuousClock.now
-
-    /// The same readouts in the unified log, where `log show` can time them: a menu
-    /// nobody has open is no way to measure a launch, and no way for an agent to check
-    /// what the app is showing without a screen. [LAW:verifiable-goals]
+    /// What the app does, in the unified log, where `log show` can time it: a menu nobody has
+    /// open is no way to measure a launch, and no way for an agent to check what the app is
+    /// showing without a screen. [LAW:verifiable-goals]
+    private let loggers: [LowTalkerApp.Line.Category: Logger] = Dictionary(uniqueKeysWithValues: [
+        LowTalkerApp.Line.Category.engine, .dictation, .microphone, .config,
+    ].map { ($0, Logger(subsystem: Bundle.main.bundleIdentifier!, category: $0.rawValue)) })
     private let log = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "engine")
-    /// Each press's activity as it changes, then one line for its outcome: what was heard, how
-    /// long after key-up, and what was inserted.
-    private let sessions = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "dictation")
 
-    /// [LAW:one-source-of-truth] Every engine status passes through here, so the
-    /// menu and the log never tell different stories.
-    private func show(_ readiness: EngineReadiness) {
-        let box = activity.box(over: engineReadiness)
-        engineReadiness = readiness
+    /// [LAW:one-source-of-truth] Every record of the app's lands here: in the log, as the lines
+    /// it renders to, and on the status icon, which is drawn from what the app now reads.
+    private func record(_ event: LowTalkerApp.Event) {
+        for line in event.lines {
+            let level: OSLogType = switch line.level {
+            case .info: .info
+            case .notice: .default
+            case .error: .error
+            case .fault: .fault
+            }
+            loggers[line.category]!.log(level: level, "\(line.text, privacy: .public)\(line.dictated ?? "", privacy: .private)")
+        }
         drawStatusIcon()
-        // Only a change in what the box shows redraws it, so the load's phases leave it be.
-        if activity.box(over: readiness) != box { showHUD(held: hold.held) }
-        log.info("model: \(readiness.readout(at: .now), privacy: .public)")
     }
-
-    private func show(_ activity: Dictation.Activity) {
-        self.activity = activity
-        drawStatusIcon()
-        showHUD(held: hold.held)
-        sessions.info("activity: \(String(describing: activity), privacy: .public)")
-    }
-
-    /// This app's build, read off its bundle at launch, so it is the build that is running and
-    /// not one an install has since put on disk. The log names it beside the input method's.
-    /// The build refuses to make a bundle without it, so its absence is a bundle this project
-    /// did not make.
-    private let build: Build = Build(of: .main) ?? { preconditionFailure("the app bundle carries no build number or source revision; it was not built by `make app`") }()
-
-    /// The input method's process, the one source of what the status line says of it, and the
-    /// build it last said, which the log names. [LAW:one-source-of-truth]
-    private lazy var inputMethod = InputMethodWatch(app: build)
-
-    private func showHotkeyStatus(_ status: HotkeyStatus) {
-        hotkeyStatus = status
-        showHUD(held: hold.held)
-        log.notice("hotkey: \(status, privacy: .public)")
-    }
-
-    /// Every device report the microphone answers and every move of its resting mode, and
-    /// what it is doing after, so a device that went away and the recovery that followed - or
-    /// did not - and a saved mode that did or did not open the microphone read in `log show`
-    /// without a press or a menu to show them. [LAW:nothing-unseen]
-    private lazy var capture: AudioCapture = AudioCapture { [unowned self] report in
-        microphoneLog.notice("\(report, privacy: .public); now \(self.capture.doing, privacy: .public)")
-    }
-    private let microphoneLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "microphone")
 
     /// A signal is a third way to ask the app to go, after the menu item and Cmd-Q, and
     /// it goes the same way they do rather than by the default disposition, which ends
@@ -177,188 +139,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
-    /// The engine, from the moment launch starts loading it, as each press finds it at
-    /// key-down: waited for while it loads, and loaded again by the first press after a load
-    /// that failed.
-    ///
-    /// [LAW:no-ambient-temporal-coupling] Nothing can call the transcriber before it
-    /// is resident: the only handle is the supply's task, which yields the value only
-    /// when the initializer has returned. Lazy so that it can name `loadEngine`, which
-    /// reports to this delegate's menu; touching it is what starts the load.
-    private lazy var engine = EngineSupply { [unowned self] attempt in try await loadEngine(attempt: attempt) }
-
-    /// Whose decode the engine runs next: every press holds it from key-down, so a served
-    /// caller waits for the speaker. Made with the delegate rather than with the engine, so
-    /// a press that begins while the model still loads is already holding it when the
-    /// server's first caller arrives. [LAW:single-enforcer]
-    private let turns = EngineTurns()
-
-    /// The transcription server, answering with `engine` once it is resident, so a caller is
-    /// heard by the model dictation already holds and never a second copy of it. Nil in the
-    /// offline build, which cannot accept a connection and so shows nothing about serving.
-    private lazy var serving = ServerSwitch.ifEntitled()
-
-    // MARK: - the loop
-
-    /// The config this app runs on, read once at launch and again at every save: what the microphone does at rest, the modes the hotkey listens for and where
-    /// the server listens, from one reading, so none of them comes from a different version
-    /// of the file. The menu's names for the chords read it too, so what the menu says to
-    /// hold is what is heard. Only `follow` changes it once it is read. [LAW:one-source-of-truth]
-    ///
-    /// Nil until `reading` ends: the file is read only once the model's tokenizer can check
-    /// every mode's vocabulary, and everything that runs on the config awaits that reading.
-    private var running: RunningConfig?
-    private var config: Result<Config, ConfigError>? { running?.config }
-
-    /// The model the bundle carries, resolved once, so the engine and the vocabulary check
-    /// read one model. [LAW:one-source-of-truth]
-    private lazy var carriedModel = Result { () throws -> InstalledModel in
-        guard let carried = ModelStore.carried(by: .main) else { throw BundleCarriesNoModel() }
-        return try carried.installedModel(.default)
-    }
-
-    /// The carried model's tokenizer alone, loaded from launch: a fraction of a second,
-    /// where the model it belongs to can take minutes.
-    private lazy var prompting: Task<Result<PromptEncoder, PromptsUnavailable>, Never> = Task { @MainActor in
-        let loading = ContinuousClock.now
-        let model = carriedModel
-        let prompts = await Result { () async throws(PromptsUnavailable) in
-            let installed: InstalledModel
-            do { installed = try model.get() } catch { throw PromptsUnavailable(why: "\(error)") }
-            return try await PromptEncoder.load(installed)
-        }
-        // [LAW:nothing-unseen] The reading of the config waits on this, so it is told.
-        let load: PromptEncoder.Load = switch prompts {
-        case .success: .loaded(after: loading.duration(to: .now))
-        case .failure(let failure): .failed(failure)
-        }
-        configLog.notice("\(load, privacy: .public)")
-        return prompts
-    }
-
-    /// The config's reading at launch, through the tokenizer, so a mode the engine could not be
-    /// told is refused as the file is read. A tokenizer that did not load reads nothing: the
-    /// file is never run on unchecked, and it is not blamed for the store. [LAW:no-silent-failure]
-    private lazy var reading: Task<Result<RunningConfig, PromptsUnavailable>, Never> = Task { @MainActor in
-        let prompts: PromptEncoder
-        switch await prompting.value {
-        case .success(let loaded): prompts = loaded
-        case .failure(let failure): return .failure(failure)
-        }
-        let read = RunningConfig(reading: Result { () throws(ConfigError) in try Config.load(prompting: prompts) })
-        running = read
-        configLog.notice("config: \(read, privacy: .public)")
-        return .success(read)
-    }
-    private let configLog = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "config")
-
-    /// The config as it stands once the launch reading has ended. Awaited, never assumed: a
-    /// come-up the menu or the setup starts at launch, and a server switched on then, wait
-    /// here for the reading. [LAW:no-ambient-temporal-coupling] What they then run on is the
-    /// config as it stands, which a save may have moved past the launch reading.
-    private func readConfig() async throws -> Config {
-        _ = try await reading.value.get()
-        guard let config else { preconditionFailure("the launch reading sets the running config before it ends") }
-        return try config.get()
-    }
-
-    /// Where the server listens, from `readConfig`, so a tokenizer that did not load stops a
-    /// chosen server with that reason rather than leaving it off. [LAW:no-silent-failure]
-    private func serveBinding() async throws -> ServeBinding {
-        try await readConfig().serve
-    }
-
-    /// Takes up a save of the config file: each setting whose value changed is moved to the
-    /// new value, and the rest are left alone. A save the file refused leaves every one where
-    /// it was, and the menu says why. [LAW:no-silent-failure]
-    ///
-    /// Nothing here ends a press. A mode moved mid-hold leaves the hold to end at its own
-    /// chord's release, heard in the mode it began in, and a resting mode moved mid-hold is
-    /// taken up at the key-up.
-    private func follow(_ next: RunningConfig) {
-        let was = try? config?.get()
-        running = next
-        // No config ran before this reading: the loop was held down for want of one, and comes
-        // up the way it does at launch, whose status line says what still stops it - this
-        // reading's refusal among them. A refusal with a config running before it reads as
-        // that config, `.kept`, so it arrives below and moves nothing.
-        guard let was, case .success(let now) = next.config else {
-            configLog.notice("config: \(next, privacy: .public)")
-            serving?.resume(at: serveBinding)
-            lifecycle.comeUp()
-            return
-        }
-        // [LAW:nothing-unseen] Each moved setting lands on the event with what came of moving it.
-        let moved = now.settings(changedFrom: was).map { setting in
-            switch setting {
-            case .modes:
-                listening?.hotkey.listen(for: now.modes)
-                // Only a line that says how to press is rewritten: one that says why nothing is
-                // heard still says so. [LAW:no-silent-failure]
-                if case .listening = hotkeyStatus { showHotkeyStatus(.listening(listeningStatus)) }
-                return "modes \(now.modes)"
-            case .microphone:
-                // What the move comes to is its own report, once it lands.
-                capture.rest(as: now.microphone)
-                return "microphone \(capture.doing)"
-            case .serve:
-                serving?.resume(at: serveBinding)
-                return "server binding"
-            }
-        }
-        configLog.notice("config: \(next, privacy: .public); moved [\(moved.joined(separator: "; "), privacy: .public)]")
-    }
-
-    /// The task following the config file's saves, ended by a quit.
-    private var reloading: Task<Void, Never>?
-
-    /// The loop that is listening now.
-    private struct Listening {
-        let hotkey: Hotkey
-        let dictation: Dictation
-        let steering: KeySteering
-        /// The input method's notices, hosted for as long as the hotkey is up. Nil when they or
-        /// the hotkey could not come up, and then neither is.
-        let notices: InputMethodNotices?
-
-        /// [LAW:single-enforcer] Every teardown, in one order: the hotkey comes down and what
-        /// it handed the main queue is delivered, then the notices stop, so the port's name is
-        /// free for the loop built next.
-        @MainActor func stop() async {
-            await hotkey.stopAndDeliver()
-            notices?.stop()
-        }
-    }
-
-    private var listening: Listening?
-
-    /// [LAW:one-source-of-truth] The panel, drawn from the loop's activity, what is held, and
-    /// whether LowTalker is listening, as the menu says, to insert it. `held` is passed by the
-    /// hold as it changes, since the hold calls here before it is assigned.
-    private func showHUD(held: Held?) {
-        let insertable = if case .listening = hotkeyStatus { true } else { false }
-        box.show(activity, over: engineReadiness, held: held, insertable: insertable)
-    }
-
-    /// When the loop comes up, is rebuilt, or is left as it stands, and the one owner of the
-    /// quit's refusal of anything new. Its events are the loop's lines in the log.
-    /// [LAW:single-enforcer]
-    private lazy var lifecycle = LoopLifecycle(
-        startCapture: { [unowned self] in await startCapture() },
-        adopt: { [unowned self] in await adopt() },
-        requirementsMet: { [unowned self] in readReadiness().ready },
-        watching: { [unowned self] in listening?.hotkey.isWatching == true },
-        offerSetUp: { [unowned self] in offerGuidedSetUp() },
-        told: { [unowned self] in log.notice("\($0, privacy: .public)") })
-
-    /// Why the last press's words reached no cursor, while no press has begun since.
-    private var lastFailure: String?
-
     private func drawStatusIcon() {
         // Named, so the icon can be found by a reader with VoiceOver and by an agent
         // reading the bar over Accessibility.
-        let description = activity.iconDescription(for: AppIdentity.displayName, over: engineReadiness)
-        switch activity.glyph(over: engineReadiness) {
+        let description = app.activity.iconDescription(for: AppIdentity.displayName, over: app.engineReadiness)
+        switch app.activity.glyph(over: app.engineReadiness) {
         case .mark:
             // The asset catalog marks it a template, so the bar tints it like its neighbours.
             // A copy, because the named image is shared and the description is this state's.
@@ -376,231 +161,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Takes the loop down and builds it again: the old loop's hotkey comes down first,
-    /// ending any press it had open, its sessions are waited out, and then the input method
-    /// is installed and the hotkey goes up in front of a new loop. `lifecycle` decides when.
-    private func adopt() async {
-        if let previous = listening {
-            listening = nil
-            await previous.stop()
-            // A refused wait is reported and the rebuild still made: a loop that cannot be
-            // replaced would be the worse failure of the two. [LAW:no-silent-failure]
-            do throws(SerialQueueError) { try await previous.dictation.finish() } catch { reportFailure(Dictation.Failed(error), of: nil) }
-        }
-        // [LAW:no-ambient-temporal-coupling] The input method is made ready before the hotkey
-        // goes up, so no press is heard that has nowhere to go yet.
-        showHotkeyStatus(.starting(step: "setting up the input method"))
-        let installed = await selectInputMethod()
-        // A loop is built only over capture holding the microphone, capture starts only over
-        // a config that was read, and a save the file refused keeps the one that ran.
-        guard case .success(let config)? = config else { preconditionFailure("a loop is adopted only once the config has been read") }
-        let hotkey = Hotkey(listeningFor: config)
-        // The words cross to the input method, which commits them at the cursor through the
-        // text input system. Awaited because the inserter reads this process's own signature
-        // off the main actor to know who may answer; see `signedLikeThisProcess`.
-        let inserter = await InputMethodInserter()
-        let dictation = Dictation(
-            capture: capture,
-            // Asked at key-down, so a press after a failed load is refused before the person
-            // speaks into it.
-            engine: { [unowned self] () throws(EngineUnavailable) in try engine.forPress() },
-            turns: turns,
-            // [LAW:one-source-of-truth] A press is timed on the clock its key events are stamped on.
-            executor: Executor(insertingThrough: inserter, clock: hotkey.clock),
-            hold: hold,
-            sessions: loopTurn,
-            recovery: keptSpeech,
-            report: { [unowned self] in report($0) },
-            showing: { [unowned self] in show($0) }
-        )
-        // How Return and Escape steer this loop's press, the input method's questions and the
-        // word box's dismissal alike.
-        let steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { ReturnHoldSetting.isOn }, dismissing: { [unowned self] in box.escape(cancelling: $0, hold: hold) })
-        // The hotkey goes up only over an input method that installed: a hotkey over one that
-        // refused would open the microphone on every press for words that go nowhere, while
-        // the status line said the loop was off. [LAW:no-silent-failure]
-        //
-        // And only over notices that were hosted. The input method tells each cursor it is
-        // given focus in, and the loop listening then offers it what is held. The port's name
-        // is one per login session, so a second copy of the app stops here and hears nothing.
-        // Awaited rather than the sibling gates' synchronous `Result {}` because hosting the
-        // port reads this process's own signature off the main actor.
-        let notices: Result<InputMethodNotices, LoopRefusal>
-        if case .failure(let refusal) = installed {
-            notices = .failure(refusal)
-        } else {
-            do throws(PortNotHosted) {
-                notices = .success(try await InputMethodNotices(
-                    heard: { [unowned self] notice in
-                        inputMethod.heard(notice).map(showInputMethod)
-                        if case .cursorArrived = notice { listening?.dictation.cursorArrived() }
-                    },
-                    // A Return the input method holds asks whether words are owed to it, and
-                    // answers to this loop's own press and queue; an Escape asks the word box to
-                    // take it, which puts the box away and cancels the press it showed.
-                    asked: { steering.answer($0, through: $1) },
-                    superviseInputMethod: { [unowned self] in InputMethodSupervisor(told: { [unowned self] in show($0) }).stop }))
-            } catch { notices = .failure(LoopRefusal(stringLiteral: "\(error)")) }
-        }
-        // Notices whose hotkey did not go up are stopped with it, so their supervision says
-        // nothing that would put a listening line over the refusal.
-        let hearing = notices.flatMap { notices in
-            Result {
-                // A blocked chord is no press, so the last press's failure stands.
-                try hotkey.start(feeding: dictation) { [unowned self] in lastFailure = nil }
-                return notices
-            }.mapError { error in
-                notices.stop()
-                return LoopRefusal(stringLiteral: "\(error)")
-            }
-        }
-        listening = Listening(hotkey: hotkey, dictation: dictation, steering: steering, notices: try? hearing.get())
-        // A hotkey that went up says how to press it once the input method's process is
-        // running, which is that process's event to tell; see `show(_:)`.
-        if case .failure(let refusal) = hearing { showHotkeyStatus(.off(refusal.reason)) }
-    }
-
-    /// The input method's process as the notices keep it.
-    private func show(_ event: InputMethodSupervisor.Event) {
-        log.notice("input method: \(event, privacy: .public)")
-        showInputMethod(inputMethod.told(event))
-    }
-
     /// Flips whether a Return is held until the dictated words land, from the menu's checkbox. The
     /// input method asks for it at each Return, so a change here needs no word to the input method.
     @objc private func toggleReturnHold() {
         ReturnHoldSetting.set(!ReturnHoldSetting.isOn)
     }
 
-    /// The line says how to press only while an input method is running to type the words,
-    /// of whatever build. `InputMethodWatch` decides when the line is written and when the
-    /// log hears it.
-    private func showInputMethod(_ showing: InputMethodWatch.Showing) {
-        if showing.isNew { log.notice("input method: \(showing.standing, privacy: .public)") }
-        let status: HotkeyStatus = switch showing.standing {
-        case .running: .listening(listeningStatus)
-        case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
-        case .overMemoryCeiling(_, let overrun):
-            .off("the input method is ending itself, \(overrun); \(AppIdentity.displayName) will start it again")
-        case .notOpened(let reason):
-            .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
-        }
-        showHotkeyStatus(status)
-    }
-
-    /// This installation's input method, as its package installed it, registered and - once
-    /// a person has switched it on in setup - selected: what the words are committed through.
-    /// Run at every rebuild, which is what keeps the input method selected.
-    ///
-    /// Nothing here puts a system dialog on screen, because a rebuild runs at launch. The
-    /// input method is switched on from its own step in setup; see `ask(_:)`.
-    ///
-    /// [LAW:no-silent-failure] A select that fails leaves a hotkey that would hear every
-    /// press and insert nothing, so it comes back as a refusal for the status line.
-    private func selectInputMethod() async -> Result<Void, LoopRefusal> {
-        do {
-            let inputMethod = InstalledInputMethod()
-            let bundle = try inputMethod.bundle()
-            let state = try await inputMethod.select()
-            log.notice("input method: \(state, privacy: .public) from \(bundle.path, privacy: .public)")
-            // Stopped short of selected only where a person has yet to switch it on,
-            // which is a step in setup rather than something that went wrong.
-            return state.ready ? .success(()) : .failure("""
-                the input method is \(state); switch it on in \(GuidedSetup.title) \
-                in this menu, where macOS asks you to allow it
-                """)
-        } catch {
-            log.error("input method: \(String(describing: error), privacy: .public)")
-            return .failure("the input method could not be selected: \(error)")
-        }
-    }
-
-    /// Why the loop is not working, in the words the status line says it.
-    /// Named apart from `Insertion.Refusal`, which is the input method's answer to an insert.
-    private struct LoopRefusal: Error, ExpressibleByStringInterpolation {
-        let reason: String
-        init(stringLiteral reason: String) { self.reason = reason }
-    }
-
-    /// What the menu says after "Hotkey: ".
-    private enum HotkeyStatus: CustomStringConvertible {
-        case starting(step: String?)
-        /// Listening, and how to press it.
-        case listening(String)
-        /// Not listening, for this reason.
-        case off(String)
-
-        var description: String {
-            switch self {
-            case .starting(nil): "starting…"
-            case .starting(let step?): "starting — \(step)"
-            case .listening(let howToPress): howToPress
-            case .off(let reason): "off — \(reason)"
-            }
-        }
-    }
-
-    /// The status line of a hotkey that is listening, and the input method that last ended
-    /// itself over its memory ceiling, which the person would otherwise never see (IMK rule 7).
-    private var listeningStatus: String {
-        "hold \(chordName), or tap it to start and again to stop"
-            + (inputMethod.lastOverrun.map { "; the input method ended itself \($0), and was started again" } ?? "")
-    }
-
-    /// The chords the config listens for, in the words a person presses them by.
-    private var chordName: String {
-        switch config {
-        case .success(let config)?: Hotkey.named(in: config)
-        // The status line already says why nothing is heard.
-        case .failure?: "no chord: the config cannot be read"
-        case nil: preconditionFailure("only a loop `adopt` built says how to press, and it adopts only a config that was read")
-        }
-    }
-
     // MARK: - the guided setup
 
     /// The guided setup, over the one list the menu reads.
     private lazy var setUp = SetUpWindow(
-        read: { [unowned self] in readReadiness() },
-        ask: { [unowned self] in await ask($0) },
-        settle: { [unowned self] in lifecycle.settle(requirementsMet: $0.ready) }, log: log)
+        read: { [unowned self] in app.readiness() },
+        ask: { [unowned self] in await app.ask($0) },
+        settle: { [unowned self] in app.settle($0) }, log: log)
 
-    /// Asks macOS for one requirement - the only place in the app that does, and reached
-    /// only from the button a person pressed on that requirement's step. Each case raises
-    /// at most one system dialog.
-    ///
-    /// Answers with how the request ended, and what went wrong for the step to show when
-    /// something did. A person declining is not something that went wrong: the next reading
-    /// shows the step still unmet, with what skipping it costs. [LAW:no-silent-failure]
-    private func ask(_ row: Requirement.Row) async -> SetUpWindow.Request {
-        switch row {
-        case .microphone:
-            // macOS asks about the microphone once. Past that, requesting answers at once and
-            // shows nothing, so a decided "no" is said here and the pane opened instead.
-            switch readMicrophone() {
-            case .withheld(.notDetermined):
-                // Asked here, as measured on studious 2026-09-24: one dialog, naming the app.
-                _ = await MicrophonePermission().request()
-                return .answered
-            case .withheld(.denied):
-                return .sentToSystemSettings("macOS asks only once. Turn on \(AppIdentity.displayName) in the \(row.rawValue) list in System Settings.")
-            case .withheld(.restricted):
-                return .failed("A policy on this Mac blocks the microphone.")
-            case .granted:
-                return .made
-            }
-        case .inputMethod:
-            do { try await InstalledInputMethod().switchOn() } catch { return .failed("\(error)") }
-            // Switched on is not selected: once it reads as met, the loop is rebuilt so the
-            // install selects it, whether or not the loop is up.
-            lifecycle.inputMethodWasSwitchedOn()
-            return .made
-        }
-    }
-
-    /// Only in the menu of a build that has a server to switch.
     @objc private func toggleServing() {
-        serving.map { $0.choose(!$0.chosen, at: serveBinding) }
+        app.toggleServing()
     }
 
     /// Opens the app at login, or stops it. An item switched off in System Settings can be
@@ -626,11 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - the bench
 
-    /// The one bench run at a time, which the first press heard during it stops. It holds
-    /// the app's turns for a run, so a served request waits for it as for a press.
-    private lazy var benchRuns = BenchRuns(turns: turns)
-
-    private lazy var bench = BenchWindow(runs: benchRuns, carried: ModelStore.carried(by: .main))
+    private lazy var bench = BenchWindow(runs: app.benchRuns, carried: carried)
 
     @objc private func openBench() {
         bench.show()
@@ -708,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         // Asking whether to keep running means nothing to an app already on its way out.
-        guard !lifecycle.quitting else {
+        guard !app.quitting else {
             menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as \(AppIdentity.displayName, privacy: .public) is quitting")
             return
         }
@@ -742,238 +314,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - launch and quit
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        show(.preparing(nil, since: launched))
         statusItem.isVisible = true
+        drawStatusIcon()
         watchStatusItem()
-        // Before the engine, so speech kept by an earlier run is found at launch and the first
-        // load that lands has it to read. [LAW:no-ambient-temporal-coupling]
-        _ = keptSpeech
-        _ = engine
-        // What the last run held is shown from launch, not from the first loop, which waits on
-        // the microphone grant. [LAW:nothing-unseen] So is a store that could not be read.
-        hold.unrestored.map { sessions.fault("held words: \($0, privacy: .public)") }
-        // Listening from launch when the person last chose to, answering 503 until the model
-        // is resident, so a client started beside the app is told to wait rather than refused.
-        // Its binding, like the come-up's first step, awaits the config's reading, so both
-        // start now.
-        serving?.resume(at: serveBinding)
-        showHotkeyStatus(.starting(step: nil))
-        listen()
-        // Once the config is read, each save is a reload of the config the server and the
-        // loop started on.
-        reloading = Task {
-            guard case .success(let prompts) = await prompting.value, case .success(let read) = await reading.value, !Task.isCancelled else { return }
-            for await next in RunningConfig.reloads(after: read, prompting: prompts) { follow(next) }
-        }
+        app.launch()
     }
 
-    /// The loop as far as what is already granted allows, then the guided setup when
-    /// something is left: every requirement stops dictation, so an app missing one can do
-    /// nothing until the person has seen why. The come-up offers the setup at its end, so a quit
-    /// asked for while it is suspended opens no window; see `offerSetUp`.
-    ///
-    /// A launch asks for no grant. Every grant is asked for from its own step in setup,
-    /// after that step has said why; see `ask(_:)`.
-    private func listen() {
-        lifecycle.comeUp()
-    }
-
-    /// Shows the guided setup when a requirement is left unmet, so a person sees why nothing is
-    /// heard. The come-up offers this at its end (through `offerSetUp`), and refuses it once a
-    /// quit is asked for, so a quit during the come-up opens no window. A method, not the closure
-    /// inline, so `lifecycle`'s initializer does not reference `setUp` and tangle the two lazy
-    /// vars into a cycle (`setUp` already reads back into `lifecycle`).
-    private func offerGuidedSetUp() {
-        if !readReadiness().unmet.isEmpty { setUp.show() }
-    }
-
-    /// The come-up's first step: the microphone grant read, then capture holding it. Answers
-    /// what came of it; `lifecycle` builds the loop over it, last, so no press can
-    /// arrive before there is a capture to open a microphone for it.
-    /// [LAW:no-ambient-temporal-coupling]
-    ///
-    /// Reads the grant and asks for none: a microphone not yet allowed leaves the loop down
-    /// with the reason on the status line, and the setup's step is where it is asked for.
-    ///
-    /// What the microphone is doing when this returns is the resting mode's to say, which
-    /// is the one thing the config decides here; `AudioCapture.start` is where that is
-    /// written down. [LAW:one-source-of-truth]
-    ///
-    /// A config that cannot be read stops the app listening rather than being answered
-    /// with the defaults, which is `ConfigError`'s own rule: "there is no config" and
-    /// "there is a config I could not read" are different facts, and running the second
-    /// one as the first would hold or release the microphone on settings its owner never
-    /// chose. The menu says what is wrong with it.
-    /// [LAW:no-silent-failure]
-    private func startCapture() async -> LoopLifecycle.Capture {
-        do {
-            // A capture already running is left running: the microphone was held before, and
-            // what came up short was the hotkey or the input method, which the rebuild redoes.
-            // Restarting it would close and reopen an engine the resting mode holds open.
-            guard capture.atRest == nil else { return .running }
-            // Read before the grant, so a tokenizer that did not load is the status line's
-            // reason even while the microphone waits on setup, whose list says that too.
-            let atRest = try await readConfig().microphone
-            let grant = try readMicrophone().grant()
-            // Awaited, so the menu and the readings queued behind the come-up run while
-            // a slow input is reached.
-            try await capture.start(grant, atRest: atRest)
-            return .started
-        } catch {
-            // Stopping is idempotent, so a grant withheld and a capture that failed to
-            // start leave by one path. [LAW:dataflow-not-control-flow]
-            capture.stop()
-            // A microphone macOS was never asked about, or was told no, is a step in setup,
-            // and the status says where it is the way the input method's refusal does.
-            let whereToAllow = switch error {
-            case MicrophoneAuthorization.Withheld.notDetermined, MicrophoneAuthorization.Withheld.denied:
-                "; allow it in \(GuidedSetup.title) in this menu"
-            default: ""
-            }
-            showHotkeyStatus(.off("\(error)\(whereToAllow)"))
-            return .notStarted
-        }
-    }
-
-    /// Quitting waits for the sessions: a press heard just before the quit still has its
-    /// words on the way to the cursor, and the wait is what lets them land.
-    /// [LAW:no-ambient-temporal-coupling] The quit has an owner, rather than a race.
+    /// The quit is the app's: it refuses anything new at once and is granted once the press's
+    /// words have landed.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let rebuilding = lifecycle.quit()
-        // A save during the drain would rebind the server and move the microphone under it.
-        reloading?.cancel()
+        let drained = app.quit()
         Task {
-            // A rebuild in progress is let finish first, so the loop waited on is the last one.
-            await rebuilding?.value
-            // The hotkey comes down before the wait, as at every other teardown: a press open
-            // when the quit arrives is ended as lapsed and reported, rather than the app
-            // going mid-utterance leaving nothing behind to say it did, and no key-down
-            // arriving during the wait can open a session there is no longer anyone to close.
-            await listening?.stop()
-            // Every session's audio ended at its key-up and no key-down can open another, so
-            // the microphone goes now: a resting mode that holds it open does not hold it
-            // through a drain that can wait minutes on a cold load.
-            capture.stop()
-            // A refused wait is reported and the quit still granted: an app that cannot
-            // be quit would be the worse failure of the two. [LAW:no-silent-failure]
-            do throws(SerialQueueError) { try await listening?.dictation.finish() } catch { reportFailure(Dictation.Failed(error), of: nil) }
+            await drained.value
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
     }
 
-    /// Off the main path from the first await: the Core ML load runs on WhisperKit's
-    /// own threads, and only the status text comes back here.
-    private func loadEngine(attempt: Int) async throws -> WhisperKitTranscriber {
-        // The first attempt's wait counts from launch, and a later one's from the press that
-        // started it.
-        let since = attempt == 1 ? launched : ContinuousClock.now
-        show(.preparing(nil, since: since))
-        serving?.answer(with: .loading)
-        do {
-            // The bundle carries a store, and `carriedModel` is its model, loaded here in
-            // place — read-only, verified whole where the code signature sealed it, written
-            // to never. A read-only store cannot be installed into, only confirmed and
-            // loaded, so a carried store that lacks the model fails with its reason rather
-            // than a permission error from a lock it could not take.
-            //
-            // There is deliberately no other way to reach a model from here, and a bundle
-            // carrying none is a build error reported at launch rather than a download.
-            // The branch that used to stand here fetched from Hugging Face when the bundle
-            // carried nothing, which made a development build that had silently shipped
-            // without its model look launchable and then reach the network from an app that
-            // has no business doing so. Every bundle carries its model - `make app` fills
-            // the store the same way scripts/sign-release does - so the case that branch
-            // existed for is now a Makefile that did not run, which is worth being told
-            // about in the words below. [LAW:types-are-the-program] [LAW:no-silent-failure]
-            let report: @Sendable (WhisperKitTranscriber.LoadPhase) -> Void = { phase in
-                Task { @MainActor in
-                    let next = self.engineReadiness.reporting(phase)
-                    if next != self.engineReadiness { self.show(next) }
-                }
-            }
-            let installed = try carriedModel.get()
-            report(.loading)
-            let transcriber = try await WhisperKitTranscriber(installed, turns: turns)
-            show(.ready(transcriber.model, after: since.duration(to: .now)))
-            serving?.answer(with: .ready(transcriber.served))
-            // Reads the speech kept while no engine could hear it, as a served caller: its passes
-            // wait while a press holds the engine. Starts a task and returns, so this load never
-            // waits on a decode that waits on the press that waits on this load.
-            keptSpeech.landed(transcriber.served)
-            return transcriber
-        } catch {
-            // [LAW:no-silent-failure] A model that failed to load is the one thing the
-            // menu must say, since every session after this would otherwise fail
-            // with no explanation on screen.
-            show(.failed("\(error)"))
-            serving?.answer(with: .failed("the model failed to load: \(error)"))
-            throw error
-        }
-    }
-
-    /// The press's own line, with what it showed while the key was down and what its
-    /// microphone delivered; each insert's key-up-to-acknowledged time is the executor's line
-    /// beside it, under its own category.
-    /// The words are private: they are what the user dictated.
-    private func report(_ press: Dictation.Report) {
-        switch press.outcome {
-        case .session(let session):
-            sessions.notice("\(press.mode, privacy: .public): \(session.description, privacy: .public); \(press.record, privacy: .public): \(session.transcription.transcript.text, privacy: .private)")
-        case .usedAsModifier(let landed, let standing, let discarded):
-            sessions.notice("\(press.mode, privacy: .public): the chord was the modifier of a typed key, so the press was not dictation and nothing heard past its inserts is held or shown; \(counted(landed, "word", "words"), privacy: .public) inserted before, \(standing, privacy: .public) that may have been, \(discarded, privacy: .public) heard after them discarded; \(press.record, privacy: .public)")
-        case .cancelled(let cancelled):
-            sessions.notice("\(press.mode, privacy: .public): the press was cancelled with Escape, so nothing of it is held, offered or shown; \(cancelled.description, privacy: .public); \(press.record, privacy: .public)")
-        case .failed(let failed):
-            reportFailure(failed, of: press)
-        }
-    }
-
-    /// `press` is nil for a failure that was no press - the loop's sessions could not be
-    /// waited out - which has no microphone to say.
-    private func reportFailure(_ failed: Dictation.Failed, of press: Dictation.Report?) {
-        // [LAW:no-silent-failure] The words went nowhere, or only some of them did, so the
-        // menu says why.
-        lastFailure = failureLine(failed.failure)
-        // [LAW:nothing-unseen] A dictation that did not happen is as readable here as one
-        // that did: the facts in the clear and any words it carries private, as its type
-        // declares them. The microphone's record comes before the facts, which can be a
-        // whole Core ML error, so the 1 KB the unified log keeps of a line still holds it.
-        let account = failed.failure.account
-        let mode = press.map { " in \($0.mode)" } ?? ""
-        let record = press.map { "; \($0.record)" } ?? ""
-        switch account.dictated {
-        case nil:
-            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public)\(record, privacy: .public) — \(account.facts, privacy: .public)")
-        case let dictated?:
-            sessions.error("session failed\(mode, privacy: .public): \(failed.kind, privacy: .public)\(record, privacy: .public) — \(account.facts, privacy: .public); dictated: \(dictated, privacy: .private)")
-        }
-    }
-
     // MARK: - the menu
-
-    /// What this installation's setup needs, read off this Mac now, and logged as it is read.
-    ///
-    /// The one reading every surface in the app draws from: the menu, the guided setup, and
-    /// the question of whether setup has anything to show. Paid on every read rather than
-    /// kept warm in the background because a cached reading is a reading that can be stale
-    /// exactly when it matters: right after the user gave the grant the menu was telling them
-    /// to give. [LAW:no-ambient-temporal-coupling]
-    private func readReadiness() -> Readiness {
-        let readiness = OnboardingProbe.readiness(microphone: readMicrophone())
-        log.notice("onboarding: \(readiness.ready ? "ready" : "not ready", privacy: .public)")
-        for requirement in readiness.requirements {
-            log.notice("onboarding: \(requirement.name, privacy: .public): \(requirement.reads, privacy: .public)")
-        }
-        return readiness
-    }
-
-    /// The app's microphone authorization as it stands now.
-    private func readMicrophone() -> MicrophoneAuthorization {
-        let microphone = MicrophonePermission().current
-        log.notice("privacy: \(microphone, privacy: .public)")
-        return microphone
-    }
 
     /// Why the words of a press would be held rather than typed right now, read at the moment
     /// the menu opens: the input method types only while its source is the one in use. Empty while
@@ -982,7 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// [LAW:no-silent-failure] A hotkey line that read as working while nothing could type
     /// would send the person after a broken app rather than the Input menu.
     private func untypedBecause() -> [String] {
-        let found = InstalledInputMethod.isSelected() ? [] : ["\(AppIdentity.displayName) is not the selected input source"]
+        let found = installedInputMethod.isSelected ? [] : ["\(AppIdentity.displayName) is not the selected input source"]
         log.notice("hotkey: words held, not typed, because [\(found.joined(separator: "; "), privacy: .public)]")
         return found
     }
@@ -993,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func globeKeyClash() -> String? {
         let stored = CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString) as? Int
         let action = GlobeKeyAction(appleFnUsageType: stored)
-        let clash: String? = switch config {
+        let clash: String? = switch app.running?.config {
         case .success(let config)?: action.clash(with: config.modes.chords)
         // The status line already says why no chord is heard.
         case .failure?, nil: nil
@@ -1008,29 +366,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// to re-read. `menuNeedsUpdate` rather than `menuWillOpen`: AppKit calls this one
     /// before the menu is laid out, so the items are in place when it is measured.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        let readiness = readReadiness()
-        lifecycle.settle(requirementsMet: readiness.ready)
+        let readiness = app.readiness()
+        app.settle(readiness)
 
         // What the user's microphone is doing, on the surface the epic exists for: the
         // menu-bar indicator says the device is open and only this says why, so a lit
         // microphone on an idle Mac is either explained here or is a bug - and a dark one
         // the config asked to hold open says so here too. [LAW:no-silent-failure]
-        let microphone = capture.doing
+        let microphone = app.microphone
         log.notice("microphone at rest: \(microphone, privacy: .public)")
         let untyped = untypedBecause()
         let globeKey = globeKeyClash()
         let openAtLogin = loginItem.current
         loginLog.notice("open at login: \(openAtLogin, privacy: .public)")
+        let engineReadiness = app.engineReadiness
+        let hotkeyStatus = app.hotkeyStatus
+        let hold = app.hold
+        let keptSpeech = app.keptSpeech
 
         menu.removeAllItems()
-        let model = "Whisper model: \(engineReadiness.readout(at: .now))"
+        let model = "Whisper model: \(app.engineReadout)"
         let modelRow = if case .failed = engineReadiness { errorRow(model, .model) } else { readout(model) }
         menu.addItem(modelRow)
         // A press made during the wait is not lost, and nothing else on screen says so.
         if case .preparing = engineReadiness { menu.addItem(readout("A press now is heard once the model is ready")) }
         // Beside the model it answers with. [LAW:dataflow-not-control-flow] The offline build
         // has no switch, so no line.
-        serving.map { serving in
+        app.serving.map { serving in
             let server = "Server: \(serving.state)"
             let serverRow = if case .stopped = serving.state { errorRow(server, .server) } else { readout(server) }
             menu.addItem(serverRow)
@@ -1043,7 +405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(hotkeyRow)
         for reason in untyped { menu.addItem(readout("    Not typed now: \(reason)")) }
         globeKey.map { menu.addItem(readout("    \($0)")) }
-        lastFailure.map { menu.addItem(errorRow($0, .lastDictation)) }
+        app.lastFailure.map { menu.addItem(errorRow($0, .lastDictation)) }
         // What keeping the held words for the next launch failed at: a fact about the store,
         // not the words, and one the panel has nothing to show for when nothing is held.
         // [LAW:no-silent-failure]
@@ -1060,8 +422,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !keptSpeech.kept.isEmpty {
             menu.addItem(withTitle: "Discard Kept Speech (\(keptSpeech.keptSeconds) s)", action: #selector(discardKeptSpeech), keyEquivalent: "")
         }
-        if let running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
-        if benchRuns.isRunning { menu.addItem(readout("A benchmark is running: the next press heard stops it")) }
+        if let running = app.running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
+        if app.benchRuns.isRunning { menu.addItem(readout("A benchmark is running: the next press heard stops it")) }
         // Every requirement, met or not, and its step under it as the lines it was
         // written in - one item per line, so nothing here wraps text the requirement
         // already broke. A list that showed only what was missing would leave a reader
@@ -1089,7 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // the message goes out with them in it; the input method holds a Return only when this is on.
         let holdItem = menu.addItem(withTitle: "Hold Return for Dictated Words", action: #selector(toggleReturnHold), keyEquivalent: "")
         holdItem.state = ReturnHoldSetting.isOn ? .on : .off
-        if let serving {
+        if let serving = app.serving {
             let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
             item.state = serving.chosen ? .on : .off
         }
@@ -1099,15 +461,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func discardKeptSpeech() {
-        keptSpeech.discard()
+        app.discardKeptSpeech()
     }
 
     @objc private func bringBackDismissed() {
-        // [LAW:nothing-unseen] A click with no loop to bring them back through moves nothing, and says so.
-        let unheard = listening == nil ? ", with no loop listening to bring them back" : ""
-        sessions.notice("asked to bring back \(counted(self.hold.dismissed?.allWords.words.count ?? 0, "dismissed word", "dismissed words"), privacy: .public)\(unheard, privacy: .public)")
-        // The panel opens again when the loop holds the words again.
-        listening?.dictation.bringBackDismissed()
+        app.bringBackDismissed()
     }
 
     /// A line the menu says and nothing a reader can press. An item with no action is
@@ -1133,16 +491,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 }
-
-/// A bundle built without the model it is supposed to carry.
-///
-/// [LAW:no-silent-failure] Not a state this app recovers from and not one it downloads its
-/// way out of: the model is put in at build time, so a bundle without one was built wrong
-/// and the only thing to do about it is say so where the person running it will read it.
-struct BundleCarriesNoModel: Error, CustomStringConvertible {
-    var description: String {
-        "this build carries no model in Contents/Resources/\(ModelStore.carriedResourceName); "
-            + "it was built without one. Build it with `make app`, which puts the model in"
-    }
-}
-

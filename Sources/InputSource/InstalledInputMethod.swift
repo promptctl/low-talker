@@ -95,7 +95,7 @@ public struct InstalledInputMethod: Sendable {
     /// refusal and is said as one.
     @MainActor
     @discardableResult
-    public func select(settling: Duration = .seconds(3)) async throws -> InputMethodReadiness {
+    public func select(settling: Duration) async throws -> InputMethodReadiness {
         let source = try await registered(settling: settling)
         // Never switched on here. Switching an input method on is what makes macOS ask the
         // person, in its own dialog, whether this app may, and `select` runs at every
@@ -126,7 +126,7 @@ public struct InstalledInputMethod: Sendable {
     /// Nothing is read back here: macOS may still be showing its dialog when this returns,
     /// so whoever asked reads `isSwitchedOn` when the person is done with it.
     @MainActor
-    public func switchOn(settling: Duration = .seconds(3)) async throws {
+    public func switchOn(settling: Duration) async throws {
         let mode = try await registered(settling: settling)
         // The input method's own source, looked for the way the mode's was: this process's
         // list may not hold it yet, and a list read before the refresh arrives is not an

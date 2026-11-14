@@ -1,4 +1,5 @@
 import Foundation
+import Uptime
 
 /// Where the app's engine stands between launch and the first moment it can hear, as the
 /// menu bar shows it.
@@ -13,7 +14,7 @@ import Foundation
 public enum EngineReadiness: Sendable, Equatable {
     /// Not yet able to hear, waiting `since` that instant: `phase` is nil until the load
     /// reports its first step.
-    case preparing(WhisperKitTranscriber.LoadPhase?, since: ContinuousClock.Instant)
+    case preparing(WhisperKitTranscriber.LoadPhase?, since: HostTime)
     /// Loaded, the wait having lasted `after`. Kept rather than measured when read, so the
     /// menu opened an hour later says how long the load took, not how long ago launch was.
     case ready(ModelName, after: Duration)
@@ -37,7 +38,7 @@ public enum EngineReadiness: Sendable, Equatable {
 
     /// The words for the menu and the log, read at `now`. A wait says how long it has run,
     /// which is what tells a slow load from a stuck one.
-    public func readout(at now: ContinuousClock.Instant) -> String {
+    public func readout(at now: HostTime) -> String {
         switch self {
         case .preparing(let phase, let since): "\(phase?.description ?? "checking the model"), \(Self.spoken(since.duration(to: now))) so far"
         case .ready(let model, let wait): "ready (\(model)) after \(Self.spoken(wait))"
