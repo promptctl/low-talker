@@ -1,4 +1,5 @@
 import LowTalkerCore
+import Uptime
 
 /// A keyboard a test types on, standing in the window server's modifier events. Every handler
 /// installed and not yet disposed is told each key the test moves, and it keeps
@@ -16,10 +17,14 @@ public final class FakeModifierFeed: ModifierFeed {
 
     /// Every handler installed, in order, disposed or not.
     public private(set) var installations: [Installation] = []
+    /// The clock the test stamps the keys it types on.
+    public let clock: HostClock
     private let refusal: (any Error)?
 
-    /// A feed that cannot start throws `refusal` from every install.
-    public init(refusing refusal: (any Error)? = nil) {
+    /// A keyboard whose keys are stamped on `clock`. A feed that cannot start throws `refusal`
+    /// from every install.
+    public init(on clock: HostClock, refusing refusal: (any Error)? = nil) {
+        self.clock = clock
         self.refusal = refusal
     }
 

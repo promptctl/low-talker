@@ -22,6 +22,9 @@ import Uptime
 public struct ModifierMonitor: ModifierFeed {
     public init() {}
 
+    /// `NSEvent.timestamp` counts the machine's uptime, as the host clock does.
+    public var clock: HostClock { .system }
+
     /// How often a held key is looked for in the session. A release no event told is heard
     /// within two of these, since one younger than `ToldModifiers.telling` is left for the next.
     static let confirming: DispatchTimeInterval = .milliseconds(200)

@@ -1,5 +1,5 @@
-/// The clock every decision here reads time from: what `now` is on the host clock, and a sleep
-/// until a moment of it.
+/// The clock a decision reads time from: what `now` is on the host clock, and a sleep until a
+/// moment of it.
 ///
 /// [LAW:effects-at-boundaries] [LAW:no-ambient-temporal-coupling] A reading of the clock is an
 /// effect, so a decision is handed one of these rather than reaching for `HostTime.now`, and a
@@ -29,8 +29,8 @@ public struct HostClock: Clock, Sendable {
     }
 
     /// The machine's: `CLOCK_UPTIME_RAW`, which stops while the Mac sleeps. Sleeps on
-    /// `SuspendingClock`, which on Darwin is that same clock, so a deadline is not moved by a
-    /// sleep of the Mac's.
+    /// `SuspendingClock`, which on Darwin is that same clock, so a sleep ends when `now` reaches
+    /// its deadline, and time the Mac spends asleep counts toward neither.
     public static let system = HostClock(now: { HostTime.now }) { deadline in
         let suspending = SuspendingClock()
         try await suspending.sleep(until: suspending.now.advanced(by: deadline - HostTime.now))

@@ -21,7 +21,7 @@ private struct BadBuffer: Error {}
 
         init() async throws {
             rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
-            feed = FakeModifierFeed()
+            feed = FakeModifierFeed(on: rig.clock.clock)
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             try hotkey.start(feeding: rig.dictation)
         }

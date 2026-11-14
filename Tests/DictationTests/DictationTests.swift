@@ -133,10 +133,14 @@ final class Rig {
     }
 
     /// Audio captured from `now` on, stamped as the microphone would stamp it, into
-    /// whichever engine is running: a replaced one is deaf, as it is on a real Mac.
+    /// whichever engine is running: a replaced one is deaf, as it is on a real Mac. The buffer
+    /// arrives once its samples have been said, as a real one does, so the engine's pass,
+    /// which reads the clock on a thread of its own, reads it after the speaking.
+    /// [LAW:no-ambient-temporal-coupling]
     func speak(_ samples: [Float]) {
-        hardware.live.appending(samples, now)
+        let said = now
         clock.advance(by: Self.spoken(samples.count))
+        hardware.live.appending(samples, said)
     }
 
     /// How long `samples` samples take to say.
@@ -1977,7 +1981,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         try await rig.dictation.finish()
         let rebuilt = Dictation(
             capture: rig.capture, engine: { { FakeTranscriber { _ in Transcript(typed: "") } } }, turns: rig.turns,
-            executor: Executor(insertingThrough: rig.inputMethod), hold: rig.hold,
+            executor: Executor(insertingThrough: rig.inputMethod, clock: rig.clock.clock), hold: rig.hold,
             sessions: rig.sessions, recovery: rig.recovery,
             report: { _ in }, showing: { _ in })
         rig.inputMethod.refusing(nil)

@@ -221,7 +221,7 @@ public struct InstalledInputMethod: Sendable {
         while true {
             if let found = source(named: identifier), holds(found) { return found }
             if clock.now >= giveUp { return nil }
-            try await Task.sleep(for: .milliseconds(50))
+            try await clock.sleep(for: .milliseconds(50))
         }
     }
 

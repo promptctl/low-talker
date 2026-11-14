@@ -31,6 +31,11 @@ private let rightOption = Mode.dictation
 
 private func at(_ ms: Int64) -> HostTime { HostTime(uptime: .milliseconds(ms)) }
 
+/// A keyboard whose keys are stamped on a clock that stands at `at(0)`, as `at` counts from.
+@MainActor private func keyboard(refusing refusal: (any Error)? = nil) -> FakeModifierFeed {
+    FakeModifierFeed(on: ManualHostClock().clock, refusing: refusal)
+}
+
 /// Right Option moving at `ms`, with a key last typed at `typed`: long before the run, unless
 /// the test says.
 private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: Int64 = -60_000) -> KeyEvent {
@@ -41,7 +46,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
 @MainActor
 @Suite struct HotkeyTests {
     @Test func aPressReachesTheHandler() async throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
@@ -58,7 +63,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// The repro of low-unfiled-50ff.28v: Right Option down, A typed under it, Right Option
     /// up, all within 150 ms. The press ends at the release instead of latching open.
     @Test func aChordThatWasATypedKeysModifierLeavesNothingListening() async throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
@@ -74,7 +79,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// other mode's beginning, in that order, as `Dictation.press` requires.
     @Test func aSwitchReachesTheHandlerEndedThenBegan() async throws {
         let notes = Mode(name: "notes", chord: KeyChord(modifiers: .rightCommand))
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: try Modes([rightOption, notes]), feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
@@ -91,7 +96,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// [LAW:behavior-not-structure] asserted as what the caller can observe - a decision in
     /// hand with the handler not yet run.
     @Test func theHandlerRunsAfterTheEventIsRead() async throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
@@ -105,7 +110,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// Stopping mid-press ends the press as lapsed at its handler, since its release can
     /// no longer arrive, and a later start begins from rest.
     @Test func stopEndsAnOpenPressAndDisposesTheFeed() async throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
@@ -139,7 +144,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// The refusal is read while the chord is still down: the tap ends as the chord comes up and
     /// latches nothing.
     @Test func aRefusedPressTappedEndsAtTheReleaseAndLatchesNothing() async throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         let box = Box()
         try hotkey.start(refusing(box))
@@ -156,7 +161,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// The chord's release was read before the refusal was delivered: the press ends then, once,
     /// after its beginning, so the next press of the chord begins a press.
     @Test func aRefusalDeliveredAfterTheTapLatchedEndsItOnce() async throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         let box = Box()
         try hotkey.start(refusing(box))
@@ -177,7 +182,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
 
     /// A start puts a fresh feed up and takes the last one down.
     @Test func aStartReplacesTheFeedThatWasUp() throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         try hotkey.start { _ in }
         try hotkey.start { _ in }
@@ -188,14 +193,14 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     }
 
     @Test func aRefusedFeedThrowsFromStart() {
-        let hotkey = Hotkey(modes: Config.default.modes, feed: FakeModifierFeed(refusing: Refused()))
+        let hotkey = Hotkey(modes: Config.default.modes, feed: keyboard(refusing: Refused()))
         #expect(throws: Refused.self) { try hotkey.start { _ in } }
         #expect(!hotkey.isWatching)
         #expect(hotkey.phase == .idle)
     }
 
     @Test func releasingTheHotkeyDisposesTheFeed() throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         do {
             let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             try hotkey.start { _ in }
@@ -206,10 +211,9 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// What the hotkey did is a record a test reads: each transition handed on, and the press the
     /// loop refused at `began`, whose ending is a transition of its own.
     @Test func aTransitionAndARefusedPressAreRecorded() async throws {
-        let feed = FakeModifierFeed()
-        let clock = ManualHostClock(startingAt: at(50))
+        let feed = FakeModifierFeed(on: ManualHostClock(startingAt: at(50)).clock)
         let records = Records()
-        let hotkey = Hotkey(modes: Config.default.modes, feed: feed, clock: clock.clock) { records.all.append($0) }
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed) { records.all.append($0) }
         try hotkey.start(refusing(Box()))
         feed.type(rightOption(.down, at: 0))
         await settle()
@@ -221,6 +225,27 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
             .refused(pressBegunAt: at(0)),
             .transition(.ended(.released(.tap, at: at(100)))),
         ])
+    }
+
+    /// A tap that latched before its refusal was read is ended by the refusal, at the moment it
+    /// is read on the clock the feed stamps its keys on.
+    @Test func aLatchedTapIsEndedWhenItsRefusalIsRead() async throws {
+        let feed = FakeModifierFeed(on: ManualHostClock(startingAt: at(250)).clock)
+        let records = Records()
+        let hotkey = Hotkey(modes: Config.default.modes, feed: feed) { records.all.append($0) }
+        let told = Box()
+        try hotkey.start(refusing(told))
+        feed.type(rightOption(.down, at: 0))
+        feed.type(rightOption(.up, at: 100))
+        await settle()
+        await settle()
+        #expect(records.all == [
+            .transition(.began(rightOption, at: at(0))),
+            .refused(pressBegunAt: at(0)),
+            .transition(.ended(.released(.tap, at: at(250)))),
+        ])
+        #expect(told.told == [.began(rightOption, at: at(0)), .ended(.released(.tap, at: at(250)))])
+        #expect(hotkey.phase == .idle)
     }
 
     /// The log line is the record's rendering, and only that.
@@ -240,7 +265,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
 @MainActor
 @Suite struct ModifierFeedContractTests {
     static let fake = ModifierFeedContract { refusing in
-        let feed = FakeModifierFeed(refusing: refusing ? Refused() : nil)
+        let feed = keyboard(refusing: refusing ? Refused() : nil)
         return ModifierFeedContract.Subject(feed: feed, type: feed.type)
     }
 
@@ -265,7 +290,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
 @MainActor
 extension HotkeyTests {
     @Test func aSteeringKeyEndsALatchedPressThroughTheHandlerInOrder() async throws {
-        let feed = FakeModifierFeed()
+        let feed = keyboard()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         var transitions: [HotkeyDetector.Transition] = []
         try hotkey.start { transitions.append($0) }
@@ -282,7 +307,7 @@ extension HotkeyTests {
     }
 
     @Test func aSteeringKeyBeforeTheHotkeyStartedEndsNothing() {
-        let hotkey = Hotkey(modes: Config.default.modes, feed: FakeModifierFeed())
+        let hotkey = Hotkey(modes: Config.default.modes, feed: keyboard())
         #expect(hotkey.steer(.send(at: at(0))) == .nothingOpen)
     }
 }

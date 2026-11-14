@@ -16,13 +16,14 @@ import Uptime
 public struct Executor {
     private let inserter: any Inserter
     private let log: Logger
-    /// What an insert's acknowledgement is timed on, and the press that made it.
+    /// What an insert's acknowledgement is timed on, and the press that made it: the clock the
+    /// key events it is timed from are stamped on, which is why it has no default.
     public let clock: HostClock
 
     /// Words that do not reach the cursor are a failure and are thrown as one: the input
     /// method's refusal or the channel's, by name. Nothing puts them anywhere else.
     /// [LAW:no-silent-failure]
-    public init(insertingThrough inserter: any Inserter, clock: HostClock = .system, log: Logger = Executor.log) {
+    public init(insertingThrough inserter: any Inserter, clock: HostClock, log: Logger = Executor.log) {
         self.inserter = inserter
         self.clock = clock
         self.log = log

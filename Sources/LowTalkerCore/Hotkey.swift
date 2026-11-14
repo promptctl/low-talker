@@ -69,7 +69,6 @@ public final class Hotkey {
     }
 
     private let feed: any ModifierFeed
-    private let clock: HostClock
     private let recording: @MainActor (Record) -> Void
     private var detector: HotkeyDetector
     /// The feed that is running, and the handler its presses go to - kept together because a
@@ -79,11 +78,9 @@ public final class Hotkey {
     /// Hears each transition and answers whether it refused the press that began.
     public typealias Handler = @MainActor (HotkeyDetector.Transition) -> PressRefusal?
 
-    /// A refusal is timed on `clock`, which the feed's key events are stamped on, and every
-    /// record goes to `recording`.
-    public init(modes: Modes, tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed, clock: HostClock = .system, recording: @escaping @MainActor (Record) -> Void = Hotkey.log) {
+    /// Every record goes to `recording`.
+    public init(modes: Modes, tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed, recording: @escaping @MainActor (Record) -> Void = Hotkey.log) {
         self.feed = feed
-        self.clock = clock
         self.recording = recording
         detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
@@ -95,6 +92,10 @@ public final class Hotkey {
     }
 
     public var phase: HotkeyDetector.Phase { detector.phase }
+
+    /// [LAW:one-source-of-truth] The clock the feed stamps its key events on, which a refusal is
+    /// timed on too, and which whatever times a press from those stamps must read.
+    public var clock: HostClock { feed.clock }
 
     /// Whether the feed is running and presses are being heard.
     ///

@@ -1,4 +1,5 @@
 import IOKit.hidsystem
+import Uptime
 
 /// Where the hotkey is told each modifier key moving.
 ///
@@ -7,6 +8,9 @@ import IOKit.hidsystem
 /// and the press detection above runs in tests against a keyboard a test types on.
 @MainActor
 public protocol ModifierFeed {
+    /// The clock every event it tells is stamped on.
+    var clock: HostClock { get }
+
     /// Starts telling `handle`, on the main actor, every modifier key that moves, until the
     /// disposal it answers with is called. Throws when it cannot start.
     func install(handling handle: @escaping @MainActor (KeyEvent) -> Void) throws -> Disposal

@@ -36,7 +36,7 @@ private struct BadBuffer: Error {}
         init(over rig: Rig, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true) throws {
             self.rig = rig
             rig.inputMethod.refusing(refusal)
-            feed = FakeModifierFeed()
+            feed = FakeModifierFeed(on: rig.clock.clock)
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             let dictation = rig.dictation
             try hotkey.start(feeding: dictation)

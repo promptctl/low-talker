@@ -44,8 +44,8 @@ let package = Package(
         // through this one rule. [LAW:one-way-deps]
         .target(name: "GrammaticalNumber"),
         // The clock the machine has been up on, which key events and microphone buffers are
-        // stamped on, and the one clock any decision reads time from. It depends on nothing,
-        // so the core and the input source's watch read one clock. [LAW:one-way-deps]
+        // stamped on, and which a decision reads time from through `HostClock`. It depends on
+        // nothing, so the core and the input source's watch read one clock. [LAW:one-way-deps]
         .target(name: "Uptime"),
         .testTarget(name: "GrammaticalNumberTests", dependencies: ["GrammaticalNumber"]),
         // The Text Input Sources framework as this program uses it: where the
