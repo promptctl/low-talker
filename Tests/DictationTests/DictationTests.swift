@@ -1,4 +1,5 @@
 import Dictation
+import DictationFakes
 import Foundation
 import Grants
 import Insertion
@@ -1798,7 +1799,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func anUnreadableStoreHoldsNothingAndSaysWhy() async throws {
         let store = FakeHeldStore(keeping: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)")))
         let unreadable = HeldUnreadable(why: "torn", kept: .movedTo("/kept.json"))
-        store.unreadable = unreadable
+        store.spoil(unreadable)
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
         #expect(rig.hold.held == nil)
         #expect(rig.hold.unrestored == unreadable)

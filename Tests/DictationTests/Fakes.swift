@@ -1,5 +1,6 @@
 import AVFoundation
 import Dictation
+import DictationFakes
 import Dispatch
 import Grants
 import Insertion
@@ -9,40 +10,6 @@ import LowTalkerCoreFakes
 import Synchronization
 import TestProbes
 import Uptime
-
-/// A store kept in memory, outliving the rigs built over it as a file outlives the app, and
-/// keeping the store's contract.
-@MainActor
-final class FakeHeldStore: HeldStore {
-    private(set) var state: HoldState
-    /// What is held, as kept.
-    var kept: Held? { state.held }
-    /// Every write, in order.
-    private(set) var written: [HoldState] = []
-    /// What every read throws, when set.
-    var unreadable: HeldUnreadable?
-    /// What every write throws, when set; `.lost` keeps nothing, `.stale` leaves what was kept.
-    var failing: HeldUnkept?
-
-    init(keeping kept: Held? = nil, dismissed: Held? = nil) {
-        state = HoldState(held: kept, dismissed: dismissed)
-    }
-
-    func read() throws(HeldUnreadable) -> HoldState {
-        if let unreadable { throw unreadable }
-        return state
-    }
-
-    func write(_ state: HoldState) throws(HeldUnkept) {
-        written.append(state)
-        switch failing {
-        case nil: self.state = state
-        case .lost?: self.state = HoldState()
-        case .stale?: break
-        }
-        if let failing { throw failing }
-    }
-}
 
 /// Hardware a test feeds: one engine per opening, its samples the test's to append.
 @MainActor

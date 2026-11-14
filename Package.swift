@@ -125,7 +125,10 @@ let package = Package(
         // app links it and hands over the real microphone, engine and inserter - the input
         // method in the app, a fake in a test. [LAW:decomposition] [LAW:composability]
         .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber", "Uptime"]),
-        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "Insertion", "InsertionFakes", "TestProbes", "Uptime"]),
+        // The one fake of each store the loop keeps words and speech in, and the contracts they and
+        // the files are held to, beside the ports. In no product. [LAW:one-source-of-truth]
+        .target(name: "DictationFakes", dependencies: ["Dictation", "LowTalkerCore"]),
+        .testTarget(name: "DictationTests", dependencies: ["Dictation", "DictationFakes", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "Insertion", "InsertionFakes", "TestProbes", "Uptime"]),
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
