@@ -1,0 +1,25 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3510.2.1"}, {"coremlc-version", "3505.4.1"}})]
+{
+    func main<ios17>(tensor<int32, [1]> audio_length, tensor<fp32, [1, 240000]> audio_signal) {
+            tensor<int32, [2]> slice_by_index_3_begin_0 = const()[name = tensor<string, []>("slice_by_index_3_begin_0"), val = tensor<int32, [2]>([0, 0])];
+            tensor<int32, [2]> slice_by_index_3_end_0 = const()[name = tensor<string, []>("slice_by_index_3_end_0"), val = tensor<int32, [2]>([1, 240640])];
+            tensor<int32, [2]> slice_by_index_3_stride_0 = const()[name = tensor<string, []>("slice_by_index_3_stride_0"), val = tensor<int32, [2]>([1, 1280])];
+            tensor<fp32, [1, 188]> slice_by_index_3 = slice_by_index(begin = slice_by_index_3_begin_0, end = slice_by_index_3_end_0, stride = slice_by_index_3_stride_0, x = audio_signal)[name = tensor<string, []>("slice_by_index_3")];
+            tensor<string, []> cast_2_dtype_0 = const()[name = tensor<string, []>("cast_2_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [3]> reshape_3_shape_0 = const()[name = tensor<string, []>("reshape_3_shape_0"), val = tensor<int32, [3]>([1, 1, 1])];
+            tensor<fp32, [1]> cast_2 = cast(dtype = cast_2_dtype_0, x = audio_length)[name = tensor<string, []>("cast_0")];
+            tensor<fp32, [1, 1, 1]> reshape_3 = reshape(shape = reshape_3_shape_0, x = cast_2)[name = tensor<string, []>("reshape_3")];
+            tensor<fp32, []> mul_3_y_0 = const()[name = tensor<string, []>("mul_3_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<fp32, [1, 1, 1]> mul_3 = mul(x = reshape_3, y = mul_3_y_0)[name = tensor<string, []>("mul_3")];
+            tensor<int32, [3]> reshape_4_shape_0 = const()[name = tensor<string, []>("reshape_4_shape_0"), val = tensor<int32, [3]>([1, 1, 188])];
+            tensor<fp32, [1, 1, 188]> reshape_4 = reshape(shape = reshape_4_shape_0, x = slice_by_index_3)[name = tensor<string, []>("reshape_4")];
+            tensor<int32, [3]> tile_2_reps_0 = const()[name = tensor<string, []>("tile_2_reps_0"), val = tensor<int32, [3]>([1, 512, 1])];
+            tensor<fp32, [1, 512, 188]> tile_2 = tile(reps = tile_2_reps_0, x = reshape_4)[name = tensor<string, []>("tile_2")];
+            tensor<fp32, [1, 512, 188]> encoder = add(x = tile_2, y = mul_3)[name = tensor<string, []>("encoder")];
+            tensor<int32, []> floor_div_2_y_0 = const()[name = tensor<string, []>("floor_div_2_y_0"), val = tensor<int32, []>(1280)];
+            tensor<int32, [1]> floor_div_2 = floor_div(x = audio_length, y = floor_div_2_y_0)[name = tensor<string, []>("floor_div_2")];
+            tensor<int32, []> encoder_length_y_1 = const()[name = tensor<string, []>("encoder_length_y_1"), val = tensor<int32, []>(1)];
+            tensor<int32, [1]> encoder_length = add(x = floor_div_2, y = encoder_length_y_1)[name = tensor<string, []>("encoder_length")];
+        } -> (encoder, encoder_length);
+}

@@ -186,10 +186,10 @@ private struct LoadFailed: Error, CustomStringConvertible {
     /// lands one: what Parakeet cannot be told, Whisper may read.
     @Test(.timeLimit(.minutes(1))) func aSpeechOneEngineRefusedIsReadByTheNextToLand() async throws {
         let rig = try await Self.rig(over: try Self.store(Self.said(1, under: ["Brynleigh"])))
-        let refusing = FakeTranscriber(refusing: { _ throws(VocabularyError) in throw .engineTakesNone(.parakeet(.tdtV3)) }, turns: rig.turns) { _ in Transcript(typed: " first") }
+        let refusing = FakeTranscriber(refusing: { _ throws(VocabularyError) in throw .unspellable(term: "Zoë", piece: "ë") }, turns: rig.turns) { _ in Transcript(typed: " first") }
         rig.recovery.landed(refusing.served)
         await rig.recovery.settled()
-        #expect(rig.recovery.lines == ["Speech the model could not read: 1 s (parakeet-tdt-0.6b-v3 hears no vocabulary, so a mode that names it can list no terms)"])
+        #expect(rig.recovery.lines == ["Speech the model could not read: 1 s (\(VocabularyError.unspellable(term: "Zoë", piece: "ë")))"])
 
         rig.recovery.landed(Self.reading(rig.turns).served)
         // Until the new engine has tried it, it waits for that engine.

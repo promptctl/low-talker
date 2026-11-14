@@ -288,17 +288,20 @@ import Testing
         #expect(try Self.config(#"model = "base.en""#).model == .whisperKit("base.en"))
     }
 
-    /// Until Parakeet has a word spotter (low-engines-7ht.eed), a mode that lists terms for it is
-    /// refused by the mode's name, and one with none is taken.
-    @Test func aParakeetModeWithVocabularyIsRefusedByName() throws {
-        let prompting = Prompting([.parakeet(.tdtV3): .success(.takingNone(.parakeet(.tdtV3)))])
-        let named = """
+    /// A Parakeet mode's terms are taken when its spotter can spell them, and a term with a
+    /// character it has no piece for is refused by the mode's name.
+    @Test func aParakeetModeTakesTheTermsItsSpotterCanSpell() throws {
+        let prompting = Prompting([.parakeet(.tdtV3): .success(VocabularyCheck(try Captured.tokenizer))])
+        func named(_ term: String) -> String {
+            """
             model = "parakeet-tdt-0.6b-v3"
             [[modes]]
             name = "names"
-            vocabulary = ["Fryslie"]
+            vocabulary = ["\(term)"]
             """
-        #expect(throws: ConfigError.vocabulary(mode: "names", .engineTakesNone(.parakeet(.tdtV3)))) { try Config(toml: named, prompting: prompting) }
+        }
+        #expect(try Config(toml: named("Fryslie"), prompting: prompting).modes.first?.vocabulary.terms.map(\.text) == ["Fryslie"])
+        #expect(throws: ConfigError.vocabulary(mode: "names", .unspellable(term: "Zoë", piece: "ë"))) { try Config(toml: named("Zoë"), prompting: prompting) }
         let bare = """
             model = "parakeet-tdt-0.6b-v3"
             [[modes]]

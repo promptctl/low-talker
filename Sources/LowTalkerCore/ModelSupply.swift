@@ -76,15 +76,15 @@ public struct CarriedModel: ModelSupply {
     }
 
     public func prompting() async -> Prompting {
-        var encoders: [Model: Result<PromptEncoder, PromptsUnavailable>] = [:]
+        var checks: [Model: Result<VocabularyCheck, PromptsUnavailable>] = [:]
         for model in Model.carried {
-            encoders[model] = await Result { () async throws(PromptsUnavailable) in
+            checks[model] = await Result { () async throws(PromptsUnavailable) in
                 let installed: InstalledModel
                 do { installed = try store.get().installedModel(model) } catch { throw PromptsUnavailable(why: "\(error)") }
-                return try await PromptEncoder.load(installed)
+                return try await VocabularyCheck.load(installed)
             }
         }
-        return Prompting(encoders)
+        return Prompting(checks)
     }
 
     public func load(_ model: Model, turns: EngineTurns, phase: @escaping @Sendable (LoadPhase) -> Void) async throws -> LoadedEngine {

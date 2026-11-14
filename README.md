@@ -57,7 +57,7 @@ chord = { modifiers = ["leftCommand", "leftShift"] }
 vocabulary = ["Kubernetes", "Anthropic"]
 ```
 
-The `model` is one the app carries: Whisper's `large-v3-v20240930_turbo_632MB`, the default, or NVIDIA's `parakeet-tdt-0.6b-v3`. Parakeet hears no vocabulary yet, so a mode that lists terms is refused under it. A chord is one or more modifier keys, including Fn (`"function"`). A file LowTalker cannot read is never silently replaced by the defaults: the menu names the problem, and a bad save leaves the app on the last config that worked. The [engineering notes](docs/engineering.md#the-config-file) cover the rest: the microphone's resting state and the options for the server.
+The `model` is one the app carries: Whisper's `large-v3-v20240930_turbo_632MB`, the default, or NVIDIA's `parakeet-tdt-0.6b-v3`. Parakeet hears a mode's vocabulary through a word spotter beside it, which spells terms in English letters and `! ' , . ?` only, so a term with any other character is refused under it. A chord is one or more modifier keys, including Fn (`"function"`). A file LowTalker cannot read is never silently replaced by the defaults: the menu names the problem, and a bad save leaves the app on the last config that worked. The [engineering notes](docs/engineering.md#the-config-file) cover the rest: the microphone's resting state and the options for the server.
 
 ## Transcription server
 

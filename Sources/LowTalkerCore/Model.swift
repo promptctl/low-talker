@@ -69,13 +69,14 @@ public enum Model: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByS
         }
     }
 
-    /// The parts a store installs and records for this model. A Whisper model decodes
-    /// with a tokenizer published in a repo of its own; Parakeet's vocabulary ships
-    /// beside its weights, so its weights are the whole model.
+    /// The parts a store installs and records for this model, each from a repo of its own, in
+    /// `ModelPart`'s order. A Whisper model decodes with a tokenizer published apart from its
+    /// weights; Parakeet's vocabulary ships beside its weights, and its word spotter is two
+    /// halves of another model, each converted in a repo of its own.
     public var parts: [ModelPart] {
         switch self {
         case .whisperKit: [.weights, .tokenizer]
-        case .parakeet: [.weights]
+        case .parakeet: [.weights, .spotterEncoder, .spotterHead]
         }
     }
 
@@ -127,6 +128,23 @@ public enum ParakeetModel: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// The repo `part` of this model is published in, and the files of it the engine loads,
+    /// which are the files an install fetches. Nil for a part a Parakeet model does not have.
+    ///
+    /// [LAW:one-source-of-truth] The spotter is nvidia/parakeet-tdt_ctc-110m's encoder and CTC
+    /// head, which FluidInference publishes in two repos: the length-masked encoder (mel front end
+    /// included) beside a TDT decoder this engine does not load, and the head beside a 6-bit
+    /// encoder that misreads short clips (low-engines-7ht.eed). `tokenizer.json` is the head
+    /// repo's, the only file of either that carries the BPE merges a term is spelled with.
+    public func source(of part: ModelPart) -> (repo: String, files: [String])? {
+        switch (self, part) {
+        case (.tdtV3, .weights): (repo, Self.files)
+        case (.tdtV3, .spotterEncoder): ("FluidInference/parakeet-tdt-ctc-110m-coreml", [Self.spotterEncoder])
+        case (.tdtV3, .spotterHead): ("FluidInference/parakeet-ctc-110m-coreml", [Self.spotterHead, Self.spotterTokenizer])
+        case (.tdtV3, .tokenizer): nil
+        }
+    }
+
     /// [LAW:one-source-of-truth] The files of the repo the engine loads, which are the
     /// files an install fetches: the repo also holds older and alternative conversions,
     /// about 3 GB in all. Encoder_v2 is the int8 encoder the repo added (commit 7dd20fe6)
@@ -137,6 +155,11 @@ public enum ParakeetModel: String, CaseIterable, Hashable, Sendable {
     public static let joint = "JointDecision.mlmodelc"
     public static let vocabulary = "parakeet_v3_vocab.json"
     public static let files = [preprocessor, encoder, decoder, joint, vocabulary]
+    /// The spotter's encoder: 15 s of audio in, its frames and how many are speech out.
+    public static let spotterEncoder = "Preprocessor.mlmodelc"
+    /// The spotter's CTC head: encoder frames in, each frame's log-probabilities out.
+    public static let spotterHead = "CtcHead.mlmodelc"
+    public static let spotterTokenizer = "tokenizer.json"
 }
 
 extension StringProtocol {

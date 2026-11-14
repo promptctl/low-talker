@@ -34,17 +34,17 @@ public struct ParakeetVocabulary: Sendable {
         return pieces[token.id]
     }
 
-    /// The tokens as transcript words from sample `cut` on, each timed from its first token's
-    /// frame to the end of its last token's, at `sampleRate`, and as sure as the product of its
-    /// tokens' probabilities. A word starts at each piece that starts with a space; a first piece
-    /// without one starts a word too, given the leading space every transcript word carries. A
-    /// word sounding mostly before the cut is no word of these, so its tokens are never read.
+    /// The tokens as words from sample `cut` on, each timed from its first token's frame to the
+    /// end of its last token's and as sure as the product of its tokens' probabilities. A word
+    /// starts at each piece that starts with a space; a first piece without one starts a word
+    /// too, given the leading space every transcript word carries. A word sounding mostly before
+    /// the cut is no word of these, so its tokens are never read.
     ///
     /// [LAW:no-silent-failure] A control piece (`<unk>`, `<pad>`, `<|endoftext|>`, the language
     /// tags, all spelled in angle brackets) or a probability outside 0...1 in a word from the cut
     /// on fails the reading, naming it: dropped, it would leave a transcript missing what the
     /// engine heard there with nothing to say so.
-    func words(_ tokens: [TDTDecoding.EmittedToken], from cut: Int) throws(ParakeetReadingError) -> [Transcript.Word] {
+    func words(_ tokens: [TDTDecoding.EmittedToken], from cut: Int) throws(ParakeetReadingError) -> [HeardWord] {
         var spoken: [[(token: TDTDecoding.EmittedToken, piece: String)]] = []
         for token in tokens {
             let piece = try piece(token)
@@ -52,25 +52,89 @@ public struct ParakeetVocabulary: Sendable {
             spoken[spoken.count - 1].append((token, piece))
         }
         return try spoken
-            .filter { ($0.first!.token.sample + $0.last!.token.sample + ParakeetWindow.frameSamples) / 2 >= cut }
+            .filter { HeardWord.sounds(from: $0.first!.token.sample, to: $0.last!.token.sample, after: cut) }
             .map { pieces throws(ParakeetReadingError) in try Self.word(pieces) }
     }
 
-    private static func word(_ pieces: [(token: TDTDecoding.EmittedToken, piece: String)]) throws(ParakeetReadingError) -> Transcript.Word {
+    private static func word(_ pieces: [(token: TDTDecoding.EmittedToken, piece: String)]) throws(ParakeetReadingError) -> HeardWord {
         var confidence: Confidence = 1.0
         for (token, piece) in pieces {
             if piece.count > 2, piece.hasPrefix("<"), piece.hasSuffix(">") { throw .controlToken(id: token.id, piece: piece) }
-            guard let sure = Confidence(exactly: Double(token.probability)) else {
-                throw .probabilityOutsideUnitInterval(token.probability, piece: piece)
-            }
-            confidence = confidence * sure
+            confidence = confidence * (try Self.sure(token.probability, piece))
         }
         let text = pieces.map(\.piece).joined()
-        return Transcript.Word(
-            text: text.hasPrefix(" ") ? text : " " + text,
-            time: AudioClip.duration(for: pieces.first!.token.sample)...AudioClip.duration(for: pieces.last!.token.sample + ParakeetWindow.frameSamples),
-            confidence: confidence
-        )
+        return HeardWord(text: text.hasPrefix(" ") ? text : " " + text, first: pieces.first!.token.sample, last: pieces.last!.token.sample, confidence: confidence)
+    }
+
+    static func sure(_ probability: Float, _ piece: String) throws(ParakeetReadingError) -> Confidence {
+        guard let sure = Confidence(exactly: Double(probability)) else { throw .probabilityOutsideUnitInterval(probability, piece: piece) }
+        return sure
+    }
+}
+
+/// A word a Parakeet pass heard, timed in samples from the pass's first: from the frame its
+/// first piece sounded on to the frame its last piece sounded on, which it holds whole.
+struct HeardWord: Equatable, Sendable {
+    let text: String
+    let first: Int
+    let last: Int
+    let confidence: Confidence
+
+    /// [LAW:one-source-of-truth] Where a word sounding from the frame at `first` to the frame at
+    /// `last` is heard: on the side of `cut` its midpoint is. The cut and the merge of spotted
+    /// words both place a word by this.
+    static func sounds(from first: Int, to last: Int, after cut: Int) -> Bool {
+        (first + last + ParakeetWindow.frameSamples) / 2 >= cut
+    }
+
+    /// Whether this word's midpoint is among the frames from `first` to `last`.
+    func sounds(within first: Int, _ last: Int) -> Bool {
+        Self.sounds(from: self.first, to: self.last, after: first) && !Self.sounds(from: self.first, to: self.last, after: last + ParakeetWindow.frameSamples)
+    }
+
+    var transcript: Transcript.Word {
+        Transcript.Word(text: text, time: AudioClip.duration(for: first)...AudioClip.duration(for: last + ParakeetWindow.frameSamples), confidence: confidence)
+    }
+
+    /// `heard` with each of `spotted`'s terms in place of the words whose midpoints fall within
+    /// the frames it was heard over. A term with none takes its place among them by time. The last word of a term keeps
+    /// the punctuation of the last word it replaced, which the spotter cannot hear, past what the
+    /// term already spells: "Frisley," is "Fryslie,", and "Yahoo!" heard as "Yahoo!" stays so.
+    static func merging(_ spotted: [SpottedTerm], into heard: [HeardWord]) -> [HeardWord] {
+        var words = heard
+        for spotting in spotted {
+            let (term, first, last) = (spotting.words, spotting.words.first!.first, spotting.last)
+            let replaced = words.filter { $0.sounds(within: first, last) }
+            let heard = replaced.last.map(\.trailingPunctuation) ?? ""
+            let spelled = term.last!.trailingPunctuation
+            let said = term.dropLast() + [term.last!.ending(with: String(heard.dropFirst(heard.commonPrefix(with: spelled).count)))]
+            words.removeAll { $0.sounds(within: first, last) }
+            let at = words.firstIndex { $0.first > first } ?? words.endIndex
+            words.insert(contentsOf: said, at: at)
+        }
+        return words
+    }
+
+    private var trailingPunctuation: String {
+        String(text.reversed().prefix { $0.isPunctuation }.reversed())
+    }
+
+    private func ending(with punctuation: String) -> HeardWord {
+        HeardWord(text: text + punctuation, first: first, last: last, confidence: confidence)
+    }
+}
+
+/// A term the spotter heard: its words, each timed as a TDT word is, and the frame at `last`,
+/// the last it was heard over, which its last piece may be held to past its last word's time.
+struct SpottedTerm: Equatable, Sendable {
+    let words: [HeardWord]
+    let last: Int
+
+    /// The words of this term that sound from `cut` on, by the rule TDT words are cut by, or nil
+    /// where none do.
+    func sounding(after cut: Int) -> SpottedTerm? {
+        let kept = words.filter { HeardWord.sounds(from: $0.first, to: $0.last, after: cut) }
+        return kept.isEmpty ? nil : SpottedTerm(words: kept, last: last)
     }
 }
 

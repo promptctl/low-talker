@@ -294,9 +294,11 @@ import Testing
         #expect(damages.map(\.description) == ["config.json is 1 bytes, expected 2", "tokenizer.json is 1 bytes, expected 13"])
     }
 
-    /// A Parakeet model is its weights alone, its vocabulary beside them: one manifest makes it
-    /// installed, by the same rule a Whisper model's two make it so, and its folder is the repo.
-    @Test func aParakeetModelIsInstalledByItsWeightsAlone() throws {
+    /// A Parakeet model is its weights, its vocabulary beside them, and its spotter's two halves,
+    /// each part in its repo's folder: every part's manifest makes it installed, by the same rule
+    /// a Whisper model's two make it so, and a store holding the weights alone, as every store did
+    /// before the spotter, holds no Parakeet model.
+    @Test func aParakeetModelIsInstalledByEachOfItsParts() throws {
         let scratch = try ScratchStore(files: [:])
         let store = ModelStore(directory: scratch.root)
         let parakeet = Model.parakeet(.tdtV3)
@@ -304,13 +306,26 @@ import Testing
             Issue.record("a store with no Parakeet manifest must not hold Parakeet")
             return
         }
-        let folder = try scratch.installParakeet(files: [ParakeetModel.vocabulary: "{}"])
+        let folders = try scratch.installParakeet([.weights: .init(files: [ParakeetModel.vocabulary: "{}"])])
+        guard case .damaged(let unrecorded) = try store.presence(of: parakeet) else {
+            Issue.record("a Parakeet model with no spotter must be damaged")
+            return
+        }
+        #expect(unrecorded.map(\.description) == ["the spotter-encoder is not installed", "the spotter-head is not installed"])
+        try scratch.installParakeet([
+            .spotterEncoder: .init(files: ["\(ParakeetModel.spotterEncoder)/model.mil": "encoder"]),
+            .spotterHead: .init(files: [ParakeetModel.spotterTokenizer: "{}"]),
+        ])
         // The layout every install already on disk was written in, spelled out here alone.
+        let folder = try #require(folders[.weights])
         #expect(folder.path(percentEncoded: false).hasSuffix("/models/FluidInference/parakeet-tdt-0.6b-v3-coreml"))
-        #expect(FileManager.default.fileExists(atPath: scratch.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json").path(percentEncoded: false)))
-        let vocabulary = folder.appending(path: ParakeetModel.vocabulary)
-        #expect(try store.installedModel(parakeet).folder.standardizedFileURL == folder.standardizedFileURL)
-        try FileManager.default.removeItem(at: vocabulary)
+        for (part, manifest) in [(ModelPart.weights, "parakeet-tdt-0.6b-v3.json"), (.spotterEncoder, "spotter-encoder/parakeet-tdt-0.6b-v3.json"), (.spotterHead, "spotter-head/parakeet-tdt-0.6b-v3.json")] {
+            #expect(FileManager.default.fileExists(atPath: scratch.root.appending(components: "installed").appending(path: manifest).path(percentEncoded: false)), "\(part)")
+        }
+        let installed = try store.installedModel(parakeet)
+        #expect(installed.folder.standardizedFileURL == folder.standardizedFileURL)
+        #expect(installed.folder(of: .spotterHead).path(percentEncoded: false).hasSuffix("/models/FluidInference/parakeet-ctc-110m-coreml"))
+        try FileManager.default.removeItem(at: folder.appending(path: ParakeetModel.vocabulary))
         guard case .damaged(let damages) = try store.presence(of: parakeet) else {
             Issue.record("a Parakeet model missing a file must be damaged")
             return

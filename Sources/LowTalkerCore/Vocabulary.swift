@@ -56,9 +56,9 @@ public enum VocabularyError: Error, Equatable, CustomStringConvertible {
     /// More prompt tokens than the engine keeps, refused by the engine that would
     /// otherwise drop the first terms without a word said.
     case tooLong(tokens: Int, limit: Int)
-    /// A term for an engine that takes no vocabulary, refused rather than dropped, so a
-    /// mode's terms are never quietly unheard.
-    case engineTakesNone(Model)
+    /// A term with a character Parakeet's word spotter has no piece for, refused rather than
+    /// dropped, so a mode's terms are never quietly unheard.
+    case unspellable(term: String, piece: String)
 
     public var description: String {
         switch self {
@@ -66,8 +66,8 @@ public enum VocabularyError: Error, Equatable, CustomStringConvertible {
             "vocabulary term \"\(text)\" has no word in it"
         case .tooLong(let tokens, let limit):
             "the vocabulary is \(tokens) prompt tokens and the engine keeps at most \(limit)"
-        case .engineTakesNone(let model):
-            "\(model) hears no vocabulary, so a mode that names it can list no terms"
+        case .unspellable(let term, let piece):
+            "vocabulary term \"\(term)\" has \"\(piece)\" in it, which Parakeet cannot spell: its spotter's pieces are A-Z, a-z and ! ' , . ?"
         }
     }
 }

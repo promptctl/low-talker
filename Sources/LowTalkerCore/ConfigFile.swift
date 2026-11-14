@@ -52,11 +52,11 @@ public extension Config {
         // spelled a second time here to drift from it.
         let model = file.model ?? Config.default.model
         // The modes are checked against the model this file names, the one the app will load.
-        let encoder = try prompting.encoder(for: model)
+        let check = try prompting.check(for: model)
         try self.init(
             model: model,
             microphone: file.microphone?.atRest ?? Config.default.microphone,
-            modes: try file.modes?.map { entry throws(ConfigError) in try entry.mode(prompting: encoder) } ?? Array(Config.default.modes),
+            modes: try file.modes?.map { entry throws(ConfigError) in try entry.mode(prompting: check) } ?? Array(Config.default.modes),
             serve: try file.serve.map { entry throws(ConfigError) in try entry.binding } ?? Config.default.serve
         )
     }
@@ -155,10 +155,10 @@ private struct ModeEntry: Decodable {
     ///
     /// An entry becomes a Mode only once the engine can be told its vocabulary, so no press
     /// ever begins in a mode whose every press would fail. [LAW:single-enforcer] The check is
-    /// `PromptEncoder`'s, the one the engine makes again at each press.
-    func mode(prompting: PromptEncoder) throws(ConfigError) -> Mode {
+    /// the engine's own (`VocabularyCheck`), the one it applies again at each press.
+    func mode(prompting: VocabularyCheck) throws(ConfigError) -> Mode {
         let mode = Mode(name: name, chord: chord ?? Hotkey.defaultChord, vocabulary: Vocabulary(vocabulary ?? []))
-        do throws(VocabularyError) { _ = try prompting.prompt(for: mode.vocabulary) } catch { throw .vocabulary(mode: mode.name, error) }
+        do throws(VocabularyError) { try prompting.check(mode.vocabulary) } catch { throw .vocabulary(mode: mode.name, error) }
         return mode
     }
 }

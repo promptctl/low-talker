@@ -5,7 +5,8 @@
 
 CycloneDX 1.6, one component per thing that reaches a user's Mac: every package
 Package.resolved pins, the third-party code vendored inside those packages, and each part of
-every model the app carries (a Whisper model's weights and tokenizer, Parakeet's weights).
+every model the app carries (a Whisper model's weights and tokenizer, Parakeet's weights and
+its word spotter's encoder and head).
 Identity, URL, version and revision come from Package.resolved, the checkouts under .build,
 and model-tool; sbom/rules.json holds only what none of those can say - the license of each
 component, which packages carry code no manifest declares, and which Hugging Face repos each
@@ -357,8 +358,9 @@ def model_components(tool, rules, store):
     """Every model model-tool names as carried, which are the models a release carries and a
     config may name, with the parts a store installs for it. A rule lists exactly those parts:
     the weights, whose `layout` says where in their repo they are, and, for a Whisper model, the
-    tokenizer WhisperKit picks off the weights' config. Each part's repo is the rule's to state
-    and the store's, when there is one, to confirm."""
+    tokenizer WhisperKit picks off the weights' config; for Parakeet, its word spotter's encoder
+    and head. Each part's repo is the rule's to state and the store's, when there is one, to
+    confirm."""
     if not tool.is_file():
         fail(f"no model tool at {tool}; run `make model-tool`")
     # [LAW:one-source-of-truth] A model's parts are the code's, so a rule missing one fails here.
@@ -382,7 +384,7 @@ def model_components(tool, rules, store):
         if layout not in LAYOUTS:
             fail(f"{model} weights: rules.json says layout {layout!r}, which is none of {', '.join(sorted(LAYOUTS))}")
         for part in parts[model]:
-            kind = {"weights": "machine-learning-model", "tokenizer": "data"}[part]
+            kind = {"weights": "machine-learning-model", "tokenizer": "data", "spotter-encoder": "machine-learning-model", "spotter-head": "machine-learning-model"}[part]
             component = f"{model} {part}"
             entry = rule[part]
             repo = need(entry, "repo", component)
@@ -417,7 +419,7 @@ def confirm_against_store(store, model, part, repo, folder):
     (`folder`). A store with no manifest for this part has not installed it - another model's
     store, or a download that stopped - and so has nothing to hold the rule to; only a manifest
     that disagrees is a failure. Answers whether the rule was confirmed."""
-    manifest = store / "installed" / (f"tokenizer/{model}.json" if part == "tokenizer" else f"{model}.json")
+    manifest = store / "installed" / (f"{model}.json" if part == "weights" else f"{part}/{model}.json")
     if not manifest.is_file():
         return False
     try:

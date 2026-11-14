@@ -80,6 +80,16 @@
         "layout": "repo",
         "license": "CC-BY-4.0",
         "licenseFile": "sbom/licenses/parakeet-tdt-0.6b-v3-coreml.txt"
+      },
+      "spotter-encoder": {
+        "repo": "FluidInference/parakeet-tdt-ctc-110m-coreml",
+        "license": "CC-BY-4.0",
+        "licenseFile": "sbom/licenses/parakeet-tdt-ctc-110m-coreml.txt"
+      },
+      "spotter-head": {
+        "repo": "FluidInference/parakeet-ctc-110m-coreml",
+        "license": "CC-BY-4.0",
+        "licenseFile": "sbom/licenses/parakeet-ctc-110m-coreml.txt"
       }
     }
   }

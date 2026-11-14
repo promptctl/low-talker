@@ -3,10 +3,10 @@ import LowTalkerCore
 extension Prompting {
     /// Every carried model, and `base.en`, told a vocabulary through an encoder that counts its
     /// words against `limit`, a tokenization a test can count by eye, where the real model
-    /// reads a tokenizer; a model that reads none, such as Parakeet, is told it as the app tells it.
+    /// reads a tokenizer.
     public static func counting(limit: Int, models: [Model] = Model.carried + ["base.en"]) -> Prompting {
         let encoder = PromptEncoder(limit: limit) { text in text.split(separator: " ").map { _ in 0 } }
-        return Prompting(Dictionary(uniqueKeysWithValues: models.map { ($0, .success(PromptEncoder.withoutFiles($0) ?? encoder)) }))
+        return Prompting(Dictionary(uniqueKeysWithValues: models.map { ($0, .success(VocabularyCheck(encoder))) }))
     }
 }
 

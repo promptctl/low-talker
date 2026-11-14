@@ -48,6 +48,29 @@ struct ScriptedNetwork: ParakeetNetwork {
     }
 }
 
+/// A spotter whose frames read from a script: the class sounding at each sample it names, the
+/// blank everywhere else, each the one class of its row likely and the rest far less so.
+struct ScriptedSpotter: SpotterNetwork {
+    var said: [Int: Int] = [:]
+    /// The windows the spotter was handed, by their sample counts.
+    let log = Log()
+
+    final class Log: Sendable {
+        let windows = Mutex<[Int]>([])
+    }
+
+    func logProbabilities(_ samples: ArraySlice<Float>) throws -> [[Float]] {
+        log.windows.withLock { $0.append(samples.count) }
+        return stride(from: samples.startIndex, through: samples.endIndex, by: ParakeetWindow.frameSamples).map { start in
+            let sounding = said.first { (start..<start + ParakeetWindow.frameSamples).contains($0.key) }?.value ?? SpotterClasses.blank
+            return (0..<SpotterClasses.count).map { $0 == sounding ? Foundation.log(0.98) : -12 }
+        }
+    }
+}
+
+/// The stub spotter tokenizer: `Zed` is the one piece `▁Zed`, id 5.
+let spotterTokenizer = try! SpotterTokenizer(json: Data(ScratchStore.spotterTokenizer.utf8))
+
 /// A vocabulary of control pieces, words that start with a space, and pieces that continue one.
 let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map { id in
     switch id {
@@ -169,7 +192,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 
     /// [LAW:nothing-unseen] Every count, zeros included, is on the pass's line.
     @Test func thePassSaysWhatItDid() {
-        #expect("\(ParakeetPassFacts(samples: 16_000, windows: 1, frames: 12, blanks: 9, tokens: 3, forcedAdvances: 0))" == "parakeet pass: 16000 samples in 1 windows, 12 frames, 3 tokens, 9 blanks, 0 forced advances")
+        #expect("\(ParakeetPassFacts(samples: 16_000, windows: 1, frames: 12, blanks: 9, tokens: 3, forcedAdvances: 0, spotterFrames: 12, candidates: 4, outscored: 1, spotted: 2))" == "parakeet pass: 16000 samples in 1 windows, 12 frames, 3 tokens, 9 blanks, 0 forced advances; spotter: 12 frames, 4 candidates, 1 outscored, 2 spotted")
     }
 }
 
@@ -182,8 +205,8 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     /// without a space joins the word before it, as sure as both pieces' probabilities together.
     @Test func piecesGroupIntoTimedWords() throws {
         let words = try vocabulary.words([Self.token(300, at: 1), Self.token(302, at: 4, 0.5), Self.token(304, at: 5, 0.25)], from: 0)
-        #expect(Transcript(words: words).text == " one threeteen")
-        #expect(words.map(\.time) == [0.08...0.16, 0.32...0.48])
+        #expect(Transcript(words: words.map(\.transcript)).text == " one threeteen")
+        #expect(words.map(\.transcript.time) == [0.08...0.16, 0.32...0.48])
         #expect(words.map(\.confidence.value) == [0.5, 0.125])
     }
 
@@ -253,8 +276,60 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     /// The prefix a pass starts from: " two", confirmed over the frame at the cut.
     static let prefix = [Transcript.Word(text: " two", time: AudioClip.duration(for: cut)...AudioClip.duration(for: cut + ParakeetWindow.frameSamples), confidence: 0.5)]
 
-    static func read(_ spoken: [Int: (token: Int, duration: Int)], prefix: [Transcript.Word] = Self.prefix) throws(TranscriptionFailure) -> [Transcript.Word] {
-        try ParakeetReader(network: ScriptedNetwork(spoken: spoken), vocabulary: vocabulary).read(Hearing.Pass(samples: samples, arrived: 0, prefix: prefix))
+    static func reader(_ spoken: [Int: (token: Int, duration: Int)], spotter: ScriptedSpotter = ScriptedSpotter()) -> ParakeetReader {
+        ParakeetReader(network: ScriptedNetwork(spoken: spoken), vocabulary: vocabulary, spotter: spotter, tokenizer: spotterTokenizer)
+    }
+
+    static func read(_ spoken: [Int: (token: Int, duration: Int)], prefix: [Transcript.Word] = Self.prefix, spotter: ScriptedSpotter = ScriptedSpotter(), told terms: [String] = []) throws -> [Transcript.Word] {
+        let spelled = try spotterTokenizer.terms(Vocabulary(terms.map { try Vocabulary.Term($0) }))
+        return try reader(spoken, spotter: spotter).read(Hearing.Pass(samples: samples, arrived: 0, prefix: prefix), hearing: spelled)
+    }
+
+    static func frame(_ offset: Int) -> Int { cut + offset * ParakeetWindow.frameSamples }
+
+    /// A term the spotter finds takes the place of the word the pass heard over it, and keeps that
+    /// word's punctuation, which the spotter cannot hear; with no term told, the spotter reads no
+    /// audio at all.
+    @Test func aSpottedTermTakesThePlaceOfTheWordHeardThere() throws {
+        let spoken = [Self.cut: (301, 1), Self.frame(3): (302, 0), Self.frame(3) + 1: (305, 1), Self.frame(6): (303, 1)]
+        let spotter = ScriptedSpotter(said: [Self.frame(3): 5, Self.frame(4): 5])
+        #expect(try Self.read(spoken, spotter: spotter, told: ["Zed"]).map(\.text) == [" two", " Zed.", " four"])
+        #expect(spotter.log.windows.withLock { $0 } == [Self.samples.count - (Self.cut - ParakeetReader.leadIn)])
+        let bare = ScriptedSpotter(said: [Self.frame(3): 5, Self.frame(4): 5])
+        #expect(try Self.read(spoken, spotter: bare).map(\.text) == [" two", " three.", " four"])
+        #expect(bare.log.windows.withLock { $0 }.isEmpty)
+    }
+
+    /// [LAW:nothing-unseen] A pass's line counts what the spotter did: the frames it searched,
+    /// the ends its search found, and the terms the greedy reading outscored. No term searches
+    /// nothing, and the line says so with zeros.
+    @Test func aPassCountsWhatTheSpotterDid() throws {
+        let reader = Self.reader([:], spotter: ScriptedSpotter(said: [Self.frame(3): 5, Self.frame(4): 5]))
+        var facts = ParakeetPassFacts()
+        let spotted = try reader.spot(Self.samples, from: 0, hearing: try spotterTokenizer.terms(Vocabulary([try Vocabulary.Term("Zed")])), facts: &facts)
+        #expect(spotted.map { $0.words.map(\.text) } == [[" Zed"]])
+        #expect(facts.spotterFrames == 28)
+        #expect(facts.candidates == 2)
+        #expect(facts.outscored == 0)
+        var bare = ParakeetPassFacts()
+        #expect(try reader.spot(Self.samples, from: 0, hearing: [], facts: &bare).isEmpty)
+        #expect(bare == ParakeetPassFacts())
+    }
+
+    /// A term the spotter finds in the lead-in, before the cut, is no word of this pass's.
+    @Test func aTermSpottedBeforeTheCutIsNotReturned() throws {
+        let spotter = ScriptedSpotter(said: [Self.frame(-3): 5])
+        #expect(try Self.read([Self.cut: (301, 1)], spotter: spotter, told: ["Zed"]).map(\.text) == [" two"])
+    }
+
+    /// A spotted word is timed as the TDT decoder times a word, from its first piece's frame to the
+    /// end of its last piece's, never by the frames the piece is held: confirmed as the prefix's
+    /// last word, it leaves the word after it to be heard as new.
+    @Test func aConfirmedSpottedWordLeavesTheNextWordNew() throws {
+        let prefix = [Transcript.Word(text: " Zed", time: AudioClip.duration(for: Self.cut)...AudioClip.duration(for: Self.frame(1)), confidence: 0.9)]
+        let spotter = ScriptedSpotter(said: [Self.cut: 5, Self.frame(1): 5, Self.frame(2): 5])
+        let words = try Self.read([Self.cut: (303, 1), Self.frame(3): (302, 1)], prefix: prefix, spotter: spotter, told: ["Zed"])
+        #expect(words.map(\.text) == [" Zed", " three"])
     }
 
     /// A pass reads from half a second before its cut, so the first confirmed word is heard with the
@@ -289,7 +364,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     /// A pass that starts at the utterance's first sample has no lead-in to read before it, and
     /// decodes no frame past its audio.
     @Test func aPassFromTheStartReadsFromTheStart() throws {
-        let reader = ParakeetReader(network: ScriptedNetwork(spoken: [0: (300, 1)]), vocabulary: vocabulary)
+        let reader = Self.reader([0: (300, 1)])
         let (tokens, facts) = try reader.decode([Float](repeating: 0.1, count: 12_800), from: 0)
         #expect(tokens.map(\.id) == [300])
         #expect(facts == ParakeetPassFacts(samples: 12_800, windows: 1, frames: 10, blanks: 9, tokens: 1, forcedAdvances: 0))
@@ -311,9 +386,9 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     static let network = ScriptedNetwork(spoken: [1_280: (300, 1), 5_120: (301, 1), 8_960: (302, 1), 12_800: (303, 1)])
 
     static let contract = EngineContract(engine: { turns in
-        let engine = ParakeetTranscriber(model: .parakeet(.tdtV3), network: network, vocabulary: vocabulary, turns: turns)
+        let engine = ParakeetTranscriber(model: .parakeet(.tdtV3), network: network, vocabulary: vocabulary, spotter: ScriptedSpotter(), tokenizer: spotterTokenizer, turns: turns)
         return (engine, engine.served)
-    }, speech: speech, refused: Vocabulary([try! Vocabulary.Term("Fryslie")]))
+    }, speech: speech, refused: Vocabulary([try! Vocabulary.Term("Zoë")]))
 
     @Test(.timeLimit(.minutes(1)), arguments: EngineContract.Statement.allCases)
     func theEngineKeepsTheStatement(_ statement: EngineContract.Statement) async throws {
@@ -322,16 +397,17 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 
     /// The whole road through the engine: the clip's words, in order, each once.
     @Test func aClipIsHeardAsItsWords() async throws {
-        let engine = ParakeetTranscriber(model: .parakeet(.tdtV3), network: Self.network, vocabulary: vocabulary, turns: EngineTurns())
+        let engine = ParakeetTranscriber(model: .parakeet(.tdtV3), network: Self.network, vocabulary: vocabulary, spotter: ScriptedSpotter(), tokenizer: spotterTokenizer, turns: EngineTurns())
         let heard = try await engine.transcribe(Self.speech, expecting: .empty)
         #expect(heard.transcript.text == " one two three four")
     }
 
-    /// Parakeet takes no vocabulary: a term is refused as the config refuses it, naming the model.
-    @Test func aVocabularyIsRefusedNamingTheModel() async {
-        let engine = ParakeetTranscriber(model: .parakeet(.tdtV3), network: Self.network, vocabulary: vocabulary, turns: EngineTurns())
-        let result = await Result { () async throws(TranscriptionFailure) in try await engine.transcribe(Self.speech, expecting: Vocabulary([try! Vocabulary.Term("Fryslie")])) }
-        guard case .failure(.vocabulary(.engineTakesNone(.parakeet(.tdtV3)))) = result else {
+    /// A term the spotter's tokenizer cannot spell is refused before any audio is taken in, by the
+    /// rule the config refuses it with.
+    @Test func aTermTheSpotterCannotSpellIsRefused() async {
+        let engine = ParakeetTranscriber(model: .parakeet(.tdtV3), network: Self.network, vocabulary: vocabulary, spotter: ScriptedSpotter(), tokenizer: spotterTokenizer, turns: EngineTurns())
+        let result = await Result { () async throws(TranscriptionFailure) in try await engine.transcribe(Self.speech, expecting: Vocabulary([try! Vocabulary.Term("Zoë")])) }
+        guard case .failure(.vocabulary(.unspellable(term: "Zoë", piece: "o"))) = result else {
             Issue.record("a term was answered \(result)")
             return
         }
@@ -344,7 +420,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     /// The audio and its length reach the encoder: a second of audio is 13 frames of 80 ms, each
     /// frame's features its own index.
     @Test func aWindowIsEncodedIntoItsFrames() async throws {
-        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs(.weights), computeUnits: .cpuOnly)
         let window = try network.encode([Float](repeating: 0.25, count: 16_000)[...])
         #expect(window.frames.count == 13)
         #expect(window.frames[5].features.count == 1024)
@@ -353,7 +429,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 
     /// The token and the state reach the predictor, and its output and new state come back.
     @Test func aTokenIsPredictedFromItsState() async throws {
-        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs(.weights), computeUnits: .cpuOnly)
         let (prediction, state) = try network.predict(7, from: network.startState)
         #expect(prediction.features == [Float](repeating: 7, count: 640))
         #expect(state.hidden == [Float](repeating: 1, count: ParakeetInterface.stateCount))
@@ -363,7 +439,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     /// The frame and the prediction both reach the joint, and its three answers come back: the
     /// duration is the prediction mod 5, so 7 reads 2.
     @Test func theJointReadsItsFrameAndPrediction() async throws {
-        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs(.weights), computeUnits: .cpuOnly)
         let (prediction, _) = try network.predict(7, from: network.startState)
         let step = try network.joint(EncodedFrame(features: [Float](repeating: 5, count: 1024)), prediction)
         #expect(step == JointStep(token: 5, probability: 0.5, duration: 2))
@@ -379,5 +455,32 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
         found = joint.features
         found["token_id"] = ParakeetInterface.Feature(type: .float32, shape: [1, 1, 1])
         #expect(throws: ParakeetLoadError.interface(model: "JointDecision", "token_id is Float32 [1, 1, 1] where the decoder reads Int32 [1, 1, 1]")) { try joint.check("JointDecision", found) }
+    }
+}
+
+/// The spotter's adapter over the two stub models scripts/make-parakeet-stubs builds with the
+/// published names, element types and shapes: the encoder carries each frame's first sample, and
+/// the head reads it as the class that frame's log-probabilities peak at.
+@Suite struct CoreMLSpotterTests {
+    /// A second of audio is 13 frames of speech, the encoder's count, each a row of every class's
+    /// log-probability that peaks at the class its first sample carries.
+    @Test func aWindowIsReadAsItsFramesLogProbabilities() async throws {
+        let spotter = try await CoreMLSpotter(encoder: ScratchStore.parakeetStubs(.spotterEncoder), head: ScratchStore.parakeetStubs(.spotterHead), computeUnits: .cpuOnly)
+        var samples = [Float](repeating: Float(SpotterClasses.blank), count: 16_000)
+        samples[2 * ParakeetWindow.frameSamples] = 7
+        let rows = try spotter.logProbabilities(samples[...])
+        #expect(rows.count == 13)
+        #expect(rows.allSatisfy { $0.count == SpotterClasses.count })
+        #expect(rows.map { row in row.indices.max { row[$0] < row[$1] }! } == [1_024, 1_024, 7] + [Int](repeating: 1_024, count: 10))
+        let total = rows[2].reduce(0) { $0 + exp($1) }
+        #expect(abs(total - 1) < 0.001)
+    }
+
+    /// A model whose interface is not the published one is refused at load, naming what differs:
+    /// the TDT model's encoder is not the spotter's.
+    @Test func anEncoderWithAnotherInterfaceIsRefused() async throws {
+        await #expect(throws: ParakeetLoadError.self) {
+            _ = try await CoreMLSpotter(encoder: ScratchStore.parakeetStubs(.weights), head: ScratchStore.parakeetStubs(.spotterHead), computeUnits: .cpuOnly)
+        }
     }
 }

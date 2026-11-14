@@ -50,38 +50,36 @@ import Testing
         #expect(try Manifest(contentsOf: destination.tokenizerManifestURL) == Manifest(contentsOf: source.tokenizerManifestURL))
     }
 
-    /// A Parakeet model is copied as its weights alone, under the one manifest that proves it
-    /// whole, and a revision of WhisperKit's shape is refused for it before anything is fetched.
-    @Test func aParakeetModelIsInstalledAsItsWeightsAlone() async throws {
+    /// A Parakeet model is installed as each of its parts, the TDT weights and the spotter's two
+    /// halves, each in its own repo's folder and recorded by its own manifest; a store already
+    /// holding a part takes only the others.
+    @Test func aParakeetModelIsInstalledAsItsParts() async throws {
         let source = try ScratchStore(files: [:])
-        let folder = source.root.appending(components: "models", "FluidInference", "parakeet-tdt-0.6b-v3-coreml")
-        for path in [ParakeetModel.vocabulary, "\(ParakeetModel.joint)/model.mil"] {
-            try FileManager.default.createDirectory(at: folder.appending(path: path).deletingLastPathComponent(), withIntermediateDirectories: true)
-            try "parakeet".write(to: folder.appending(path: path), atomically: true, encoding: .utf8)
-        }
-        try Manifest(recording: folder, relativeTo: source.root).write(to: source.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json"))
+        try source.installParakeet([
+            .weights: .init(files: [ParakeetModel.vocabulary: "parakeet", "\(ParakeetModel.joint)/model.mil": "joint"]),
+            .spotterEncoder: .init(files: ["\(ParakeetModel.spotterEncoder)/model.mil": "encoder"]),
+            .spotterHead: .init(files: ["\(ParakeetModel.spotterHead)/model.mil": "head", ParakeetModel.spotterTokenizer: "{}"]),
+        ])
         let destination = try ScratchStore(files: [:])
+        try destination.installParakeet([.weights: .init(files: [ParakeetModel.vocabulary: "parakeet", "\(ParakeetModel.joint)/model.mil": "joint"])])
         let store = ModelStore(directory: destination.root)
-        let installed = try await store.install(.parakeet(.tdtV3), from: .store(ModelStore(directory: source.root))) { _ in }
+        let phases = Mutex<[ModelStore.InstallPhase]>([])
+        let installed = try await store.install(.parakeet(.tdtV3), from: .store(ModelStore(directory: source.root))) { phase in phases.withLock { $0.append(phase) } }
         #expect(installed.folder.path.hasSuffix("models/FluidInference/parakeet-tdt-0.6b-v3-coreml"))
-        #expect(!FileManager.default.fileExists(atPath: destination.root.appending(components: "installed", "tokenizer", "parakeet-tdt-0.6b-v3.json").path))
-
-        let empty = try ScratchStore(files: [:])
-        let whisperShaped = try #require(ModelRevisions("parakeet-tdt-0.6b-v3@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))"))
-        await #expect(throws: ModelInstallError.revisionNotFor(model: .parakeet(.tdtV3), revision: whisperShaped.revisions[.parakeet(.tdtV3)]!)) {
-            try await ModelStore(directory: empty.root).install(.parakeet(.tdtV3), from: .huggingFace(whisperShaped)) { _ in }
+        #expect(installed.folder(of: .spotterEncoder).path.hasSuffix("models/FluidInference/parakeet-tdt-ctc-110m-coreml"))
+        #expect(installed.folder(of: .spotterHead).path.hasSuffix("models/FluidInference/parakeet-ctc-110m-coreml"))
+        #expect(phases.withLock { $0 } == [.copying, .copying])
+        for part in ["spotter-encoder", "spotter-head"] {
+            #expect(FileManager.default.fileExists(atPath: destination.root.appending(components: "installed", part, "parakeet-tdt-0.6b-v3.json").path))
         }
+        #expect(!FileManager.default.fileExists(atPath: destination.root.appending(components: "installed", "tokenizer", "parakeet-tdt-0.6b-v3.json").path))
     }
 
-    /// A Whisper model at a revision naming its weights alone is refused before anything is
-    /// fetched: the store is left with no manifest, and no request reaches the hub.
-    @Test func aWhisperRevisionWithNoTokenizerIsRefusedBeforeAnyFetch() async throws {
-        let empty = try ScratchStore(files: [:])
-        let parakeetShaped = try #require(ModelRevisions("\(Model.default)@\(String(repeating: "a", count: 40))"))
-        await #expect(throws: ModelInstallError.revisionNotFor(model: .default, revision: parakeetShaped.revisions[.default]!)) {
-            try await ModelStore(directory: empty.root).install(.default, from: .huggingFace(parakeetShaped)) { _ in }
-        }
-        #expect(!FileManager.default.fileExists(atPath: empty.root.appending(components: "installed", "\(Model.default).json").path))
+    /// A revision of the wrong shape for its model is refused as it is read, before any install
+    /// can take it: a Whisper model's two commits are not Parakeet's three, nor one Whisper's.
+    @Test func aRevisionOfAnotherShapeIsRefusedAsItIsRead() {
+        #expect(ModelRevisions("parakeet-tdt-0.6b-v3@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))") == nil)
+        #expect(ModelRevisions("\(Model.default)@\(String(repeating: "a", count: 40))") == nil)
     }
 
     /// A folder standing where a listed file belongs is removed before the copy, so

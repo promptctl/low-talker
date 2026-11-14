@@ -1,0 +1,20 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3510.2.1"}, {"coremlc-version", "3505.4.1"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 512, 188]> encoder_output) {
+            tensor<int32, [3]> slice_by_index_4_begin_0 = const()[name = tensor<string, []>("slice_by_index_4_begin_0"), val = tensor<int32, [3]>([0, 0, 0])];
+            tensor<int32, [3]> slice_by_index_4_end_0 = const()[name = tensor<string, []>("slice_by_index_4_end_0"), val = tensor<int32, [3]>([1, 1, 188])];
+            tensor<fp32, [1, 1, 188]> slice_by_index_4 = slice_by_index(begin = slice_by_index_4_begin_0, end = slice_by_index_4_end_0, x = encoder_output)[name = tensor<string, []>("slice_by_index_4")];
+            tensor<int32, [3]> transpose_0_perm_0 = const()[name = tensor<string, []>("transpose_0_perm_0"), val = tensor<int32, [3]>([0, 2, 1])];
+            tensor<fp32, [1, 1, 1025]> reshape_5 = const()[name = tensor<string, []>("reshape_5"), val = tensor<fp32, [1, 1, 1025]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];
+            tensor<fp32, [1, 188, 1]> transpose_0 = transpose(perm = transpose_0_perm_0, x = slice_by_index_4)[name = tensor<string, []>("transpose_0")];
+            tensor<fp32, [1, 188, 1025]> sub_1 = sub(x = reshape_5, y = transpose_0)[name = tensor<string, []>("sub_1")];
+            tensor<fp32, [1, 188, 1025]> mul_4 = mul(x = sub_1, y = sub_1)[name = tensor<string, []>("mul_4")];
+            tensor<fp32, []> mul_5_y_0 = const()[name = tensor<string, []>("mul_5_y_0"), val = tensor<fp32, []>(-0x1p+2)];
+            tensor<fp32, [1, 188, 1025]> mul_5 = mul(x = mul_4, y = mul_5_y_0)[name = tensor<string, []>("mul_5")];
+            tensor<int32, []> softmax_0_axis_0 = const()[name = tensor<string, []>("softmax_0_axis_0"), val = tensor<int32, []>(-1)];
+            tensor<fp32, [1, 188, 1025]> softmax_0 = softmax(axis = softmax_0_axis_0, x = mul_5)[name = tensor<string, []>("softmax_0")];
+            tensor<fp32, []> ctc_logits_epsilon_0 = const()[name = tensor<string, []>("ctc_logits_epsilon_0"), val = tensor<fp32, []>(0x1.4484cp-100)];
+            tensor<fp32, [1, 188, 1025]> ctc_logits = log(epsilon = ctc_logits_epsilon_0, x = softmax_0)[name = tensor<string, []>("ctc_logits")];
+        } -> (ctc_logits);
+}

@@ -6,7 +6,8 @@ import Testing
 @Suite struct SourceOptionsTests {
     /// One flag names every kind of source, so the text alone decides: models at commits are
     /// revisions on the hub, and a directory whose name looks like a host, or like a bare
-    /// revision, is still a directory.
+    /// revision, is still a directory. Text naming a model before `@` that is no revision of it,
+    /// such as Parakeet at the one commit it took before its spotter, is refused.
     @Test(arguments: [
         ("https://github.com/o/r/releases/download/models-1/", "published"),
         ("http://127.0.0.1:8000", "published"),
@@ -14,11 +15,13 @@ import Testing
         ("relative/store", "store"),
         ("huggingface.co", "store"),
         ("base.en@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))", "huggingFace"),
-        ("base.en@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))+parakeet-tdt-0.6b-v3@\(String(repeating: "c", count: 40))", "huggingFace"),
+        ("base.en@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))+parakeet-tdt-0.6b-v3@\(String(repeating: "c", count: 40))-\(String(repeating: "d", count: 40))-\(String(repeating: "e", count: 40))", "huggingFace"),
         ("\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))", "store"),
         (String(repeating: "a", count: 40), "store"),
+        ("parakeet-tdt-0.6b-v3@\(String(repeating: "c", count: 40))", nil),
+        ("base.en@main", nil),
     ])
-    func fromNamesTheKindOfSourceByItsText(argument: String, kind: String) {
+    func fromNamesTheKindOfSourceByItsText(argument: String, kind: String?) {
         let parsed: String? = switch ModelSource(argument: argument) {
         case .published: "published"
         case .store: "store"
