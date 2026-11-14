@@ -161,7 +161,8 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// The chord's release was read before the refusal was delivered: the press ends then, once,
     /// after its beginning, so the next press of the chord begins a press.
     @Test func aRefusalDeliveredAfterTheTapLatchedEndsItOnce() async throws {
-        let feed = keyboard()
+        // The refusal is read at 250 ms, after the release, on the clock the keys are stamped on.
+        let feed = FakeModifierFeed(on: ManualHostClock(startingAt: at(250)).clock)
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed)
         let box = Box()
         try hotkey.start(refusing(box))
@@ -170,9 +171,7 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
         installation.handle(rightOption(.up, at: 100))
         await settle()
         await settle()
-        #expect(box.told.count == 2)
-        #expect(box.told.first == .began(rightOption, at: at(0)))
-        guard case .ended(.released(.tap, _)) = try #require(box.told.last) else { Issue.record("the press did not end as a tap: \(box.told)"); return }
+        #expect(box.told == [.began(rightOption, at: at(0)), .ended(.released(.tap, at: at(250)))])
         #expect(hotkey.phase == .idle)
 
         installation.handle(rightOption(.down, at: 1000))
@@ -227,32 +226,11 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
         ])
     }
 
-    /// A tap that latched before its refusal was read is ended by the refusal, at the moment it
-    /// is read on the clock the feed stamps its keys on.
-    @Test func aLatchedTapIsEndedWhenItsRefusalIsRead() async throws {
-        let feed = FakeModifierFeed(on: ManualHostClock(startingAt: at(250)).clock)
-        let records = Records()
-        let hotkey = Hotkey(modes: Config.default.modes, feed: feed) { records.all.append($0) }
-        let told = Box()
-        try hotkey.start(refusing(told))
-        feed.type(rightOption(.down, at: 0))
-        feed.type(rightOption(.up, at: 100))
-        await settle()
-        await settle()
-        #expect(records.all == [
-            .transition(.began(rightOption, at: at(0))),
-            .refused(pressBegunAt: at(0)),
-            .transition(.ended(.released(.tap, at: at(250)))),
-        ])
-        #expect(told.told == [.began(rightOption, at: at(0)), .ended(.released(.tap, at: at(250)))])
-        #expect(hotkey.phase == .idle)
-    }
-
     /// The log line is the record's rendering, and only that.
     @Test func aRecordRendersAsItsLogLine() {
         let began = HotkeyDetector.Transition.began(rightOption, at: at(987_654))
         #expect("\(Hotkey.Record.transition(began))" == "\(began)")
-        #expect("\(Hotkey.Record.refused(pressBegunAt: at(987_654)))" == "the press begun at 987654 ms of uptime was refused")
+        #expect("\(Hotkey.Record.refused(pressBegunAt: at(987_654)))" == "the press begun at 987654.0 ms of uptime was refused")
     }
 
     @MainActor private final class Records {

@@ -1825,8 +1825,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A store that cannot be read at launch holds nothing, offers nothing, and says why.
     @Test func anUnreadableStoreHoldsNothingAndSaysWhy() async throws {
         let store = FakeHeldStore(keeping: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)")))
-        let unreadable = HeldUnreadable(why: "torn", kept: .movedTo("/kept.json"))
-        store.spoil(unreadable)
+        let unreadable = store.spoil(why: "torn", movedTo: "/kept.json")
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
         #expect(rig.hold.held == nil)
         #expect(rig.hold.unrestored == unreadable)

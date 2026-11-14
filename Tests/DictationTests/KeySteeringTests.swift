@@ -49,9 +49,11 @@ private struct BadBuffer: Error {}
         /// Right Option going down or up, `held` milliseconds into the press, stamped on the
         /// clock the loop's marks are on.
         func chord(_ direction: KeyEvent.Direction, atMilliseconds ms: Int64) {
+            // The clock moves to the stamp: a key is typed at the moment it is stamped.
+            rig.clock.set(to: HostTime(uptime: rig.now.uptime + .milliseconds(ms)))
             feed.type(KeyEvent(
                 key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [],
-                time: HostTime(uptime: rig.now.uptime + .milliseconds(ms)), lastTyped: HostTime(uptime: .seconds(-60))))
+                time: rig.now, lastTyped: HostTime(uptime: .seconds(-60))))
         }
 
         func delivered() async {

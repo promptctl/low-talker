@@ -1904,7 +1904,7 @@ enum UnplugReports: CaseIterable, Sendable {
             hear: { hardware.live.appending($0, HostTime(uptime: .zero)) },
             moveDefault: {
                 hardware.moveDefaultInput()
-                if hardware.isWatching { try hardware.announceDefaultInput() }
+                hardware.postDefaultInputChange()
             }
         )
     }

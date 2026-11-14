@@ -18,19 +18,19 @@ public final class FakeHeldStore: HeldStore {
         state = HoldState(held: kept, dismissed: dismissed)
     }
 
-    /// The record kept cannot be read back. Moved aside, as `unreadable.kept` says, it throws at
-    /// the next read and is nothing held from then on; left in place, every read throws until a
-    /// write replaces it.
-    public func spoil(_ unreadable: HeldUnreadable) {
+    /// The record kept cannot be read back, `why`, and the next read moves it to `aside`, as
+    /// `HeldStoreContract` says: that read throws what it returns, and nothing is held after it.
+    @discardableResult
+    public func spoil(why: String, movedTo aside: String) -> HeldUnreadable {
+        let unreadable = HeldUnreadable(why: why, kept: .movedTo(aside))
         spoiled = unreadable
+        return unreadable
     }
 
     public func read() throws(HeldUnreadable) -> HoldState {
         guard let spoiled else { return state }
-        if case .movedTo = spoiled.kept {
-            self.spoiled = nil
-            state = HoldState()
-        }
+        self.spoiled = nil
+        state = HoldState()
         throw spoiled
     }
 

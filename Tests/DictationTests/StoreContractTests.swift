@@ -19,7 +19,7 @@ final class StoreContractTests {
         let store = FakeHeldStore()
         return HeldStoreContract.Subject(
             store: store,
-            spoil: { store.spoil(HeldUnreadable(why: "torn", kept: .movedTo("aside"))) },
+            spoil: { store.spoil(why: "torn", movedTo: "aside") },
             obstruct: { store.failing = .lost(why: "in the way") }
         )
     }

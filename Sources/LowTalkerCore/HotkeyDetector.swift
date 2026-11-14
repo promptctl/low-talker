@@ -322,12 +322,21 @@ public struct HotkeyDetector: Sendable {
 /// beginning at one moment.
 extension HotkeyDetector.Transition: CustomStringConvertible {
     public var description: String {
-        func moment(_ time: HostTime) -> String { "at \(time.uptime / .milliseconds(1)) ms of uptime" }
-        return switch self {
-        case .began(let mode, let at): "\(mode) began \(moment(at))"
+        switch self {
+        case .began(let mode, let at): "\(mode) began \(at.onUptime)"
         case .blocked(let mode, let others): "\(mode) blocked by \(Hotkey.named(others)) held with it"
-        case .ended(.released(let kind, let at)): "ended as a \(kind.rawValue) \(moment(at))"
+        case .ended(.released(let kind, let at)): "ended as a \(kind.rawValue) \(at.onUptime)"
         case .ended(let ending): "ended \(ending)"
         }
+    }
+}
+
+extension HostTime {
+    /// [LAW:one-source-of-truth] A moment as every hotkey line says it, so a refusal's line names
+    /// its press exactly as the press's `began` line did. Read from the duration's whole seconds
+    /// and attoseconds, which, unlike a division of durations, prints a whole millisecond whole.
+    var onUptime: String {
+        let (seconds, attoseconds) = uptime.components
+        return "at \(Double(seconds) * 1_000 + Double(attoseconds) / 1e15) ms of uptime"
     }
 }

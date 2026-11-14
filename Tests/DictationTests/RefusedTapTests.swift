@@ -29,9 +29,11 @@ private struct BadBuffer: Error {}
         /// Right Option going down or up, `ms` milliseconds after the rig's clock, which the loop's
         /// marks are on.
         func chord(_ direction: KeyEvent.Direction, atMilliseconds ms: Int64) {
+            // The clock moves to the stamp: a key is typed at the moment it is stamped.
+            rig.clock.set(to: HostTime(uptime: rig.now.uptime + .milliseconds(ms)))
             feed.type(KeyEvent(
                 key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [],
-                time: HostTime(uptime: rig.now.uptime + .milliseconds(ms)), lastTyped: HostTime(uptime: .seconds(-60))))
+                time: rig.now, lastTyped: HostTime(uptime: .seconds(-60))))
         }
 
         /// Lets the main queue run what the hotkey put on it, and what that put on it in turn.
