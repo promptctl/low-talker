@@ -75,7 +75,7 @@ let package = Package(
         // dictation (epic low-serve-axq). Above the core, so the core never links Network
         // and the offline build's app need not link this at all. [LAW:one-way-deps]
         .target(name: "Serve", dependencies: ["LowTalkerCore", "Identity"]),
-        .testTarget(name: "ServeTests", dependencies: ["Serve", "LowTalkerCore", "Identity", "TestProbes"], resources: [.copy("Fixtures")]),
+        .testTarget(name: "ServeTests", dependencies: ["Serve", "LowTalkerCore", "LowTalkerCoreFakes", "Identity", "TestProbes"], resources: [.copy("Fixtures")]),
         // Answering a signal rather than obeying it, for every process here that has an
         // ending of its own to unwind through. It links nothing, so any process here can
         // watch through it. [LAW:one-source-of-truth]
@@ -86,6 +86,10 @@ let package = Package(
         // test targets cannot import one another's sources, and in no product because
         // nothing ships it. [LAW:one-source-of-truth]
         .target(name: "TestProbes", dependencies: ["LowTalkerCore"]),
+        // The one fake of the engine port and the contract it is held to, beside the port, so
+        // every caller's tests hear on the engine the contract checks. In no product.
+        // [LAW:one-source-of-truth]
+        .target(name: "LowTalkerCoreFakes", dependencies: ["LowTalkerCore", "TestProbes"]),
         // Everything that must hold before low-talker can hear and type, as a list a reader
         // can act on: what was read off this Mac, and the step for whatever is missing. It
         // links the identity, the grants and the input source's switch, and not the core - so
@@ -116,7 +120,7 @@ let package = Package(
         // app links it and hands over the real microphone, engine and inserter - the input
         // method in the app, a fake in a test. [LAW:decomposition] [LAW:composability]
         .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber"]),
-        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "Grants", "Insertion", "InsertionFakes", "TestProbes"]),
+        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "Insertion", "InsertionFakes", "TestProbes"]),
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
@@ -159,7 +163,7 @@ let package = Package(
         // one run at a time the app's window and `LowTalker --bench` start. Beneath the app;
         // the engine it loads is the core's, read in place, never installed.
         .target(name: "Bench", dependencies: ["LowTalkerCore", "GrammaticalNumber", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
-        .testTarget(name: "BenchTests", dependencies: ["Bench", "LowTalkerCore", "TestProbes"]),
+        .testTarget(name: "BenchTests", dependencies: ["Bench", "LowTalkerCore", "LowTalkerCoreFakes", "TestProbes"]),
         // The write side of the model store: fetching from huggingface.co or a published
         // base, copying from another store, packing one to publish. Beneath `model-tool`
         // alone.
@@ -187,6 +191,7 @@ let package = Package(
             name: "LowTalkerCoreTests",
             dependencies: [
                 "LowTalkerCore",
+                "LowTalkerCoreFakes",
                 "Grants",
                 "Insertion",
                 "TestProbes",

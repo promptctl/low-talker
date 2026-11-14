@@ -1,5 +1,6 @@
 import Dictation
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Synchronization
 import Testing
 import TestProbes

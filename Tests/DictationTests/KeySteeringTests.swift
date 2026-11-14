@@ -4,6 +4,7 @@ import Foundation
 import Insertion
 import InsertionFakes
 import LowTalkerCore
+import LowTalkerCoreFakes
 import TestProbes
 import Testing
 

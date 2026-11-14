@@ -2,6 +2,7 @@ import Dictation
 import Foundation
 import Insertion
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Testing
 import TestProbes
 
@@ -26,9 +27,10 @@ private struct LoadFailed: Error, CustomStringConvertible {
     }
 
     /// An engine that says `first`, `second` or `third` by the speech's first sample.
-    private static func reading(_ turns: EngineTurns, inside: Gate? = nil) -> TurnedTranscriber {
-        TurnedTranscriber(turns: turns, inside: inside) { samples throws(TranscriptionFailure) in
-            switch samples.first {
+    private static func reading(_ turns: EngineTurns, inside: Gate? = nil) -> FakeTranscriber {
+        FakeTranscriber(turns: turns) { clip in
+            await inside?.wait()
+            return switch clip.samples.first {
             case 1: Transcript(typed: " first")
             case 2: Transcript(typed: " second")
             default: Transcript(typed: " other")
@@ -147,7 +149,7 @@ private struct LoadFailed: Error, CustomStringConvertible {
 
         #expect(rig.hold.held?.allWords.text == " first second")
         #expect(rig.hold.held?.warnings.allSatisfy { $0.hasPrefix("WARNING: These words were said before the model had loaded") } == true)
-        #expect(engine.heard.all.map(\.vocabulary.terms.count) == [1, 0])
+        #expect(engine.expected.map(\.terms.count) == [1, 0])
         #expect(rig.unheard.kept.isEmpty)
         #expect(rig.recovery.lines.isEmpty)
     }
@@ -169,7 +171,7 @@ private struct LoadFailed: Error, CustomStringConvertible {
 
     @Test(.timeLimit(.minutes(1))) func aSpeechTheEngineFailsOnStaysKeptAndHoldsNothing() async throws {
         let rig = try await Self.rig(over: try Self.store(Self.said(1)))
-        let failing = TurnedTranscriber(turns: rig.turns) { _ throws(TranscriptionFailure) in throw .engine(LoadFailed()) }
+        let failing = FakeTranscriber(turns: rig.turns) { _ throws(TranscriptionFailure) in throw .engine(LoadFailed()) }
 
         rig.recovery.landed(failing.served)
         await rig.recovery.settled()
@@ -181,7 +183,7 @@ private struct LoadFailed: Error, CustomStringConvertible {
 
     @Test(.timeLimit(.minutes(1))) func speechThatWasNothingSpokenIsLetGoAndHoldsNothing() async throws {
         let rig = try await Self.rig(over: try Self.store(Self.said(1)))
-        let silent = TurnedTranscriber(turns: rig.turns) { _ throws(TranscriptionFailure) in throw .nothingSpoken(peak: 0, quiet: .none) }
+        let silent = FakeTranscriber(turns: rig.turns) { _ throws(TranscriptionFailure) in throw .nothingSpoken(peak: 0, quiet: .none) }
 
         rig.recovery.landed(silent.served)
         await rig.recovery.settled()
@@ -195,7 +197,7 @@ private struct LoadFailed: Error, CustomStringConvertible {
     /// warned of, once the press is done. None is lost and none is typed twice.
     @Test(.timeLimit(.minutes(1))) func aPressMadeAfterTheLandingTypesFirstAndTheRecoveredWordsAreHeldBehindIt() async throws {
         let turns = EngineTurns()
-        let live = TurnedTranscriber(turns: turns) { _ throws(TranscriptionFailure) in Transcript(typed: " live") }
+        let live = FakeTranscriber(turns: turns) { _ throws(TranscriptionFailure) in Transcript(typed: " live") }
         let rig = try await Rig(engine: { { live } }, keepingSpeech: try Self.store(Self.said(1)), turns: turns)
         let inside = Gate()
         let recovering = Self.reading(turns, inside: inside)
@@ -209,14 +211,14 @@ private struct LoadFailed: Error, CustomStringConvertible {
 
         #expect(rig.inputMethod.inserted == [" live"])
         #expect(rig.hold.held?.allWords.text == " first")
-        #expect(recovering.heard.all.count == 1)
+        #expect(recovering.utterances.count == 1)
     }
 
     /// The load does not wait on the recovery: a press waiting on the load that lands is heard,
     /// with a recovery reading in the same landing.
     @Test(.timeLimit(.minutes(1))) func aPressWaitingOnALoadThatLandsIsHeardWhileKeptSpeechIsRead() async throws {
         let turns = EngineTurns()
-        let live = TurnedTranscriber(turns: turns) { _ throws(TranscriptionFailure) in Transcript(typed: " live") }
+        let live = FakeTranscriber(turns: turns) { _ throws(TranscriptionFailure) in Transcript(typed: " live") }
         let loading = Gate()
         let rig = try await Rig(engine: { { await loading.wait(); return live } }, keepingSpeech: try Self.store(Self.said(1)), turns: turns)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))

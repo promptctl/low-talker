@@ -2,6 +2,7 @@ import Dictation
 import Dispatch
 import Foundation
 import LowTalkerCore
+import LowTalkerCoreFakes
 import TestProbes
 import Testing
 

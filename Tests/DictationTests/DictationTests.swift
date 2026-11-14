@@ -4,6 +4,7 @@ import Grants
 import Insertion
 import InsertionFakes
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Synchronization
 import Testing
 import TestProbes
@@ -1199,7 +1200,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A press whose engine refused the mode's vocabulary is reported in that mode, so the
     /// record says whose terms to cut.
     @Test func aFailedPressIsReportedInTheModeItBeganIn() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .vocabulary(.tooLong(tokens: 300, limit: 224)) })
+        let rig = try await Rig(hearing: FakeTranscriber(refusing: { _ throws(VocabularyError) in throw .tooLong(tokens: 300, limit: 224) }) { _ in Transcript(typed: "a") })
         rig.hold(in: Self.notes)
         let report = await rig.pressReport()
         #expect(report.mode == Self.notes)

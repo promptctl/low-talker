@@ -3,6 +3,7 @@ import Foundation
 import Insertion
 import InsertionFakes
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Testing
 import TestProbes
 
