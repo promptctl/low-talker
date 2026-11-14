@@ -508,8 +508,10 @@ final class Recorded<Value: Sendable>: Sendable {
     }
 
     /// A press made while the model loads shows the box while it is held and puts it away at its
-    /// release, since a press waiting on the load has nothing to show; the circle puts it away
-    /// and a second press shows it again.
+    /// release, since a press waiting on the load has nothing to show. With nothing held there is
+    /// no circle, so an Escape is the one way to put it away, and with the box gone it is the app
+    /// in front's: the waiting press keeps its words. A second press shows the box again, and
+    /// both land once the model has loaded.
     @Test func theWordBoxThroughAPressWaitingOnTheLoad() async {
         let rig = AppRig(holdingLoads: true)
         await rig.launched()
@@ -521,15 +523,16 @@ final class Recorded<Value: Sendable>: Sendable {
         rig.chord(.up)
         await rig.until { !rig.panel.isShown }
 
-        rig.app.dismissBox()
-        #expect(!rig.panel.isShown)
+        let escape = FakeReply()
+        rig.notices.ask(.escape(at: 0), through: escape)
+        #expect(await escape.said() == .dismissal(.nothingShown))
 
         rig.chord(.down)
         await rig.until { rig.panel.isShown }
         await rig.speak()
         rig.chord(.up)
         rig.model.loading.open()
-        await rig.until { rig.reports.count == 2 }
+        await rig.until { rig.inputMethod.inserted.count == 2 }
     }
 
     /// The menu the app opens is drawn from its own state and the edge's two readings, and the

@@ -350,7 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .failed(let text, let line): return errorRow(text, line)
         case .separator: return .separator()
         case .item(let title, let action, let check):
-            let item = NSMenuItem(title: title, action: selector(action), keyEquivalent: action == .quit ? "q" : "")
+            let item = NSMenuItem(title: title, action: selector(action), keyEquivalent: action.keyEquivalent)
             item.state = switch check {
             case .on?: .on
             case .mixed?: .mixed

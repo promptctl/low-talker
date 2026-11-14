@@ -184,7 +184,7 @@ public final class LowTalkerApp {
         let readiness = readiness()
         settle(readiness)
         let menu = Menu(Menu.Readings(
-            engine: engineReadiness, engineReadout: engineReadout,
+            engine: engineReadiness, now: ports.clock.now,
             serving: ports.server.map { (state: $0.state, chosen: $0.chosen) },
             microphone: microphone, hotkey: hotkeyStatus, inputMethodSelected: ports.inputMethod.isSelected,
             globeKey: globeKey, running: running, lastFailure: lastFailure, lastReplacement: lastReplacement,

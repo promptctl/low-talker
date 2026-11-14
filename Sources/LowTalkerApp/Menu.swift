@@ -3,6 +3,7 @@ import Identity
 import LowTalkerCore
 import Onboarding
 import Serve
+import Uptime
 
 /// Everything the status item's menu says, as rows, decided from one set of readings taken as the
 /// menu opens. AppKit draws the rows and runs their actions; nothing it draws is decided there.
@@ -11,8 +12,8 @@ public struct Menu {
     /// What the menu is drawn from, each read at the moment the menu opens.
     public struct Readings {
         public var engine: EngineReadiness
-        /// The engine's readiness in words, read on the app's clock.
-        public var engineReadout: String
+        /// The instant the menu opened, on the app's clock, which a wait's readout is measured to.
+        public var now: HostTime
         /// What the server is doing and whether the person chose it, in a build that can serve.
         public var serving: (state: ServerSwitch.State, chosen: Bool)?
         public var microphone: AudioCapture.Doing
@@ -37,14 +38,14 @@ public struct Menu {
         public var returnHolds: Bool
 
         public init(
-            engine: EngineReadiness, engineReadout: String, serving: (state: ServerSwitch.State, chosen: Bool)?,
+            engine: EngineReadiness, now: HostTime, serving: (state: ServerSwitch.State, chosen: Bool)?,
             microphone: AudioCapture.Doing, hotkey: HotkeyStatus, inputMethodSelected: Bool, globeKey: GlobeKeyAction,
             running: RunningConfig?, lastFailure: String?, lastReplacement: String?, heldTroubles: [String],
             dismissedWords: Int?, keptSpeech: (lines: [String], seconds: Int?), benchRunning: Bool, readiness: Readiness,
             openAtLogin: LoginItemStatus, returnHolds: Bool
         ) {
             self.engine = engine
-            self.engineReadout = engineReadout
+            self.now = now
             self.serving = serving
             self.microphone = microphone
             self.hotkey = hotkey
@@ -82,6 +83,15 @@ public struct Menu {
     public enum Action: Sendable {
         case bringBackDismissed, discardKeptSpeech, openSetUp, openBench, toggleOpenAtLogin, toggleReturnHold,
              toggleServing, openNotices, quit
+
+        /// The key that, with Command, chooses the item: Quit's alone, as every Mac app's.
+        public var keyEquivalent: String {
+            switch self {
+            case .quit: "q"
+            case .bringBackDismissed, .discardKeptSpeech, .openSetUp, .openBench, .toggleOpenAtLogin, .toggleReturnHold,
+                 .toggleServing, .openNotices: ""
+            }
+        }
     }
 
     public enum Check: Sendable {
@@ -118,7 +128,7 @@ public struct Menu {
     public var rows: [Row] {
         let r = readings
         var rows: [Row] = []
-        let model = "Model: \(r.engineReadout)"
+        let model = "Model: \(r.engine.readout(at: r.now))"
         let modelRow: Row = if case .failed = r.engine { .failed(model, .model) } else { .readout(model) }
         rows.append(modelRow)
         // A press made during the wait is not lost, and nothing else on screen says so.

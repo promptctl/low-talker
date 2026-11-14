@@ -17,7 +17,7 @@ import Uptime
     /// An app with nothing to say beyond its status: ready, listening, typing.
     static func readings() -> Menu.Readings {
         Menu.Readings(
-            engine: .ready(.default, after: .seconds(2)), engineReadout: "ready", serving: nil,
+            engine: .ready(.default, after: .seconds(2)), now: HostTime(uptime: .seconds(4)), serving: nil,
             microphone: .keeping(.shut), hotkey: .listening("hold Right Option"), inputMethodSelected: true,
             globeKey: .doNothing, running: .adopted(.default), lastFailure: nil, lastReplacement: nil, heldTroubles: [],
             dismissedWords: nil, keptSpeech: (lines: [], seconds: nil), benchRunning: false, readiness: Readiness([]),
@@ -31,7 +31,7 @@ import Uptime
     }
 
     static let quiet: [Menu.Row] = [
-        .readout("Model: ready"),
+        .readout("Model: ready (\(Model.default.engine) \(Model.default)) after 2 s"),
         .readout("Microphone: \(AudioCapture.Doing.keeping(.shut))"),
         .readout("Hotkey: hold Right Option"),
     ]
@@ -46,14 +46,14 @@ import Uptime
             .item("Acknowledgements", .openNotices, check: nil),
             .item("Quit \(AppIdentity.displayName)", .quit, check: nil),
         ])
+        #expect(Menu(Self.readings()).rows.compactMap { if case .item(_, let action, _) = $0, !action.keyEquivalent.isEmpty { action.keyEquivalent } else { nil } } == ["q"])
     }
 
     @Test func aPreparingEngineSaysAPressNowWaitsForIt() {
         var readings = Self.readings()
         readings.engine = .preparing(.loading, since: HostTime(uptime: .seconds(1)))
-        readings.engineReadout = "loading, 3 seconds so far"
         #expect(Array(Self.status(readings).prefix(2)) == [
-            .readout("Model: loading, 3 seconds so far"),
+            .readout("Model: \(LoadPhase.loading), 3 s so far"),
             .readout("A press now is heard once the model is ready"),
         ])
     }
@@ -61,7 +61,6 @@ import Uptime
     @Test func aFailedEngineIsAnErrorRow() {
         var readings = Self.readings()
         readings.engine = .failed("no model")
-        readings.engineReadout = "failed — no model"
         #expect(Self.status(readings).first == .failed("Model: failed — no model", .model))
     }
 
