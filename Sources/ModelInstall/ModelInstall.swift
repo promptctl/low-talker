@@ -33,7 +33,7 @@ extension ModelStore {
                 let hub = HubApiWrapper(downloadBase: directory, endpoint: Hub.endpoint.absoluteString)
                 switch model {
                 case .whisperKit: return try await installWhisperKit(model, from: source, through: hub, phase: phase)
-                case .parakeet: return try await installParakeet(model, from: source, through: hub, phase: phase)
+                case .parakeet(let parakeet): return try await installParakeet(model, parakeet, from: source, through: hub, phase: phase)
                 }
             }
         }
@@ -45,8 +45,7 @@ extension ModelStore {
         // [LAW:parse-dont-validate] A revision names both parts, refused before either is fetched.
         enum Parts { case hub(weights: ModelRevision.Commit, tokenizer: ModelRevision.Commit), store(ModelStore) }
         let parts: Parts = switch source {
-        case .huggingFace(.weightsAndTokenizer(let weights, let tokenizer)): .hub(weights: weights, tokenizer: tokenizer)
-        case .huggingFace(let revision): throw ModelInstallError.revisionNotFor(model: model, revision: revision)
+        case .huggingFace(let revision): .hub(weights: revision.commit(of: .weights), tokenizer: revision.commit(of: .tokenizer))
         case .store(let store): .store(store)
         }
         let weights = try await whole(.weights, of: model) {
@@ -78,22 +77,23 @@ extension ModelStore {
                 return try await copy(.tokenizer, of: model, from: store, phase: phase)
             }
         }
-        return InstalledModel(model: model, folder: folder, hub: directory)
+        return try installedModel(model)
     }
 
-    /// A Parakeet model: the files of its repo the engine loads, at the repo's top, its
-    /// vocabulary among them.
-    private func installParakeet(_ model: Model, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
-        let weights = try await whole(.weights, of: model) {
-            switch source {
-            case .huggingFace(let revision):
-                guard case .weights(let commit) = revision else { throw ModelInstallError.revisionNotFor(model: model, revision: revision) }
-                return try await fromHub(model.repo, at: commit, through: hub, phase: phase) { _ in (nil, ParakeetModel.hubGlobs) }
-            case .store(let store):
-                return try await copy(.weights, of: model, from: store, phase: phase)
+    /// A Parakeet model: for each part, the files of its repo the engine loads, at the repo's
+    /// top, the TDT model's vocabulary and the spotter's tokenizer among them.
+    private func installParakeet(_ model: Model, _ parakeet: ParakeetModel, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
+        for part in model.parts {
+            _ = try await whole(part, of: model) {
+                switch source {
+                case .huggingFace(let revision):
+                    return try await fromHub(parakeet.source(of: part)!.repo, at: revision.commit(of: part), through: hub, phase: phase) { _ in (nil, parakeet.hubGlobs(of: part)) }
+                case .store(let store):
+                    return try await copy(part, of: model, from: store, phase: phase)
+                }
             }
         }
-        return InstalledModel(model: model, folder: directory.appending(path: weights.folder), hub: directory)
+        return try installedModel(model)
     }
 
     /// Writes `<directory>/<model>.zip`, the archive a published source serves: a
@@ -277,9 +277,11 @@ private enum InstallLock {
 }
 
 extension ParakeetModel {
-    /// The globs that take the engine's files from the repo's top and nothing else: a
-    /// `.mlmodelc` is a folder, and the hub client's globs cross `/`, so one glob takes it whole.
-    static let hubGlobs = files.map { $0.hasSuffix(".mlmodelc") ? "\($0)/*" : $0 }
+    /// The globs that take `part`'s files from its repo's top and nothing else: a `.mlmodelc` is
+    /// a folder, and the hub client's globs cross `/`, so one glob takes it whole.
+    func hubGlobs(of part: ModelPart) -> [String] {
+        (source(of: part)?.files ?? []).map { $0.hasSuffix(".mlmodelc") ? "\($0)/*" : $0 }
+    }
 }
 
 public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
@@ -297,9 +299,6 @@ public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
     case incomplete(folder: URL, faults: [Manifest.Fault])
     /// Revisions given for an install that name none for the model being installed.
     case noRevision(model: Model, revisions: ModelRevisions)
-    /// A revision of the other engine's shape: a Whisper model needs its tokenizer's commit,
-    /// and Parakeet has none.
-    case revisionNotFor(model: Model, revision: ModelRevision)
 
     public var description: String {
         switch self {
@@ -319,8 +318,6 @@ public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
             "\(folder.path) came up short after the install: \(faults.map(\.description).joined(separator: "; "))"
         case .noRevision(let model, let revisions):
             "the revisions \(revisions) name none for \(model)"
-        case .revisionNotFor(let model, let revision):
-            "\(revision) is not a revision of \(model), whose \(model.parts.count == 1 ? "repo is one commit" : "weights and tokenizer are two commits")"
         }
     }
 }

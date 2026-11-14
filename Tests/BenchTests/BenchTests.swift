@@ -277,16 +277,6 @@ private final class Picked: Sendable {
         #expect(throws: BenchOptionsError.tooFewRuns(0)) { try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 0, vocabulary: .empty) }
     }
 
-    /// A vocabulary Parakeet cannot be told is refused before any model loads, and a Whisper
-    /// model alone takes it.
-    @Test func aVocabularyAModelRefusesIsRefusedBeforeAnyLoad() throws {
-        let vocabulary = Vocabulary([try Vocabulary.Term("Kubernetes")])
-        #expect(throws: BenchOptionsError.vocabulary(.engineTakesNone(.parakeet(.tdtV3)))) {
-            try BenchPlan(models: [.default, .parakeet(.tdtV3)], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: vocabulary)
-        }
-        _ = try BenchPlan(models: [.default], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: vocabulary)
-    }
-
     /// The window offers the models a store has recorded, by name and in order.
     @Test func aStoreListsTheModelsItRecorded() throws {
         let picked = try Picked(fixtures: [], models: ["zeta", "alpha"])
@@ -295,19 +285,28 @@ private final class Picked: Sendable {
     }
 
     /// The bench holds a fixture on a Parakeet model installed as ModelInstall lays out the
-    /// repo, the stub models in place of weights, loaded by `Bench.loadInPlace`. The utterance
+    /// repos, the stub models in place of weights, loaded by `Bench.loadInPlace`. The utterance
     /// hands the pass the second of audio and its 0.3 s hangover, 17 frames. Each id is read as
     /// the word `w<id>`, and at each step the stub joint emits its frame's index and moves on by
     /// the token fed before it mod 5, the blank's 8192 first: 0 +2, 2 +0, 2 +2, 4 +2, 6 +4,
-    /// 10 +1, 11 +0, 11 +1, 12 +1, 13 +2, 15 +3, past the last frame.
-    @Test func aFixtureIsHeldOnAnInstalledParakeetModel() async throws {
+    /// 10 +1, 11 +0, 11 +1, 12 +1, 13 +2, 15 +3, past the last frame. The stub spotter reads each
+    /// frame as the class its first sample carries, so the audio says the blank on every frame but
+    /// the three that say `▁Zed`; told `Zed`, the pass hears it there, between frame 2's words and
+    /// frame 4's.
+    @Test(arguments: [(Vocabulary.empty, "w0 w2 w2 w4 w6 w10 w11 w11 w12 w13 w15"), (Vocabulary([try! Vocabulary.Term("Zed")]), "w0 w2 w2 Zed w4 w6 w10 w11 w11 w12 w13 w15")])
+    func aFixtureIsHeldOnAnInstalledParakeetModel(told vocabulary: Vocabulary, heard: String) async throws {
         let scratch = try ScratchStore(files: [:])
         let pieces = Dictionary(uniqueKeysWithValues: (0..<ParakeetWindow.blank).map { (String($0), " w\($0)") })
-        try scratch.installParakeet(copying: ScratchStore.parakeetStubs, files: [ParakeetModel.vocabulary: String(decoding: JSONEncoder().encode(pieces), as: UTF8.self)])
+        try scratch.installParakeet([
+            .weights: .init(copying: ScratchStore.parakeetStubs(.weights), files: [ParakeetModel.vocabulary: String(decoding: JSONEncoder().encode(pieces), as: UTF8.self)]),
+            .spotterEncoder: .init(copying: ScratchStore.parakeetStubs(.spotterEncoder)),
+            .spotterHead: .init(copying: ScratchStore.parakeetStubs(.spotterHead), files: [ParakeetModel.spotterTokenizer: ScratchStore.spotterTokenizer]),
+        ])
         let store = ModelStore(directory: scratch.root)
-        let heard = "w0 w2 w2 w4 w6 w10 w11 w11 w12 w13 w15"
-        let fixture = try Fixture(name: "second", clip: AudioClip(samples: [Float](repeating: 0.25, count: 16_000)), reference: heard)
-        let plan = try BenchPlan(models: [.parakeet(.tdtV3)], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: .empty)
+        var samples = [Float](repeating: Float(SpotterClasses.blank), count: 16_000)
+        for frame in 3...5 { samples[frame * ParakeetWindow.frameSamples] = 5 }
+        let fixture = try Fixture(name: "second", clip: AudioClip(samples: samples), reference: heard)
+        let plan = try BenchPlan(models: [.parakeet(.tdtV3)], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: vocabulary)
         let rows = Mutex<[BenchRow]>([])
         try await Bench.measure([fixture], plan: plan, load: { try await Bench.loadInPlace(store, $0) }, emit: {
             if case .row(let row) = $0 { rows.withLock { $0.append(row) } }

@@ -68,8 +68,8 @@ public struct ModelStore: Sendable {
         let wholes = recordings.compactMap { part, recording in
             if case .whole(let manifest) = recording { (part, manifest) } else { nil }
         }
-        if wholes.count == recordings.count, let weights = wholes.first(where: { $0.0 == .weights })?.1 {
-            return .installed(InstalledModel(model: model, folder: directory.appending(path: weights.folder), hub: directory))
+        if wholes.count == recordings.count {
+            return .installed(InstalledModel(model: model, folders: Dictionary(uniqueKeysWithValues: wholes.map { ($0.0, directory.appending(path: $0.1.folder)) }), hub: directory))
         }
         if recordings.allSatisfy({ if case .unrecorded = $0.1 { true } else { false } }) {
             return .missing
@@ -130,14 +130,14 @@ public struct ModelStore: Sendable {
     }
 
     /// `installed/<model>.json` for the weights, where every store before the
-    /// tokenizer had a manifest already wrote it, and `installed/tokenizer/<model>.json`
-    /// beside it. Kept per model rather than per tokenizer: a model knows its own
-    /// manifests' names without reading its weights.
+    /// tokenizer had a manifest already wrote it, and `installed/<part>/<model>.json`
+    /// beside it for every other part. Kept per model rather than per part's repo: a model
+    /// knows its own manifests' names without reading its weights.
     package func manifestURL(for model: Model, _ part: ModelPart) -> URL {
         let installed = directory.appending(path: "installed")
         return switch part {
         case .weights: installed.appending(path: "\(model.rawValue).json")
-        case .tokenizer: installed.appending(components: "tokenizer", "\(model.rawValue).json")
+        case .tokenizer, .spotterEncoder, .spotterHead: installed.appending(components: part.rawValue, "\(model.rawValue).json")
         }
     }
 
@@ -170,13 +170,18 @@ public struct ModelStore: Sendable {
     }
 }
 
-/// A part of a model, as a store installs it and a manifest records it.
-public enum ModelPart: String, Sendable, CustomStringConvertible {
+/// A part of a model, as a store installs it and a manifest records it. Declared in the order a
+/// revision names each part's commit.
+public enum ModelPart: String, CaseIterable, Sendable, CustomStringConvertible {
     /// The Core ML bundles and what ships beside them in the model's repo.
     case weights
     /// The tokenizer the weights decode with, in an openai repo shared by every model
     /// of one Whisper size.
     case tokenizer
+    /// The encoder of the CTC model Parakeet's word spotter reads vocabulary from.
+    case spotterEncoder = "spotter-encoder"
+    /// That model's CTC head, and the tokenizer a term is spelled in its pieces with.
+    case spotterHead = "spotter-head"
 
     public var description: String { rawValue }
 }
@@ -199,15 +204,27 @@ public enum ModelStoreError: Error, Equatable, CustomStringConvertible {
 /// an install has written both parts and their manifests.
 public struct InstalledModel: Sendable {
     public let model: Model
-    /// The folder holding the `.mlmodelc` bundles and what ships beside them.
-    public let folder: URL
+    /// Where each of the model's parts is, as its manifest records it.
+    private let folders: [ModelPart: URL]
     /// The store root, where the tokenizer for this model lives or will be fetched.
     public let hub: URL
 
-    package init(model: Model, folder: URL, hub: URL) {
+    /// [LAW:parse-dont-validate] One folder for every part of `model` and no other, so a part
+    /// the model has is always somewhere.
+    package init(model: Model, folders: [ModelPart: URL], hub: URL) {
+        precondition(Set(folders.keys) == Set(model.parts), "\(model) is \(model.parts), not \(folders.keys.sorted { $0.rawValue < $1.rawValue })")
         self.model = model
-        self.folder = folder
+        self.folders = folders
         self.hub = hub
+    }
+
+    /// The folder holding the `.mlmodelc` bundles and what ships beside them.
+    public var folder: URL { folders[.weights]! }
+
+    /// Where `part` is. A part the model does not have is a bug in the asking, and traps.
+    public func folder(of part: ModelPart) -> URL {
+        guard let folder = folders[part] else { preconditionFailure("\(model) has no \(part)") }
+        return folder
     }
 }
 

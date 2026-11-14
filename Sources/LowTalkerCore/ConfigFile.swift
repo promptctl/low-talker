@@ -155,10 +155,10 @@ private struct ModeEntry: Decodable {
     ///
     /// An entry becomes a Mode only once the engine can be told its vocabulary, so no press
     /// ever begins in a mode whose every press would fail. [LAW:single-enforcer] The check is
-    /// `PromptEncoder`'s, the one the engine makes again at each press.
-    func mode(prompting: PromptEncoder) throws(ConfigError) -> Mode {
+    /// the engine's own (`VocabularyCheck`), the one it applies again at each press.
+    func mode(prompting: VocabularyCheck) throws(ConfigError) -> Mode {
         let mode = Mode(name: name, chord: chord ?? Hotkey.defaultChord, vocabulary: Vocabulary(vocabulary ?? []))
-        do throws(VocabularyError) { _ = try prompting.prompt(for: mode.vocabulary) } catch { throw .vocabulary(mode: mode.name, error) }
+        do throws(VocabularyError) { try prompting.check(mode.vocabulary) } catch { throw .vocabulary(mode: mode.name, error) }
         return mode
     }
 }

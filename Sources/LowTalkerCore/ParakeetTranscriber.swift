@@ -3,7 +3,8 @@ import Identity
 import os
 
 /// Parakeet TDT v3 on the Neural Engine, decoded by our own greedy TDT decoder over
-/// FluidInference's Core ML conversion.
+/// FluidInference's Core ML conversion, hearing a mode's vocabulary through our own CTC word
+/// spotter beside it.
 ///
 /// [LAW:no-shared-mutable-globals] Core ML models are not re-entered mid-decode: every pass
 /// goes through the `EngineTurns` the engine was loaded with, as WhisperKit's does.
@@ -16,18 +17,21 @@ public struct ParakeetTranscriber: Transcriber {
     private let turns: EngineTurns
     private var caller: EngineTurns.Caller
 
-    /// Loads an installed model onto the compute units and reads its vocabulary. Returns only
-    /// once the models are resident, so the first `transcribe` pays no load cost.
+    /// Loads an installed model and its spotter onto the compute units and reads their
+    /// vocabularies. Returns only once the models are resident, so the first `transcribe` pays no
+    /// load cost.
     public init(_ installed: InstalledModel, turns: EngineTurns) async throws {
         let network = try await CoreMLParakeet(folder: installed.folder)
         let vocabulary = try ParakeetVocabulary(json: Data(contentsOf: installed.folder.appending(path: ParakeetModel.vocabulary)))
-        self.init(model: installed.model, network: network, vocabulary: vocabulary, turns: turns)
+        let spotter = try await CoreMLSpotter(encoder: installed.folder(of: .spotterEncoder), head: installed.folder(of: .spotterHead))
+        let tokenizer = try SpotterTokenizer(json: Data(contentsOf: installed.folder(of: .spotterHead).appending(path: ParakeetModel.spotterTokenizer)))
+        self.init(model: installed.model, network: network, vocabulary: vocabulary, spotter: spotter, tokenizer: tokenizer, turns: turns)
     }
 
-    /// The engine over any network: a test hands it a scripted one.
-    init(model: Model, network: any ParakeetNetwork, vocabulary: ParakeetVocabulary, turns: EngineTurns) {
+    /// The engine over any networks: a test hands it scripted ones.
+    init(model: Model, network: any ParakeetNetwork, vocabulary: ParakeetVocabulary, spotter: any SpotterNetwork, tokenizer: SpotterTokenizer, turns: EngineTurns) {
         self.model = model
-        reader = ParakeetReader(network: network, vocabulary: vocabulary)
+        reader = ParakeetReader(network: network, vocabulary: vocabulary, spotter: spotter, tokenizer: tokenizer)
         self.turns = turns
         caller = .dictation
     }
@@ -41,27 +45,32 @@ public struct ParakeetTranscriber: Transcriber {
 
     /// Hears the utterance in passes as its audio arrives, as WhisperKit's engine does: each
     /// pass decodes from a few confirmed words back to the audio so far, and words two passes
-    /// agree on are confirmed. Parakeet takes no prompt, so a vocabulary with any term is
-    /// refused before audio is taken in, by the rule a config is checked with.
+    /// agree on are confirmed. Parakeet takes no prompt: the vocabulary's terms are spelled in
+    /// the spotter's pieces once, before audio is taken in, by the rule a config is checked
+    /// with, and every pass searches its audio for them.
     public func transcribe(
         _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
     ) async throws(TranscriptionFailure) -> Transcription {
-        // The refusal reads nothing on the compute units, so it takes no turn.
-        do throws(VocabularyError) { _ = try PromptEncoder.takingNone(model).prompt(for: vocabulary) } catch { throw .vocabulary(error) }
+        // Spelling reads nothing on the compute units, so it takes no turn.
+        let terms: [SpelledTerm]
+        do throws(VocabularyError) { terms = try reader.tokenizer.terms(vocabulary) } catch { throw .vocabulary(error) }
         let reader = reader
         return try await Hearing.transcribe(audio, margin: ParakeetReader.margin, context: ParakeetReader.context, pass: { pass async throws(TranscriptionFailure) in
-            try await turns.decode(as: caller) { () throws(TranscriptionFailure) in try reader.read(pass) }
+            try await turns.decode(as: caller) { () throws(TranscriptionFailure) in try reader.read(pass, hearing: terms) }
         }, partial: partial)
     }
 }
 
 /// One Parakeet pass: the audio from just before the cut to the pass's end, encoded window by
-/// window and decoded as one sequence of tokens, read as words.
+/// window and decoded as one sequence of tokens, read as words, with the terms the spotter finds
+/// in the same audio in place of the words they were heard as.
 struct ParakeetReader: Sendable {
     let network: any ParakeetNetwork
     let vocabulary: ParakeetVocabulary
+    let spotter: any SpotterNetwork
+    let tokenizer: SpotterTokenizer
 
     /// A settled word ends a second before the pass's end, and a first pass waits for a second
     /// of speech: the encoder attends across its whole window, so the last words it reads are
@@ -86,12 +95,18 @@ struct ParakeetReader: Sendable {
     /// over the prefix's audio are the prefix as told, the last with the punctuation this pass
     /// hears on it: a prefix word heard another way is then not heard twice, once confirmed and
     /// once as a new word. The words the lead-in heard before the cut are dropped by where they
-    /// sound.
-    func read(_ pass: Hearing.Pass) throws(TranscriptionFailure) -> [Transcript.Word] {
-        let (tokens, facts) = try decode(pass.samples, from: max(0, pass.cut - Self.leadIn))
-        Self.log.info("\(facts.description, privacy: .public)")
+    /// sound, and so are the terms the spotter found there.
+    func read(_ pass: Hearing.Pass, hearing terms: [SpelledTerm]) throws(TranscriptionFailure) -> [Transcript.Word] {
+        let start = max(0, pass.cut - Self.leadIn)
+        var (tokens, facts) = try decode(pass.samples, from: start)
+        let spotted = try spot(pass.samples, from: start, hearing: terms, facts: &facts)
+            .filter { HeardWord.sounds(from: $0.first!.first, to: $0.last!.last, after: pass.cut) }
+        facts.spotted = spotted.count
         let words: [Transcript.Word]
-        do throws(ParakeetReadingError) { words = try vocabulary.words(tokens, from: pass.cut) } catch { throw .unreadable(.parakeet(error)) }
+        do throws(ParakeetReadingError) {
+            words = HeardWord.merging(spotted, into: try vocabulary.words(tokens, from: pass.cut)).map(\.transcript)
+        } catch { throw .unreadable(.parakeet(error)) }
+        Self.log.info("\(facts.description, privacy: .public)")
         guard let last = pass.prefix.last else { return words }
         // The words that start before the last prefix word are hearings of the words before it,
         // and the next is the last's if it starts before that word's last frame ends, its
@@ -103,6 +118,30 @@ struct ParakeetReader: Sendable {
         // `Hearing` keeps a confirmed word's time and takes only the text a pass reads for it.
         let reheard = over.last.flatMap { Hearing.sameWord(last, $0) ? $0 : nil } ?? last
         return pass.prefix.dropLast() + [reheard] + words.dropFirst(over.count)
+    }
+
+    /// The `terms` the spotter finds in `samples` from `start` on, each as its words, timed from
+    /// the pass's first sample. No term is nothing to find, so its pass reads no audio for it.
+    func spot(_ samples: [Float], from start: Int, hearing terms: [SpelledTerm], facts: inout ParakeetPassFacts) throws(TranscriptionFailure) -> [[HeardWord]] {
+        guard !terms.isEmpty else { return [] }
+        var frames: [[Float]] = []
+        do {
+            for span in ParakeetWindow.spans(of: samples, from: start) {
+                if Task.isCancelled { throw TranscriptionFailure.cancelled }
+                frames += try spotter.logProbabilities(samples[span]).prefix(ParakeetWindow.frames(startedBy: span))
+            }
+        } catch let failure as TranscriptionFailure {
+            throw failure
+        } catch {
+            throw .engine(error)
+        }
+        let spotting = CTCWordSpotter(terms: terms, blank: SpotterClasses.blank, wordStarts: tokenizer.wordStarts).spot(frames)
+        facts.spotterFrames = frames.count
+        facts.candidates = spotting.candidates
+        facts.outscored = spotting.outscored
+        do throws(ParakeetReadingError) {
+            return try spotting.hits.map { hit throws(ParakeetReadingError) in try hit.words(from: start) }
+        } catch { throw .unreadable(.parakeet(error)) }
     }
 
     /// The tokens of `samples` from `start` on, and what the decode did.

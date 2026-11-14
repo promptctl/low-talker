@@ -32,6 +32,33 @@ public enum ParakeetWindow {
     /// The most tokens greedy decoding emits at one frame before it moves on
     /// (`max_symbols_per_step`).
     public static let maxSymbolsPerFrame = 10
+
+    /// [LAW:one-source-of-truth] The frames of a window that `span` holds: the ones starting at
+    /// one of its samples. The encoders also return the frame starting at the span's end, which
+    /// the next window holds as its first. The TDT decoder and the spotter both read a window's
+    /// frames by this.
+    static func frames(startedBy span: Range<Int>) -> Int {
+        (span.count + frameSamples - 1) / frameSamples
+    }
+}
+
+/// The CTC model Parakeet's word spotter reads: nvidia/parakeet-tdt_ctc-110m's encoder and CTC
+/// head, on the TDT encoder's grid of 80 ms frames in windows of `ParakeetWindow.samples`.
+///
+/// [LAW:effects-at-boundaries] The port the spotter is fed through. `CoreMLSpotter` is the one
+/// adapter; a test hands the reader scripted frames instead.
+public protocol SpotterNetwork: Sendable {
+    /// `samples`, at most `ParakeetWindow.samples` of them at 16 kHz, as one row of
+    /// log-probabilities per frame of speech the encoder counts, each row `SpotterClasses.count`
+    /// long, the blank last.
+    func logProbabilities(_ samples: ArraySlice<Float>) throws -> [[Float]]
+}
+
+/// The spotter's classes: the 1,024 pieces of its tokenizer's vocabulary, and the blank after
+/// them (`ctc_head_metadata.json`: `blank_id` 1024, `ctc_classes` 1025).
+public enum SpotterClasses {
+    public static let blank = 1_024
+    public static let count = 1_025
 }
 
 /// One window's encoder output: a frame per 80 ms of the audio the window held.

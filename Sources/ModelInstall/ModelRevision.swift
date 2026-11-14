@@ -2,41 +2,46 @@ import Foundation
 import LowTalkerCore
 import WhisperKit
 
-/// Which Hugging Face commits a model's parts come from: for a Whisper model, the
-/// whisperkit-coreml commit of its weights and the openai commit of the tokenizer they decode
-/// with; for Parakeet, the commit of its repo, whose weights ship their vocabulary.
+/// Which Hugging Face commits a model's parts come from, one for each part: for a Whisper
+/// model, the whisperkit-coreml commit of its weights and the openai commit of the tokenizer
+/// they decode with; for Parakeet, the commit of its own repo, whose weights ship their
+/// vocabulary, and of each repo its word spotter's halves come from.
 ///
 /// An install from huggingface.co fetches every part at one of these, so a store filled
 /// from the hub holds exactly the revision it was given. `upstream(of:)` names the one
 /// `main` points at now; a release keys its cached store by it and fetches at it.
 ///
-/// [LAW:types-are-the-program] The shape is the engine's: a Whisper revision cannot be made
-/// without its tokenizer's commit, and a Parakeet one has none to give.
-public enum ModelRevision: Hashable, Sendable, LosslessStringConvertible {
-    case weightsAndTokenizer(weights: Commit, tokenizer: Commit)
-    case weights(Commit)
+/// [LAW:types-are-the-program] [LAW:parse-dont-validate] A revision is made for a model, with a
+/// commit for each of that model's parts and no other, so its text is read back against the
+/// model it names: two models whose parts number the same can never read each other's.
+public struct ModelRevision: Hashable, Sendable, CustomStringConvertible {
+    public let model: Model
+    private let commits: [ModelPart: Commit]
 
-    public var weights: Commit {
-        switch self {
-        case .weightsAndTokenizer(let weights, _), .weights(let weights): weights
-        }
+    /// The revision of `model` at `commits`, or nil unless they name exactly its parts.
+    public init?(of model: Model, _ commits: [ModelPart: Commit]) {
+        guard Set(commits.keys) == Set(model.parts) else { return nil }
+        self.model = model
+        self.commits = commits
     }
 
-    /// `<weights commit>-<tokenizer commit>`, or the one commit, the form a cache key takes it in.
-    public var description: String {
-        switch self {
-        case .weightsAndTokenizer(let weights, let tokenizer): "\(weights)-\(tokenizer)"
-        case .weights(let weights): "\(weights)"
-        }
+    /// `part`'s commit. A part the model does not have is a bug in the asking, and traps.
+    public func commit(of part: ModelPart) -> Commit {
+        guard let commit = commits[part] else { preconditionFailure("\(model) has no \(part)") }
+        return commit
     }
 
-    public init?(_ description: String) {
+    /// `model`'s revision read from its text, its commits in the order of its parts.
+    public init?(of model: Model, _ description: String) {
         let commits = description.split(separator: "-", omittingEmptySubsequences: false).map { Commit(String($0)) }
-        switch commits.count {
-        case 1: guard let weights = commits[0] else { return nil }; self = .weights(weights)
-        case 2: guard let weights = commits[0], let tokenizer = commits[1] else { return nil }; self = .weightsAndTokenizer(weights: weights, tokenizer: tokenizer)
-        default: return nil
-        }
+        guard commits.count == model.parts.count, !commits.contains(nil) else { return nil }
+        self.init(of: model, Dictionary(uniqueKeysWithValues: zip(model.parts, commits.map { $0! })))
+    }
+
+    /// The commits joined by `-` in `ModelPart`'s order, the form a cache key takes it in: a
+    /// Whisper model's `<weights>-<tokenizer>`.
+    public var description: String {
+        ModelPart.allCases.compactMap { commits[$0]?.description }.joined(separator: "-")
     }
 
     /// A git commit hash as the hub writes it: 40 lowercase hex digits.
@@ -49,9 +54,9 @@ public enum ModelRevision: Hashable, Sendable, LosslessStringConvertible {
         }
     }
 
-    /// The revision `main` names now: the commit it points at in the weights repo, and, for a
-    /// Whisper model, in the tokenizer repo those weights' config picks. Asks the hub at most
-    /// three small questions and downloads no weights.
+    /// The revision `main` names now: the commit it points at in the weights repo, and in each
+    /// other part's repo: for a Whisper model, the tokenizer repo those weights' config picks.
+    /// Asks the hub at most three small questions and downloads no weights.
     public static func upstream(of model: Model) async throws -> ModelRevision {
         try await upstream(of: model, asking: Hub.get)
     }
@@ -60,15 +65,19 @@ public enum ModelRevision: Hashable, Sendable, LosslessStringConvertible {
     /// the asking handed in, so the answers can be ones captured from the hub.
     static func upstream(of model: Model, asking get: (URL) async throws -> Data) async throws -> ModelRevision {
         let weights = try await Hub.Revision.asking(get, for: "main", of: model.repo)
+        var commits: [ModelPart: Commit] = [.weights: weights.commit]
         switch model {
-        case .parakeet:
-            return .weights(weights.commit)
+        case .parakeet(let parakeet):
+            for part in model.parts where part != .weights {
+                commits[part] = try await Hub.Revision.asking(get, for: "main", of: parakeet.source(of: part)!.repo).commit
+            }
         case .whisperKit:
             let folder = try variantFolder(of: model, among: weights.files.map(\.path))
             let config = try await get(Hub.file("\(folder)/config.json", in: model.repo, at: weights.commit))
-            let tokenizer = try await Hub.Revision.asking(get, for: "main", of: ModelVariant(modelConfig: config).tokenizerRepo)
-            return .weightsAndTokenizer(weights: weights.commit, tokenizer: tokenizer.commit)
+            commits[.tokenizer] = try await Hub.Revision.asking(get, for: "main", of: ModelVariant(modelConfig: config).tokenizerRepo).commit
         }
+        // The commits are one per part by the loop above, so the revision is made.
+        return ModelRevision(of: model, commits)!
     }
 
     /// The repo folder that holds `model`, chosen from `files` as `WhisperKit.download`
@@ -98,8 +107,14 @@ public enum ModelRevision: Hashable, Sendable, LosslessStringConvertible {
 public struct ModelRevisions: Hashable, Sendable, LosslessStringConvertible {
     public let revisions: [Model: ModelRevision]
 
-    public init(_ revisions: [Model: ModelRevision]) {
-        self.revisions = revisions
+    /// Each revision under the model it was made for, so the one an install of a model takes is
+    /// that model's. Nil when two are for one model.
+    public init?(_ revisions: [ModelRevision]) {
+        var byModel: [Model: ModelRevision] = [:]
+        for revision in revisions {
+            guard byModel.updateValue(revision, forKey: revision.model) == nil else { return nil }
+        }
+        self.revisions = byModel
     }
 
     public var description: String {
@@ -107,20 +122,20 @@ public struct ModelRevisions: Hashable, Sendable, LosslessStringConvertible {
     }
 
     public init?(_ description: String) {
-        var revisions: [Model: ModelRevision] = [:]
+        var revisions: [ModelRevision] = []
         for entry in description.split(separator: "+", omittingEmptySubsequences: false) {
             let parts = entry.split(separator: "@", omittingEmptySubsequences: false)
-            guard parts.count == 2, let model = Model(rawValue: String(parts[0])), let revision = ModelRevision(String(parts[1])), revisions[model] == nil else { return nil }
-            revisions[model] = revision
+            guard parts.count == 2, let model = Model(rawValue: String(parts[0])), let revision = ModelRevision(of: model, String(parts[1])) else { return nil }
+            revisions.append(revision)
         }
         self.init(revisions)
     }
 
-    /// The revisions `main` names now for each of `models`.
+    /// The revisions `main` names now for each of `models`, which are distinct.
     public static func upstream(of models: [Model]) async throws -> ModelRevisions {
-        var revisions: [Model: ModelRevision] = [:]
-        for model in models { revisions[model] = try await ModelRevision.upstream(of: model) }
-        return ModelRevisions(revisions)
+        var revisions: [ModelRevision] = []
+        for model in models { revisions.append(try await ModelRevision.upstream(of: model)) }
+        return ModelRevisions(revisions)!
     }
 }
 

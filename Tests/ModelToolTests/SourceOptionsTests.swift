@@ -14,7 +14,7 @@ import Testing
         ("relative/store", "store"),
         ("huggingface.co", "store"),
         ("base.en@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))", "huggingFace"),
-        ("base.en@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))+parakeet-tdt-0.6b-v3@\(String(repeating: "c", count: 40))", "huggingFace"),
+        ("base.en@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))+parakeet-tdt-0.6b-v3@\(String(repeating: "c", count: 40))-\(String(repeating: "d", count: 40))-\(String(repeating: "e", count: 40))", "huggingFace"),
         ("\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))", "store"),
         (String(repeating: "a", count: 40), "store"),
     ])

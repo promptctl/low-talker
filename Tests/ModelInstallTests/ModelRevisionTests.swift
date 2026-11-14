@@ -9,18 +9,31 @@ import Testing
 @Suite struct ModelRevisionTests {
     static let weights = ModelRevision.Commit(String(repeating: "a", count: 40))!
     static let tokenizer = ModelRevision.Commit(String(repeating: "b", count: 40))!
-    static let revision = ModelRevision.weightsAndTokenizer(weights: weights, tokenizer: tokenizer)
+    static let head = ModelRevision.Commit(String(repeating: "c", count: 40))!
+    static let revision = ModelRevision(of: .default, [.weights: weights, .tokenizer: tokenizer])!
+    static let parakeet = ModelRevision(of: .parakeet(.tdtV3), [.weights: weights, .spotterEncoder: tokenizer, .spotterHead: head])!
 
     @Test func revisionReadsBackFromItsDescription() {
-        #expect(ModelRevision(Self.revision.description) == Self.revision)
-        #expect(ModelRevision(Self.weights.description) == .weights(Self.weights))
+        #expect("\(Self.revision)" == "\(Self.weights)-\(Self.tokenizer)")
+        #expect("\(Self.parakeet)" == "\(Self.weights)-\(Self.tokenizer)-\(Self.head)")
+        #expect(ModelRevision(of: .default, Self.revision.description) == Self.revision)
+        #expect(ModelRevision(of: .parakeet(.tdtV3), Self.parakeet.description) == Self.parakeet)
+    }
+
+    /// A revision is read against the model it names, so one model's text is never another's,
+    /// and a revision is made only with a commit for every part of its model.
+    @Test func aRevisionIsTheModelsOwn() {
+        #expect(ModelRevision(of: .parakeet(.tdtV3), Self.revision.description) == nil)
+        #expect(ModelRevision(of: .default, Self.parakeet.description) == nil)
+        #expect(ModelRevision(of: .parakeet(.tdtV3), [.weights: Self.weights, .tokenizer: Self.tokenizer, .spotterHead: Self.head]) == nil)
+        #expect(ModelRevision(of: .default, [.weights: Self.weights]) == nil)
     }
 
     /// The revisions of several models read back from the one text a cache key and
     /// `download --from` share, in name order whatever order they were given in.
-    @Test func revisionsReadBackFromTheirDescription() {
-        let revisions = ModelRevisions([.parakeet(.tdtV3): .weights(Self.weights), .default: Self.revision])
-        #expect("\(revisions)" == "large-v3-v20240930_turbo_632MB@\(Self.weights)-\(Self.tokenizer)+parakeet-tdt-0.6b-v3@\(Self.weights)")
+    @Test func revisionsReadBackFromTheirDescription() throws {
+        let revisions = try #require(ModelRevisions([Self.parakeet, Self.revision]))
+        #expect("\(revisions)" == "large-v3-v20240930_turbo_632MB@\(Self.weights)-\(Self.tokenizer)+parakeet-tdt-0.6b-v3@\(Self.weights)-\(Self.tokenizer)-\(Self.head)")
         #expect(ModelRevisions(revisions.description) == revisions)
     }
 
@@ -36,8 +49,8 @@ import Testing
         "\(String(repeating: "a", count: 40))-\(String(repeating: "ｂ", count: 40))",
         "\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))-\(String(repeating: "c", count: 40))",
     ])
-    func revisionRefusesWhatIsNotOneOrTwoCommits(text: String) {
-        #expect(ModelRevision(text) == nil)
+    func revisionRefusesWhatIsNotAWhisperModelsTwoCommits(text: String) {
+        #expect(ModelRevision(of: .default, text) == nil)
     }
 
     /// The three questions, answered as huggingface.co answered them on 2026-10-04 (siblings
@@ -64,21 +77,30 @@ import Testing
         let revision = try await ModelRevision.upstream(of: "large-v3-v20240930_turbo_632MB") { url in
             try Data(#require(answers[url.absoluteString], "asked \(url)").utf8)
         }
-        #expect(revision == ModelRevision("\(weights)-\(tokenizer)"))
+        #expect(revision == ModelRevision(of: "large-v3-v20240930_turbo_632MB", "\(weights)-\(tokenizer)"))
     }
 
-    /// Parakeet's revision is its repo's one commit, asked once.
-    @Test func upstreamOfParakeetIsItsRepoCommit() async throws {
+    /// Parakeet's revision is the commit of its repo and of each repo its spotter's halves come
+    /// from, each asked once; answered as huggingface.co answered on 2026-11-14 (siblings cut).
+    @Test func upstreamOfParakeetIsEachRepoCommit() async throws {
         let commit = "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe"
+        let encoder = "9bc92ead6e8f17eca92a869fd578ae76842b82ba"
+        let head = "accdafd8cf8a2ff1cabe3c11e54416b405d409aa"
         let answers = [
             "https://huggingface.co/api/models/FluidInference/parakeet-tdt-0.6b-v3-coreml/revision/main?blobs=true": """
                 {"id": "FluidInference/parakeet-tdt-0.6b-v3-coreml", "sha": "\(commit)", "siblings": [{"rfilename": "parakeet_v3_vocab.json", "size": 151122}]}
+                """,
+            "https://huggingface.co/api/models/FluidInference/parakeet-tdt-ctc-110m-coreml/revision/main?blobs=true": """
+                {"id": "FluidInference/parakeet-tdt-ctc-110m-coreml", "sha": "\(encoder)", "siblings": [{"rfilename": "parakeet_vocab.json", "size": 18136}]}
+                """,
+            "https://huggingface.co/api/models/FluidInference/parakeet-ctc-110m-coreml/revision/main?blobs=true": """
+                {"id": "FluidInference/parakeet-ctc-110m-coreml", "sha": "\(head)", "siblings": [{"rfilename": "tokenizer.json", "size": 360106}]}
                 """,
         ]
         let revision = try await ModelRevision.upstream(of: .parakeet(.tdtV3)) { url in
             try Data(#require(answers[url.absoluteString], "asked \(url)").utf8)
         }
-        #expect(revision == ModelRevision(commit))
+        #expect(revision == ModelRevision(of: .parakeet(.tdtV3), "\(commit)-\(encoder)-\(head)"))
     }
 
     /// Parakeet's manifest is the files of the four models the engine loads and its vocabulary,
@@ -100,7 +122,7 @@ import Testing
               {"rfilename": "parakeet_vocab.json", "size": 151122}]}
             """.utf8))
         let store = URL(filePath: "/store")
-        let manifest = try listing.manifest(of: nil, in: store.appending(path: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml"), store: store, matching: ParakeetModel.hubGlobs)
+        let manifest = try listing.manifest(of: nil, in: store.appending(path: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml"), store: store, matching: ParakeetModel.tdtV3.hubGlobs(of: .weights))
         #expect(manifest == (try Manifest(folder: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml", files: [
             .init(path: "Decoder.mlmodelc/weights/weight.bin", size: 23604992),
             .init(path: "Encoder_v2.mlmodelc/model.mil", size: 1002653),
@@ -108,6 +130,31 @@ import Testing
             .init(path: "JointDecision.mlmodelc/coremldata.bin", size: 534),
             .init(path: "Preprocessor.mlmodelc/metadata.json", size: 2841),
             .init(path: "parakeet_v3_vocab.json", size: 151122),
+        ])))
+    }
+
+    /// The spotter's head is the CTC head and the tokenizer of its repo, and none of the repo's
+    /// 6-bit encoder, its mel model, or the conversion code beside them; the listing is cut from
+    /// huggingface.co's at accdafd8 on 2026-11-14.
+    @Test func theSpotterHeadsManifestTakesOnlyTheHeadAndItsTokenizer() throws {
+        let listing = try JSONDecoder().decode(Hub.Revision.self, from: Data("""
+            {"sha": "\(Self.head)", "siblings": [
+              {"rfilename": "AudioEncoder.mlmodelc/weights/weight.bin", "size": 100778304},
+              {"rfilename": "CtcHead.mlmodelc/model.mil", "size": 3605},
+              {"rfilename": "CtcHead.mlmodelc/weights/weight.bin", "size": 1051842},
+              {"rfilename": "CtcHead.mlpackage/Manifest.json", "size": 617},
+              {"rfilename": "MelSpectrogram.mlmodelc/model.mil", "size": 12584},
+              {"rfilename": "convert/parakeet-tdt-ctc-110m/coreml/convert-parakeet.py", "size": 26577},
+              {"rfilename": "tokenizer.json", "size": 360106},
+              {"rfilename": "vocab.json", "size": 16086}]}
+            """.utf8))
+        let store = URL(filePath: "/store")
+        let folder = "models/FluidInference/parakeet-ctc-110m-coreml"
+        let manifest = try listing.manifest(of: nil, in: store.appending(path: folder), store: store, matching: ParakeetModel.tdtV3.hubGlobs(of: .spotterHead))
+        #expect(manifest == (try Manifest(folder: folder, files: [
+            .init(path: "CtcHead.mlmodelc/model.mil", size: 3605),
+            .init(path: "CtcHead.mlmodelc/weights/weight.bin", size: 1051842),
+            .init(path: "tokenizer.json", size: 360106),
         ])))
     }
 

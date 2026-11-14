@@ -1,6 +1,7 @@
 import Foundation
 @testable import LowTalkerCore
 import LowTalkerCoreFakes
+import TestProbes
 import Testing
 
 extension PromptEncoder {
@@ -33,39 +34,40 @@ extension Prompting {
     /// A store with no model in it fails the load as the model's, never as the config's.
     @Test func aStoreWithNoModelIsUnavailablePrompts() async throws {
         let empty = URL(filePath: NSTemporaryDirectory()).appending(path: "low-talker-\(UUID().uuidString)")
-        let installed = InstalledModel(model: .default, folder: empty.appending(path: "model"), hub: empty)
-        let error = await #expect(throws: PromptsUnavailable.self) { try await PromptEncoder.load(installed) }
+        let installed = InstalledModel(model: .default, folders: [.weights: empty.appending(path: "model"), .tokenizer: empty.appending(path: "tokenizer")], hub: empty)
+        let error = await #expect(throws: PromptsUnavailable.self) { try await VocabularyCheck.load(installed) }
         #expect(error?.description.hasPrefix("the model's tokenizer did not load, so no mode's vocabulary can be checked: ") == true)
     }
 
-    /// An engine that hears no vocabulary is told none, and refuses any term by its model's name.
-    @Test func anEngineTakingNoVocabularyRefusesEveryTerm() throws {
-        let parakeet = PromptEncoder.takingNone(.parakeet(.tdtV3))
-        #expect(try parakeet.prompt(for: .empty) == [])
-        #expect(throws: VocabularyError.engineTakesNone(.parakeet(.tdtV3))) { try parakeet.prompt(for: Vocabulary([try Vocabulary.Term("Fryslie")])) }
-    }
-
-    /// Parakeet's check needs nothing from the store but the model being there: it reads no
-    /// tokenizer.
-    @Test func aParakeetModelLoadsTheRefusalWithNoTokenizer() async throws {
-        let empty = URL(filePath: NSTemporaryDirectory()).appending(path: "low-talker-\(UUID().uuidString)")
-        let installed = InstalledModel(model: .parakeet(.tdtV3), folder: empty.appending(path: "model"), hub: empty)
-        await #expect(throws: VocabularyError.engineTakesNone(.parakeet(.tdtV3))) { try await PromptEncoder.load(installed).prompt(for: Vocabulary([try Vocabulary.Term("Fryslie")])) }
+    /// Parakeet's check is its spotter's tokenizer, read from the spotter's head with no Core ML
+    /// load: a term it can spell is taken and one it cannot is refused naming what it lacks.
+    @Test func aParakeetModelIsCheckedByItsSpottersTokenizer() async throws {
+        let scratch = try ScratchStore(files: [:])
+        let folders = try scratch.installParakeet([
+            .weights: .init(files: [ParakeetModel.vocabulary: "{}"]),
+            .spotterEncoder: .init(files: ["\(ParakeetModel.spotterEncoder)/model.mil": "encoder"]),
+            .spotterHead: .init(files: [ParakeetModel.spotterTokenizer: String(decoding: try Data(contentsOf: Captured.url("tokenizer.json")), as: UTF8.self)]),
+        ])
+        let check = try await VocabularyCheck.load(try ModelStore(directory: scratch.root).installedModel(.parakeet(.tdtV3)))
+        try check.check(Vocabulary([try Vocabulary.Term("Brynleigh Fryslie")]))
+        #expect(throws: VocabularyError.unspellable(term: "K8s", piece: "8")) { try check.check(Vocabulary([try Vocabulary.Term("K8s")])) }
+        try FileManager.default.removeItem(at: folders[.spotterHead]!.appending(path: ParakeetModel.spotterTokenizer))
+        await #expect(throws: PromptsUnavailable.self) { try await VocabularyCheck.load(InstalledModel(model: .parakeet(.tdtV3), folders: folders, hub: scratch.root)) }
     }
 
     /// [LAW:nothing-unseen] The read's event: how long it took, and each model it failed for.
     @Test func theReadIsToldHowLongItTookAndWhichModelsFailed() {
-        let read = Prompting([.default: .success(.countingWords()), .parakeet(.tdtV3): .failure(PromptsUnavailable(why: "no vocabulary"))])
+        let read = Prompting([.default: .success(VocabularyCheck(.countingWords())), .parakeet(.tdtV3): .failure(PromptsUnavailable(why: "no vocabulary"))])
         #expect("\(Prompting.Load(after: .milliseconds(412), prompting: read))" == "prompt tokenizers: read in 412 ms; parakeet-tdt-0.6b-v3: the model's tokenizer did not load, so no mode's vocabulary can be checked: no vocabulary")
-        #expect("\(Prompting.Load(after: .milliseconds(9), prompting: Prompting([.default: .success(.countingWords())])))" == "prompt tokenizers: read in 9 ms")
+        #expect("\(Prompting.Load(after: .milliseconds(9), prompting: Prompting([.default: .success(VocabularyCheck(.countingWords()))])))" == "prompt tokenizers: read in 9 ms")
     }
 
     /// A model the build does not carry is refused by name, with the ones it does; a model whose
     /// check did not load refuses only the configs that name it.
     @Test func aModelIsCheckedOnlyByItsOwnEncoder() throws {
-        let read = Prompting([.default: .success(.countingWords()), .parakeet(.tdtV3): .failure(PromptsUnavailable(why: "no vocabulary"))])
+        let read = Prompting([.default: .success(VocabularyCheck(.countingWords())), .parakeet(.tdtV3): .failure(PromptsUnavailable(why: "no vocabulary"))])
         #expect(throws: ConfigError.modelNotCarried("base.en", carried: [.default, .parakeet(.tdtV3)])) { try read.encoder(for: "base.en") }
         #expect(throws: ConfigError.prompts(.parakeet(.tdtV3), PromptsUnavailable(why: "no vocabulary"))) { try read.encoder(for: .parakeet(.tdtV3)) }
-        #expect(try read.encoder(for: .default).prompt(for: .empty) == [])
+        try read.encoder(for: .default).check(.empty)
     }
 }

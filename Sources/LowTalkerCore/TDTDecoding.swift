@@ -40,7 +40,7 @@ struct TDTDecoding {
     /// the window's whose span holds the sample it starts at: the encoder also returns the
     /// frame starting at the span's end, which the next window decodes as its first.
     mutating func decode(_ window: EncodedWindow, over span: Range<Int>) throws {
-        let frames = window.frames.prefix((span.count + ParakeetWindow.frameSamples - 1) / ParakeetWindow.frameSamples)
+        let frames = window.frames.prefix(ParakeetWindow.frames(startedBy: span))
         facts.windows += 1
         facts.frames += frames.count
         var frame = covered
@@ -88,8 +88,16 @@ struct ParakeetPassFacts: Equatable, Sendable, CustomStringConvertible {
     var tokens = 0
     /// Frames left because they had emitted `maxSymbolsPerFrame` tokens.
     var forcedAdvances = 0
+    /// Frames the spotter searched: none when the vocabulary has no term.
+    var spotterFrames = 0
+    /// The terms the spotter's search ended on, every end frame counted.
+    var candidates = 0
+    /// Terms found that the greedy reading of the same frames outscored.
+    var outscored = 0
+    /// Terms put in place of the words they were heard as, from the cut on.
+    var spotted = 0
 
     var description: String {
-        "parakeet pass: \(samples) samples in \(windows) windows, \(frames) frames, \(tokens) tokens, \(blanks) blanks, \(forcedAdvances) forced advances"
+        "parakeet pass: \(samples) samples in \(windows) windows, \(frames) frames, \(tokens) tokens, \(blanks) blanks, \(forcedAdvances) forced advances; spotter: \(spotterFrames) frames, \(candidates) candidates, \(outscored) outscored, \(spotted) spotted"
     }
 }

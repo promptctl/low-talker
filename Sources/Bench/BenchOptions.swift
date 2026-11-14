@@ -5,9 +5,9 @@ import LowTalkerCore
 /// Everything but where the fixtures and the models are read from, which is the surface's to
 /// say: the app reads them from folders a person picked.
 ///
-/// [LAW:parse-dont-validate] Made only through `init`, which refuses an empty list, a run count
-/// under one, and a vocabulary a model refuses without reading a file, so a plan in hand
-/// always measures something and no model loads only to fail every hold.
+/// [LAW:parse-dont-validate] Made only through `init`, which refuses an empty list and a run
+/// count under one, so a plan in hand always measures something. A vocabulary is the engine's to
+/// refuse, from the files it loads, at the first hold.
 public struct BenchPlan: Equatable, Sendable {
     public let models: [Model]
     public let arrivals: [LatencyHarness.Arrival]
@@ -28,9 +28,6 @@ public struct BenchPlan: Equatable, Sendable {
         guard !arrivals.isEmpty else { throw .nothingChosen("delivery") }
         guard !servings.isEmpty else { throw .nothingChosen("serving") }
         guard runs >= 1 else { throw .tooFewRuns(runs) }
-        for model in models {
-            do throws(VocabularyError) { _ = try PromptEncoder.withoutFiles(model)?.prompt(for: vocabulary) } catch { throw .vocabulary(error) }
-        }
         self.models = models
         self.arrivals = arrivals
         self.servings = servings
@@ -66,13 +63,11 @@ public struct BenchOptions: Equatable, Sendable {
 public enum BenchOptionsError: Error, Equatable, CustomStringConvertible {
     case nothingChosen(String)
     case tooFewRuns(Int)
-    case vocabulary(VocabularyError)
 
     public var description: String {
         switch self {
         case .nothingChosen(let what): "choose at least one \(what)"
         case .tooFewRuns(let runs): "runs must be at least 1, not \(runs)"
-        case .vocabulary(let error): "\(error)"
         }
     }
 }

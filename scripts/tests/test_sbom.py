@@ -240,3 +240,20 @@ class ModelComponentsTests(unittest.TestCase):
         with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
             self.components("m weights tokenizer\\n", rules)
         self.assertIn("the model's parts are weights, tokenizer", stderr.getvalue())
+
+    def test_the_spotters_halves_are_models_confirmed_by_their_own_manifests(self):
+        licensed = {"license": "CC-BY-4.0", "licenseFile": "sbom/licenses/parakeet-ctc-110m-coreml.txt"}
+        rules = {"m": {"weights": {"repo": "o/weights", "layout": "repo", **licensed},
+                       "spotter-encoder": {"repo": "o/encoder", **licensed},
+                       "spotter-head": {"repo": "o/head", **licensed}}}
+        with tempfile.TemporaryDirectory() as folder:
+            store = Path(folder) / "store"
+            for part, repo in [("spotter-encoder", "encoder"), ("spotter-head", "head")]:
+                (store / "installed" / part).mkdir(parents=True)
+                (store / "installed" / part / "m.json").write_text(f'{{"folder": "models/o/{repo}", "files": []}}')
+            tool = Path(folder) / "model-tool"
+            tool.write_text("#!/bin/sh\nprintf 'm weights spotter-encoder spotter-head\\n'\n")
+            tool.chmod(0o755)
+            components, confirmed = sbom.model_components(tool, rules, store)
+        self.assertEqual([(c["name"], c["type"]) for c in components], [("weights", "machine-learning-model"), ("encoder", "machine-learning-model"), ("head", "machine-learning-model")])
+        self.assertEqual(confirmed, ["m spotter-encoder", "m spotter-head"])

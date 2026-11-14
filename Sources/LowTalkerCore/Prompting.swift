@@ -1,3 +1,45 @@
+import Foundation
+
+/// Whether a vocabulary can be told to a model's engine, read from the store with no Core ML
+/// load, so a config's modes are checked long before the model is resident.
+///
+/// [LAW:single-enforcer] Each engine's own rule, the one its engine applies again at each press:
+/// Whisper's prompt limit, through the `PromptEncoder` its pipeline makes, and Parakeet's
+/// spelling of every term in its spotter's pieces, through the `SpotterTokenizer` its engine
+/// spells the terms with.
+public struct VocabularyCheck: Sendable {
+    private let check: @Sendable (Vocabulary) throws(VocabularyError) -> Void
+
+    public init(_ encoder: PromptEncoder) {
+        check = { vocabulary throws(VocabularyError) in _ = try encoder.prompt(for: vocabulary) }
+    }
+
+    public init(_ tokenizer: SpotterTokenizer) {
+        check = { vocabulary throws(VocabularyError) in _ = try tokenizer.terms(vocabulary) }
+    }
+
+    /// Nothing, or why the engine cannot be told `vocabulary`.
+    public func check(_ vocabulary: Vocabulary) throws(VocabularyError) {
+        try check(vocabulary)
+    }
+
+    /// The check for `installed`, from the files its engine reads a vocabulary through.
+    ///
+    /// [LAW:types-are-the-program] Exhaustive, so an engine added to `Model` says here how it
+    /// is told a vocabulary before it compiles.
+    public static func load(_ installed: InstalledModel) async throws(PromptsUnavailable) -> VocabularyCheck {
+        switch installed.model {
+        case .whisperKit:
+            return VocabularyCheck(try await PromptEncoder.load(installed))
+        case .parakeet:
+            let file = installed.folder(of: .spotterHead).appending(path: ParakeetModel.spotterTokenizer)
+            let json: Data
+            do { json = try Data(contentsOf: file) } catch { throw PromptsUnavailable(why: "\(error)") }
+            return VocabularyCheck(try SpotterTokenizer(json: json))
+        }
+    }
+}
+
 /// How each model the app carries is told a vocabulary, read before any of them is resident,
 /// so a config's modes are checked against the model the config names.
 ///
@@ -5,9 +47,9 @@
 /// only a config that names it, and a model the app does not carry has no check at all, which
 /// is the config's refusal to name it.
 public struct Prompting: Sendable {
-    public let encoders: [Model: Result<PromptEncoder, PromptsUnavailable>]
+    public let encoders: [Model: Result<VocabularyCheck, PromptsUnavailable>]
 
-    public init(_ encoders: [Model: Result<PromptEncoder, PromptsUnavailable>]) {
+    public init(_ encoders: [Model: Result<VocabularyCheck, PromptsUnavailable>]) {
         self.encoders = encoders
     }
 
@@ -16,8 +58,8 @@ public struct Prompting: Sendable {
         encoders.keys.sorted { $0.rawValue < $1.rawValue }
     }
 
-    /// `model`'s encoder, or why a config naming it cannot be checked.
-    public func encoder(for model: Model) throws(ConfigError) -> PromptEncoder {
+    /// `model`'s check, or why a config naming it cannot be checked.
+    public func encoder(for model: Model) throws(ConfigError) -> VocabularyCheck {
         guard let encoder = encoders[model] else { throw .modelNotCarried(model, carried: models) }
         do { return try encoder.get() } catch { throw .prompts(model, error) }
     }
