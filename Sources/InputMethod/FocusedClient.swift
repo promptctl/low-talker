@@ -419,8 +419,8 @@ public final class Client: CustomStringConvertible {
     }
 
     /// The selection and the text around it, or why the client cannot be read: asked of the client
-    /// each time, as `field` is, and never kept. Before the selection it reaches back `reaching`
-    /// units where that is further than a read goes.
+    /// each time, as `field` is, and never kept. Before the selection it reaches back a read's
+    /// bound past `reaching` units.
     ///
     /// [LAW:single-enforcer] The one edge where a read reaches the log, so no read goes unsaid. The
     /// line carries the event and never the text, which is the person's words.

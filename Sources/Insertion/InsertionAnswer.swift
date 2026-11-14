@@ -88,7 +88,8 @@ public enum InsertionAnswer: Codable, Equatable, Sendable {
     /// window is worse than one naming none. [FRAMING:representation]
     ///
     /// `landed` is the text as it went in, fitted to the field, and `replaced` how many characters
-    /// of the field's own it took the place of, nil where the field could not be read. Both are
+    /// it took the place of, the selection or the words a take-back named, nil where the field
+    /// could not be read. Both are
     /// absent from an input method of a build before it fitted words, which commits the text as
     /// sent and says nothing of the field; `characters` is said for an app of that build.
     case inserted(characters: Int, into: String, landed: String?, replaced: Int?)
@@ -161,7 +162,8 @@ public struct NotYetTaken: Error, Equatable, Sendable, InsertWarning {
 }
 
 /// Words committed at the cursor: the text as it landed, the app whose client took it, and how
-/// many characters of the field's own it took the place of, nil where the field could not be read.
+/// many characters it took the place of, the selection or the words a take-back named, nil where
+/// the field could not be read.
 public struct Inserted: Equatable, Sendable {
     public let text: String
     public let into: String

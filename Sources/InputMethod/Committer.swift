@@ -228,7 +228,7 @@ public nonisolated struct Ended: Sendable, CustomStringConvertible {
         /// The port answered while the cursor was being decided, so nothing was committed.
         case letGoAfterDeciding(deciding: Duration, seen: String)
         case refused(Refusal, deciding: Duration, late: Bool)
-        /// `replaced` characters of the field's own, nil where it could not be read, which
+        /// `replaced` characters, the selection's or a take-back's, nil where the field could not be read, which
         /// `fitting` then says why.
         case committed(characters: Int, into: String, fitting: Fitting.Outcome, replaced: Int?, deciding: Duration,
                        committing: Duration, late: Bool)

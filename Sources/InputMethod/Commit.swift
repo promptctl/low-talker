@@ -2,7 +2,8 @@ import Foundation
 import Insertion
 
 /// One commit decided against the field: the words as they go in, the range they go in at, what
-/// fitting did to them, and how many characters of the field's own they take the place of.
+/// fitting did to them, and how many characters they take the place of: the selection, or the
+/// words a take-back names.
 ///
 /// [LAW:effects-at-boundaries] Pure over one reading of the field. `Client` reads the field and
 /// makes the `insertText` this decides.
