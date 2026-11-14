@@ -127,6 +127,29 @@ import Testing
         #expect(event == .unreadable(reason, asks: 1))
     }
 
+    /// A selection no field could hold is unreadable before any text is asked for.
+    @Test(arguments: [NSRange(location: -1, length: 0), NSRange(location: 0, length: -1), NSRange(location: Int.max - 500, length: 0)])
+    func aSelectionNoFieldCouldHoldIsUnreadable(_ selection: NSRange) {
+        let field = Self.field(.appKit, holding: "alpha", selecting: selection)
+
+        let (reading, event) = FieldReading.read(from: field)
+
+        #expect(reading == .unreadable(.impossibleSelection(selection)))
+        #expect(field.calls == [.givesDocumentAccess, .selectedRange])
+        #expect(event == .unreadable(.impossibleSelection(selection), asks: 0))
+    }
+
+    /// A probe ending inside an emoji is answered short of it, and the search goes on to the whole
+    /// emoji, under a client answering half a surrogate pair as it is.
+    @Test func anEmojiAfterTheCaretIsReadWhole() {
+        let field = Self.field(.appKit, holding: "alpha 👍", selecting: NSRange(location: 6, length: 0))
+
+        let (reading, _) = FieldReading.read(from: field)
+
+        #expect(reading == .readable(DocumentContext(selection: NSRange(location: 6, length: 0), selected: "", before: "alpha ", after: "👍")))
+        #expect(field.calls == [.givesDocumentAccess, .selectedRange, Self.text(0, 6)] + [1_000, 1, 2, 4, 3].map { Self.text(6, $0) })
+    }
+
     /// A client giving a selection and no text over it contradicts itself at the first text asked.
     @Test func aSelectionWithoutTextContradictsIt() {
         let field = FakeTextInputClient(.iTerm2SelectionOnly, holding: "alpha bravo")

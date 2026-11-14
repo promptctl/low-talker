@@ -36,15 +36,18 @@ public nonisolated enum Unreadable: Error, Equatable, Sendable, CustomStringConv
     case noDocumentAccess
     /// It gives document access, and its `selectedRange` answered NSNotFound.
     case selectionNotFound
+    /// Its `selectedRange` answered a range no field could hold: negative, or ending so near
+    /// `Int.max` that the read after it is no range.
+    case impossibleSelection(NSRange)
     /// Its answers disagree with each other: a range its own selection puts in the field answered
-    /// nothing, or text of another length (`answered` units). A selection no field could hold is
-    /// itself the range asked.
+    /// nothing, or text of another length (`answered` units).
     case contradicted(asked: NSRange, answered: Int?)
 
     public var description: String {
         switch self {
         case .noDocumentAccess: "it gives no document access"
         case .selectionNotFound: "its selection is NSNotFound"
+        case let .impossibleSelection(selection): "its selection is \(selection), which no field could hold"
         case let .contradicted(asked, answered):
             "it answered \(answered.map { "\($0) units" } ?? "nothing") for \(asked), which its selection puts in the field"
         }
@@ -118,8 +121,8 @@ public extension FieldReading {
             let selection = client.selectedRange()
             guard selection.location != NSNotFound, selection.length != NSNotFound else { return .failure(.selectionNotFound) }
             let (end, overflowed) = selection.location.addingReportingOverflow(selection.length)
-            guard selection.location >= 0, selection.length >= 0, !overflowed else {
-                return .failure(.contradicted(asked: selection, answered: nil))
+            guard selection.location >= 0, selection.length >= 0, !overflowed, end <= Int.max - bound else {
+                return .failure(.impossibleSelection(selection))
             }
             let start = max(0, selection.location - bound)
             return exactly(selection).flatMap { selected in

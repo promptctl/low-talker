@@ -225,10 +225,10 @@ public final class FakeTextInputClient: TextInputClient {
         case .toTheField:
             let field = answered.field as NSString
             if Self.holds(range, in: field as String) { return field.substring(with: range) }
-            let startsInTheField = range.location >= 0 && range.location <= field.length
+            let runsPastTheEnd = range.location >= 0 && range.length >= 0 && range.location <= field.length
             return switch profile.pastTheEnd {
             case .answersNothing: nil
-            case .answersWhatIsThere: startsInTheField ? field.substring(from: range.location) : nil
+            case .answersWhatIsThere: runsPastTheEnd ? field.substring(from: range.location) : nil
             }
         }
     }
