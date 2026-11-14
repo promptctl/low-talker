@@ -22,9 +22,9 @@ import Testing
     }
 
     static let cases: [Case] = [
-        Case(name: "the field's start", before: "", after: "", transcript: " hello world.", fitted: "Hello world.", rules: [.capitalized]),
-        Case(name: "mid-line, the engine's space replaced by one", before: "Say", after: "", transcript: " hello", fitted: " hello", rules: [.spacedBefore]),
-        Case(name: "mid-line after a space", before: "Say ", after: "", transcript: " hello", fitted: "hello", rules: []),
+        Case(name: "the field's start", before: "", after: "", transcript: " hello world.", fitted: "Hello world.", rules: [.trimmed, .capitalized]),
+        Case(name: "mid-line, the engine's space replaced by one", before: "Say", after: "", transcript: " hello", fitted: " hello", rules: [.trimmed, .spacedBefore]),
+        Case(name: "mid-line after a space", before: "Say ", after: "", transcript: " hello", fitted: "hello", rules: [.trimmed]),
         Case(name: "after a newline", before: "Hi.\n", after: "", transcript: "next", fitted: "Next", rules: [.capitalized]),
         Case(name: "after a newline and indentation", before: "Hi\n  ", after: "", transcript: "next", fitted: "Next", rules: [.capitalized]),
         Case(name: "after a period", before: "Hi.", after: "", transcript: "there", fitted: " There", rules: [.capitalized, .spacedBefore]),
@@ -44,12 +44,25 @@ import Testing
         Case(name: "after an opening bracket", before: "note (", after: "", transcript: "see", fitted: "see", rules: []),
         Case(name: "after an opening curly quote", before: "He said “", after: "", transcript: "go", fitted: "go", rules: []),
         Case(name: "after an opening straight quote", before: "He said \"", after: "", transcript: "go", fitted: "go", rules: []),
+        Case(name: "after a sentence and an opening bracket", before: "Done. (", after: "", transcript: "see below", fitted: "See below", rules: [.capitalized]),
+        Case(name: "after a sentence and an opening curly quote", before: "Hi. “", after: "", transcript: "go", fitted: "Go", rules: [.capitalized]),
+        Case(name: "after a sentence and an opening straight quote", before: "Hi. \"", after: "", transcript: "go", fitted: "Go", rules: [.capitalized]),
+        Case(name: "a bracket opening the field", before: "(", after: "", transcript: "see", fitted: "See", rules: [.capitalized]),
         Case(name: "a quote opening the field", before: "", after: "", transcript: "\"wow\"", fitted: "\"Wow\"", rules: [.capitalized]),
+        Case(name: "an abbreviation before a sentence that continues", before: "We met at 9 ", after: "and left", transcript: "a.m.", fitted: "a.m. ", rules: [.spacedAfter]),
+        Case(name: "after a hyphen in a word", before: "e-", after: "", transcript: "mail", fitted: "mail", rules: []),
+        Case(name: "after a dash between words", before: "well -", after: "", transcript: "maybe", fitted: " maybe", rules: [.spacedBefore]),
+        Case(name: "after a currency sign", before: "costs $", after: "", transcript: "5", fitted: "5", rules: []),
+        Case(name: "after a slash", before: "src/", after: "", transcript: "main", fitted: "main", rules: []),
+        Case(name: "after a hash", before: "in #", after: "", transcript: "general", fitted: "general", rules: []),
+        Case(name: "between Chinese characters", before: "你好", after: "吗", transcript: "世界", fitted: "世界", rules: []),
+        Case(name: "after Japanese kana", before: "今日は", after: "", transcript: "晴れ", fitted: "晴れ", rules: []),
+        Case(name: "a ligature first, title-cased", before: "", after: "", transcript: "ﬁne", fitted: "Fine", rules: [.capitalized]),
         Case(name: "starting with a comma", before: "Well", after: "", transcript: ", then", fitted: ", then", rules: []),
         Case(name: "a number first", before: "", after: "", transcript: "3 apples", fitted: "3 apples", rules: []),
         Case(name: "already capital", before: "", after: "", transcript: "Hello", fitted: "Hello", rules: []),
         Case(name: "after an emoji", before: "👍", after: "", transcript: "nice", fitted: " nice", rules: [.spacedBefore]),
-        Case(name: "blank", before: "Hi", after: "there", transcript: "  ", fitted: "", rules: []),
+        Case(name: "blank", before: "Hi", after: "there", transcript: "  ", fitted: "", rules: [.trimmed]),
         Case(name: "a selection replaced, judged by what is around it", before: "Hi. ", selected: "world", after: "", transcript: "there", fitted: "There", rules: [.capitalized]),
         Case(name: "a selection replaced mid-sentence", before: "a", selected: "big", after: "dog", transcript: "small.", fitted: " small ", rules: [.closingDropped, .spacedBefore, .spacedAfter]),
     ]
@@ -69,8 +82,8 @@ import Testing
 
     /// What the commit's event says: the rules in the order they apply, or the reason.
     @Test func theOutcomeSaysWhatFittingDid() {
-        #expect(Fitting.Outcome.fitted([.spacedAfter, .closingDropped, .capitalized, .spacedBefore]).description
-            == "fitted: closing mark dropped, capitalized, space before, space after")
+        #expect(Fitting.Outcome.fitted([.spacedAfter, .closingDropped, .capitalized, .spacedBefore, .trimmed]).description
+            == "fitted: edge whitespace trimmed, closing mark dropped, capitalized, space before, space after")
         #expect(Fitting.Outcome.fitted([]).description == "fitted, unchanged")
         #expect(Fitting.Outcome.unfitted(.noDocumentAccess).description == "unfitted, because it gives no document access")
     }
