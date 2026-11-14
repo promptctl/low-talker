@@ -349,10 +349,7 @@ public final class Dictation {
             state.withLock { state in
                 if let performed = placed.performed {
                     state.performed.append(performed)
-                    for run in placed.carried?.runs ?? [] {
-                        state.provenance.takeBack.landed(Transcript(words: run.words), own: run.by === self)
-                    }
-                    state.provenance.takeBack.landed(words, own: true)
+                    state.provenance.takeBack.landed(carrying: placed.carried, then: words, of: self)
                 }
                 state.words += placed.words
             }
@@ -1067,9 +1064,9 @@ public final class Dictation {
     /// What it put at the cursor is taken back by one request through the executor, never through
     /// `place`, which would carry held words into it: the request replaces the stretch from its
     /// first word to the caret with the earlier dictation inside it (`TakeBack`). What no cursor
-    /// took of its own words the hold let go at the throw (`threwAway`), held or dismissed, since a
-    /// cancel discards what is not in the field, and the report counts it. What was said past the commits is dropped, as for a chord
-    /// that was a typed key's modifier. Words an insert may have landed stand with the hold's
+    /// took of its own words the hold let go at the throw (`threwAway`), held or dismissed, since
+    /// a cancel discards what is not in the field, and the report counts it. What was said past
+    /// the commits is dropped, as for a chord that was a typed key's modifier. Words an insert may have landed stand with the hold's
     /// warning, and earlier dictation the press's inserts carried stays in the field: the report
     /// counts both.
     ///

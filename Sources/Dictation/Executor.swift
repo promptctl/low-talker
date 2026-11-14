@@ -89,14 +89,14 @@ public struct Executor {
     /// earlier dictation inside it. The input method reads the field before it changes it, and
     /// refuses, changing nothing, when that stretch is not there.
     ///
-    /// Not an insert of words, so not `insert`: nothing is carried ahead of it, and a press with
-    /// nothing landed is not asked at all, since replacing nothing is not a request.
+    /// Not an insert of words, so not `insert`: nothing is carried ahead of it, and a press none
+    /// of whose own words landed is not asked at all, since replacing nothing is not a request.
     /// Throws as `insert` does, and a failure that may have landed is not retried: a second
     /// take-back could remove words that are not this dictation's. [LAW:no-silent-failure]
     func takeBack(_ landed: TakeBack, from last: Performed) async throws(InsertFailure) {
         guard !landed.replacing.isEmpty else { return }
         let started = ContinuousClock.now
         _ = try await inserter.insert(InsertRequest(landed.leaving, into: .app(last.into.rawValue), replacing: landed.replacing))
-        log.info("took back \(landed.replacing.utf16.count, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public), putting back \(landed.leaving.utf16.count, privacy: .public) of earlier dictation, in \(Int((ContinuousClock.now - started) / .milliseconds(1)), privacy: .public) ms")
+        log.info("took back \(landed.replacing.utf16.count - landed.leaving.utf16.count, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public), replacing \(landed.replacing.utf16.count, privacy: .public) before the caret with \(landed.leaving.utf16.count, privacy: .public) of earlier dictation, in \(Int((ContinuousClock.now - started) / .milliseconds(1)), privacy: .public) ms")
     }
 }
