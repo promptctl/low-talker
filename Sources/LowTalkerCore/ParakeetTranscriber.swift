@@ -95,15 +95,17 @@ struct ParakeetReader: Sendable {
     /// over the prefix's audio are the prefix as told, the last with the punctuation this pass
     /// hears on it: a prefix word heard another way is then not heard twice, once confirmed and
     /// once as a new word. The words the lead-in heard before the cut are dropped by where they
-    /// sound, and so are the terms the spotter found there.
+    /// sound, and so are the words of the terms the spotter found there.
     func read(_ pass: Hearing.Pass, hearing terms: [SpelledTerm]) throws(TranscriptionFailure) -> [Transcript.Word] {
         let start = max(0, pass.cut - Self.leadIn)
         var (tokens, facts) = try decode(pass.samples, from: start)
         // Logged however the pass ends, so a pass the spotter or the reading fails still says
         // what the decode did.
         defer { Self.log.info("\(facts.description, privacy: .public)") }
+        // A term's words are kept by where each sounds, as the TDT words are, so a term across
+        // the cut corrects the words after it and repeats none before it.
         let spotted = try spot(pass.samples, from: start, hearing: terms, facts: &facts)
-            .filter { HeardWord.sounds(from: $0.first!.first, to: $0.last!.last, after: pass.cut) }
+            .compactMap { $0.sounding(after: pass.cut) }
         facts.spotted = spotted.count
         let words: [Transcript.Word]
         do throws(ParakeetReadingError) {
@@ -122,9 +124,9 @@ struct ParakeetReader: Sendable {
         return pass.prefix.dropLast() + [reheard] + words.dropFirst(over.count)
     }
 
-    /// The `terms` the spotter finds in `samples` from `start` on, each as its words, timed from
+    /// The `terms` the spotter finds in `samples` from `start` on, each as its words and frames, timed from
     /// the pass's first sample. No term is nothing to find, so its pass reads no audio for it.
-    func spot(_ samples: [Float], from start: Int, hearing terms: [SpelledTerm], facts: inout ParakeetPassFacts) throws(TranscriptionFailure) -> [[HeardWord]] {
+    func spot(_ samples: [Float], from start: Int, hearing terms: [SpelledTerm], facts: inout ParakeetPassFacts) throws(TranscriptionFailure) -> [SpottedTerm] {
         guard !terms.isEmpty else { return [] }
         var frames: [[Float]] = []
         do {
@@ -142,7 +144,7 @@ struct ParakeetReader: Sendable {
         facts.candidates = spotting.candidates
         facts.outscored = spotting.outscored
         do throws(ParakeetReadingError) {
-            return try spotting.hits.map { hit throws(ParakeetReadingError) in try hit.words(from: start) }
+            return try spotting.hits.map { hit throws(ParakeetReadingError) in try hit.spotted(from: start) }
         } catch { throw .unreadable(.parakeet(error)) }
     }
 

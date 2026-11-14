@@ -66,8 +66,8 @@ extension Prompting {
     /// check did not load refuses only the configs that name it.
     @Test func aModelIsCheckedOnlyByItsOwnEncoder() throws {
         let read = Prompting([.default: .success(VocabularyCheck(.countingWords())), .parakeet(.tdtV3): .failure(PromptsUnavailable(why: "no vocabulary"))])
-        #expect(throws: ConfigError.modelNotCarried("base.en", carried: [.default, .parakeet(.tdtV3)])) { try read.encoder(for: "base.en") }
-        #expect(throws: ConfigError.prompts(.parakeet(.tdtV3), PromptsUnavailable(why: "no vocabulary"))) { try read.encoder(for: .parakeet(.tdtV3)) }
-        try read.encoder(for: .default).check(.empty)
+        #expect(throws: ConfigError.modelNotCarried("base.en", carried: [.default, .parakeet(.tdtV3)])) { try read.check(for: "base.en") }
+        #expect(throws: ConfigError.prompts(.parakeet(.tdtV3), PromptsUnavailable(why: "no vocabulary"))) { try read.check(for: .parakeet(.tdtV3)) }
+        try read.check(for: .default).check(.empty)
     }
 }

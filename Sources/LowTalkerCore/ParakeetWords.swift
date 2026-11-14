@@ -97,13 +97,13 @@ struct HeardWord: Equatable, Sendable {
     }
 
     /// `heard` with each of `spotted`'s terms in place of the words whose midpoints fall within
-    /// it. A term with none takes its place among them by time. The last word of a term keeps
+    /// the frames it was heard over. A term with none takes its place among them by time. The last word of a term keeps
     /// the punctuation of the last word it replaced, which the spotter cannot hear, past what the
     /// term already spells: "Frisley," is "Fryslie,", and "Yahoo!" heard as "Yahoo!" stays so.
-    static func merging(_ spotted: [[HeardWord]], into heard: [HeardWord]) -> [HeardWord] {
+    static func merging(_ spotted: [SpottedTerm], into heard: [HeardWord]) -> [HeardWord] {
         var words = heard
-        for term in spotted {
-            let (first, last) = (term.first!.first, term.last!.last)
+        for spotting in spotted {
+            let (term, first, last) = (spotting.words, spotting.words.first!.first, spotting.last)
             let replaced = words.filter { $0.sounds(within: first, last) }
             let heard = replaced.last.map(\.trailingPunctuation) ?? ""
             let spelled = term.last!.trailingPunctuation
@@ -121,6 +121,20 @@ struct HeardWord: Equatable, Sendable {
 
     private func ending(with punctuation: String) -> HeardWord {
         HeardWord(text: text + punctuation, first: first, last: last, confidence: confidence)
+    }
+}
+
+/// A term the spotter heard: its words, each timed as a TDT word is, and the frame at `last`,
+/// the last it was heard over, which its last piece may be held to past its last word's time.
+struct SpottedTerm: Equatable, Sendable {
+    let words: [HeardWord]
+    let last: Int
+
+    /// The words of this term that sound from `cut` on, by the rule TDT words are cut by, or nil
+    /// where none do.
+    func sounding(after cut: Int) -> SpottedTerm? {
+        let kept = words.filter { HeardWord.sounds(from: $0.first, to: $0.last, after: cut) }
+        return kept.isEmpty ? nil : SpottedTerm(words: kept, last: last)
     }
 }
 

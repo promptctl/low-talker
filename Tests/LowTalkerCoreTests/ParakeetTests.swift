@@ -307,7 +307,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
         let reader = Self.reader([:], spotter: ScriptedSpotter(said: [Self.frame(3): 5, Self.frame(4): 5]))
         var facts = ParakeetPassFacts()
         let spotted = try reader.spot(Self.samples, from: 0, hearing: try spotterTokenizer.terms(Vocabulary([try Vocabulary.Term("Zed")])), facts: &facts)
-        #expect(spotted.map { $0.map(\.text) } == [[" Zed"]])
+        #expect(spotted.map { $0.words.map(\.text) } == [[" Zed"]])
         #expect(facts.spotterFrames == 28)
         #expect(facts.candidates == 2)
         #expect(facts.outscored == 0)

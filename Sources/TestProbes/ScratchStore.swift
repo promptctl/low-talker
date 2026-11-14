@@ -79,7 +79,6 @@ public struct ScratchStore: ~Copyable {
                 try text.write(to: url, atomically: true, encoding: .utf8)
             }
             let manifest = store.manifestURL(for: .parakeet(model), part)
-            try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Manifest(recording: folder, relativeTo: root).write(to: manifest)
             folders[part] = folder
         }

@@ -122,7 +122,7 @@ import Testing
               {"rfilename": "parakeet_vocab.json", "size": 151122}]}
             """.utf8))
         let store = URL(filePath: "/store")
-        let manifest = try listing.manifest(of: nil, in: store.appending(path: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml"), store: store, matching: ParakeetModel.tdtV3.hubGlobs(of: .weights))
+        let manifest = try listing.manifest(of: nil, in: store.appending(path: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml"), store: store, matching: ParakeetModel.hubGlobs(ParakeetModel.tdtV3.source(of: .weights)!.files))
         #expect(manifest == (try Manifest(folder: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml", files: [
             .init(path: "Decoder.mlmodelc/weights/weight.bin", size: 23604992),
             .init(path: "Encoder_v2.mlmodelc/model.mil", size: 1002653),
@@ -150,7 +150,7 @@ import Testing
             """.utf8))
         let store = URL(filePath: "/store")
         let folder = "models/FluidInference/parakeet-ctc-110m-coreml"
-        let manifest = try listing.manifest(of: nil, in: store.appending(path: folder), store: store, matching: ParakeetModel.tdtV3.hubGlobs(of: .spotterHead))
+        let manifest = try listing.manifest(of: nil, in: store.appending(path: folder), store: store, matching: ParakeetModel.hubGlobs(ParakeetModel.tdtV3.source(of: .spotterHead)!.files))
         #expect(manifest == (try Manifest(folder: folder, files: [
             .init(path: "CtcHead.mlmodelc/model.mil", size: 3605),
             .init(path: "CtcHead.mlmodelc/weights/weight.bin", size: 1051842),

@@ -81,7 +81,8 @@ extension ModelStore {
             _ = try await whole(part, of: model) {
                 switch source {
                 case .huggingFace(let revision):
-                    return try await fromHub(parakeet.source(of: part)!.repo, at: revision.commit(of: part), through: hub, phase: phase) { _ in (nil, parakeet.hubGlobs(of: part)) }
+                    let source = parakeet.source(of: part)!
+                    return try await fromHub(source.repo, at: revision.commit(of: part), through: hub, phase: phase) { _ in (nil, ParakeetModel.hubGlobs(source.files)) }
                 case .store(let store):
                     return try await copy(part, of: model, from: store, phase: phase)
                 }
@@ -271,10 +272,10 @@ private enum InstallLock {
 }
 
 extension ParakeetModel {
-    /// The globs that take `part`'s files from its repo's top and nothing else: a `.mlmodelc` is
-    /// a folder, and the hub client's globs cross `/`, so one glob takes it whole.
-    func hubGlobs(of part: ModelPart) -> [String] {
-        (source(of: part)?.files ?? []).map { $0.hasSuffix(".mlmodelc") ? "\($0)/*" : $0 }
+    /// The globs that take `files` from a repo's top and nothing else: a `.mlmodelc` is a
+    /// folder, and the hub client's globs cross `/`, so one glob takes it whole.
+    static func hubGlobs(_ files: [String]) -> [String] {
+        files.map { $0.hasSuffix(".mlmodelc") ? "\($0)/*" : $0 }
     }
 }
 

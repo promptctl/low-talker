@@ -38,6 +38,11 @@ public struct SpotterTokenizer: Sendable {
         guard let longest = file.model.vocab.keys.map(\.count).max() else {
             throw PromptsUnavailable(why: "the spotter's tokenizer.json has no pieces")
         }
+        // [LAW:parse-dont-validate] Every id is a class of the head's rows, so the search reads
+        // a row at any piece it spells.
+        if let (piece, id) = file.model.vocab.first(where: { !(0..<SpotterClasses.blank).contains($0.value) }) {
+            throw PromptsUnavailable(why: "the spotter's tokenizer.json gives \(piece) id \(id), outside the head's \(SpotterClasses.blank) pieces")
+        }
         ids = file.model.vocab
         self.longest = longest
         wordStarts = Set(file.model.vocab.filter { $0.key.first == Self.wordStart }.values)
@@ -50,7 +55,8 @@ public struct SpotterTokenizer: Sendable {
     }
 
     /// Every piece that writes the term from each character of it on. Refused, naming the
-    /// character, where the pieces can write the term only up to that character.
+    /// character of the term, never the `▁` written before a word, where the pieces can write
+    /// the term only up to that character.
     func spell(_ term: Vocabulary.Term) throws(VocabularyError) -> SpelledTerm {
         let written = Array(term.text.split(whereSeparator: \.isWhitespace).map { String(Self.wordStart) + $0 }.joined())
         var arcs: [[SpelledTerm.Arc]] = Array(repeating: [], count: written.count)
@@ -67,7 +73,7 @@ public struct SpotterTokenizer: Sendable {
         }
         guard reached[written.count] else {
             let stuck = reached.lastIndex(of: true)!
-            throw .unspellable(term: term.text, piece: String(written[stuck]))
+            throw .unspellable(term: term.text, piece: String(written[stuck...].first { $0 != Self.wordStart }!))
         }
         return SpelledTerm(term: term, arcs: arcs)
     }

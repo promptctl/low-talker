@@ -63,7 +63,7 @@ public struct ModelStore: Sendable {
     /// `InstalledModel` and never asks about files again.
     public func presence(of model: Model) throws -> Presence {
         // [LAW:one-source-of-truth] One rule for every engine: the model is whole when each
-        // of its parts' manifests is, and the weights' manifest says where the model is.
+        // of its parts' manifests is, and each part's manifest says where that part is.
         let recordings = try model.parts.map { part in (part, try recording(part, of: model)) }
         let wholes = recordings.compactMap { part, recording in
             if case .whole(let manifest) = recording { (part, manifest) } else { nil }

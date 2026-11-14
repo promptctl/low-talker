@@ -52,11 +52,11 @@ public extension Config {
         // spelled a second time here to drift from it.
         let model = file.model ?? Config.default.model
         // The modes are checked against the model this file names, the one the app will load.
-        let encoder = try prompting.encoder(for: model)
+        let check = try prompting.check(for: model)
         try self.init(
             model: model,
             microphone: file.microphone?.atRest ?? Config.default.microphone,
-            modes: try file.modes?.map { entry throws(ConfigError) in try entry.mode(prompting: encoder) } ?? Array(Config.default.modes),
+            modes: try file.modes?.map { entry throws(ConfigError) in try entry.mode(prompting: check) } ?? Array(Config.default.modes),
             serve: try file.serve.map { entry throws(ConfigError) in try entry.binding } ?? Config.default.serve
         )
     }

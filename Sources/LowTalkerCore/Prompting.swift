@@ -47,21 +47,21 @@ public struct VocabularyCheck: Sendable {
 /// only a config that names it, and a model the app does not carry has no check at all, which
 /// is the config's refusal to name it.
 public struct Prompting: Sendable {
-    public let encoders: [Model: Result<VocabularyCheck, PromptsUnavailable>]
+    public let checks: [Model: Result<VocabularyCheck, PromptsUnavailable>]
 
-    public init(_ encoders: [Model: Result<VocabularyCheck, PromptsUnavailable>]) {
-        self.encoders = encoders
+    public init(_ checks: [Model: Result<VocabularyCheck, PromptsUnavailable>]) {
+        self.checks = checks
     }
 
     /// The models this covers, in name order, as a refusal lists them.
     public var models: [Model] {
-        encoders.keys.sorted { $0.rawValue < $1.rawValue }
+        checks.keys.sorted { $0.rawValue < $1.rawValue }
     }
 
     /// `model`'s check, or why a config naming it cannot be checked.
-    public func encoder(for model: Model) throws(ConfigError) -> VocabularyCheck {
-        guard let encoder = encoders[model] else { throw .modelNotCarried(model, carried: models) }
-        do { return try encoder.get() } catch { throw .prompts(model, error) }
+    public func check(for model: Model) throws(ConfigError) -> VocabularyCheck {
+        guard let check = checks[model] else { throw .modelNotCarried(model, carried: models) }
+        do { return try check.get() } catch { throw .prompts(model, error) }
     }
 
     /// What came of reading every model's check at launch, as the log says it.
@@ -79,7 +79,7 @@ public struct Prompting: Sendable {
 
         public var description: String {
             let failures = prompting.models.compactMap { model -> String? in
-                guard case .failure(let failure) = prompting.encoders[model] else { return nil }
+                guard case .failure(let failure) = prompting.checks[model] else { return nil }
                 return "; \(model): \(failure)"
             }
             return "prompt tokenizers: read in \(Int((after / .milliseconds(1)).rounded())) ms\(failures.joined())"
