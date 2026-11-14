@@ -16,13 +16,6 @@ import Testing
 @Suite struct CommitterTests {
     private static let request = InsertRequest("🫠 hello", into: .cursorInFront)
 
-    /// What `FocusedClient` would have seen: the cursor chosen, or the refusal.
-    @MainActor
-    private static func seen(_ cursor: Result<Client, Refusal>) -> InFront {
-        InFront(frontmost: "com.example.editor", selected: true, cursorApplication: "com.example.editor", cursors: 1, ruledOut: 0,
-                field: nil, screens: [], cursor: cursor)
-    }
-
     private static let seenLine = "with com.example.editor in front and the cursor in com.example.editor"
 
     /// The words go in, and the answer counts them as a person would: an emoji is one
@@ -33,7 +26,7 @@ import Testing
         let cursor = try field.cursor()
         let turn = Turn()
 
-        let did = Committer.place(Self.request, turn: turn, inFront: { Self.seen(.success(cursor)) })
+        let did = Committer.place(Self.request, turn: turn, inFront: { InFront.seen(.success(cursor)) })
 
         #expect(field.text == "🫠 hello")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 7, into: cursor.application), seen: Self.seenLine))
@@ -47,9 +40,9 @@ import Testing
         let field = FakeTextInputClient(holding: "say ")
         let cursor = try field.cursor()
 
-        _ = Committer.place(Self.request, turn: Turn(), inFront: { Self.seen(.success(cursor)) })
+        _ = Committer.place(Self.request, turn: Turn(), inFront: { InFront.seen(.success(cursor)) })
         #expect(field.text == "say 🫠 hello")
-        _ = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "🫠 hello"), turn: Turn(), inFront: { Self.seen(.success(cursor)) })
+        _ = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "🫠 hello"), turn: Turn(), inFront: { InFront.seen(.success(cursor)) })
         #expect(field.text == "say ")
     }
 
@@ -61,7 +54,7 @@ import Testing
         let cursor = try field.cursor()
         let turn = Turn()
 
-        let did = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "hello"), turn: turn, inFront: { Self.seen(.success(cursor)) })
+        let did = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: "hello"), turn: turn, inFront: { InFront.seen(.success(cursor)) })
 
         #expect(field.text == "say goodbye")
         #expect(turn.wait(.zero) == .answered(.refused(.wordsCannotBeTakenBack), seen: Self.seenLine))
@@ -72,7 +65,7 @@ import Testing
     @Test func aRefusalIsAnsweredAndNothingIsCommitted() {
         let turn = Turn()
 
-        let did = Committer.place(Self.request, turn: turn, inFront: { Self.seen(.failure(.noTextFieldHasFocus)) })
+        let did = Committer.place(Self.request, turn: turn, inFront: { InFront.seen(.failure(.noTextFieldHasFocus)) })
 
         #expect(turn.wait(.zero) == .answered(.refused(.noTextFieldHasFocus), seen: Self.seenLine))
         guard case .refused(.noTextFieldHasFocus, _, late: false) = did else { Issue.record("\(did)"); return }
@@ -91,7 +84,7 @@ import Testing
         #expect(turn.wait(.zero) == .busy(reached: false))
         let did = Committer.place(Self.request, turn: turn, inFront: {
             decided += 1
-            return Self.seen(.success(cursor))
+            return InFront.seen(.success(cursor))
         })
 
         #expect(did == .letGo)
@@ -110,7 +103,7 @@ import Testing
 
         let did = Committer.place(Self.request, turn: turn, inFront: {
             answered = turn.wait(.zero)
-            return Self.seen(.success(cursor))
+            return InFront.seen(.success(cursor))
         })
 
         #expect(answered == .busy(reached: true))
@@ -125,7 +118,7 @@ import Testing
 
         let did = Committer.place(Self.request, turn: turn, inFront: {
             _ = turn.wait(.zero)
-            return Self.seen(.failure(.noTextFieldHasFocus))
+            return InFront.seen(.failure(.noTextFieldHasFocus))
         })
 
         guard case .refused(.noTextFieldHasFocus, _, late: true) = did else { Issue.record("\(did)"); return }
@@ -141,7 +134,7 @@ import Testing
         var answered: Placed.Outcome?
         field.duringInsert = { answered = turn.wait(.zero) }
 
-        let did = Committer.place(Self.request, turn: turn, inFront: { Self.seen(.success(cursor)) })
+        let did = Committer.place(Self.request, turn: turn, inFront: { InFront.seen(.success(cursor)) })
 
         #expect(answered == .notYetTaken(characters: 7, into: cursor.application, seen: Self.seenLine))
         #expect(field.text == "🫠 hello")
@@ -158,7 +151,7 @@ import Testing
 
         let answers = await onAThreadOfItsOwn {
             ["one", "two", "three"].map { word in
-                committer.insert(InsertRequest(word, into: .cursorInFront)) { Self.seen(.success(cursor)) }.answer
+                committer.insert(InsertRequest(word, into: .cursorInFront)) { InFront.seen(.success(cursor)) }.answer
             }
         }
 
@@ -190,7 +183,7 @@ import Testing
             defer { released.signal() }
             return committer.insert(Self.request) {
                 decided.withLock { $0 += 1 }
-                return Self.seen(.success(cursor))
+                return InFront.seen(.success(cursor))
             }
         }
         await MainActor.run {}

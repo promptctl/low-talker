@@ -38,8 +38,8 @@ public final class FakeInputMethod: Inserter, Sendable {
     public func noting(_ changes: Changes) { onChange.withLock { $0 = changes } }
     private func moved() { onChange.withLock { $0 }?.note() }
 
-    /// Every text put at the cursor, in order, the earlier words a take-back leaves among them. A
-    /// held insert is not in it until it is let go.
+    /// Every text answered as put at the cursor, in order, the earlier words a take-back leaves
+    /// among them. A held insert is not in it until it is let go.
     public var inserted: [String] { state.withLock { $0.inserted } }
     /// Where each request it was handed was bound, answered or refused, in order.
     public var destinations: [Destination] { state.withLock { $0.requests.map(\.destination) } }
@@ -55,6 +55,8 @@ public final class FakeInputMethod: Inserter, Sendable {
     /// An insert refused with a failure that may have landed lands in the document anyway, which is
     /// what the failure means: the words are somewhere nobody was told.
     public func landingDespiteFailure(_ lands: Bool = true) { state.withLock { $0.landingDespiteFailure = lands } }
+    /// The person types `text` at the caret, so words before it are no longer at the caret.
+    public func typing(_ text: String) { state.withLock { $0.field += text } }
     /// The app the next inserts say they reached, by bundle identifier.
     public func reaching(_ app: String) { state.withLock { $0.into = app } }
     /// Every insert from now on, a take-back among them, is refused with `refusal`, or none is when
@@ -92,7 +94,9 @@ public final class FakeInputMethod: Inserter, Sendable {
                 if state.landingDespiteFailure, refusal.wordsMayHaveLanded { _ = Self.commit(request, in: &state) }
                 throw refusal
             }
-            return try Self.commit(request, in: &state).get()
+            let inserted = try Self.commit(request, in: &state).get()
+            if !request.text.isEmpty { state.inserted.append(request.text) }
+            return inserted
         }
     }
 
@@ -109,7 +113,6 @@ public final class FakeInputMethod: Inserter, Sendable {
         guard case .success(let range) = found else { return .failure(.refused(.wordsCannotBeTakenBack)) }
         let kept = range.location == NSNotFound ? field.count : range.location
         state.field = String(decoding: field[..<kept], as: UTF16.self) + request.text
-        if !request.text.isEmpty { state.inserted.append(request.text) }
         return .success(Inserted(characters: request.text.count, into: state.into))
     }
 }

@@ -127,14 +127,7 @@ public struct InputMethodInserter: Inserter {
         try greet(through: exchange)
         let data = try say(Wire.request(request), id: Wire.insert, through: exchange, at: .words)
         guard let answer = Wire.answer(of: data) else { throw unread(data, at: .words) }
-        // [LAW:parse-dont-validate] The wire's sum ends here: past this line a refusal or
-        // words not yet taken is a failure thrown like the others, and a caller holds words
-        // inserted or nothing.
-        switch answer {
-        case .inserted(let characters, let into): return Inserted(characters: characters, into: into)
-        case .refused(let refusal): throw .refused(refusal)
-        case .notYetTaken(let characters, let into): throw .notYetTaken(NotYetTaken(characters: characters, into: into))
-        }
+        return try answer.outcome()
     }
 
     /// The greeting every insert is preceded by. Who holds the name is asked before a word is

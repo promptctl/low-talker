@@ -444,19 +444,20 @@ import TestProbes
         #expect(failureLine(left).hasPrefix("WARNING: You cancelled a dictation, but 2 of its words are still in com.apple.TextEdit"))
     }
 
-    /// An app that will not give the words back keeps them, and the person is told how many and where.
+    /// Words the person has typed after are not at the caret, so they stay, and the person is told
+    /// how many and where.
     @Test func aRefusedTakeBackSaysHowManyWordsStay() async throws {
         let rig = try await Rig(hearing: Self.engine())
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
-        rig.inputMethod.refusing(.refused(.wordsCannotBeTakenBack))
+        rig.inputMethod.typing("!")
 
         Self.cancel(rig)
         let left = try #require(await rig.report().failure as? CancelLeftWords)
 
         #expect(left.left == 1)
         #expect(failureLine(left).hasPrefix("WARNING: You cancelled a dictation, but 1 of its words is still in com.apple.TextEdit, and nothing more was done. "))
-        #expect(rig.inputMethod.field == " hello")
+        #expect(rig.inputMethod.field == " hello!")
         #expect(rig.hold.held == nil)
     }
 

@@ -1,5 +1,6 @@
 @testable import InputMethod
 import InputMethodFakes
+import Insertion
 import Testing
 
 extension FakeTextInputClient {
@@ -8,6 +9,16 @@ extension FakeTextInputClient {
     @MainActor
     func cursor(whileInFrontIs frontmost: String? = nil) throws -> Client {
         try #require(Client(self, inFront: frontmost))
+    }
+}
+
+extension InFront {
+    /// What `FocusedClient` would have seen with `application` in front and its one cursor
+    /// chosen, or the refusal.
+    @MainActor
+    static func seen(_ cursor: Result<Client, Refusal>, in application: String = "com.example.editor") -> InFront {
+        InFront(frontmost: application, selected: true, cursorApplication: application, cursors: 1, ruledOut: 0,
+                field: nil, screens: [], cursor: cursor)
     }
 }
 

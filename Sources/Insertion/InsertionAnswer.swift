@@ -93,6 +93,18 @@ public enum InsertionAnswer: Codable, Equatable, Sendable {
     /// bound. Neither of the others: the words are on their way and land if the app
     /// recovers, so this is never a refusal and must never be retried.
     case notYetTaken(characters: Int, into: String)
+
+    /// What the insert that met this answer comes to for its caller: words inserted, or the
+    /// failure thrown. [LAW:parse-dont-validate] The wire's sum ends here: past it a refusal or
+    /// words not yet taken is a failure thrown like the others, and a caller holds words
+    /// inserted or nothing.
+    public func outcome() throws(InsertFailure) -> Inserted {
+        switch self {
+        case .inserted(let characters, let into): return Inserted(characters: characters, into: into)
+        case .refused(let refusal): throw .refused(refusal)
+        case .notYetTaken(let characters, let into): throw .notYetTaken(NotYetTaken(characters: characters, into: into))
+        }
+    }
 }
 
 /// A failed request told to the person: why it failed, then what became of the words it carried.
