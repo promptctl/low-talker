@@ -227,7 +227,7 @@ import Testing
         case .none:
             #expect(answer == .refused(.noTextFieldHasFocus))
             #expect(field.text == "say")
-        case .selectionOnly, .toTheField:
+        case .withoutSelection, .selectionOnly, .toTheField:
             #expect(answer == .inserted(characters: 6, into: "com.apple.Safari"))
             #expect(field.text == "say hello")
         }
@@ -249,7 +249,7 @@ import Testing
     }
 
     /// Taking back the words a dictation put before the caret: only a client that says what text
-    /// is there has them taken out. One with a selection and no text is refused, the field left
+    /// is there has them taken out. One with no selection, or a selection and no text, is refused, the field left
     /// as it was, and one giving no document access is no cursor at all.
     @MainActor
     @Test(arguments: ClientProfile.all)
@@ -262,7 +262,7 @@ import Testing
         case .none:
             #expect(answer == .refused(.noTextFieldHasFocus))
             #expect(field.text == "say hello")
-        case .selectionOnly:
+        case .withoutSelection, .selectionOnly:
             #expect(answer == .refused(.wordsCannotBeTakenBack))
             #expect(field.text == "say hello")
         case .toTheField:

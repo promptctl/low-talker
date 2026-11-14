@@ -417,6 +417,17 @@ public final class Client: CustomStringConvertible {
         return .documentAccess(caretLine: line == .zero ? nil : line)
     }
 
+    /// The selection and the text around it, or why the client cannot be read: asked of the client
+    /// each time, as `field` is, and never kept.
+    ///
+    /// [LAW:single-enforcer] The one edge where a read reaches the log, so no read goes unsaid. The
+    /// line carries the event and never the text, which is the person's words.
+    func read() -> FieldReading {
+        let (reading, event) = FieldReading.read(from: client)
+        insertLog.notice("read the field of \(self, privacy: .public): \(event, privacy: .public)")
+        return reading
+    }
+
     /// Commits `text` at the insertion point in place of `replacing`, the text immediately before
     /// it, which is nothing for every ordinary commit. Refuses, changing nothing, when the words
     /// to take back are not there.
