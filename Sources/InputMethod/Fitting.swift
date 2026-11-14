@@ -2,8 +2,8 @@ import Foundation
 
 /// A transcript shaped to the text around where it goes: spaced from its neighbours, capitalised
 /// where a sentence starts, and without a closing period where the field's text continues the
-/// sentence. The dictation commit and the marked-text preview fit the same way, so a final does
-/// not jump from the partials before it.
+/// sentence. One fit for the dictation commit and the marked-text preview alike, so that a final
+/// does not jump from the partials before it.
 ///
 /// [LAW:effects-at-boundaries] Pure: the field was read once, by `FieldReading.read`, and this
 /// decides from that reading alone.
@@ -32,7 +32,8 @@ public nonisolated struct Fitting: Equatable, Sendable {
         /// Its edge whitespace removed, which an engine puts before its words (`Transcript.text`),
         /// so the space rules alone decide the edges.
         case trimmed
-        /// Its closing period dropped, since the text after it continues the sentence. A `?` or
+        /// Its closing period dropped, since the text after it continues the sentence or brings its
+        /// own `, ; : . ? ! …`. A `?` or
         /// `!` says what was said, so it stays, as do an ellipsis and an initialism's own period.
         case periodDropped
         /// Its first letter title-cased, since it starts the field, a line, or a sentence. A first
@@ -62,7 +63,7 @@ public nonisolated struct Fitting: Equatable, Sendable {
             case .periodDropped:
                 let body = text.dropLast()
                 let closes = text.last == "." && body.last.map { $0 != "." && !$0.isWhitespace } ?? false
-                let continues = after.drop(while: \.isSpaceOrTab).first?.isLowercase ?? false
+                let continues = after.drop(while: \.isSpaceOrTab).first.map { $0.isLowercase || Self.clauseMarks.contains($0) } ?? false
                 return closes && continues && !Self.endsInInitialism(body) ? String(body) : text
             case .capitalized:
                 // Spaces, quotes and brackets sit between a sentence's end and its next word:
@@ -80,24 +81,28 @@ public nonisolated struct Fitting: Equatable, Sendable {
         }
 
         private static let terminal: Set<Character> = [".", "?", "!", "…"]
-        private static let openingBrackets: Set<Character> = ["(", "[", "{"]
-        private static let openingQuotes: Set<Character> = ["“", "‘", "«", "‹", "„", "‚"]
+        private static let clauseMarks = terminal.union([",", ";", ":"])
+        /// Opening brackets and quotes, and Spanish's inverted marks.
+        private static let openingMarks: Set<Character> = ["(", "[", "{", "“", "‘", "«", "‹", "„", "‚", "¿", "¡"]
         private static let straightQuotes: Set<Character> = ["\"", "'"]
         /// What may stand before a sentence's first letter: a straight quote opens there.
-        private static let openers = openingBrackets.union(openingQuotes).union(straightQuotes)
+        private static let openers = openingMarks.union(straightQuotes)
         private static let closers: Set<Character> = [")", "]", "}", "”", "’", "»", "›", "\"", "'"]
         /// What never takes a space before it.
-        private static let closingPunctuation = closers.subtracting(straightQuotes).union(terminal).union([",", ";", ":", "%"])
+        private static let closingPunctuation = closers.subtracting(straightQuotes).union(clauseMarks).union(["%"])
 
-        /// What a word joins with no space before it: a currency sign, as in `$5`, and `/ \ @ # _`.
-        private static let joiners: Set<Character> = ["/", "\\", "@", "#", "_"]
+        /// What joins the words either side of it: `/ \ _`, as in `and/or` and `my_test`.
+        private static let joiners: Set<Character> = ["/", "\\", "_"]
+        /// What joins the word after it alone, as in `in #general`: `@ #`, and a currency sign.
+        private static let prefixes: Set<Character> = ["@", "#"]
         /// A hyphen or dash, which closes up to the word on whichever side it touches.
         private static let dashes: Set<Character> = ["-", "‐", "–", "—"]
 
         /// Whether `text` ends in an initialism's period, as `a.m.`, `U.S.` and `e.g.` do: a word
-        /// of single letters each followed by a period.
+        /// of single letters each followed by a period, inside any opening brackets or quotes.
         private static func endsInInitialism(_ text: Substring) -> Bool {
-            let letters = text.split(whereSeparator: \.isWhitespace).last?.split(separator: ".") ?? []
+            let word = text[(text.lastIndex(where: \.isWhitespace).map(text.index(after:)) ?? text.startIndex)...]
+            let letters = word.drop(while: openers.contains).split(separator: ".")
             return letters.count > 1 && letters.allSatisfy { $0.count == 1 && $0.first!.isLetter }
         }
 
@@ -115,23 +120,24 @@ public nonisolated struct Fitting: Equatable, Sendable {
             guard let last = text.last else { return true }
             let previous = text.dropLast().last
             if straightQuotes.contains(last) {
-                return previous.map { $0.isWhitespace || openingBrackets.contains($0) || openingQuotes.contains($0) } ?? true
+                return previous.map { $0.isWhitespace || openingMarks.contains($0) } ?? true
             }
             if dashes.contains(last) { return previous.map { !$0.isWhitespace } ?? true }
             return last.isWhitespace || last.isCurrencySymbol || last.isUnspaced || joiners.contains(last)
-                || openingBrackets.contains(last) || openingQuotes.contains(last)
+                || prefixes.contains(last) || openingMarks.contains(last)
         }
 
         /// Whether the start of `text` follows the word before it with no space: at the field's
-        /// end, and at whitespace, closing punctuation, or a script written without spaces. A
-        /// straight quote closes where no word follows it, as in `"hi" he said`; before a word it
-        /// opens. A dash joins the word it is attached to, as in `—so`.
+        /// end, and at whitespace, closing punctuation, a joiner, or a script written without
+        /// spaces. A straight quote closes where no word follows it, as in `"hi" he said`; before
+        /// a word it opens. A dash joins the word it is attached to, as in `—so`, but before a
+        /// digit it is a minus sign, as in `is -5`.
         private static func joinsPrevious(_ text: String) -> Bool {
             guard let first = text.first else { return true }
             let next = text.dropFirst().first
             if straightQuotes.contains(first) { return next.map { !($0.isLetter || $0.isNumber) } ?? true }
-            if dashes.contains(first) { return next.map { !$0.isWhitespace } ?? true }
-            return first.isWhitespace || first.isUnspaced || closingPunctuation.contains(first)
+            if dashes.contains(first) { return next.map { !$0.isWhitespace && !$0.isNumber } ?? true }
+            return first.isWhitespace || first.isUnspaced || joiners.contains(first) || closingPunctuation.contains(first)
         }
     }
 
