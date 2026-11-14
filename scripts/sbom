@@ -25,6 +25,7 @@ Run through `make sbom`, which builds model-tool first, names it, and names this
 when it has one.
 """
 import hashlib
+import itertools
 import json
 import re
 import subprocess
@@ -81,13 +82,180 @@ def license_entry(component, root, rule):
         if not found:
             fail(f"{component}: {relative} does not match {rule['licenseMatch']!r}, so its license text cannot be read")
         text = found.group(1)
+    properties = [
+        {"name": "low-talker:license-file", "value": relative},
+        {"name": "low-talker:license-file-sha256", "value": sha256(path)},
+    ]
+    # An id with no template here is one check-licenses refuses, and the refusal, with what
+    # to do about it, is that gate's to give. [LAW:single-enforcer]
+    template = license_templates.get(spdx.casefold())
+    if template is not None:
+        # SPDX ids match without regard to case; the SBOM spells the id as the List does.
+        spdx, pattern = template
+        if not pattern.search(comparable(text)):
+            fail(f"{component}: {relative} does not carry the text of {spdx} as the SPDX License List "
+                 f"{SPDX_LICENSE_LIST} template reads it, so the rule names a license the file does not state")
+        properties.append({"name": "low-talker:license-text", "value": f"SPDX License List {SPDX_LICENSE_LIST} {spdx} template"})
     return (
         [{"license": {"id": spdx, "text": {"contentType": "text/plain", "content": text.lstrip("\n").rstrip() + "\n"}}}],
-        [
-            {"name": "low-talker:license-file", "value": relative},
-            {"name": "low-talker:license-file-sha256", "value": sha256(path)},
-        ],
+        properties,
     )
+
+
+# The SPDX License List release sbom/spdx holds, named by its one directory: the template of
+# each license check-licenses accepts, byte for byte from license-list-data's template/, and
+# the words SPDX matches as one, from license-list-XML's equivalentwords.txt, at that tag.
+releases = sorted(path.name for path in (repository / "sbom" / "spdx").iterdir() if path.is_dir())
+if len(releases) != 1:
+    fail(f"sbom/spdx holds {releases or 'no release'}, and the templates are one SPDX License List release")
+[SPDX_LICENSE_LIST] = releases
+license_list = repository / "sbom" / "spdx" / SPDX_LICENSE_LIST
+
+# The template markup: optional text, and a var, which is a span the template's own regular
+# expression matches. A var's fields are quoted, and its `original` can hold a `>`.
+TEMPLATE_MARKUP = re.compile(r'<<(beginOptional|endOptional|var(?:;[a-z]+="(?:[^"\\]|\\.)*")*)>>')
+VAR_MATCH = re.compile(r'match="((?:[^"\\]|\\.)*)"')
+# Whatever whitespace and punctuation stand between two words, or none, as before a var whose
+# own expression opens with a space. A word stands whole, so two never run together.
+BETWEEN_WORDS = r"[\W_]*"
+COPYRIGHT_SYMBOL = re.compile(r"©|\(c\)", re.IGNORECASE)
+# The punctuation at either edge of a line: a comment's markers, in whatever syntax wraps the
+# license, and a box's borders. Inside a var only whitespace may stand between its words.
+LINE_EDGE = re.compile(r"^(?:(?!\n)[\W_])+|(?:(?!\n)[\W_])+$", re.MULTILINE)
+
+
+def spelled(form):
+    """A form of an equivalent word as a pattern: its words, each whole, with anything between
+    them but nothing; or a form with no words, as `&` is, as itself."""
+    found = r"[\W_]+".join(map(re.escape, re.findall(r"[^\W_]+", form)))
+    return rf"(?<![^\W_]){found}(?![^\W_])" if found else re.escape(form)
+
+
+def equivalent_words(listing):
+    """Each line's later forms, as patterns, with the form to read them as: the line's first,
+    or what that is read as where an earlier line lists it. A form whose words are its first
+    form's, as `sub license` beside `sub-license`, already reads the same."""
+    read_as = {}
+    for line in listing.splitlines():
+        first, *others = line.split(",")
+        for form in others:
+            if spelled(form) != spelled(first):
+                read_as[spelled(form)] = read_as.get(spelled(first), first)
+    return [(re.compile(pattern, re.IGNORECASE), f" {first} ") for pattern, first in read_as.items()]
+
+
+EQUIVALENT_WORDS = equivalent_words((license_list / "equivalentwords.txt").read_text())
+
+
+def equivalent(text):
+    """The text with each varietal spelling read as the one SPDX lists first. The spaces around
+    it keep `&` from joining the words beside it."""
+    for form, first in EQUIVALENT_WORDS:
+        text = form.sub(lambda _: first, text)
+    return text
+
+
+def words(literal):
+    return [("word", word) for word in re.findall(r"[^\W_]+", equivalent(COPYRIGHT_SYMBOL.sub(" ", literal)))]
+
+
+def template_parts(template):
+    """The template as its parts, in order: a word, a var's expression, or an optional run of
+    parts."""
+    nested = [[]]
+    position = 0
+    for mark in TEMPLATE_MARKUP.finditer(template):
+        nested[-1] += words(template[position:mark.start()])
+        tag = mark.group(1)
+        if tag == "beginOptional":
+            nested.append([])
+        elif tag == "endOptional":
+            optional = nested.pop()
+            nested[-1].append(("optional", optional))
+        else:
+            nested[-1].append(("var", VAR_MATCH.search(tag).group(1)))
+        position = mark.end()
+    nested[-1] += words(template[position:])
+    return nested[0]
+
+
+def whole(word):
+    return rf"(?<![^\W_]){re.escape(word)}(?![^\W_])"
+
+
+# A regular expression's atoms, enough to tell a var's any-character `.` from an escaped one
+# or one inside a character class.
+EXPRESSION_ATOM = re.compile(r"\\.|\[(?:\\.|[^\]\\])*\]|.", re.DOTALL)
+
+
+def expressions(parts, after, names):
+    """Each part as an expression. A var that can run over any text runs as SPDX's does, to
+    the next word the template requires after it (`after` where nothing in `parts` is), and
+    is read once where that word is the next part required: its any-character stops short of
+    the word, and the lookahead it is read in gives nothing back. Without both, a near miss is
+    retried at every split of every such var and of the punctuation beside it, which grows
+    with the power of their number, and a `.+` reaches across any license spliced inside it.
+    A var the next var follows keeps its splits, since where it ends is that var's to say.
+    `names` numbers each var read once."""
+    out = []
+    for index, (kind, value) in enumerate(parts):
+        following = next((whole(word) for k, word in parts[index + 1:] if k == "word"), after)
+        required = next((k for k, _ in parts[index + 1:] if k != "optional"), "word")
+        if kind == "word":
+            out.append(whole(value))
+        elif kind == "optional":
+            out.append(f"(?:{BETWEEN_WORDS.join(expressions(value, following, names))})?")
+        elif "." not in EXPRESSION_ATOM.findall(value):
+            out.append(f"(?:{value})")
+        else:
+            held = "".join(f"(?:(?!{following}).)" if atom == "." and following else atom
+                           for atom in EXPRESSION_ATOM.findall(value))
+            if required == "word":
+                name = f"var{next(names)}"
+                out.append(f"(?=(?P<{name}>{held}))(?P={name})")
+            else:
+                out.append(f"(?:{held})")
+    return out
+
+
+def template_pattern(template):
+    """An SPDX template as one regular expression, compared as SPDX's License Matching
+    Guidelines compare: the words, and not their case, their varietal spellings, the
+    whitespace and punctuation between them, or which of ©, (c) and none the copyright line
+    uses. A search, not a full match: a license file may carry more than the license, as a
+    NOTICES file's preamble or an exception appended to Apache-2.0 do."""
+    # A part at either end that can match nothing changes nothing a search finds, so it is
+    # left off: a leading copyright var's `.{0,5000}` would otherwise be retried at every
+    # character of the file, which is most of a minute to refuse a 485 KB header.
+    held = expressions(template_parts(template), None, itertools.count())
+    while re.fullmatch(held[0], ""):
+        held.pop(0)
+    while re.fullmatch(held[-1], ""):
+        held.pop()
+    return re.compile(BETWEEN_WORDS.join(held), re.IGNORECASE)
+
+
+def comparable(text):
+    """A license text as a template's pattern reads it: without the punctuation at the edges
+    of its lines, which source files wrap a license in, its words spelled as the template's
+    are, and its whitespace one space wherever it stands, since a var's own expression can
+    name a single space."""
+    return re.sub(r"\s+", " ", LINE_EDGE.sub("", equivalent(COPYRIGHT_SYMBOL.sub(" ", text))))
+
+
+# Each template, by its id without regard to case: the id as the List spells it, and its pattern.
+license_templates = {
+    spdx.casefold(): (spdx, template_pattern(path.read_text()))
+    for path in license_list.glob("*.template.txt")
+    for spdx in [path.name.removesuffix(".template.txt")]
+}
+
+
+def license_texts_held(components):
+    """How many components, the vendored ones included, had their license text held to their
+    id, and how many components there are."""
+    every = components + [vendored for c in components for vendored in c.get("components", [])]
+    return sum(p["name"] == "low-talker:license-text" for c in every for p in c["properties"]), len(every)
 
 
 def vendored_version(component, checkout, rule):
@@ -290,7 +458,10 @@ def main():
         held = f"; the {' and '.join(confirmed)} rules held to the install in {store}"
     else:
         held = f"; {store} holds no install of the default model, so its rules were not confirmed"
-    print(f"{output}: {len(components)} components, {sum(len(c.get('components', [])) for c in components)} vendored{held}")
+    texts, every = license_texts_held(components)
+    print(f"{output}: {len(components)} components, {every - len(components)} vendored, "
+          f"{texts} of {every} license texts held to their ids{held}")
 
 
-main()
+if __name__ == "__main__":
+    main()

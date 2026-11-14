@@ -81,4 +81,5 @@ def main():
     print(f"check-licenses: all {read} components in {sys.argv[1]} are under accepted licenses")
 
 
-main()
+if __name__ == "__main__":
+    main()
