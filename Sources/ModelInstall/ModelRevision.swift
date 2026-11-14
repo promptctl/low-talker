@@ -38,10 +38,10 @@ public struct ModelRevision: Hashable, Sendable, CustomStringConvertible {
         self.init(of: model, Dictionary(uniqueKeysWithValues: zip(model.parts, commits.map { $0! })))
     }
 
-    /// The commits joined by `-` in `ModelPart`'s order, the form a cache key takes it in: a
-    /// Whisper model's `<weights>-<tokenizer>`.
+    /// The commits joined by `-` in the order of the model's parts, the order its text is read
+    /// back in, the form a cache key takes it in: a Whisper model's `<weights>-<tokenizer>`.
     public var description: String {
-        ModelPart.allCases.compactMap { commits[$0]?.description }.joined(separator: "-")
+        model.parts.map { commit(of: $0).description }.joined(separator: "-")
     }
 
     /// A git commit hash as the hub writes it: 40 lowercase hex digits.

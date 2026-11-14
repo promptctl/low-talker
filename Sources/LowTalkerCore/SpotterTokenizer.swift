@@ -35,8 +35,11 @@ public struct SpotterTokenizer: Sendable {
         do { file = try JSONDecoder().decode(File.self, from: json) } catch {
             throw PromptsUnavailable(why: "the spotter's tokenizer.json has no vocabulary of pieces to ids: \(error)")
         }
+        guard let longest = file.model.vocab.keys.map(\.count).max() else {
+            throw PromptsUnavailable(why: "the spotter's tokenizer.json has no pieces")
+        }
         ids = file.model.vocab
-        longest = file.model.vocab.keys.map(\.count).max() ?? 0
+        self.longest = longest
         wordStarts = Set(file.model.vocab.filter { $0.key.first == Self.wordStart }.values)
     }
 

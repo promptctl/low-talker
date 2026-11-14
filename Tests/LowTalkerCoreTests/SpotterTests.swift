@@ -114,6 +114,11 @@ func tokenizer(_ pieces: [String]) throws -> SpotterTokenizer {
         #expect(throws: VocabularyError.unspellable(term: "fry", piece: "▁")) { try tokenizer.spell(Vocabulary.Term("fry")) }
     }
 
+    /// A tokenizer.json with no pieces is refused as it is read, not when a term is spelled.
+    @Test func aTokenizerWithNoPiecesIsRefused() {
+        #expect(throws: PromptsUnavailable(why: "the spotter's tokenizer.json has no pieces")) { try tokenizer([]) }
+    }
+
     /// The spotter's real vocabulary spells the bench's names and refuses what it has no piece
     /// for, by the character.
     @Test func theRealVocabularySpellsNamesAndRefusesTheRest() throws {
@@ -182,14 +187,15 @@ func tokenizer(_ pieces: [String]) throws -> SpotterTokenizer {
     }
 
     /// A term's words are each timed from the frame its first piece was entered on to the frame
-    /// its last was, in samples from where the frames start, as sure as its pieces were there.
+    /// its last was, in samples from where the frames start, as sure as its pieces were there,
+    /// and the last runs on over the frames its last piece was held.
     @Test func aTermsWordsAreTimedByTheirPieces() throws {
         let pieces = ["▁Ze", "d", "▁Q", "▁Zed"]
         let spotting = try Self.spotter(["Zed Q"], pieces: pieces).spot(Self.frames([0, 0, 1, 4, 2, 2], sure: 0.9))
         let words = try #require(spotting.hits.first).words(from: 1_000)
         #expect(words.map(\.text) == [" Zed", " Q"])
         #expect(words.map(\.first) == [1_000, 1_000 + 4 * ParakeetWindow.frameSamples])
-        #expect(words.map(\.last) == [1_000 + 2 * ParakeetWindow.frameSamples, 1_000 + 4 * ParakeetWindow.frameSamples])
+        #expect(words.map(\.last) == [1_000 + 2 * ParakeetWindow.frameSamples, 1_000 + 5 * ParakeetWindow.frameSamples])
         #expect(abs(words[0].confidence.value - 0.81) < 0.001)
     }
 }
@@ -205,6 +211,13 @@ func tokenizer(_ pieces: [String]) throws -> SpotterTokenizer {
         let heard = [Self.word(" Ask", 0, 1), Self.word(" Bryan", 3, 5), Self.word(" Lee,", 6, 7), Self.word(" to", 9, 9)]
         let merged = HeardWord.merging([[Self.word(" Brynleigh", 3, 8)]], into: heard)
         #expect(merged.map(\.text) == [" Ask", " Brynleigh,", " to"])
+    }
+
+    /// Punctuation a term spells is not added again from the word it replaces; only what the
+    /// word carries past it is.
+    @Test func aTermsOwnPunctuationIsNotDoubled() {
+        let merged = HeardWord.merging([[Self.word(" Yahoo!", 1, 2)], [Self.word(" Inc.", 5, 6)]], into: [Self.word(" Yahoo!", 1, 2), Self.word(" Inc.,", 5, 6)])
+        #expect(merged.map(\.text) == [" Yahoo!", " Inc.,"])
     }
 
     /// A term over frames where no word was heard takes its place among them by time.

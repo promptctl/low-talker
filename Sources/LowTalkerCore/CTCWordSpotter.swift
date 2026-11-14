@@ -125,8 +125,9 @@ struct CTCWordSpotter {
 extension CTCWordSpotter.Hit {
     /// The term's words as heard, timed in samples from `start`, the sample frame 0 starts at:
     /// each from the frame its first piece was entered on to the frame its last piece was entered
-    /// on, as a TDT word is timed, and as sure as the product of its pieces' probabilities on
-    /// those frames.
+    /// on, as a TDT word is timed, except the last, which runs to the frame the hit ended on, so
+    /// the term spans every frame it was heard over. Each is as sure as the product of its
+    /// pieces' probabilities on the frames they were entered on.
     func words(from start: Int) throws(ParakeetReadingError) -> [HeardWord] {
         var words: [HeardWord] = []
         var spoken = term.words.makeIterator()
@@ -140,7 +141,8 @@ extension CTCWordSpotter.Hit {
                 words.append(HeardWord(text: word.text, first: word.first, last: sample, confidence: word.confidence * sure))
             }
         }
-        return words
+        let last = words.removeLast()
+        return words + [HeardWord(text: last.text, first: last.first, last: start + end * ParakeetWindow.frameSamples, confidence: last.confidence)]
     }
 }
 

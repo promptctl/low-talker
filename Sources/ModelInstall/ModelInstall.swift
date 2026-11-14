@@ -42,16 +42,10 @@ extension ModelStore {
     /// A Whisper model: its weights, a folder of the whisperkit-coreml repo, and the tokenizer
     /// their config names, from an openai repo.
     private func installWhisperKit(_ model: Model, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
-        // [LAW:parse-dont-validate] A revision names both parts, refused before either is fetched.
-        enum Parts { case hub(weights: ModelRevision.Commit, tokenizer: ModelRevision.Commit), store(ModelStore) }
-        let parts: Parts = switch source {
-        case .huggingFace(let revision): .hub(weights: revision.commit(of: .weights), tokenizer: revision.commit(of: .tokenizer))
-        case .store(let store): .store(store)
-        }
         let weights = try await whole(.weights, of: model) {
-            switch parts {
-            case .hub(let weights, _):
-                return try await fromHub(model.repo, at: weights, through: hub, phase: phase) { listing in
+            switch source {
+            case .huggingFace(let revision):
+                return try await fromHub(model.repo, at: revision.commit(of: .weights), through: hub, phase: phase) { listing in
                     (try ModelRevision.variantFolder(of: model, among: listing.files.map(\.path)), ["*"])
                 }
             case .store(let store):
@@ -60,8 +54,8 @@ extension ModelStore {
         }
         let folder = directory.appending(path: weights.folder)
         _ = try await whole(.tokenizer, of: model) {
-            switch parts {
-            case .hub(_, let tokenizer):
+            switch source {
+            case .huggingFace(let revision):
                 // WhisperKit fetches the tokenizer on first load, from the hub,
                 // when it is not already here; taking it now is what lets that
                 // load, and every one after, run with the network off.
@@ -70,7 +64,7 @@ extension ModelStore {
                 // load takes (`Hub.loadConfig` in ArgmaxCore, internal), fetched
                 // here at the revision, which the load cannot be given.
                 let variant = try ModelVariant(modelConfig: Data(contentsOf: folder.appending(path: "config.json")))
-                return try await fromHub(variant.tokenizerRepo, at: tokenizer, through: hub, phase: phase) { _ in
+                return try await fromHub(variant.tokenizerRepo, at: revision.commit(of: .tokenizer), through: hub, phase: phase) { _ in
                     (nil, ["config.json", "tokenizer_config.json", "chat_template.jinja", "chat_template.json", "tokenizer.json"])
                 }
             case .store(let store):

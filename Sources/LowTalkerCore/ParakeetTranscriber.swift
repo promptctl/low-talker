@@ -99,6 +99,9 @@ struct ParakeetReader: Sendable {
     func read(_ pass: Hearing.Pass, hearing terms: [SpelledTerm]) throws(TranscriptionFailure) -> [Transcript.Word] {
         let start = max(0, pass.cut - Self.leadIn)
         var (tokens, facts) = try decode(pass.samples, from: start)
+        // Logged however the pass ends, so a pass the spotter or the reading fails still says
+        // what the decode did.
+        defer { Self.log.info("\(facts.description, privacy: .public)") }
         let spotted = try spot(pass.samples, from: start, hearing: terms, facts: &facts)
             .filter { HeardWord.sounds(from: $0.first!.first, to: $0.last!.last, after: pass.cut) }
         facts.spotted = spotted.count
@@ -106,7 +109,6 @@ struct ParakeetReader: Sendable {
         do throws(ParakeetReadingError) {
             words = HeardWord.merging(spotted, into: try vocabulary.words(tokens, from: pass.cut)).map(\.transcript)
         } catch { throw .unreadable(.parakeet(error)) }
-        Self.log.info("\(facts.description, privacy: .public)")
         guard let last = pass.prefix.last else { return words }
         // The words that start before the last prefix word are hearings of the words before it,
         // and the next is the last's if it starts before that word's last frame ends, its

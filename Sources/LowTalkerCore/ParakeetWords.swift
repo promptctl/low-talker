@@ -98,20 +98,25 @@ struct HeardWord: Equatable, Sendable {
 
     /// `heard` with each of `spotted`'s terms in place of the words whose midpoints fall within
     /// it. A term with none takes its place among them by time. The last word of a term keeps
-    /// the punctuation of the last word it replaced, which the spotter cannot hear: "Frisley," is
-    /// "Fryslie,".
+    /// the punctuation of the last word it replaced, which the spotter cannot hear, past what the
+    /// term already spells: "Frisley," is "Fryslie,", and "Yahoo!" heard as "Yahoo!" stays so.
     static func merging(_ spotted: [[HeardWord]], into heard: [HeardWord]) -> [HeardWord] {
         var words = heard
         for term in spotted {
             let (first, last) = (term.first!.first, term.last!.last)
             let replaced = words.filter { $0.sounds(within: first, last) }
-            let trailing = replaced.last.map { String($0.text.reversed().prefix { $0.isPunctuation }.reversed()) } ?? ""
-            let said = term.dropLast() + [term.last!.ending(with: trailing)]
+            let heard = replaced.last.map(\.trailingPunctuation) ?? ""
+            let spelled = term.last!.trailingPunctuation
+            let said = term.dropLast() + [term.last!.ending(with: String(heard.dropFirst(heard.commonPrefix(with: spelled).count)))]
             words.removeAll { $0.sounds(within: first, last) }
             let at = words.firstIndex { $0.first > first } ?? words.endIndex
             words.insert(contentsOf: said, at: at)
         }
         return words
+    }
+
+    private var trailingPunctuation: String {
+        String(text.reversed().prefix { $0.isPunctuation }.reversed())
     }
 
     private func ending(with punctuation: String) -> HeardWord {

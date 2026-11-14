@@ -291,9 +291,9 @@ private final class Picked: Sendable {
     /// the token fed before it mod 5, the blank's 8192 first: 0 +2, 2 +0, 2 +2, 4 +2, 6 +4,
     /// 10 +1, 11 +0, 11 +1, 12 +1, 13 +2, 15 +3, past the last frame. The stub spotter reads each
     /// frame as the class its first sample carries, so the audio says the blank on every frame but
-    /// the three that say `▁Zed`; told `Zed`, the pass hears it there, between frame 2's words and
-    /// frame 4's.
-    @Test(arguments: [(Vocabulary.empty, "w0 w2 w2 w4 w6 w10 w11 w11 w12 w13 w15"), (Vocabulary([try! Vocabulary.Term("Zed")]), "w0 w2 w2 Zed w4 w6 w10 w11 w11 w12 w13 w15")])
+    /// the three that say `▁Zed`; told `Zed`, the pass hears it over those frames, in place of
+    /// frame 4's word.
+    @Test(arguments: [(Vocabulary.empty, "w0 w2 w2 w4 w6 w10 w11 w11 w12 w13 w15"), (Vocabulary([try! Vocabulary.Term("Zed")]), "w0 w2 w2 Zed w6 w10 w11 w11 w12 w13 w15")])
     func aFixtureIsHeldOnAnInstalledParakeetModel(told vocabulary: Vocabulary, heard: String) async throws {
         let scratch = try ScratchStore(files: [:])
         let pieces = Dictionary(uniqueKeysWithValues: (0..<ParakeetWindow.blank).map { (String($0), " w\($0)") })
