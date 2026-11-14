@@ -450,8 +450,6 @@ public final class Dictation {
     private struct Placed: Sendable {
         let performed: Executor.Performed?
         let words: Int
-        /// What the insert carried: the hold's offered words, then the new ones.
-        let offered: Transcript
         /// What of the hold's it carried, and who said it.
         let carried: Held.Part?
     }
@@ -971,7 +969,7 @@ public final class Dictation {
             let performed = try await executor.insert(offered, following: last, since: since)
             // An insert of nothing is no proof a cursor takes words, so a warning stands.
             performed.map { _ in hold.landed() }
-            return Placed(performed: performed, words: performed.map { _ in offered.words.count } ?? 0, offered: offered, carried: carried)
+            return Placed(performed: performed, words: performed.map { _ in offered.words.count } ?? 0, carried: carried)
         } catch {
             let forgotten = hold.failed(words, by: owner, with: error)
             throw Unplaced(failure: error, carried: offered.words.count, forgotten: forgotten)
@@ -1066,9 +1064,9 @@ public final class Dictation {
     /// first word to the caret with the earlier dictation inside it (`TakeBack`). What no cursor
     /// took of its own words the hold let go at the throw (`threwAway`), held or dismissed, since
     /// a cancel discards what is not in the field, and the report counts it. What was said past
-    /// the commits is dropped, as for a chord that was a typed key's modifier. Words an insert may have landed stand with the hold's
-    /// warning, and earlier dictation the press's inserts carried stays in the field: the report
-    /// counts both.
+    /// the commits is dropped, as for a chord that was a typed key's modifier. Words an insert
+    /// may have landed stand with the hold's warning, and earlier dictation the press's inserts
+    /// carried stays in the field: the report counts both.
     ///
     /// [LAW:no-silent-failure] A take-back that did not happen is a failure saying how many words
     /// stay at the cursor, and it is never retried: a second one could remove words that are not
