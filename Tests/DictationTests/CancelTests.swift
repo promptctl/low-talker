@@ -449,7 +449,7 @@ import TestProbes
         let rig = try await Rig(hearing: Self.engine())
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
-        rig.inputMethod.refusingTakeBack(.refused(.wordsCannotBeTakenBack))
+        rig.inputMethod.refusing(.refused(.wordsCannotBeTakenBack))
 
         Self.cancel(rig)
         let left = try #require(await rig.report().failure as? CancelLeftWords)
@@ -466,7 +466,7 @@ import TestProbes
         let rig = try await Rig(hearing: Self.engine())
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
-        rig.inputMethod.refusingTakeBack(.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words)))
+        rig.inputMethod.refusing(.unreachable(Unreachable(.noAnswer(port: "port", after: .seconds(1)), at: .words)))
 
         Self.cancel(rig)
         let left = try #require(await rig.report().failure as? CancelLeftWords)
@@ -483,7 +483,7 @@ import TestProbes
         let rig = try await Rig(hearing: Self.engine())
         Self.begin(rig)
         try await Self.said([1, 2], in: rig) { rig.inputMethod.field == " hello" }
-        rig.inputMethod.refusingTakeBack(failure)
+        rig.inputMethod.refusing(failure)
 
         Self.cancel(rig)
         let left = try #require(await rig.report().failure as? CancelLeftWords)
