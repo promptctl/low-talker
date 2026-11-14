@@ -174,7 +174,7 @@ let package = Package(
         // The bench: its options, flags, table, the folders a person picked for it, and the
         // one run at a time the app's window and `LowTalker --bench` start. Beneath the app;
         // the engine it loads is the core's, read in place, never installed.
-        .target(name: "Bench", dependencies: ["LowTalkerCore", "GrammaticalNumber", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
+        .target(name: "Bench", dependencies: ["LowTalkerCore", "GrammaticalNumber", "Uptime", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
         .testTarget(name: "BenchTests", dependencies: ["Bench", "LowTalkerCore", "LowTalkerCoreFakes", "TestProbes"]),
         // The write side of the model store: fetching from huggingface.co or a published
         // base, copying from another store, packing one to publish. Beneath `model-tool`

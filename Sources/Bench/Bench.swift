@@ -1,5 +1,6 @@
 import Foundation
 import LowTalkerCore
+import Uptime
 
 /// What a bench run tells its surface while it runs: a model about to load, and each row as
 /// its model's report comes in.
@@ -29,7 +30,7 @@ public enum Bench {
             await emit(.loading(model))
             let report = try await LatencyHarness.measure(
                 fixtures, arrivals: plan.arrivals, servings: plan.servings, reruns: UInt(plan.runs - 1), expecting: plan.vocabulary,
-                on: ContinuousClock()
+                on: HostClock.system
             ) { try await load(model) }
             for result in report.fixtures {
                 await emit(.row(BenchRow(model: model, load: report.load, result: result)))
