@@ -19,21 +19,11 @@ private struct BadBuffer: Error {}
 /// that the words are at the cursor by the time it is told they landed.
 @MainActor
 @Suite struct KeySteeringTests {
-    /// A feed the test types the chord on.
-    private final class Feed: ModifierFeed {
-        var handle: (@MainActor (KeyEvent) -> Void)?
-
-        func install(handling handle: @escaping @MainActor (KeyEvent) -> Void) throws -> Disposal {
-            self.handle = handle
-            return {}
-        }
-    }
-
     /// The loop and the hotkey that feeds it, with a keyboard.
     @MainActor private struct Loop {
         let rig: Rig
         let hotkey: Hotkey
-        let feed: Feed
+        let feed: FakeModifierFeed
         let steering: KeySteering
         /// The word box an Escape the input method asks about is taken by, as the app's is.
         let box: WordBox
@@ -46,7 +36,7 @@ private struct BadBuffer: Error {}
         init(over rig: Rig, refusing refusal: InsertFailure? = nil, holdsReturn: Bool = true) throws {
             self.rig = rig
             rig.inputMethod.refusing(refusal)
-            feed = Feed()
+            feed = FakeModifierFeed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             let dictation = rig.dictation
             try hotkey.start(feeding: dictation)
@@ -59,7 +49,7 @@ private struct BadBuffer: Error {}
         /// Right Option going down or up, `held` milliseconds into the press, stamped on the
         /// clock the loop's marks are on.
         func chord(_ direction: KeyEvent.Direction, atMilliseconds ms: Int64) {
-            feed.handle?(KeyEvent(
+            feed.type(KeyEvent(
                 key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [],
                 time: HostTime(uptime: rig.now.uptime + .milliseconds(ms)), lastTyped: HostTime(uptime: .seconds(-60))))
         }

@@ -58,7 +58,7 @@ public final class Hotkey {
         public var description: String {
             switch self {
             case .transition(let transition): "\(transition)"
-            case .refused(let moment): "the press begun at \(moment.uptime / .milliseconds(1)) ms of uptime was refused"
+            case .refused(let moment): "the press begun at \(Int((moment.uptime / .milliseconds(1)).rounded())) ms of uptime was refused"
             }
         }
     }

@@ -14,24 +14,14 @@ private struct BadBuffer: Error {}
 /// the chord listens.
 @MainActor
 @Suite struct RefusedTapTests {
-    /// A feed the test types the chord on.
-    private final class Feed: ModifierFeed {
-        var handle: (@MainActor (KeyEvent) -> Void)?
-
-        func install(handling handle: @escaping @MainActor (KeyEvent) -> Void) throws -> Disposal {
-            self.handle = handle
-            return {}
-        }
-    }
-
     @MainActor private struct Loop {
         let rig: Rig
         let hotkey: Hotkey
-        let feed: Feed
+        let feed: FakeModifierFeed
 
         init() async throws {
             rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "a") })
-            feed = Feed()
+            feed = FakeModifierFeed()
             hotkey = Hotkey(modes: Config.default.modes, feed: feed)
             try hotkey.start(feeding: rig.dictation)
         }
@@ -39,7 +29,7 @@ private struct BadBuffer: Error {}
         /// Right Option going down or up, `ms` milliseconds after the rig's clock, which the loop's
         /// marks are on.
         func chord(_ direction: KeyEvent.Direction, atMilliseconds ms: Int64) {
-            feed.handle?(KeyEvent(
+            feed.type(KeyEvent(
                 key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [],
                 time: HostTime(uptime: rig.now.uptime + .milliseconds(ms)), lastTyped: HostTime(uptime: .seconds(-60))))
         }
