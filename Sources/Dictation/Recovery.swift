@@ -31,11 +31,14 @@ public final class Recovery {
     /// Files the store could not read when it was opened, and what became of each, and removals
     /// that failed after the words were held. [LAW:no-silent-failure]
     public private(set) var troubles: [String]
-    /// Why the engine could not read a kept speech, by its id. It stays kept and listed until the
-    /// person discards it or the next launch's landing reads it again: no engine lands twice in a
-    /// process, so nothing here would try it again.
-    private var unread: [String: String] = [:]
+    /// Why an engine could not read a kept speech, and which landing it was, by the speech's id.
+    /// It stays kept and listed until the person discards it, and each engine that lands after
+    /// reads it again: a save naming another model lands one that may read what this one could
+    /// not, such as speech kept with a vocabulary Parakeet cannot be told.
+    private var unread: [String: (why: String, landing: Int)] = [:]
     private var engine: (any Transcriber)?
+    /// Engines landed so far; the latest is `engine`.
+    private var landing = 0
     private var recovering: Task<Void, Never>?
 
     /// What a read of kept speech is timed on.
@@ -78,6 +81,7 @@ public final class Recovery {
     /// engine, so reading kept speech never holds up a press.
     public func landed(_ served: any Transcriber) {
         engine = served
+        landing += 1
         recover()
     }
 
@@ -105,7 +109,7 @@ public final class Recovery {
         var lines: [String] = []
         if !waiting.isEmpty { lines.append("Speech waiting for the model: \(Self.spoken(waiting))") }
         if !failed.isEmpty {
-            let causes = Set(failed.compactMap { unread[$0.id] }).sorted().joined(separator: "; ")
+            let causes = Set(failed.compactMap { unread[$0.id]?.why }).sorted().joined(separator: "; ")
             lines.append("Speech the model could not read: \(Self.spoken(failed)) (\(causes))")
         }
         return lines + troubles
@@ -119,8 +123,13 @@ public final class Recovery {
     /// `keep` is called from inside the loop's turn, whose queue refuses a wait from any task that
     /// inherits it, and the hand-off in `read` is such a wait: so the run is detached.
     private func recover() {
-        guard recovering == nil, let engine, kept.contains(where: { unread[$0.id] == nil }) else { return }
-        recovering = Task.detached { [self] in await run(on: engine) }
+        guard recovering == nil, engine != nil, kept.contains(where: untried) else { return }
+        recovering = Task.detached { [self] in await run() }
+    }
+
+    /// Whether the latest engine has yet to read `entry`.
+    private func untried(_ entry: UnheardEntry) -> Bool {
+        unread[entry.id]?.landing != landing
     }
 
     /// Reads each kept speech not yet tried, oldest first, each either removed or marked unread:
@@ -128,22 +137,22 @@ public final class Recovery {
     /// in the same step as it finds nothing left to read, so a speech kept in between starts
     /// another run. A run a discard cancelled ends the same way, and speech kept since the
     /// discard gets the run that follows. [LAW:no-ambient-temporal-coupling]
-    private func run(on engine: any Transcriber) async {
-        while !Task.isCancelled, let entry = kept.first(where: { unread[$0.id] == nil }) {
-            await read(entry, on: engine)
+    private func run() async {
+        while !Task.isCancelled, let engine, let entry = kept.first(where: untried) {
+            await read(entry, on: engine, landing: landing)
         }
         recovering = nil
         recover()
     }
 
-    private func read(_ entry: UnheardEntry, on engine: any Transcriber) async {
+    private func read(_ entry: UnheardEntry, on engine: any Transcriber, landing: Int) async {
         let samples: [Float]
         let vocabulary: Vocabulary
         do {
             samples = try store.samples(of: entry)
             vocabulary = try Vocabulary(entry.vocabulary.map { try Vocabulary.Term($0) })
         } catch {
-            return fail(entry, "\(error)")
+            return fail(entry, "\(error)", landing: landing)
         }
         let began = clock.now
         let transcription: Transcription
@@ -154,11 +163,11 @@ public final class Recovery {
             case .cancelled:
                 // A discard cancelled this task and has cleared what was kept; a cancel from
                 // anywhere else is a failure to read it, or this would try it again forever.
-                return Task.isCancelled ? () : fail(entry, "\(error)")
+                return Task.isCancelled ? () : fail(entry, "\(error)", landing: landing)
             case .nothingSpoken:
                 Self.log.notice("kept speech \(entry.id, privacy: .public) held nothing spoken, so it was let go")
                 return finish(entry)
-            case .vocabulary, .unreadable, .engine: return fail(entry, "\(error)")
+            case .vocabulary, .unreadable, .engine: return fail(entry, "\(error)", landing: landing)
             }
         }
         let words = transcription.transcript
@@ -197,8 +206,8 @@ public final class Recovery {
         unread[entry.id] = nil
     }
 
-    private func fail(_ entry: UnheardEntry, _ why: String) {
-        unread[entry.id] = why
+    private func fail(_ entry: UnheardEntry, _ why: String, landing: Int) {
+        unread[entry.id] = (why, landing)
         Self.log.fault("kept speech \(entry.id, privacy: .public) could not be read: \(why, privacy: .public)")
     }
 

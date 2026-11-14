@@ -64,7 +64,11 @@ struct Hearing {
     /// is matched the same way, so it is dropped whether it comes back punctuated
     /// or not.
     var saying: String {
-        Self.unpunctuated(prefix.map(\.text).joined())
+        Self.saying(prefix)
+    }
+
+    fileprivate static func saying(_ prefix: [Transcript.Word]) -> String {
+        unpunctuated(prefix.map(\.text).joined())
     }
 
     private static func unpunctuated(_ text: String) -> String {
@@ -74,7 +78,7 @@ struct Hearing {
     /// [LAW:one-source-of-truth] The one rule for two passes reading the same word:
     /// trailing punctuation is the later pass's to revise, in a prefix or in a
     /// tentative word alike.
-    private static func sameWord(_ earlier: Transcript.Word, _ later: Transcript.Word) -> Bool {
+    static func sameWord(_ earlier: Transcript.Word, _ later: Transcript.Word) -> Bool {
         unpunctuated(earlier.text) == unpunctuated(later.text)
     }
 
@@ -82,6 +86,10 @@ struct Hearing {
     /// the words it is told. [LAW:one-source-of-truth] Derived from the confirmed
     /// words, so it moves forward exactly as they settle and never back.
     var cut: Int {
+        Self.cut(prefix)
+    }
+
+    fileprivate static func cut(_ prefix: [Transcript.Word]) -> Int {
         prefix.first.map { AudioClip.sampleCount(for: $0.time.lowerBound) } ?? 0
     }
 
@@ -138,13 +146,15 @@ struct Hearing {
 
 extension Hearing {
     /// What one pass is asked to read: the speech so far, how much of it arrived before
-    /// the silence run out past it, where in it to start, and the confirmed words to say
-    /// first.
+    /// the silence run out past it, and the confirmed words it starts from, which say where
+    /// in it to start and what to say first.
     struct Pass: Equatable, Sendable {
         let samples: [Float]
         let arrived: Int
-        let cut: Int
-        let saying: String
+        let prefix: [Transcript.Word]
+
+        var cut: Int { Hearing.cut(prefix) }
+        var saying: String { Hearing.saying(prefix) }
     }
 
     /// Hears an utterance out as it arrives: fills it from `audio`, and runs `pass`
@@ -181,7 +191,7 @@ extension Hearing {
         var heard = await utterance.audio(beyond: hearing.passable)
         while heard.samples.count > hearing.heard {
             do throws(TranscriptionFailure) {
-                let words = try await pass(Pass(samples: heard.samples, arrived: heard.arrived, cut: hearing.cut, saying: hearing.saying))
+                let words = try await pass(Pass(samples: heard.samples, arrived: heard.arrived, prefix: hearing.prefix))
                 hearing.hear(words, through: heard.samples.count)
             } catch {
                 if heard.ended || Task.isCancelled { throw error }

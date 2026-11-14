@@ -222,3 +222,21 @@ class LicenseTextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModelComponentsTests(unittest.TestCase):
+    """A carried model's parts are model-tool's to name, and a rule is held to all of them."""
+
+    def components(self, printed, rules):
+        with tempfile.TemporaryDirectory() as folder:
+            tool = Path(folder) / "model-tool"
+            tool.write_text(f"#!/bin/sh\nprintf '{printed}'\n")
+            tool.chmod(0o755)
+            return sbom.model_components(tool, rules, None)
+
+    def test_a_rule_missing_a_part_stops_naming_it(self):
+        rules = {"m": {"weights": {"repo": "o/r", "layout": "model-folder", "license": "MIT"}}}
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            self.components("m weights tokenizer\\n", rules)
+        self.assertIn("the model's parts are weights, tokenizer", stderr.getvalue())

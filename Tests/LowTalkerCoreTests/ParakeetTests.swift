@@ -7,7 +7,9 @@ import Testing
 
 /// A Parakeet network whose joint reads from a script: a token at each sample it names, a blank
 /// everywhere else. Each frame's feature is the sample it starts at, counted from the pass's
-/// first, so a script names where words sound whatever window they fall in.
+/// first, so a script names where words sound whatever window they fall in. Its encoder returns
+/// a frame per 80 ms and one more starting at the window's last sample, as the published
+/// encoder's length does: 16,000 samples are 13 frames.
 struct ScriptedNetwork: ParakeetNetwork {
     /// The token sounding at a sample, and the duration index the joint gives it.
     var spoken: [Int: (token: Int, duration: Int)] = [:]
@@ -25,7 +27,7 @@ struct ScriptedNetwork: ParakeetNetwork {
     var startState: PredictorState { PredictorState(hidden: [], cell: []) }
 
     func encode(_ samples: ArraySlice<Float>) throws -> EncodedWindow {
-        EncodedWindow(frames: stride(from: samples.startIndex, to: samples.endIndex, by: ParakeetWindow.frameSamples).map { EncodedFrame(features: [Float($0)]) })
+        EncodedWindow(frames: stride(from: samples.startIndex, through: samples.endIndex, by: ParakeetWindow.frameSamples).map { EncodedFrame(features: [Float($0)]) })
     }
 
     func predict(_ token: Int, from state: PredictorState) throws -> (Prediction, PredictorState) {
@@ -44,7 +46,7 @@ struct ScriptedNetwork: ParakeetNetwork {
     }
 }
 
-/// A vocabulary of control pieces, words that start with a space, and a piece that continues one.
+/// A vocabulary of control pieces, words that start with a space, and pieces that continue one.
 let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map { id in
     switch id {
     case 0: "<unk>"
@@ -54,6 +56,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     case 302: " three"
     case 303: " four"
     case 304: "teen"
+    case 305: "."
     default: " w\(id)"
     }
 })
@@ -64,12 +67,17 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
         EncodedWindow(frames: (0..<frames).map { EncodedFrame(features: [Float(start + $0 * ParakeetWindow.frameSamples)]) })
     }
 
+    /// The samples `frames` whole frames span.
+    static func span(frames: Int, from start: Int = 0) -> Range<Int> {
+        start..<start + frames * ParakeetWindow.frameSamples
+    }
+
     /// A token is emitted at its frame and fed to the predictor; a blank is not; decoding starts
     /// from the blank as the start symbol.
     @Test func aTokenIsEmittedAtItsFrameAndFedOn() throws {
         let network = ScriptedNetwork(spoken: [2_560: (300, 1)])
         var decoding = try TDTDecoding(network: network)
-        try decoding.decode(Self.window(frames: 4), from: 0)
+        try decoding.decode(Self.window(frames: 4), over: Self.span(frames: 4))
         #expect(decoding.tokens == [.init(id: 300, sample: 2_560, probability: 0.5)])
         #expect(network.log.fed.withLock { $0 } == [ParakeetWindow.blank, 300])
         #expect(decoding.facts == ParakeetPassFacts(samples: 0, windows: 1, frames: 4, blanks: 3, tokens: 1, forcedAdvances: 0))
@@ -79,7 +87,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     @Test func aDurationSkipsTheFramesItCovers() throws {
         let network = ScriptedNetwork(spoken: [0: (300, 3)])
         var decoding = try TDTDecoding(network: network)
-        try decoding.decode(Self.window(frames: 5), from: 0)
+        try decoding.decode(Self.window(frames: 5), over: Self.span(frames: 5))
         // Frame 0 emits and covers frames 1 and 2 (duration 3 frames); frames 3 and 4 are blanks.
         #expect(network.log.handed.withLock { $0.count } == 3)
     }
@@ -88,7 +96,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     @Test func aBlankAlwaysMovesOn() throws {
         let network = ScriptedNetwork(silence: JointStep(token: ParakeetWindow.blank, probability: 1, duration: 0))
         var decoding = try TDTDecoding(network: network)
-        try decoding.decode(Self.window(frames: 3), from: 0)
+        try decoding.decode(Self.window(frames: 3), over: Self.span(frames: 3))
         #expect(decoding.facts.blanks == 3)
     }
 
@@ -97,7 +105,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     @Test func aFrameIsLeftAfterTheMostTokensItMayEmit() throws {
         let network = ScriptedNetwork(silence: JointStep(token: 300, probability: 0.9, duration: 0))
         var decoding = try TDTDecoding(network: network)
-        try decoding.decode(Self.window(frames: 2), from: 0)
+        try decoding.decode(Self.window(frames: 2), over: Self.span(frames: 2))
         #expect(decoding.tokens.count == 2 * ParakeetWindow.maxSymbolsPerFrame)
         #expect(decoding.facts.forcedAdvances == 2)
     }
@@ -107,16 +115,38 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     @Test func thePredictionCarriesAcrossWindows() throws {
         let network = ScriptedNetwork(spoken: [1_280: (301, 1)])
         var decoding = try TDTDecoding(network: network)
-        try decoding.decode(Self.window(frames: 2), from: 0)
-        try decoding.decode(Self.window(frames: 1, from: 2_560), from: 2_560)
+        try decoding.decode(Self.window(frames: 2), over: Self.span(frames: 2))
+        try decoding.decode(Self.window(frames: 1, from: 2_560), over: Self.span(frames: 1, from: 2_560))
         #expect(network.log.handed.withLock { $0 }.last == 301)
         #expect(decoding.facts.windows == 2)
+    }
+
+    /// The encoder's frame starting at a window's end is the next window's first, so it is
+    /// decoded once: a token there is emitted once, by the next window.
+    @Test func theFrameAtASeamIsDecodedOnce() throws {
+        let network = ScriptedNetwork(spoken: [2_560: (300, 1)])
+        var decoding = try TDTDecoding(network: network)
+        try decoding.decode(Self.window(frames: 3), over: Self.span(frames: 2))
+        try decoding.decode(Self.window(frames: 2, from: 2_560), over: Self.span(frames: 2, from: 2_560))
+        #expect(decoding.tokens == [.init(id: 300, sample: 2_560, probability: 0.5)])
+        #expect(decoding.facts.frames == 4)
+    }
+
+    /// A duration that runs past a window's last frame covers the next window's first frames, as
+    /// it would any other frames: the joint is asked nothing about them.
+    @Test func aDurationCarriesAcrossASeam() throws {
+        let network = ScriptedNetwork(spoken: [1_280: (300, 4)])
+        var decoding = try TDTDecoding(network: network)
+        try decoding.decode(Self.window(frames: 2), over: Self.span(frames: 2))
+        try decoding.decode(Self.window(frames: 4, from: 2_560), over: Self.span(frames: 4, from: 2_560))
+        // Frame 1 emits and covers frames 2 through 4, the second window's first three.
+        #expect(network.log.handed.withLock { $0.count } == 3)
     }
 
     /// A duration index past the model's durations fails the reading by name.
     @Test func aDurationPastTheDurationsIsRefused() throws {
         var decoding = try TDTDecoding(network: ScriptedNetwork(silence: JointStep(token: ParakeetWindow.blank, probability: 1, duration: 5)))
-        #expect(throws: ParakeetReadingError.durationOutOfRange(5)) { try decoding.decode(Self.window(frames: 1), from: 0) }
+        #expect(throws: ParakeetReadingError.durationOutOfRange(5)) { try decoding.decode(Self.window(frames: 1), over: Self.span(frames: 1)) }
     }
 
     /// [LAW:nothing-unseen] Every count, zeros included, is on the pass's line.
@@ -133,7 +163,7 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     /// A word starts at each space-led piece and runs to the end of its last token's frame; a piece
     /// without a space joins the word before it, as sure as both pieces' probabilities together.
     @Test func piecesGroupIntoTimedWords() throws {
-        let words = try vocabulary.words([Self.token(300, at: 1), Self.token(302, at: 4, 0.5), Self.token(304, at: 5, 0.25)])
+        let words = try vocabulary.words([Self.token(300, at: 1), Self.token(302, at: 4, 0.5), Self.token(304, at: 5, 0.25)], from: 0)
         #expect(Transcript(words: words).text == " one threeteen")
         #expect(words.map(\.time) == [0.08...0.16, 0.32...0.48])
         #expect(words.map(\.confidence.value) == [0.5, 0.125])
@@ -142,15 +172,21 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     /// The first piece of a window that continues a word still carries the leading space every
     /// transcript word does.
     @Test func aFirstPieceWithNoSpaceStartsAWord() throws {
-        #expect(try vocabulary.words([Self.token(304, at: 0)]).map(\.text) == [" teen"])
+        #expect(try vocabulary.words([Self.token(304, at: 0)], from: 0).map(\.text) == [" teen"])
     }
 
     /// A control piece or a probability outside 0...1 fails the reading, naming it, rather than
     /// vanishing from the transcript.
     @Test func whatCannotBeAWordIsRefused() {
-        #expect(throws: ParakeetReadingError.controlToken(id: 0, piece: "<unk>")) { try vocabulary.words([Self.token(0, at: 0)]) }
-        #expect(throws: ParakeetReadingError.probabilityOutsideUnitInterval(1.5, piece: " one")) { try vocabulary.words([Self.token(300, at: 0, 1.5)]) }
-        #expect(throws: ParakeetReadingError.tokenOutsideVocabulary(ParakeetWindow.blank)) { try vocabulary.words([Self.token(ParakeetWindow.blank, at: 0)]) }
+        #expect(throws: ParakeetReadingError.controlToken(id: 0, piece: "<unk>")) { try vocabulary.words([Self.token(0, at: 0)], from: 0) }
+        #expect(throws: ParakeetReadingError.probabilityOutsideUnitInterval(1.5, piece: " one")) { try vocabulary.words([Self.token(300, at: 0, 1.5)], from: 0) }
+        #expect(throws: ParakeetReadingError.tokenOutsideVocabulary(ParakeetWindow.blank)) { try vocabulary.words([Self.token(ParakeetWindow.blank, at: 0)], from: 0) }
+    }
+
+    /// A word sounding mostly before the cut is not read, so a control piece in it fails nothing.
+    @Test func aWordBeforeTheCutIsNotRead() throws {
+        let words = try vocabulary.words([Self.token(0, at: 0), Self.token(300, at: 1), Self.token(304, at: 2), Self.token(301, at: 3)], from: 2 * ParakeetWindow.frameSamples)
+        #expect(words.map(\.text) == [" oneteen", " two"])
     }
 
     /// The vocabulary file is read whole or refused: every id up to the blank, none missing.
@@ -194,31 +230,50 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 }
 
 @Suite struct ParakeetReaderTests {
+    static let cut = 20 * ParakeetWindow.frameSamples
+    static let samples = [Float](repeating: 0.1, count: cut + 8 * ParakeetWindow.frameSamples)
+    /// The prefix a pass starts from: " two", confirmed over the frame at the cut.
+    static let prefix = [Transcript.Word(text: " two", time: AudioClip.duration(for: cut)...AudioClip.duration(for: cut + ParakeetWindow.frameSamples), confidence: 0.5)]
+
+    static func read(_ spoken: [Int: (token: Int, duration: Int)], prefix: [Transcript.Word] = Self.prefix) throws(TranscriptionFailure) -> [Transcript.Word] {
+        try ParakeetReader(network: ScriptedNetwork(spoken: spoken), vocabulary: vocabulary).read(Hearing.Pass(samples: samples, arrived: 0, prefix: prefix))
+    }
+
     /// A pass reads from half a second before its cut, so the first confirmed word is heard with the
     /// sound before it, and returns the words from the cut on: the prefix first, as Hearing reads it.
     @Test func aPassReadsFromItsLeadInAndReturnsFromItsCut() throws {
-        let cut = 20 * ParakeetWindow.frameSamples
-        let network = ScriptedNetwork(spoken: [cut - 5 * ParakeetWindow.frameSamples: (300, 1), cut: (301, 1), cut + 3 * ParakeetWindow.frameSamples: (302, 1)])
-        let reader = ParakeetReader(network: network, vocabulary: vocabulary)
-        let words = try reader.read(Hearing.Pass(samples: [Float](repeating: 0.1, count: cut + 8 * ParakeetWindow.frameSamples), arrived: 0, cut: cut, saying: " two"))
+        let words = try Self.read([Self.cut - 5 * ParakeetWindow.frameSamples: (300, 1), Self.cut: (301, 1), Self.cut + 3 * ParakeetWindow.frameSamples: (302, 1)])
         #expect(words.map(\.text) == [" two", " three"])
-        #expect(words.first?.time.lowerBound == AudioClip.duration(for: cut))
+        #expect(words.first?.time.lowerBound == AudioClip.duration(for: Self.cut))
     }
 
-    /// A pass that starts at the utterance's first sample has no lead-in to read before it.
+    /// Parakeet hears its prefix again rather than being told it, so a prefix heard another way
+    /// is still the prefix as told, and not a new word after it.
+    @Test func aPrefixHeardAnotherWayIsTheOneTold() throws {
+        let words = try Self.read([Self.cut: (303, 1), Self.cut + 3 * ParakeetWindow.frameSamples: (302, 1)])
+        #expect(words.map(\.text) == [" two", " three"])
+    }
+
+    /// The last prefix word takes the punctuation this pass hears on it, though the punctuation
+    /// sounds after the prefix's end.
+    @Test func thePrefixTakesThePunctuationThisPassHears() throws {
+        let words = try Self.read([Self.cut: (301, 1), Self.cut + ParakeetWindow.frameSamples: (305, 1), Self.cut + 3 * ParakeetWindow.frameSamples: (302, 1)])
+        #expect(words.map(\.text) == [" two.", " three"])
+    }
+
+    /// A pass that starts at the utterance's first sample has no lead-in to read before it, and
+    /// decodes no frame past its audio.
     @Test func aPassFromTheStartReadsFromTheStart() throws {
-        let network = ScriptedNetwork(spoken: [0: (300, 1)])
-        let (words, facts) = try ParakeetReader(network: network, vocabulary: vocabulary).decode([Float](repeating: 0.1, count: 12_800), from: 0)
-        #expect(words.map(\.text) == [" one"])
+        let reader = ParakeetReader(network: ScriptedNetwork(spoken: [0: (300, 1)]), vocabulary: vocabulary)
+        let (tokens, facts) = try reader.decode([Float](repeating: 0.1, count: 12_800), from: 0)
+        #expect(tokens.map(\.id) == [300])
         #expect(facts == ParakeetPassFacts(samples: 12_800, windows: 1, frames: 10, blanks: 9, tokens: 1, forcedAdvances: 0))
     }
 
-    /// A reading the network cannot make into words fails the pass as unreadable, and a network
-    /// that throws fails it as the engine's.
-    @Test func aPassFailsAsItsReadingOrAsItsEngine() {
-        let control = ParakeetReader(network: ScriptedNetwork(spoken: [0: (0, 1)]), vocabulary: vocabulary)
+    /// A reading the network cannot make into words fails the pass as unreadable.
+    @Test func aPassFailsAsItsReading() {
         #expect {
-            _ = try control.decode([Float](repeating: 0.1, count: 1_280), from: 0)
+            _ = try Self.read([Self.cut + 3 * ParakeetWindow.frameSamples: (0, 1)], prefix: [])
         } throws: { error in
             if case TranscriptionFailure.unreadable(.parakeet(.controlToken(id: 0, _))) = error { true } else { false }
         }

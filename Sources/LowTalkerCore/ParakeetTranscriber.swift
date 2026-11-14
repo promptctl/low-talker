@@ -83,18 +83,29 @@ struct ParakeetReader: Sendable {
 
     static let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "parakeet")
 
-    /// The pass's words from the cut on, timed from the pass's first sample: the words the lead-in
-    /// heard before the cut are dropped by where they sound, so the confirmed words come first,
-    /// as `Hearing` reads them.
+    /// The pass's words from the cut on, timed from the pass's first sample, its prefix first as
+    /// `Hearing` reads it. Parakeet is not told the prefix, it hears it again, so the words heard
+    /// over the prefix's audio are the prefix as told, the last with the punctuation this pass
+    /// hears on it: a prefix word heard another way is then not heard twice, once confirmed and
+    /// once as a new word. The words the lead-in heard before the cut are dropped by where they
+    /// sound.
     func read(_ pass: Hearing.Pass) throws(TranscriptionFailure) -> [Transcript.Word] {
-        let (words, facts) = try decode(pass.samples, from: max(0, pass.cut - Self.leadIn))
+        let (tokens, facts) = try decode(pass.samples, from: max(0, pass.cut - Self.leadIn))
         Self.log.info("\(facts.description, privacy: .public)")
-        let cut = AudioClip.duration(for: pass.cut)
-        return words.filter { ($0.time.lowerBound + $0.time.upperBound) / 2 >= cut }
+        let words: [Transcript.Word]
+        do throws(ParakeetReadingError) { words = try vocabulary.words(tokens, from: pass.cut) } catch { throw .unreadable(.parakeet(error)) }
+        guard let last = pass.prefix.last else { return words }
+        let end = AudioClip.sampleCount(for: last.time.upperBound)
+        // A word that starts before the prefix's last frame ends is a hearing of the prefix, its
+        // punctuation running on past that end or not.
+        let over = words.prefix { AudioClip.sampleCount(for: $0.time.lowerBound) < end }
+        // `Hearing` keeps a confirmed word's time and takes only the text a pass reads for it.
+        let reheard = over.last.flatMap { Hearing.sameWord(last, $0) ? $0 : nil } ?? last
+        return pass.prefix.dropLast() + [reheard] + words.dropFirst(over.count)
     }
 
-    /// The words of `samples` from `start` on, and what the decode did.
-    func decode(_ samples: [Float], from start: Int) throws(TranscriptionFailure) -> ([Transcript.Word], ParakeetPassFacts) {
+    /// The tokens of `samples` from `start` on, and what the decode did.
+    func decode(_ samples: [Float], from start: Int) throws(TranscriptionFailure) -> ([TDTDecoding.EmittedToken], ParakeetPassFacts) {
         let spans = ParakeetWindow.spans(of: samples, from: start)
         var decoding: TDTDecoding
         do {
@@ -103,7 +114,7 @@ struct ParakeetReader: Sendable {
                 // A hold that wants the engine cancels the decode between windows, and the
                 // turns run it again; a window already on the compute units finishes.
                 if Task.isCancelled { throw TranscriptionFailure.cancelled }
-                try decoding.decode(network.encode(samples[span]), from: span.lowerBound)
+                try decoding.decode(network.encode(samples[span]), over: span)
             }
         } catch let failure as TranscriptionFailure {
             throw failure
@@ -114,11 +125,7 @@ struct ParakeetReader: Sendable {
         }
         var facts = decoding.facts
         facts.samples = samples.count - start
-        do throws(ParakeetReadingError) {
-            return (try vocabulary.words(decoding.tokens), facts)
-        } catch {
-            throw .unreadable(.parakeet(error))
-        }
+        return (decoding.tokens, facts)
     }
 }
 

@@ -10,14 +10,17 @@
 /// `maxSymbolsPerFrame` tokens is left.
 ///
 /// [LAW:effects-at-boundaries] The network is a port, so every rule here is tested against a
-/// scripted one. The predictor's state and its last prediction carry across the windows of
-/// one pass: a window boundary is where the encoder's input is cut, not where speech stops.
+/// scripted one. The predictor's state, its last prediction and the frames the last token's
+/// duration covers carry across the windows of one pass: a window boundary is where the
+/// encoder's input is cut, not where speech stops.
 struct TDTDecoding {
     private let network: any ParakeetNetwork
     private var prediction: Prediction
     private var state: PredictorState
     private(set) var tokens: [EmittedToken] = []
     private(set) var facts = ParakeetPassFacts()
+    /// Frames at the start of the next window that the last token's duration already covers.
+    private var covered = 0
 
     /// A token the joint emitted, at the sample its frame starts, counted from the pass's
     /// first sample.
@@ -33,14 +36,17 @@ struct TDTDecoding {
         (prediction, state) = try network.predict(ParakeetWindow.blank, from: network.startState)
     }
 
-    /// Decodes one window's frames, its first frame at sample `start` of the pass.
-    mutating func decode(_ window: EncodedWindow, from start: Int) throws {
+    /// Decodes the frames of the window encoded from `span` of the pass's samples. A frame is
+    /// the window's whose span holds the sample it starts at: the encoder also returns the
+    /// frame starting at the span's end, which the next window decodes as its first.
+    mutating func decode(_ window: EncodedWindow, over span: Range<Int>) throws {
+        let frames = window.frames.prefix((span.count + ParakeetWindow.frameSamples - 1) / ParakeetWindow.frameSamples)
         facts.windows += 1
-        facts.frames += window.frames.count
-        var frame = 0
+        facts.frames += frames.count
+        var frame = covered
         var emittedHere = 0
-        while frame < window.frames.count {
-            let step = try network.joint(window.frames[frame], prediction)
+        while frame < frames.count {
+            let step = try network.joint(frames[frame], prediction)
             guard ParakeetWindow.durations.indices.contains(step.duration) else {
                 throw ParakeetReadingError.durationOutOfRange(step.duration)
             }
@@ -49,7 +55,7 @@ struct TDTDecoding {
                 facts.blanks += 1
                 advance = max(advance, 1)
             } else {
-                tokens.append(EmittedToken(id: step.token, sample: start + frame * ParakeetWindow.frameSamples, probability: step.probability))
+                tokens.append(EmittedToken(id: step.token, sample: span.lowerBound + frame * ParakeetWindow.frameSamples, probability: step.probability))
                 facts.tokens += 1
                 (prediction, state) = try network.predict(step.token, from: state)
                 emittedHere += 1
@@ -61,6 +67,7 @@ struct TDTDecoding {
             frame += advance
             if advance > 0 { emittedHere = 0 }
         }
+        covered = frame - frames.count
     }
 }
 

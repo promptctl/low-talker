@@ -33,16 +33,16 @@ struct ModelTool: AsyncParsableCommand {
         }
     }
 
-    /// The models a bundle carries, one name a line, for scripts: `scripts/sbom` lists each
+    /// The models a bundle carries and their parts, one model a line, for scripts: `scripts/sbom` lists each
     /// as a component, read here rather than copied so the SBOM names what the app can load.
     /// [LAW:one-source-of-truth]
     struct Carried: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Print the names of the models a bundle carries, one a line."
+            abstract: "Print the models a bundle carries, one a line: its name, then the parts a store installs for it."
         )
 
         func run() {
-            for model in Model.carried { print(model.rawValue) }
+            for model in Model.carried { print(([model.rawValue] + model.parts.map(\.rawValue)).joined(separator: " ")) }
         }
     }
 

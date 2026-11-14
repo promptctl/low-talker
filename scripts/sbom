@@ -355,13 +355,15 @@ LAYOUTS = {"model-folder", "repo"}
 
 def model_components(tool, rules, store):
     """Every model model-tool names as carried, which are the models a release carries and a
-    config may name. A rule lists the model's parts: its weights, whose `layout` says where in
-    their repo they are, and, for a Whisper model, the tokenizer WhisperKit picks off the
-    weights' config. Each part's repo is the rule's to state and the store's, when there is
-    one, to confirm."""
+    config may name, with the parts a store installs for it. A rule lists exactly those parts:
+    the weights, whose `layout` says where in their repo they are, and, for a Whisper model, the
+    tokenizer WhisperKit picks off the weights' config. Each part's repo is the rule's to state
+    and the store's, when there is one, to confirm."""
     if not tool.is_file():
         fail(f"no model tool at {tool}; run `make model-tool`")
-    models = run(str(tool), ["carried"], "the carried models").split()
+    # [LAW:one-source-of-truth] A model's parts are the code's, so a rule missing one fails here.
+    parts = {line.split()[0]: line.split()[1:] for line in run(str(tool), ["carried"], "the carried models").splitlines() if line.strip()}
+    models = list(parts)
     if not models:
         fail("`model-tool carried` printed nothing")
     unruled = [model for model in models if model not in rules]
@@ -374,16 +376,13 @@ def model_components(tool, rules, store):
     confirmed = []
     for model in models:
         rule = rules[model]
-        unknown = sorted(set(rule) - {"weights", "tokenizer"})
-        if unknown:
-            fail(f"{model}: rules.json names parts {', '.join(unknown)}; a model's parts are its weights and a tokenizer")
-        need(rule, "weights", model)
+        if set(rule) != set(parts[model]):
+            fail(f"{model}: rules.json names the parts {', '.join(sorted(rule)) or 'none'}, and the model's parts are {', '.join(parts[model])}")
         layout = need(rule["weights"], "layout", f"{model} weights")
         if layout not in LAYOUTS:
             fail(f"{model} weights: rules.json says layout {layout!r}, which is none of {', '.join(sorted(LAYOUTS))}")
-        for part, kind in (("weights", "machine-learning-model"), ("tokenizer", "data")):
-            if part not in rule:
-                continue
+        for part in parts[model]:
+            kind = {"weights": "machine-learning-model", "tokenizer": "data"}[part]
             component = f"{model} {part}"
             entry = rule[part]
             repo = need(entry, "repo", component)

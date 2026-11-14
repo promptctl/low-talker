@@ -28,40 +28,49 @@ public struct ParakeetVocabulary: Sendable {
         try self.init(pieces: pieces)
     }
 
-    /// A token's piece, or why it is no part of a transcript: past the vocabulary, or one of
-    /// the control pieces (`<unk>`, `<pad>`, `<|endoftext|>`, the language tags) the vocabulary
-    /// spells in angle brackets.
+    /// A token's piece, or the refusal of an id past the vocabulary.
     func piece(_ token: TDTDecoding.EmittedToken) throws(ParakeetReadingError) -> String {
         guard pieces.indices.contains(token.id) else { throw .tokenOutsideVocabulary(token.id) }
-        let piece = pieces[token.id]
-        if piece.count > 2, piece.hasPrefix("<"), piece.hasSuffix(">") { throw .controlToken(id: token.id, piece: piece) }
-        return piece
+        return pieces[token.id]
     }
 
-    /// The tokens as transcript words, each timed from its first token's frame to the end of
-    /// its last token's, at `sampleRate`, and as sure as the product of its tokens'
-    /// probabilities. A word starts at each piece that starts with a space; a first piece
-    /// without one starts a word too, given the leading space every transcript word carries.
+    /// The tokens as transcript words from sample `cut` on, each timed from its first token's
+    /// frame to the end of its last token's, at `sampleRate`, and as sure as the product of its
+    /// tokens' probabilities. A word starts at each piece that starts with a space; a first piece
+    /// without one starts a word too, given the leading space every transcript word carries. A
+    /// word sounding mostly before the cut is no word of these, so its tokens are never read.
     ///
-    /// [LAW:no-silent-failure] A control token or a probability outside 0...1 fails the
-    /// reading, naming it: dropped, it would leave a transcript missing what the engine heard
-    /// there with nothing to say so.
-    func words(_ tokens: [TDTDecoding.EmittedToken]) throws(ParakeetReadingError) -> [Transcript.Word] {
-        var words: [Transcript.Word] = []
+    /// [LAW:no-silent-failure] A control piece (`<unk>`, `<pad>`, `<|endoftext|>`, the language
+    /// tags, all spelled in angle brackets) or a probability outside 0...1 in a word from the cut
+    /// on fails the reading, naming it: dropped, it would leave a transcript missing what the
+    /// engine heard there with nothing to say so.
+    func words(_ tokens: [TDTDecoding.EmittedToken], from cut: Int) throws(ParakeetReadingError) -> [Transcript.Word] {
+        var spoken: [[(token: TDTDecoding.EmittedToken, piece: String)]] = []
         for token in tokens {
             let piece = try piece(token)
-            guard let confidence = Confidence(exactly: Double(token.probability)) else {
+            if spoken.isEmpty || piece.hasPrefix(" ") { spoken.append([]) }
+            spoken[spoken.count - 1].append((token, piece))
+        }
+        return try spoken
+            .filter { ($0.first!.token.sample + $0.last!.token.sample + ParakeetWindow.frameSamples) / 2 >= cut }
+            .map { pieces throws(ParakeetReadingError) in try Self.word(pieces) }
+    }
+
+    private static func word(_ pieces: [(token: TDTDecoding.EmittedToken, piece: String)]) throws(ParakeetReadingError) -> Transcript.Word {
+        var confidence: Confidence = 1.0
+        for (token, piece) in pieces {
+            if piece.count > 2, piece.hasPrefix("<"), piece.hasSuffix(">") { throw .controlToken(id: token.id, piece: piece) }
+            guard let sure = Confidence(exactly: Double(token.probability)) else {
                 throw .probabilityOutsideUnitInterval(token.probability, piece: piece)
             }
-            let start = AudioClip.duration(for: token.sample)
-            let end = AudioClip.duration(for: token.sample + ParakeetWindow.frameSamples)
-            if let last = words.last, !piece.hasPrefix(" ") {
-                words[words.count - 1] = Transcript.Word(text: last.text + piece, time: last.time.lowerBound...end, confidence: last.confidence * confidence)
-            } else {
-                words.append(Transcript.Word(text: piece.hasPrefix(" ") ? piece : " " + piece, time: start...end, confidence: confidence))
-            }
+            confidence = confidence * sure
         }
-        return words
+        let text = pieces.map(\.piece).joined()
+        return Transcript.Word(
+            text: text.hasPrefix(" ") ? text : " " + text,
+            time: AudioClip.duration(for: pieces.first!.token.sample)...AudioClip.duration(for: pieces.last!.token.sample + ParakeetWindow.frameSamples),
+            confidence: confidence
+        )
     }
 }
 
