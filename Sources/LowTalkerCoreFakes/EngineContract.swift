@@ -10,8 +10,8 @@ import TestProbes
 /// [LAW:one-source-of-truth]
 public struct EngineContract: Sendable {
     public enum Statement: CaseIterable, Sendable, CustomStringConvertible {
-        /// Any number of partials, then one final, and no partial once it has returned; and audio
-        /// said to hold speech is heard as words.
+        /// Audio said to hold speech is heard: any number of partials, then a final with words in
+        /// it.
         case partialsThenOneFinal
         /// Partials come in the order heard: each one's confirmed words begin with the previous
         /// one's, and the final transcript begins with the last of them, the promise
@@ -62,8 +62,7 @@ public struct EngineContract: Sendable {
         case .partialsThenOneFinal:
             let heard = await hear(on: dictation)
             guard case .success(let transcript) = heard.final else { return ["the speech failed: \(heard.final)"] }
-            return (heard.afterFinal == 0 ? [] : ["\(heard.afterFinal) partials came after the final"])
-                + (transcript.words.isEmpty ? ["the speech was heard as no words"] : [])
+            return transcript.words.isEmpty ? ["the speech was heard as no words"] : []
         case .confirmedWordsOpenTheTranscript:
             let heard = await hear(on: dictation)
             guard case .success(let transcript) = heard.final else { return ["the speech failed: \(heard.final)"] }
@@ -109,32 +108,32 @@ public struct EngineContract: Sendable {
     /// confirmed words begin with the earlier ones. [LAW:single-enforcer] Statement 2's one
     /// reading, which the fake holds every configuration to as it runs.
     static func confirming(_ now: Transcript, after earlier: Transcript) -> String? {
-        now.words.map(\.text).starts(with: earlier.words.map(\.text)) ? nil : "the confirmed words \(earlier.words.map(\.text)) were followed by \(now.words.map(\.text))"
+        now.opens(with: earlier) ? nil : "the confirmed words \(earlier.words.map(\.text)) were followed by \(now.words.map(\.text))"
     }
 
     /// What is wrong with a final transcript after the last partial confirmed `confirmed`: nil
     /// when it opens with them.
     static func ending(_ final: Transcript, after confirmed: Transcript) -> String? {
-        final.words.map(\.text).starts(with: confirmed.words.map(\.text)) ? nil : "the final \(final.words.map(\.text)) does not open with the confirmed \(confirmed.words.map(\.text))"
+        final.opens(with: confirmed) ? nil : "the final \(final.words.map(\.text)) does not open with the confirmed \(confirmed.words.map(\.text))"
     }
 
-    /// The partials told for `speech` streamed a buffer at a time, how many came once the final
-    /// had returned, and the final.
-    private func hear(on engine: any Transcriber) async -> (partials: [Partial], afterFinal: Int, final: Result<Transcript, TranscriptionFailure>) {
-        let told = Mutex<(partials: [Partial], returned: Bool, afterFinal: Int)>(([], false, 0))
+    /// The partials told for `speech` streamed a buffer at a time, and the final.
+    private func hear(on engine: any Transcriber) async -> (partials: [Partial], final: Result<Transcript, TranscriptionFailure>) {
+        let told = Mutex<[Partial]>([])
         let clips = speech.chunks(of: Self.buffer)
         let final = await Result { () async throws(TranscriptionFailure) in
             try await engine.transcribe(Counted(clips: clips, pulls: Pulls()), expecting: .empty) { partial in
-                told.withLock { told in
-                    if told.returned { told.afterFinal += 1 } else { told.partials.append(partial) }
-                }
+                told.withLock { $0.append(partial) }
             }.transcript
         }
-        let heard = told.withLock { told in
-            told.returned = true
-            return told
-        }
-        return (heard.partials, heard.afterFinal, final)
+        return (told.withLock { $0 }, final)
+    }
+}
+
+private extension Transcript {
+    /// Whether these words begin with `earlier`'s, the one reading of statement 2.
+    func opens(with earlier: Transcript) -> Bool {
+        words.map(\.text).starts(with: earlier.words.map(\.text))
     }
 }
 

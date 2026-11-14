@@ -30,7 +30,7 @@ import Testing
         min(words.words.count / 2, Int(AudioClip(samples: samples).duration / 0.25))
     }
 
-    @Test(arguments: EngineContract.Statement.allCases)
+    @Test(.timeLimit(.minutes(1)), arguments: EngineContract.Statement.allCases)
     func theFakeKeepsTheStatement(_ statement: EngineContract.Statement) async throws {
         #expect(try await Self.fake.disagreements(with: statement) == [])
     }

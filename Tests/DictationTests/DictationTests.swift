@@ -110,9 +110,10 @@ final class Rig {
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
         keeping store: FakeHeldStore = FakeHeldStore(),
-        keepingSpeech unheard: FakeUnheardStore = FakeUnheardStore()
+        keepingSpeech unheard: FakeUnheardStore = FakeUnheardStore(),
+        turns: EngineTurns = EngineTurns()
     ) async throws {
-        try await self.init(engine: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard)
+        try await self.init(engine: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard, turns: turns)
     }
 
     convenience init(
@@ -122,7 +123,7 @@ final class Rig {
         keeping store: FakeHeldStore = FakeHeldStore(),
         keepingSpeech unheard: FakeUnheardStore = FakeUnheardStore()
     ) async throws {
-        try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard)
+        try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard, turns: transcriber.turns)
         transcriber.noting(changes)
     }
 

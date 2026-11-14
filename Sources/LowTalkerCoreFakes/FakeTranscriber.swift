@@ -91,7 +91,7 @@ public final class FakeTranscriber: Transcriber {
         log = Log()
     }
 
-    private init(_ engine: FakeTranscriber, as caller: EngineTurns.Caller) {
+    fileprivate init(_ engine: FakeTranscriber, as caller: EngineTurns.Caller) {
         reading = engine.reading
         confirming = engine.confirming
         repunctuating = engine.repunctuating
@@ -191,8 +191,9 @@ public final class FakeTranscriber: Transcriber {
 
 extension LatencyHarness.Engine {
     /// The fake as the harness loads the real engine: hearing for dictation and served callers
-    /// alike on its own turns, so a hold the harness takes is one its served callers meet.
+    /// alike on its own turns, so a hold the harness takes is one its served callers meet,
+    /// whichever caller `engine` was made for.
     public init(_ engine: FakeTranscriber) {
-        self.init(dictation: engine, served: engine.served, turns: engine.turns)
+        self.init(dictation: FakeTranscriber(engine, as: .dictation), served: engine.served, turns: engine.turns)
     }
 }
