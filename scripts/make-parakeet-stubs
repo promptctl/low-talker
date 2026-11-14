@@ -3,7 +3,7 @@
 # load, into Sources/TestProbes/Fixtures/parakeet-stub/<part>, where they are committed. The
 # bench test's words are this arithmetic decoded, the duration's mod 5 included. Each has the
 # names, element types and shapes of the published model it stands for (see
-# ParakeetInterface.published and SpotterInterface.published), and arithmetic a test can trace
+# ParakeetInterface.published, .spotterEncoder and .spotterHead), and arithmetic a test can trace
 # an input through, in place of weights.
 # weights, FluidInference/parakeet-tdt-0.6b-v3-coreml:
 #   Preprocessor  mel = the first 128 x 1501 samples; mel_length = audio_length / 160 + 1

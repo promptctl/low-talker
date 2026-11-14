@@ -92,13 +92,16 @@ struct CTCWordSpotter {
             }
             for hypothesis in active {
                 let state = hypothesis.state
-                // A piece held over more frames, a blank after it, or a blank held.
-                if !state.blank {
+                // A piece held over more frames, unless the frame all but rules it out, a blank
+                // after it, or a blank held. A finished term is not carried on blanks: it could
+                // find nothing more, and its score would set the beam a term starting after it
+                // must fall within.
+                if !state.blank, row[state.token] >= Self.tokenSkip {
                     offer(state, hypothesis.score + row[state.token] + Self.termWeight, hypothesis.path)
                 }
-                offer(State(term: state.term, position: state.position, token: state.token, blank: true), hypothesis.score + row[blank], hypothesis.path)
                 let term = terms[state.term]
                 guard state.position < term.end else { continue }
+                offer(State(term: state.term, position: state.position, token: state.token, blank: true), hypothesis.score + row[blank], hypothesis.path)
                 for arc in term.arcs[state.position] where state.blank || arc.id != state.token {
                     enter(arc, of: state.term, after: hypothesis)
                 }

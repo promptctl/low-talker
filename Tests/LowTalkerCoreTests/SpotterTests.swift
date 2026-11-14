@@ -166,6 +166,15 @@ func tokenizer(_ pieces: [String]) throws -> SpotterTokenizer {
         #expect(spotter.spot(Self.frames([1, 2, 4, 2], sure: 0.999)).hits.first?.path.map(\.arc.id) == [1, 2, 2])
     }
 
+    /// A term heard surely and long does not crowd out of the beam a term after it: once it is
+    /// finished and parted by blanks, it has nothing left to find.
+    @Test func aFinishedTermLeavesTheBeamToTheNext() throws {
+        var frames = Self.frames(Array(repeating: 0, count: 6) + [4, 4, 4], sure: 0.999)
+        frames.append([Foundation.log(0.0001), Foundation.log(0.0001), Foundation.log(0.0001), Foundation.log(0.5), Foundation.log(0.45)])
+        let spotting = try Self.spotter(["Zed", "Q"]).spot(frames)
+        #expect(spotting.hits.map(\.term.term.text) == ["Zed", "Q"])
+    }
+
     /// No term starts on a frame that is surely blank, nor on a piece the frame all but rules out.
     @Test func noTermStartsWhereTheFrameRulesItOut() throws {
         #expect(try Self.spotter(["Zed"]).spot(Self.frames([4, 4, 4])).candidates == 0)

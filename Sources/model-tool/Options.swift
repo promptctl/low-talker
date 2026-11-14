@@ -27,11 +27,14 @@ extension Model: ExpressibleByArgument {}
 
 /// [LAW:parse-dont-validate] Models at commits are revisions on huggingface.co, a URL with an
 /// http or https scheme is a published base, and anything else is a path to a store, so
-/// the one flag cannot be read two ways and a revision cannot be asked of a copy.
+/// the one flag cannot be read two ways and a revision cannot be asked of a copy. Text that
+/// names a model before `@` and is no revision of it is refused, not read as a path.
 extension ModelSource: ExpressibleByArgument {
     public init?(argument: String) {
         if let revisions = ModelRevisions(argument) {
             self = .huggingFace(revisions)
+        } else if let at = argument.firstIndex(of: "@"), Model(rawValue: String(argument[..<at])) != nil {
+            return nil
         } else if let url = URL(string: argument), ["http", "https"].contains(url.scheme) {
             self = .published(url)
         } else {
