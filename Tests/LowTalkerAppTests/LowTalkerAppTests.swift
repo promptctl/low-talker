@@ -544,12 +544,13 @@ final class Recorded<Value: Sendable>: Sendable {
         #expect(menu.untypedBecause.isEmpty)
         #expect(menu.rows.contains(.readout("Hotkey: \(rig.listening())")))
         #expect(menu.rows.contains(.item("Open at Login", .toggleOpenAtLogin, check: .mixed)))
-        #expect(rig.lines.suffix(4) == [
+        let told = rig.events.compactMap { if case .menu = $0 { $0.lines.map(\.text) } else { nil } }
+        #expect(told == [[
             "microphone at rest: \(rig.app.microphone)",
             "hotkey: words held, not typed, because []",
             "hotkey: Globe key startDictation; no clash with the chords",
             "open at login: \(LoginItemStatus.requiresApproval)",
-        ])
+        ]])
     }
 }
 

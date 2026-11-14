@@ -36,8 +36,6 @@ public final class LowTalkerApp {
     /// What the engine is doing. The status icon's face too, since a first load runs for minutes
     /// and an icon that looks ready through them reads as an app that is not answering.
     public private(set) var engineReadiness: EngineReadiness
-    /// The engine's readiness in words, read now on the app's clock.
-    public var engineReadout: String { engineReadiness.readout(at: ports.clock.now) }
     /// What the menu says after "Hotkey: ".
     public private(set) var hotkeyStatus: HotkeyStatus = .starting(step: nil)
     /// What the loop is doing with presses, which the icon shows over the engine's readiness.
@@ -60,8 +58,6 @@ public final class LowTalkerApp {
 
     /// What the microphone is doing.
     public var microphone: AudioCapture.Doing { capture.doing }
-    /// The transcription server's switch, in a build that can serve.
-    public var serving: ServerSwitch? { ports.server }
     /// Whether a quit has been asked for.
     public var quitting: Bool { lifecycle.quitting }
 
@@ -190,7 +186,7 @@ public final class LowTalkerApp {
             globeKey: globeKey, running: running, lastFailure: lastFailure, lastReplacement: lastReplacement,
             heldTroubles: [hold.unrestored?.description, hold.unkept?.description].compactMap { $0 },
             dismissedWords: hold.dismissed?.allWords.words.count,
-            keptSpeech: (lines: keptSpeech.lines, seconds: keptSpeech.kept.isEmpty ? nil : keptSpeech.keptSeconds),
+            keptSpeech: (lines: keptSpeech.lines, seconds: keptSpeech.keptSeconds),
             benchRunning: benchRuns.isRunning, readiness: readiness, openAtLogin: openAtLogin,
             returnHolds: ports.returnHolds()))
         ports.told(.menu(menu))
