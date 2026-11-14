@@ -499,9 +499,9 @@ import TestProbes
     /// A cancelled press's account agrees with each of its counts, one and more than one.
     @Test(arguments: [
         (1, "1 word taken back, 1 held word let go, 1 heard after the commits dropped; "
-            + "1 earlier word delivered with its first insert stays, 1 word that may have landed stands"),
+            + "1 earlier word delivered with its inserts stays, 1 word that may have landed stands"),
         (2, "2 words taken back, 2 held words let go, 2 heard after the commits dropped; "
-            + "2 earlier words delivered with its first insert stay, 2 words that may have landed stand"),
+            + "2 earlier words delivered with its inserts stay, 2 words that may have landed stand"),
     ])
     func aCancelledPressTellsEachCountInItsNumber(_ count: Int, _ told: String) {
         let cancelled = Cancelled(takenBack: count, earlierWordsLanded: count, forgotten: count, standing: count, discarded: count)
