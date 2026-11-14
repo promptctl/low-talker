@@ -138,7 +138,8 @@ public struct Asker: SteeringAsking {
         self.init(portName: AppIdentity.hotkeyPortName, answerer: answerer)
     }
 
-    init(portName: String, answerer: Result<PeerIdentity, PeerIdentity.Unreadable>) {
+    /// Asking on a port someone else named, which is how a test asks a host of its own.
+    package init(portName: String, answerer: Result<PeerIdentity, PeerIdentity.Unreadable>) {
         self.portName = portName
         self.answerer = answerer
     }

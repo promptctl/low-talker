@@ -1,7 +1,9 @@
 import Foundation
 import Insertion
+import InsertionFakes
 import LowTalkerCore
 import LowTalkerCoreFakes
+import TestProbes
 import Testing
 
 /// The config source's contract, on the fake and on a real file of its own.
@@ -36,7 +38,12 @@ import Testing
 @MainActor @Suite struct NoticeHostContractTests {
     static let fake = NoticeHostContract {
         let host = FakeNoticeHost()
-        return (host, { @Sendable in Task { @MainActor in host.tellCursorArrived() } })
+        return (host, { @Sendable in Task { @MainActor in host.tellCursorArrived() } }, { @Sendable in
+            let reply = FakeReply()
+            await host.ask(.owed(at: NoticeHostContract.asked), through: reply)
+            guard case .owing(let owing) = await reply.said() else { preconditionFailure("asked what is owed, answered otherwise") }
+            return .success(owing)
+        })
     }
 
     static let port = NoticeHostContract {
@@ -44,7 +51,13 @@ import Testing
         let host = InputMethodNotices.Host(portName: name) { () throws(PortNotHosted) in
             do throws(PeerIdentity.Unreadable) { return try PeerIdentity.ofThisProcess() } catch { throw .noRequirement(error) }
         }
-        return (host, { _ = NoticeSender(portName: name, build: nil).tellCursorArrived() })
+        return (host, { _ = NoticeSender(portName: name, build: nil).tellCursorArrived() }, { @Sendable in
+            // Asked from a thread of its own, as the input method asks: the round trip blocks.
+            await onAThreadOfItsOwn {
+                Asker(portName: name, answerer: Result { () throws(PeerIdentity.Unreadable) in try .ofThisProcess() })
+                    .owed(at: NoticeHostContract.asked, within: .seconds(10))
+            }
+        })
     }
 
     @Test(arguments: NoticeHostContract.Statement.allCases)

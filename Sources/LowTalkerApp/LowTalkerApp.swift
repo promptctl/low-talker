@@ -533,8 +533,9 @@ public final class LowTalkerApp {
             // speaks into it.
             engine: { [unowned self] () throws(EngineUnavailable) in try engine.forPress() },
             turns: turns,
-            // [LAW:one-source-of-truth] A press is timed on the clock its key events are stamped on.
-            executor: Executor(insertingThrough: inserter, clock: hotkey.clock),
+            // [LAW:one-source-of-truth] A press is timed on the app's one clock, which its key
+            // events must be stamped on: the hotkey refuses a loop timed on another.
+            executor: Executor(insertingThrough: inserter, clock: ports.clock),
             hold: hold,
             sessions: loopTurn,
             recovery: keptSpeech,

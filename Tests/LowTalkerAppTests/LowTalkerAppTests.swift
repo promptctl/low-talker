@@ -56,15 +56,15 @@ final class AppRig {
         microphone: AVAuthorizationStatus = .authorized,
         config text: String? = nil,
         switchedOn: Bool = true,
-        notices: FakeNoticeHost = FakeNoticeHost(),
+        noticesRefused: PortNotHosted? = nil,
         serving: Bool = false,
         heard: String = "hello"
     ) {
         authority = FakeMicrophoneAuthority(status: microphone)
         config = FakeConfigFile(text)
         installation = FakeInputMethodInstallation(switchedOn: switchedOn)
-        self.notices = notices
         let changes = changes
+        notices = FakeNoticeHost(refusing: noticesRefused, noting: changes)
         model = FakeModelSupply(noting: changes) { turns in FakeTranscriber(turns: turns) { _ in Transcript(typed: heard) } }
         inputMethod.noting(changes)
         if serving {
@@ -232,7 +232,7 @@ final class Recorded<Value: Sendable>: Sendable {
     /// Notices that cannot be hosted, as when another copy of the app hears on the port, leave
     /// the hotkey down with why.
     @Test func noticesThatCannotBeHostedLeaveTheHotkeyDown() async {
-        let rig = AppRig(notices: FakeNoticeHost(refusing: .nameIsTaken("the notice port")))
+        let rig = AppRig(noticesRefused: .nameIsTaken("the notice port"))
         rig.app.launch()
         await rig.until { if case .off = rig.app.hotkeyStatus { true } else { false } }
         #expect(rig.app.hotkeyStatus == .off("\(PortNotHosted.nameIsTaken("the notice port"))"))
@@ -260,7 +260,7 @@ final class Recorded<Value: Sendable>: Sendable {
         #expect(moved.count == 1)
         #expect(moved.first?.count == 3)
         #expect(rig.app.hotkeyStatus == rig.listening(on: "Left Control"))
-        #expect(rig.app.microphone.description == "\(AudioCapture.Doing.moving(to: .open))" || rig.app.microphone.description == "\(MicrophoneAtRest.open)")
+        await rig.until { if case .keeping(.open) = rig.app.microphone { true } else { false } }
         let binding = ServeBinding.interface(try InterfaceAddress("192.168.1.20"), token: try BearerToken("t"))
         await rig.until { rig.bindings.all == [.loopback, binding] }
 
@@ -302,8 +302,11 @@ final class Recorded<Value: Sendable>: Sendable {
         let quit = rig.app.quit()
         let granted = Flag()
         Task { await quit.value; granted.raise() }
-        // The quit takes the hotkey down at once, while the insert still waits.
-        await rig.until { rig.feed.installations.allSatisfy { $0.disposed } }
+        // The quit takes the hotkey down and stops the notices at once, while the insert still
+        // waits. The quit's next step, were it not waiting, would end it in the same main-actor
+        // turn as the notices' stop, so one turn after it the grant would already be in.
+        await rig.until { !rig.notices.isHosted }
+        await Task.yield()
         #expect(!granted.raised)
         #expect(rig.app.quitting)
 
@@ -337,6 +340,7 @@ final class Recorded<Value: Sendable>: Sendable {
         rig.chord(.down)
         await rig.speak()
         #expect(await rig.app.ask(.inputMethod) == .made)
+        rig.installation.answer(allowing: true)
         rig.app.settle(rig.app.readiness())
 
         await rig.until { rig.feeds.count == 2 && rig.app.hotkeyStatus == rig.listening() }
@@ -349,8 +353,46 @@ final class Recorded<Value: Sendable>: Sendable {
 
         // The new loop hears the next press, which types what is held ahead of its own words.
         await rig.hold()
-        await rig.until { !rig.inputMethod.inserted.isEmpty }
+        await rig.until { rig.app.hold.held == nil && !rig.inputMethod.inserted.isEmpty }
+        // One insert, the held words first: the fake's words carry no space of their own.
+        #expect(rig.inputMethod.inserted == ["hellohello"])
         #expect(rig.app.lastFailure == nil)
+    }
+
+    /// Switching the input method on returns with macOS still asking: the hotkey stays down
+    /// through the question, and comes up once the person allows it.
+    @Test func anInputMethodSwitchedOnListensOnceThePersonAllowsIt() async {
+        let rig = AppRig(switchedOn: false)
+        rig.app.launch()
+        await rig.until { rig.setUpShown == 1 }
+
+        #expect(await rig.app.ask(.inputMethod) == .made)
+        #expect(rig.installation.asking)
+        rig.app.settle(rig.app.readiness())
+        #expect(!rig.installation.isSelected)
+
+        rig.installation.answer(allowing: true)
+        rig.app.settle(rig.app.readiness())
+        await rig.until { rig.app.hotkeyStatus == rig.listening() }
+        #expect(rig.installation.isSelected)
+    }
+
+    /// An Escape the input method asks the app to take, off the main thread as the port hands it,
+    /// puts the word box away with its held words; with no box shown, it is the app in front's.
+    @Test func anEscapeTheInputMethodAsksAboutDismissesTheWordBox() async {
+        let rig = AppRig()
+        await rig.launched()
+        let idle = FakeReply()
+        rig.notices.ask(.escape(at: 0), through: idle)
+        #expect(await idle.said() == .dismissal(.nothingShown))
+
+        rig.inputMethod.refusing(.refused(.noTextFieldHasFocus))
+        await rig.hold()
+        await rig.until { rig.app.hold.held != nil }
+        let shown = FakeReply()
+        rig.notices.ask(.escape(at: 0), through: shown)
+        #expect(await shown.said() == .dismissal(.dismissed))
+        #expect(rig.app.hold.held == nil)
     }
 
     /// Words no cursor took are held, and the word box's Copy puts them on the pasteboard and

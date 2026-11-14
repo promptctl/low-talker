@@ -1,6 +1,8 @@
 import Darwin
+import Foundation
 import Insertion
 import LowTalkerCore
+import Synchronization
 
 /// A notice host's semantics, stated once. Each statement runs one fresh host and says every way
 /// it disagreed; nothing, when it agreed. `FakeNoticeHost` runs it, and so does
@@ -17,6 +19,9 @@ public struct NoticeHostContract {
         /// The input method is supervised from the hosting until the stop, once, however often
         /// the stop is made.
         case theInputMethodIsSupervisedWhileHosted
+        /// A question the input method asks is handed over once, off the main thread, with the
+        /// right that answers it.
+        case aQuestionAskedIsHandedOverOffTheMainThread
 
         public var description: String {
             switch self {
@@ -24,13 +29,21 @@ public struct NoticeHostContract {
             case .aSecondHostIsRefused: "a second host is refused"
             case .aStoppedHostFreesItsName: "a stopped host frees its name"
             case .theInputMethodIsSupervisedWhileHosted: "the input method is supervised while hosted"
+            case .aQuestionAskedIsHandedOverOffTheMainThread: "a question asked is handed over off the main thread"
             }
         }
     }
 
     /// A fresh host, and the input method in this process telling it a cursor arrived, saying no
-    /// build.
-    public typealias Subject = (host: any NoticeHost, tellCursorArrived: @Sendable () -> Void)
+    /// build, and asking it what is owed at `Self.asked`, reading what it was answered.
+    public typealias Subject = (
+        host: any NoticeHost,
+        tellCursorArrived: @Sendable () -> Void,
+        askOwed: @Sendable () async -> Result<Owing, NotAnswered>
+    )
+
+    /// The moment every question here is stamped with.
+    public nonisolated static let asked: TimeInterval = 1.5
 
     public let subject: @MainActor () -> Subject
 
@@ -39,11 +52,17 @@ public struct NoticeHostContract {
     }
 
     public func disagreements(with statement: Statement) async -> [String] {
-        let (host, tell) = subject()
+        let (host, tell, askOwed) = subject()
         let (heard, hearing) = AsyncStream.makeStream(of: InputMethodNotice.self)
         let supervision = Supervision()
+        // Each question as it was handed over, and whether on the main thread, answered as owing
+        // words.
+        let handedOver = Mutex<[(question: Question, onMain: Bool)]>([])
         func hosting() async throws(PortNotHosted) -> Disposal {
-            try await host.host(heard: { hearing.yield($0) }, asked: { _, _ in }, superviseInputMethod: {
+            try await host.host(heard: { hearing.yield($0) }, asked: { question, reply in
+                handedOver.withLock { $0.append((question, Thread.isMainThread)) }
+                _ = reply.send(Owing.words)
+            }, superviseInputMethod: {
                 supervision.started += 1
                 return { supervision.stopped += 1 }
             })
@@ -80,6 +99,14 @@ public struct NoticeHostContract {
             stop()
             stop()
             if (supervision.started, supervision.stopped) != (1, 1) { disagreements.append("stopped twice, supervision started \(supervision.started) and stopped \(supervision.stopped)") }
+            return disagreements
+        case .aQuestionAskedIsHandedOverOffTheMainThread:
+            var disagreements: [String] = []
+            let answered = await askOwed()
+            if answered != .success(.words) { disagreements.append("answered owing words, the asker read \(answered)") }
+            let handed = handedOver.withLock { $0 }
+            if handed.map(\.question) != [.owed(at: Self.asked)] { disagreements.append("asked once what is owed, handed over \(handed.map(\.question))") }
+            if handed.contains(where: \.onMain) { disagreements.append("a question was handed over on the main thread") }
             return disagreements
         }
     }

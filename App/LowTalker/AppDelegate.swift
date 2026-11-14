@@ -97,13 +97,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// What the app does, in the unified log, where `log show` can time it: a menu nobody has
     /// open is no way to measure a launch, and no way for an agent to check what the app is
     /// showing without a screen. [LAW:verifiable-goals]
-    private let loggers: [LowTalkerApp.Line.Category: Logger] = Dictionary(uniqueKeysWithValues: [
-        LowTalkerApp.Line.Category.engine, .dictation, .microphone, .config,
-    ].map { ($0, Logger(subsystem: Bundle.main.bundleIdentifier!, category: $0.rawValue)) })
     private let log = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "engine")
 
     /// [LAW:one-source-of-truth] Every record of the app's lands here: in the log, as the lines
-    /// it renders to, and on the status icon, which is drawn from what the app now reads.
+    /// it renders to, and on the status icon when it is a change the icon is drawn from.
     private func record(_ event: LowTalkerApp.Event) {
         for line in event.lines {
             let level: OSLogType = switch line.level {
@@ -112,9 +109,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .error: .error
             case .fault: .fault
             }
-            loggers[line.category]!.log(level: level, "\(line.text, privacy: .public)\(line.dictated ?? "", privacy: .private)")
+            let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: line.category.rawValue)
+            // Only dictated words go private: a private argument is redacted whatever it holds,
+            // an empty one too, and a line with none must read whole in `log show`.
+            switch line.dictated {
+            case nil: logger.log(level: level, "\(line.text, privacy: .public)")
+            case let dictated?: logger.log(level: level, "\(line.text, privacy: .public)\(dictated, privacy: .private)")
+            }
         }
-        drawStatusIcon()
+        switch event {
+        case .engine, .activity: drawStatusIcon()
+        default: break
+        }
     }
 
     /// A signal is a third way to ask the app to go, after the menu item and Cmd-Q, and

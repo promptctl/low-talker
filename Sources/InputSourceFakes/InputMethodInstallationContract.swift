@@ -11,38 +11,43 @@ public struct InputMethodInstallationContract {
         case aSwitchedOffInputMethodIsNotSelected
         /// Selected while switched on, it is the source in use.
         case aSwitchedOnInputMethodIsSelected
-        /// Switched on by a person who allows it, the next select selects it.
-        case switchedOnThenSelectedIsSelected
+        /// Switching on returns with macOS still asking: it is not switched on until the person
+        /// allows it, and the next select then selects it.
+        case switchedOnOnceAllowedThenSelectedIsSelected
 
         public var description: String {
             switch self {
             case .aSwitchedOffInputMethodIsNotSelected: "a switched-off input method is not selected"
             case .aSwitchedOnInputMethodIsSelected: "a switched-on input method is selected"
-            case .switchedOnThenSelectedIsSelected: "switched on, then selected, is selected"
+            case .switchedOnOnceAllowedThenSelectedIsSelected: "switched on once allowed, then selected, is selected"
             }
         }
     }
 
-    /// A fresh installation, switched on or not, whose person allows it when asked.
-    public let subject: @MainActor (_ switchedOn: Bool) -> any InputMethodInstallation
+    /// A fresh installation, switched on or not, and its person allowing it once asked.
+    public typealias Subject = (installation: any InputMethodInstallation, allow: @MainActor () -> Void)
 
-    public init(subject: @escaping @MainActor (_ switchedOn: Bool) -> any InputMethodInstallation) {
+    public let subject: @MainActor (_ switchedOn: Bool) -> Subject
+
+    public init(subject: @escaping @MainActor (_ switchedOn: Bool) -> Subject) {
         self.subject = subject
     }
 
     public func disagreements(with statement: Statement) async throws -> [String] {
         switch statement {
         case .aSwitchedOffInputMethodIsNotSelected:
-            let installation = subject(false)
+            let installation = subject(false).installation
             let readiness = try await installation.select()
             return readiness == .switchedOff && !installation.isSelected ? [] : ["switched off, select read \(readiness) and selected \(installation.isSelected)"]
         case .aSwitchedOnInputMethodIsSelected:
-            let installation = subject(true)
+            let installation = subject(true).installation
             let readiness = try await installation.select()
             return readiness == .selected && installation.isSelected ? [] : ["switched on, select read \(readiness) and selected \(installation.isSelected)"]
-        case .switchedOnThenSelectedIsSelected:
-            let installation = subject(false)
+        case .switchedOnOnceAllowedThenSelectedIsSelected:
+            let (installation, allow) = subject(false)
             try await installation.switchOn()
+            guard !installation.isSwitchedOn else { return ["switching on read switched on before the person allowed it"] }
+            allow()
             guard installation.isSwitchedOn else { return ["allowed, switching on left it off"] }
             let readiness = try await installation.select()
             return readiness == .selected && installation.isSelected ? [] : ["switched on, select read \(readiness) and selected \(installation.isSelected)"]

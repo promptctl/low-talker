@@ -1,10 +1,12 @@
 import Darwin
+import Dispatch
 import Insertion
 import LowTalkerCore
 import TestProbes
 
 /// The notice port as a test holds it: one name, hosted or refused as the test says, every notice
-/// and question the test tells handed over at once. `NoticeHostContract` holds it to
+/// the test tells handed over at once, and every question on a queue of its own, as the port's
+/// are. `NoticeHostContract` holds it to
 /// `InputMethodNotices.Host`. [LAW:one-type-per-behavior]
 @MainActor
 public final class FakeNoticeHost: NoticeHost {
@@ -20,6 +22,7 @@ public final class FakeNoticeHost: NoticeHost {
     private var open: Open?
     private var hosted = 0
     private let changes: Changes?
+    private let questions = DispatchQueue(label: "FakeNoticeHost.questions")
 
     /// Whether a host is open now.
     public var isHosted: Bool { open != nil }
@@ -61,9 +64,9 @@ public final class FakeNoticeHost: NoticeHost {
         open?.heard(notice)
     }
 
-    /// The input method asks `question`, answered through `reply`.
+    /// The input method asks `question`, answered through `reply`, off the main thread.
     public func ask(_ question: Question, through reply: any Answering) {
         guard let open else { preconditionFailure("a question was asked with no notice port hosted") }
-        open.asked(question, reply)
+        questions.async { open.asked(question, reply) }
     }
 }

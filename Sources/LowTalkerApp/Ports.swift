@@ -11,14 +11,13 @@ extension LowTalkerApp {
     /// in the app, and the one fake of each in a test. Nothing inside the app constructs an
     /// adapter of its own. [LAW:effects-at-boundaries] [LAW:single-enforcer]
     public struct Ports {
-        /// The clock the launch's wait, the engine's readouts and every press are timed on. The
-        /// hotkeys' feeds stamp their key events on this one clock.
+        /// The clock the launch's wait, the engine's readouts and every press are timed on.
         public var clock: HostClock
         /// This app's build, read off its bundle, which the input method's is compared with.
         public var build: Build
         public var microphone: any MicrophoneAuthority
         public var audio: any AudioHardware
-        /// The modifier keys, one feed for each hotkey a rebuild puts up.
+        /// The modifier keys, one feed for each hotkey a rebuild puts up, stamping on `clock`.
         public var modifiers: @MainActor () -> any ModifierFeed
         public var model: any ModelSupply
         public var config: any ConfigSource

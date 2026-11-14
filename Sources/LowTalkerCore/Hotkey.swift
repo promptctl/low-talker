@@ -85,12 +85,6 @@ public final class Hotkey {
         detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
 
-    /// The app's hotkey: the modes `config` names, heard by their chords from the window
-    /// server's own events.
-    public convenience init(listeningFor config: Config, tapThreshold: Duration = defaultTapThreshold) {
-        self.init(modes: config.modes, tapThreshold: tapThreshold, feed: ModifierMonitor())
-    }
-
     public var phase: HotkeyDetector.Phase { detector.phase }
 
     /// [LAW:one-source-of-truth] The clock the feed stamps its key events on, which a refusal is

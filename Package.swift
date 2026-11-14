@@ -15,7 +15,6 @@ let package = Package(
         .library(name: "Onboarding", targets: ["Onboarding"]),
         .library(name: "MenuBarPresence", targets: ["MenuBarPresence"]),
         .library(name: "StatusMenu", targets: ["StatusMenu"]),
-        .library(name: "LoopLifecycle", targets: ["LoopLifecycle"]),
         .library(name: "LowTalkerApp", targets: ["LowTalkerApp"]),
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "Dictation", targets: ["Dictation"]),
@@ -217,6 +216,7 @@ let package = Package(
                 "Grants",
                 "GrantsFakes",
                 "Insertion",
+                "InsertionFakes",
                 "TestProbes",
                 "Uptime",
                 // The tests build WhisperKit's result types by hand to exercise the
