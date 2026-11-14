@@ -6,10 +6,8 @@ import Foundation
 /// A term is spelled as the Metaspace pre-tokenizer writes it, `▁` before each word, and then as
 /// every sequence of pieces that writes exactly that, not only the one its byte-pair merges would
 /// pick. A CTC model emits whichever pieces it hears, and a name it has never seen is heard in
-/// pieces its spelling's merges would not choose: `say/names`' "Fryslie" is merged `▁F ry s l ie`,
-/// which the model's frames score far below their greedy reading, while `▁F r ys l ie` and
-/// `▁F r y s le` score above it (`CapturedNamesTests`). The paper's alternatives sampled by BPE
-/// dropout (Andrusenko et al. 2024, Sec. 4.3) are samples of these.
+/// pieces its spelling's merges would not choose. The paper's alternatives sampled by BPE dropout
+/// (Andrusenko et al. 2024, Sec. 4.3) are samples of these.
 ///
 /// [LAW:single-enforcer] The one judge of whether a vocabulary can be told to Parakeet: the
 /// config's check and the graph the spotter searches both spell terms here, so a term the

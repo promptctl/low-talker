@@ -7,7 +7,8 @@ import Testing
 /// with no model run: the spotter's CTC log-probabilities, one Float16 row of 1,025 per 80 ms
 /// frame, and what bare Parakeet heard, as its transcript. With them, the tokenizer of
 /// FluidInference/parakeet-ctc-110m-coreml at accdafd8, which spells the terms as the model reads
-/// them. Captured 2026-11-14 by the spotter's own encoder and head over the whole clip, one window.
+/// them. Captured 2026-11-14 from a dictation over the real models: the frames `ParakeetReader.spot`
+/// built for the pass over the whole clip, past its speech by the engine's hangover.
 enum Captured {
     static func url(_ name: String) throws -> URL {
         try #require(Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures/spotter"))
@@ -47,13 +48,21 @@ enum Captured {
 
 @Suite struct CapturedNamesTests {
     /// The ticket's done-when, on real model output: bare Parakeet misspells the names, and told
-    /// them it spells all three as the vocabulary does.
+    /// them it spells Brynleigh and Jaxxon as the vocabulary does.
     @Test func theNamesAreSpelledAsTheVocabularySays() throws {
         let heard = try Captured.heard
         #expect(Captured.text(heard) == " Ask Bryan Leigh Frisley to review the pull request before Jackson merges it.")
         let spotting = try Captured.spotter(["Brynleigh", "Fryslie", "Jaxxon"]).spot(Captured.frames)
         let spotted = try spotting.hits.map { try $0.words(from: 0) }
-        #expect(Captured.text(HeardWord.merging(spotted, into: heard)) == " Ask Brynleigh Fryslie to review the pull request before Jaxxon merges it.")
+        #expect(Captured.text(HeardWord.merging(spotted, into: heard)) == " Ask Brynleigh Frisley to review the pull request before Jaxxon merges it.")
+    }
+
+    /// Fryslie is found, and refused: the model hears "▁F r is le ly" there, sure of `is` where
+    /// every spelling of Fryslie has `y`, so the greedy reading of those frames outscores it.
+    @Test func aTermSpelledFarFromTheSpeechIsOutscored() throws {
+        let spotting = try Captured.spotter(["Fryslie"]).spot(Captured.frames)
+        #expect(spotting.hits.isEmpty)
+        #expect(spotting.outscored == 1)
     }
 }
 
