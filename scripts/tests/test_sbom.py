@@ -142,9 +142,19 @@ class LicenseTextTests(unittest.TestCase):
     def test_varietal_spellings_read_as_one(self):
         self.assertHeld("MIT", MIT.replace("sublicense", "sub-licence").replace("and/or", "&/or"))
 
-    def test_refusing_a_large_header_is_quick(self):
+    def test_an_ampersand_at_a_line_edge_reads_as_and(self):
+        self.assertHeld("MIT", MIT.replace("sublicense, and/or sell", "sublicense, &\n/or sell"))
+
+    def test_a_license_spliced_inside_a_var_is_not_the_license(self):
+        gpl = GPL_NOTICE + "\nThis program is distributed in the hope that it will be useful,\n"
+        self.assertRefused("MIT", MIT.replace("SHALL THE\nAUTHORS", "SHALL THE\n" + gpl + "AUTHORS"))
+
+    def test_refusing_near_misses_in_a_large_header_is_quick(self):
+        template = (sbom.license_list / "BSD-3-Clause.template.txt").read_text()
+        near_miss = rendered(template, True).replace("EVEN IF", "XEVEN IF")
+        self.assertNotRegex(near_miss, r"\bEVEN IF")
         start = time.monotonic()
-        self.assertRefused("ISC", "// unrelated code, line after line\n" * 12000)
+        self.assertRefused("BSD-3-Clause", near_miss * 4 + "int x = 1; // unrelated code\n" * 4000)
         self.assertLess(time.monotonic() - start, 5)
 
     def test_the_license_match_part_is_what_is_held(self):

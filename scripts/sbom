@@ -25,6 +25,7 @@ Run through `make sbom`, which builds model-tool first, names it, and names this
 when it has one.
 """
 import hashlib
+import itertools
 import json
 import re
 import subprocess
@@ -104,8 +105,11 @@ def license_entry(component, root, rule):
 # The SPDX License List release sbom/spdx holds, named by its one directory: the template of
 # each license check-licenses accepts, byte for byte from license-list-data's template/, and
 # the words SPDX matches as one, from license-list-XML's equivalentwords.txt, at that tag.
-[license_list] = [path for path in (repository / "sbom" / "spdx").iterdir() if path.is_dir()]
-SPDX_LICENSE_LIST = license_list.name
+releases = sorted(path.name for path in (repository / "sbom" / "spdx").iterdir() if path.is_dir())
+if len(releases) != 1:
+    fail(f"sbom/spdx holds {releases or 'no release'}, and the templates are one SPDX License List release")
+[SPDX_LICENSE_LIST] = releases
+license_list = repository / "sbom" / "spdx" / SPDX_LICENSE_LIST
 
 # The template markup: optional text, and a var, which is a span the template's own regular
 # expression matches. A var's fields are quoted, and its `original` can hold a `>`.
@@ -152,17 +156,12 @@ def equivalent(text):
 
 
 def words(literal):
-    return [rf"(?<![^\W_]){re.escape(word)}(?![^\W_])"
-            for word in re.findall(r"[^\W_]+", equivalent(COPYRIGHT_SYMBOL.sub(" ", literal)))]
+    return [("word", word) for word in re.findall(r"[^\W_]+", equivalent(COPYRIGHT_SYMBOL.sub(" ", literal)))]
 
 
-def template_pattern(template):
-    """An SPDX template as one regular expression, compared as SPDX's License Matching
-    Guidelines compare: the words, and not their case, their varietal spellings, the
-    whitespace and punctuation between them, or which of ©, (c) and none the copyright line
-    uses. A search, not a full match: a
-    license file may carry more than the license, as a NOTICES file's preamble or an
-    exception appended to Apache-2.0 do."""
+def template_parts(template):
+    """The template as its parts, in order: a word, a var's expression, or an optional run of
+    parts."""
     nested = [[]]
     position = 0
     for mark in TEMPLATE_MARKUP.finditer(template):
@@ -172,15 +171,63 @@ def template_pattern(template):
             nested.append([])
         elif tag == "endOptional":
             optional = nested.pop()
-            nested[-1].append(f"(?:{BETWEEN_WORDS.join(optional)})?")
+            nested[-1].append(("optional", optional))
         else:
-            nested[-1].append(f"(?:{VAR_MATCH.search(tag).group(1)})")
+            nested[-1].append(("var", VAR_MATCH.search(tag).group(1)))
         position = mark.end()
     nested[-1] += words(template[position:])
+    return nested[0]
+
+
+def whole(word):
+    return rf"(?<![^\W_]){re.escape(word)}(?![^\W_])"
+
+
+# A regular expression's atoms, enough to tell a var's any-character `.` from an escaped one
+# or one inside a character class.
+EXPRESSION_ATOM = re.compile(r"\\.|\[(?:\\.|[^\]\\])*\]|.", re.DOTALL)
+
+
+def expressions(parts, after, names):
+    """Each part as an expression. A var that can run over any text runs as SPDX's does, to
+    the next word the template requires after it (`after` where nothing in `parts` is), and
+    is read once where that word is the next part required: its any-character stops short of
+    the word, and the lookahead it is read in gives nothing back. Without both, a near miss is
+    retried at every split of every such var and of the punctuation beside it, which grows
+    with the power of their number, and a `.+` reaches across any license spliced inside it.
+    A var the next var follows keeps its splits, since where it ends is that var's to say.
+    `names` numbers each var read once."""
+    out = []
+    for index, (kind, value) in enumerate(parts):
+        following = next((whole(word) for k, word in parts[index + 1:] if k == "word"), after)
+        required = next((k for k, _ in parts[index + 1:] if k != "optional"), "word")
+        if kind == "word":
+            out.append(whole(value))
+        elif kind == "optional":
+            out.append(f"(?:{BETWEEN_WORDS.join(expressions(value, following, names))})?")
+        elif "." not in EXPRESSION_ATOM.findall(value):
+            out.append(f"(?:{value})")
+        else:
+            held = "".join(f"(?:(?!{following}).)" if atom == "." and following else atom
+                           for atom in EXPRESSION_ATOM.findall(value))
+            if required == "word":
+                name = f"var{next(names)}"
+                out.append(f"(?=(?P<{name}>{held}))(?P={name})")
+            else:
+                out.append(f"(?:{held})")
+    return out
+
+
+def template_pattern(template):
+    """An SPDX template as one regular expression, compared as SPDX's License Matching
+    Guidelines compare: the words, and not their case, their varietal spellings, the
+    whitespace and punctuation between them, or which of ©, (c) and none the copyright line
+    uses. A search, not a full match: a license file may carry more than the license, as a
+    NOTICES file's preamble or an exception appended to Apache-2.0 do."""
     # A part at either end that can match nothing changes nothing a search finds, so it is
     # left off: a leading copyright var's `.{0,5000}` would otherwise be retried at every
     # character of the file, which is most of a minute to refuse a 485 KB header.
-    held = nested[0]
+    held = expressions(template_parts(template), None, itertools.count())
     while re.fullmatch(held[0], ""):
         held.pop(0)
     while re.fullmatch(held[-1], ""):
@@ -193,7 +240,7 @@ def comparable(text):
     of its lines, which source files wrap a license in, its words spelled as the template's
     are, and its whitespace one space wherever it stands, since a var's own expression can
     name a single space."""
-    return re.sub(r"\s+", " ", equivalent(LINE_EDGE.sub("", COPYRIGHT_SYMBOL.sub(" ", text))))
+    return re.sub(r"\s+", " ", LINE_EDGE.sub("", equivalent(COPYRIGHT_SYMBOL.sub(" ", text))))
 
 
 # Each template, by its id without regard to case: the id as the List spells it, and its pattern.
