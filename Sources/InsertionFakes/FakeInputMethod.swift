@@ -21,10 +21,9 @@ public final class FakeInputMethod: Inserter, Sendable {
         var refusal: InsertFailure?
         var gate: DispatchSemaphore?
         var holding = 0
-        /// What the app's document holds: every insert's text in order, less the text a take-back
-        /// replaced, so what a cancel leaves in the field is read off it.
+        /// What the app's document holds, its caret at the end: each commit's text where the text it
+        /// replaced was, so what a cancel leaves in the field is read off it.
         var field = ""
-        var takeBackRefusal: InsertFailure?
         /// An insert that fails as the app not answering, whose words landed anyway.
         var landingDespiteFailure = false
     }
@@ -39,7 +38,8 @@ public final class FakeInputMethod: Inserter, Sendable {
     public func noting(_ changes: Changes) { onChange.withLock { $0 = changes } }
     private func moved() { onChange.withLock { $0 }?.note() }
 
-    /// Every text put at the cursor, in order. A held insert is not in it until it is let go.
+    /// Every text answered as put at the cursor, in order, the earlier words a take-back leaves
+    /// among them. A held insert is not in it until it is let go.
     public var inserted: [String] { state.withLock { $0.inserted } }
     /// Where each request it was handed was bound, answered or refused, in order.
     public var destinations: [Destination] { state.withLock { $0.requests.map(\.destination) } }
@@ -52,14 +52,15 @@ public final class FakeInputMethod: Inserter, Sendable {
     /// How many inserts are held at the gate now.
     public var holding: Int { state.withLock { $0.holding } }
 
-    /// Every take-back from now on is refused with `refusal`, or none is when it is nil.
-    public func refusingTakeBack(_ refusal: InsertFailure?) { state.withLock { $0.takeBackRefusal = refusal } }
     /// An insert refused with a failure that may have landed lands in the document anyway, which is
     /// what the failure means: the words are somewhere nobody was told.
     public func landingDespiteFailure(_ lands: Bool = true) { state.withLock { $0.landingDespiteFailure = lands } }
+    /// The person types `text` at the caret, so words before it are no longer at the caret.
+    public func typing(_ text: String) { state.withLock { $0.field += text } }
     /// The app the next inserts say they reached, by bundle identifier.
     public func reaching(_ app: String) { state.withLock { $0.into = app } }
-    /// Every insert from now on is refused with `refusal`, or none is when it is nil.
+    /// Every insert from now on, a take-back among them, is refused with `refusal`, or none is when
+    /// it is nil.
     public func refusing(_ refusal: InsertFailure?) { state.withLock { $0.refusal = refusal } }
     /// Every insert from now on waits until `letGo`, the way a real one waits for the app to
     /// answer - held at a gate rather than for a duration. [LAW:no-ambient-temporal-coupling]
@@ -77,7 +78,6 @@ public final class FakeInputMethod: Inserter, Sendable {
         // Every exit - the text landing, a refusal thrown, a take-back - moves the signal, so a
         // test awaits the insert resolving. The hold below moves it separately, before it blocks.
         defer { moved() }
-        let (text, destination) = (request.text, request.destination)
         state.withLock { $0.requests.append(request) }
         if let gate = state.withLock({ $0.gate }) {
             state.withLock { $0.holding += 1 }
@@ -86,29 +86,33 @@ public final class FakeInputMethod: Inserter, Sendable {
             state.withLock { $0.holding -= 1 }
         }
         return try state.withLock { state throws(InsertFailure) in
-            // A request that replaces text is a take-back, proved by the input method's own rule
-            // over the document read as a client with its caret at the end and nothing selected.
-            // [LAW:one-source-of-truth]
-            if !request.replacing.isEmpty {
-                if let refusal = state.takeBackRefusal { throw refusal }
-                guard destination.admits(state.into) else { throw .refused(.dictationIsInAnotherApp) }
-                let field = Array(state.field.utf16)
-                let found = Replacement.range(of: request.replacing, selection: { NSRange(location: field.count, length: 0) },
-                                              text: { String(decoding: field[$0.location..<NSMaxRange($0)], as: UTF16.self) })
-                guard case .success(let range) = found else { throw .refused(.wordsCannotBeTakenBack) }
-                // The range is replaced by the request's text, as the client's commit puts it.
-                state.field = String(decoding: field[..<range.location], as: UTF16.self) + text
-                if !text.isEmpty { state.inserted.append(text) }
-                return Inserted(characters: text.count, into: state.into)
-            }
+            // A refusal is answered before anything is committed, as the input method's cursor
+            // in front is decided before its commit, for a take-back as for any insert.
             if let refusal = state.refusal {
-                if state.landingDespiteFailure, refusal.wordsMayHaveLanded { state.field += text }
+                // Landing anyway, the commit was made and its answer lost, so what it answered
+                // is not told: the failure is.
+                if state.landingDespiteFailure, refusal.wordsMayHaveLanded { _ = Self.commit(request, in: &state) }
                 throw refusal
             }
-            guard destination.admits(state.into) else { throw .refused(.dictationIsInAnotherApp) }
-            state.inserted.append(text)
-            state.field += text
-            return Inserted(characters: text.count, into: state.into)
+            let inserted = try Self.commit(request, in: &state).get()
+            if !request.text.isEmpty { state.inserted.append(request.text) }
+            return inserted
         }
+    }
+
+    /// One commit, as the input method makes it: words bound to another app are refused, and the
+    /// text a request replaces is found before the caret by the input method's own rule, over the
+    /// document read as a client with its caret at the end and nothing selected, then replaced by
+    /// the request's text. An ordinary insert replaces nothing, at the caret.
+    /// [LAW:one-source-of-truth] [LAW:dataflow-not-control-flow]
+    private static func commit(_ request: InsertRequest, in state: inout State) -> Result<Inserted, InsertFailure> {
+        guard request.destination.admits(state.into) else { return .failure(.refused(.dictationIsInAnotherApp)) }
+        let field = Array(state.field.utf16)
+        let found = Replacement.range(of: request.replacing, selection: { NSRange(location: field.count, length: 0) },
+                                      text: { String(decoding: field[$0.location..<NSMaxRange($0)], as: UTF16.self) })
+        guard case .success(let range) = found else { return .failure(.refused(.wordsCannotBeTakenBack)) }
+        let kept = range.location == NSNotFound ? field.count : range.location
+        state.field = String(decoding: field[..<kept], as: UTF16.self) + request.text
+        return .success(Inserted(characters: request.text.count, into: state.into))
     }
 }

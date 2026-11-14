@@ -18,12 +18,6 @@ import Testing
         var all: [String] { lines.withLock { $0 } }
     }
 
-    @MainActor
-    private static func inFront(_ cursor: Client) -> InFront {
-        InFront(frontmost: cursor.application, selected: true, cursorApplication: cursor.application, cursors: 1, ruledOut: 0,
-                field: nil, screens: [], cursor: .success(cursor))
-    }
-
     private static let farOff = Duration.seconds(30)
 
     @MainActor
@@ -48,7 +42,7 @@ import Testing
         let committer = Committer(bound: Self.farOff, turns: turns) { _ in }
         let order = Log()
         let gate = SteeringGate(turns: turns, ceiling: Self.farOff, asking: FakeApp(owing: { .success(.words) }, settling: {
-            let placed = committer.insert(InsertRequest("the tail", into: .cursorInFront)) { Self.inFront(cursor) }
+            let placed = committer.insert(InsertRequest("the tail", into: .cursorInFront)) { InFront.seen(.success(cursor), in: cursor.application) }
             order.add("the app was answered \(placed.answer)")
             return .success(.landed)
         }))
