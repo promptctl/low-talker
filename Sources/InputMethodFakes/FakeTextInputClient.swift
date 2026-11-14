@@ -15,6 +15,9 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
         /// No document access: `selectedRange` answers NSNotFound and the text nil whatever the
         /// field holds, and a replacement range is ignored, the words going in at the cursor.
         case none
+        /// Document access, and `selectedRange` answers NSNotFound and the text nil, as the none
+        /// tier does.
+        case withoutSelection
         /// Document access and a real selection, and no text over any range.
         case selectionOnly
         /// Document access, and the reads answer what the field holds.
@@ -34,14 +37,25 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
         case keepsWhatFitsAnsweringAll
     }
 
+    /// What a client with document access answers for a range that starts in the field and runs
+    /// past its end. Nobody measured it: bem read no range past a field's end.
+    public enum PastTheEnd: Sendable {
+        /// Nothing: the read answers nil.
+        case answersNothing
+        /// The text that is there, from the range's start to the field's end.
+        case answersWhatIsThere
+    }
+
     public let description: String
     public let access: Access
     public let overflow: Overflow?
+    public let pastTheEnd: PastTheEnd
 
-    init(_ description: String, access: Access, overflow: Overflow? = nil) {
+    init(_ description: String, access: Access, overflow: Overflow? = nil, pastTheEnd: PastTheEnd = .answersNothing) {
         self.description = description
         self.access = access
         self.overflow = overflow
+        self.pastTheEnd = pastTheEnd
     }
 
     /// TextEdit and Notes: the full tier.
@@ -84,6 +98,11 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
     /// If its reads answer what it was handed rather than what it kept.
     public static let webKitLimitedTextAreaAnsweringAll = ClientProfile("a WebKit <textarea maxlength> answering all it was handed",
                                                                         access: .toTheField, overflow: .keepsWhatFitsAnsweringAll)
+    /// A client giving document access and then answering for its selection as one giving none does.
+    public static let documentAccessWithoutSelection = ClientProfile("a client giving document access and no selection", access: .withoutSelection)
+    /// An AppKit text view, if a read running past its end answers the text that is there.
+    public static let appKitAnsweringWhatIsThere = ClientProfile("an AppKit text view answering what is there of a range past its end",
+                                                                 access: .toTheField, pastTheEnd: .answersWhatIsThere)
     /// iTerm2's terminal, where words land in plain sight, as bem read it: no document access.
     /// Its `length()` of 0 (Committer) is not a call the port makes, so it is not modelled.
     public static let iTerm2Blind = ClientProfile("iTerm2's terminal giving no document access", access: .none)
@@ -99,6 +118,7 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
         webKitLimitedTextArea, webKitLimitedTextAreaKeepingAll, webKitLimitedTextAreaKeepingNone, webKitLimitedTextAreaBlind,
         webKitLimitedTextAreaAnsweringAll,
         iTerm2Blind, iTerm2SelectionOnly, iTerm2,
+        documentAccessWithoutSelection, appKitAnsweringWhatIsThere,
     ]
 
     /// Every profile, measured and possible: what a behavior that depends on a client's answers
@@ -132,9 +152,21 @@ public final class FakeTextInputClient: TextInputClient {
     /// Where the client says the caret's line is, in screen coordinates, or nil for a client that
     /// reports none.
     public var caretLine: CGRect?
-    /// How many times the client was asked whether it gives document access: each ask is a call
-    /// into an app that may be hung.
-    public private(set) var documentAccessAsked = 0
+    /// One call made on the client through the port, with what it was handed.
+    public enum Call: Equatable, Sendable {
+        case bundleIdentifier
+        case uniqueClientIdentifierString
+        case givesDocumentAccess
+        case lineHeightRectangle(forCharacterIndex: Int)
+        case selectedRange
+        case string(in: NSRange)
+        case insertText(String, replacementRange: NSRange)
+    }
+
+    /// Every call made on the client, in order: each is a call into an app that may be hung.
+    public private(set) var calls: [Call] = []
+    /// How many times the client was asked whether it gives document access.
+    public var documentAccessAsked: Int { calls.count { $0 == .givesDocumentAccess } }
     /// Runs inside each `insertText`, before the words go in, while the app is taking them.
     public var duringInsert: () -> Void = {}
 
@@ -158,29 +190,46 @@ public final class FakeTextInputClient: TextInputClient {
         selection = range
     }
 
-    public func bundleIdentifier() -> String? { application }
-    public func uniqueClientIdentifierString() -> String? { nil }
+    public func bundleIdentifier() -> String? {
+        calls.append(.bundleIdentifier)
+        return application
+    }
+
+    public func uniqueClientIdentifierString() -> String? {
+        calls.append(.uniqueClientIdentifierString)
+        return nil
+    }
 
     public func givesDocumentAccess() -> Bool {
-        documentAccessAsked += 1
+        calls.append(.givesDocumentAccess)
         return profile.access != .none
     }
 
-    public func lineHeightRectangle(forCharacterIndex _: Int) -> NSRect { caretLine ?? .zero }
+    public func lineHeightRectangle(forCharacterIndex index: Int) -> NSRect {
+        calls.append(.lineHeightRectangle(forCharacterIndex: index))
+        return caretLine ?? .zero
+    }
 
     public func selectedRange() -> NSRange {
-        switch profile.access {
-        case .none: NSRange(location: NSNotFound, length: NSNotFound)
+        calls.append(.selectedRange)
+        return switch profile.access {
+        case .none, .withoutSelection: NSRange(location: NSNotFound, length: NSNotFound)
         case .selectionOnly, .toTheField: answered.selection
         }
     }
 
     public func string(in range: NSRange) -> String? {
+        calls.append(.string(in: range))
         switch profile.access {
-        case .none, .selectionOnly: return nil
+        case .none, .withoutSelection, .selectionOnly: return nil
         case .toTheField:
-            let field = answered.field
-            return Self.holds(range, in: field) ? (field as NSString).substring(with: range) : nil
+            let field = answered.field as NSString
+            if Self.holds(range, in: field as String) { return field.substring(with: range) }
+            let runsPastTheEnd = range.location >= 0 && range.length >= 0 && range.location <= field.length
+            return switch profile.pastTheEnd {
+            case .answersNothing: nil
+            case .answersWhatIsThere: runsPastTheEnd ? field.substring(from: range.location) : nil
+            }
         }
     }
 
@@ -206,12 +255,14 @@ public final class FakeTextInputClient: TextInputClient {
     /// range is honoured only with document access, and the field keeps of what its `maxLength` has
     /// no room for what the profile's overflow says, leaving the caret after what it kept.
     public func insertText(_ words: String, replacementRange range: NSRange) {
+        calls.append(.insertText(words, replacementRange: range))
         duringInsert()
         guard unkept == nil else { return answeredAfterUnkept("insertText(\(words.debugDescription), \(range))") }
         let replaced = range.location == NSNotFound || profile.access == .none ? selection : range
-        // No selection-only client was measured taking an explicit range, so the fake answers none.
-        guard range.location == NSNotFound || profile.access != .selectionOnly else {
-            Issue.record("insertText into \(profile) was given \(range), and nobody measured a selection-only client taking one")
+        // No client giving document access with less than the field's text was measured taking an
+        // explicit range, so the fake answers none.
+        guard range.location == NSNotFound || profile.access == .none || profile.access == .toTheField else {
+            Issue.record("insertText into \(profile) was given \(range), and nobody measured such a client taking one")
             return
         }
         // No client was measured answering a range past the end of its field, so the fake answers

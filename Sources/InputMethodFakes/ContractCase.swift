@@ -24,7 +24,7 @@ public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
     }
 
     /// What the client answers once the call is made: whether it gives document access, its
-    /// selection, and the text it says is in `readRange`.
+    /// selection, and the text it says is in `reads`.
     public struct Answers: Sendable, Equatable {
         public let documentAccess: Bool
         public let selection: NSRange
@@ -37,14 +37,17 @@ public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
     public let selected: NSRange
     public let maxLength: Int?
     public let act: Act
+    /// The range whose text the case reads back.
+    public let reads: NSRange
     public let answers: Answers
     public let holds: String
 
-    /// The range every case reads back: the field's first five UTF-16 units.
+    /// The range a case reads back unless it says otherwise: the field's first five UTF-16 units.
     public static let readRange = NSRange(location: 0, length: 5)
 
     public var description: String {
         "\(profile), \(act) into \(holding.debugDescription) with \(selected) selected" + (maxLength.map { " (maxlength \($0))" } ?? "")
+            + ", reading \(reads)"
     }
 
     /// Makes the call on `client` and says every way it disagreed with the case; nothing, when it
@@ -55,7 +58,7 @@ public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
         case .read: break
         case let .insert(text, range): client.insertText(text, replacementRange: range)
         }
-        let answered = Answers(documentAccess: client.givesDocumentAccess(), selection: client.selectedRange(), text: client.string(in: Self.readRange))
+        let answered = Answers(documentAccess: client.givesDocumentAccess(), selection: client.selectedRange(), text: client.string(in: reads))
         let held = reading()
         return (answered == answers ? [] : ["the client answered \(answered), and the case says \(answers)"])
             + (held == holds ? [] : ["the field holds \(held.debugDescription), and the case says \(holds.debugDescription)"])
@@ -99,7 +102,21 @@ public nonisolated extension ContractCase {
         typed(into: .iTerm2Blind, answers: blind),
         typed(into: .iTerm2SelectionOnly, answers: Answers(documentAccess: true, selection: NSRange(location: 13, length: 0), text: nil)),
         typed(into: .iTerm2, answers: reads(caret: 13, text: "alpha")),
+        // Nobody measured a client giving document access and answering NSNotFound for its selection.
+        typed(into: .documentAccessWithoutSelection,
+              answers: Answers(documentAccess: true, selection: NSRange(location: NSNotFound, length: NSNotFound), text: nil)),
+        // bem read no range past a field's end: whether a client answers nothing for one, or the
+        // text that is there.
+        pastTheEnd(of: .appKit, answers: nil),
+        pastTheEnd(of: .webKitTextArea, answers: nil),
+        pastTheEnd(of: .appKitAnsweringWhatIsThere, answers: "vo"),
     ]
+
+    /// Five units read from three before the end of a field.
+    private static func pastTheEnd(of profile: ClientProfile, answers text: String?) -> ContractCase {
+        ContractCase(profile: profile, holding: "alpha bravo", act: .read, reads: NSRange(location: 9, length: 5),
+                     answers: reads(caret: 11, text: text), holds: "alpha bravo")
+    }
 
     /// Thirty characters inserted at the point of an empty field with a `maxlength` of 10.
     private static func overflowing(_ profile: ClientProfile, answers: Answers, holds: String) -> ContractCase {
@@ -111,9 +128,10 @@ public nonisolated extension ContractCase {
         ContractCase(profile: profile, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint), answers: answers, holds: "alpha bravo x")
     }
 
-    private init(profile: ClientProfile, holding: String, selected: NSRange? = nil, maxLength: Int? = nil, act: Act, answers: Answers, holds: String) {
+    private init(profile: ClientProfile, holding: String, selected: NSRange? = nil, maxLength: Int? = nil, act: Act, reads: NSRange = readRange,
+                 answers: Answers, holds: String) {
         self.init(profile: profile, holding: holding, selected: selected ?? NSRange(location: holding.utf16.count, length: 0), maxLength: maxLength,
-                  act: act, answers: answers, holds: holds)
+                  act: act, reads: reads, answers: answers, holds: holds)
     }
 
     private static let atThePoint = NSRange(location: NSNotFound, length: 0)
