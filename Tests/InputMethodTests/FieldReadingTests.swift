@@ -175,12 +175,12 @@ import Testing
         #expect(try await loggedLines(category: "insert", since: since).contains("read the field of \(cursor): \(event)"))
     }
 
-    /// A read asked to reach further back than its bound reads that far, and no further.
-    @Test func aReadReachesBackAsFarAsItIsAsked() {
+    /// A read asked to reach back reads its bound past that, and no further.
+    @Test func aReadReachesItsBoundPastWhatItIsAsked() {
         let held = String(repeating: "x", count: 1_500)
         let field = Self.field(.appKit, holding: held, selecting: NSRange(location: 1_500, length: 0))
 
-        let (reading, _) = FieldReading.read(from: field, reaching: 1_200)
+        let (reading, _) = FieldReading.read(from: field, reaching: 200)
 
         #expect(reading == .readable(DocumentContext(selection: NSRange(location: 1_500, length: 0), selected: "",
                                                      before: String(repeating: "x", count: 1_200), after: "")))

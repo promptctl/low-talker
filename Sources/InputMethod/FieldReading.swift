@@ -22,8 +22,8 @@ public nonisolated struct DocumentContext: Equatable, Sendable {
     /// In UTF-16 units, as `NSRange` counts them; a caret is a selection of length 0.
     public let selection: NSRange
     public let selected: String
-    /// The text ending where the selection starts: `FieldReading.bound` units, or as many as the
-    /// read reached back, or fewer only at the field's start.
+    /// The text ending where the selection starts: `FieldReading.bound` units past as many as the
+    /// read was asked to reach, or fewer only at the field's start.
     public let before: String
     /// The text starting where the selection ends: `FieldReading.bound` units, or fewer only at
     /// the field's end.
@@ -71,8 +71,8 @@ public extension FieldReading {
     }
 
     /// Reads `client`: whether it gives document access, its selection, then the text of the
-    /// selection, before it and after it. Before reaches back `bound` units, or `reaching` where
-    /// that is further: the words a take-back proves are there can be longer than a paragraph.
+    /// selection, before it and after it. Before reaches back `bound` units past `reaching`: the
+    /// words a take-back proves are there, and a paragraph before them to fit what it leaves to.
     ///
     /// Never sized off the client's `length()`, which the partial tier answers 0 (bem). Before
     /// and the selection lie where the client's own selection says text is, so each must answer
@@ -125,7 +125,7 @@ public extension FieldReading {
             guard selection.location >= 0, selection.length >= 0, !overflowed, end <= Int.max - bound else {
                 return .failure(.impossibleSelection(selection))
             }
-            let start = max(0, selection.location - max(bound, reaching))
+            let start = max(0, selection.location - bound - reaching)
             return exactly(selection).flatMap { selected in
                 exactly(NSRange(location: start, length: selection.location - start)).flatMap { before in
                     after(end).map { DocumentContext(selection: selection, selected: selected, before: before, after: $0) }

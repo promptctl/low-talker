@@ -108,16 +108,18 @@ import Testing
         }
     }
 
-    /// A take-back longer than a read reaches is read back as far as it goes.
+    /// A take-back longer than a read reaches is proved whole, and what it leaves is fitted to the
+    /// text before the words, not taken for the field's start.
     @MainActor
     @Test func aTakeBackLongerThanAReadIsProvedWhole() throws {
         let words = String(repeating: " word", count: 300)
-        let field = FakeTextInputClient(holding: "Start." + words)
+        let field = FakeTextInputClient(holding: "Start, the" + words)
         let cursor = try field.cursor()
 
-        _ = Committer.place(InsertRequest("", into: .app(cursor.application), replacing: words), turn: Turn(), inFront: { InFront.seen(.success(cursor)) })
+        _ = Committer.place(InsertRequest("earlier", into: .app(cursor.application), replacing: words), turn: Turn(),
+                            inFront: { InFront.seen(.success(cursor)) })
 
-        #expect(field.text == "Start.")
+        #expect(field.text == "Start, the earlier")
     }
 
     /// The words a request names to replace are taken out of the field, and an insert at a caret

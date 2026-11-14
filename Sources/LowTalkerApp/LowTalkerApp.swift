@@ -681,15 +681,11 @@ public final class LowTalkerApp {
         // [LAW:no-silent-failure] The words went nowhere, or only some of them did, so the menu
         // says why.
         if case .failed(let failed) = press.outcome { lastFailure = failureLine(failed.failure) }
-        if case .session(let session) = press.outcome { lastReplacement = Self.replacementLine(session.performed) }
+        // A selection is gone however the press ended, a cancel included, so the menu says so then too.
+        lastReplacement = press.opened.flatMap { opened in
+            opened.replaced == 0 ? nil : "Last dictation replaced \(counted(opened.replaced, "selected character", "selected characters"))"
+        }
         ports.told(.press(press))
-    }
-
-    /// What the menu says of a press whose inserts took the place of the field's own text, or nil
-    /// for one that replaced none.
-    static func replacementLine(_ performed: [Executor.Performed]) -> String? {
-        let replaced = performed.compactMap(\.replaced).reduce(0, +)
-        return replaced == 0 ? nil : "Last dictation replaced \(counted(replaced, "selected character", "selected characters"))"
     }
 
     /// A failure that was no press: the loop's sessions could not be waited out.

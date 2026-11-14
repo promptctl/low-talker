@@ -30,7 +30,7 @@ import TestProbes
     /// The press's first commit lands, and a later insert carries earlier dictation and the
     /// press's own held words ahead of its next ones, so its words sit on both sides of the
     /// earlier dictation: all of them are taken back, and the earlier dictation is left where
-    /// it was delivered.
+    /// it was delivered, counted in the line as it landed fitted again.
     @Test func thePresssWordsOnBothSidesOfEarlierDictationAreTakenBack() async throws {
         let press = Speaker(), earlier = Speaker()
         let inputMethod = FakeInputMethod()
@@ -38,17 +38,18 @@ import TestProbes
         var landed = TakeBack()
         landed.landed(performed[0].landed, carrying: nil, then: Transcript(typed: " hello"), of: press)
         landed.landed(performed[1].landed, carrying: Self.carried((" first", earlier), (" again", press)), then: Transcript(typed: " there"), of: press)
+        inputMethod.landing { $0 + "." }
         let since = Date.now
 
         try await Executor(insertingThrough: inputMethod, clock: .system, log: Logger(subsystem: "lowtalker", category: "take-back-both-sides"))
             .takeBack(landed, from: performed[1])
 
-        #expect(inputMethod.field == " first")
+        #expect(inputMethod.field == " first.")
         #expect(landed.words == 3)
         #expect(landed.earlierWords == 1)
         let lines = try await loggedLines(category: "take-back-both-sides", since: since)
         #expect(lines.contains {
-            $0.hasPrefix("took back 18 UTF-16 units from com.apple.TextEdit, replacing 24 before the caret with 6 of earlier dictation, in ")
+            $0.hasPrefix("took back 17 UTF-16 units from com.apple.TextEdit, replacing 24 before the caret with 7 of earlier dictation, in ")
         })
     }
 

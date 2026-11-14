@@ -75,6 +75,23 @@ import TestProbes
         #expect(rig.inputMethod.field == " hello there my friend")
     }
 
+    /// A cancel takes back the press's words and not the selection they replaced, so the press's
+    /// report still says how much of the field's own text its inserts took the place of.
+    @Test func aCancelledPressSaysWhatItsInsertsReplaced() async throws {
+        let rig = try await Rig(hearing: Self.engine())
+        rig.inputMethod.typing("Good morning")
+        rig.inputMethod.selecting(7)
+        Self.begin(rig)
+        try await Self.said([1, 2], in: rig) { rig.inputMethod.field == "Good  hello" }
+
+        Self.cancel(rig)
+        let report = await rig.pressReport()
+
+        #expect(report.outcome.cancelled != nil)
+        #expect(rig.inputMethod.field == "Good ")
+        #expect(report.opened?.replaced == 7)
+    }
+
     /// A press cancelled before anything landed asks the input method nothing.
     @Test func aPressCancelledBeforeAnythingLandedMakesNoRequest() async throws {
         let rig = try await Rig(hearing: Self.engine())
