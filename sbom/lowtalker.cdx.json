@@ -35,6 +35,10 @@
         {
           "name": "low-talker:license-file-sha256",
           "value": "100d5a2c3747b5a3bb9c8b28ccdb178bb1b1eb86fce632240e49b527a2f358c4"
+        },
+        {
+          "name": "low-talker:license-text",
+          "value": "SPDX License List 3.29.0 MIT template"
         }
       ],
       "type": "machine-learning-model"
@@ -72,6 +76,10 @@
         {
           "name": "low-talker:license-file-sha256",
           "value": "f091a4501d4dd386a29b641302cd415228ce3c0742e00bccc9c8d26cb51171d1"
+        },
+        {
+          "name": "low-talker:license-text",
+          "value": "SPDX License List 3.29.0 Apache-2.0 template"
         }
       ],
       "type": "data"
@@ -111,6 +119,10 @@
             {
               "name": "low-talker:license-file-sha256",
               "value": "6b5172ad4dd6519aec67b919181fa7a38a2234131e5b2afa232dfe444819783e"
+            },
+            {
+              "name": "low-talker:license-text",
+              "value": "SPDX License List 3.29.0 MIT template"
             }
           ],
           "purl": "pkg:github/marzer/tomlplusplus@3.4.0",
@@ -148,6 +160,10 @@
         {
           "name": "low-talker:license-file-sha256",
           "value": "bccd5fe8b98c6caede07def6c03f55877416ec40ea5fcd18e668b5c6fbb10abe"
+        },
+        {
+          "name": "low-talker:license-text",
+          "value": "SPDX License List 3.29.0 MIT template"
         }
       ],
       "purl": "pkg:swift/github.com/LebJe/TOMLKit@0.6.0",
@@ -186,6 +202,10 @@
         {
           "name": "low-talker:license-file-sha256",
           "value": "770af8291f708538d8ff885a0bbc4e045cd700531741c4f99528d435c14d7f55"
+        },
+        {
+          "name": "low-talker:license-text",
+          "value": "SPDX License List 3.29.0 Apache-2.0 template"
         }
       ],
       "purl": "pkg:swift/github.com/apple/swift-argument-parser@1.8.2",
@@ -231,6 +251,10 @@
             {
               "name": "low-talker:license-file-sha256",
               "value": "8af554e910833382a04c73b2d9eaef669e031335c867de14b5cf631bd2239913"
+            },
+            {
+              "name": "low-talker:license-text",
+              "value": "SPDX License List 3.29.0 Apache-2.0 template"
             }
           ],
           "purl": "pkg:github/huggingface/swift-transformers@1.1.6",
@@ -268,6 +292,10 @@
         {
           "name": "low-talker:license-file-sha256",
           "value": "b8673adf319f1d6905c5c38cf69513f8857930fb3445566fa9839c6948bb85c4"
+        },
+        {
+          "name": "low-talker:license-text",
+          "value": "SPDX License List 3.29.0 MIT template"
         }
       ],
       "purl": "pkg:swift/github.com/argmaxinc/argmax-oss-swift@1.1.0",

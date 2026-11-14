@@ -81,13 +81,74 @@ def license_entry(component, root, rule):
         if not found:
             fail(f"{component}: {relative} does not match {rule['licenseMatch']!r}, so its license text cannot be read")
         text = found.group(1)
+    properties = [
+        {"name": "low-talker:license-file", "value": relative},
+        {"name": "low-talker:license-file-sha256", "value": sha256(path)},
+    ]
+    # An id with no template here is one check-licenses refuses, and the refusal, with what
+    # to do about it, is that gate's to give. [LAW:single-enforcer]
+    template = license_templates.get(spdx.casefold())
+    if template is not None:
+        if not template_pattern(template.read_text()).search(comparable(text)):
+            fail(f"{component}: {relative} does not carry the text of {spdx} as the SPDX License List "
+                 f"{SPDX_LICENSE_LIST} template reads it, so the rule names a license the file does not state")
+        properties.append({"name": "low-talker:license-text", "value": f"SPDX License List {SPDX_LICENSE_LIST} {spdx} template"})
     return (
         [{"license": {"id": spdx, "text": {"contentType": "text/plain", "content": text.lstrip("\n").rstrip() + "\n"}}}],
-        [
-            {"name": "low-talker:license-file", "value": relative},
-            {"name": "low-talker:license-file-sha256", "value": sha256(path)},
-        ],
+        properties,
     )
+
+
+# The SPDX License List's template for each license check-licenses accepts, byte for byte
+# from https://github.com/spdx/license-list-data/tree/v3.29.0/template.
+SPDX_LICENSE_LIST = "3.29.0"
+license_templates = {path.name.removesuffix(".template.txt").casefold(): path
+                     for path in (repository / "sbom" / "spdx").glob("*.template.txt")}
+
+# The template markup: optional text, and a var, which is a span the template's own regular
+# expression matches. A var's fields are quoted, and its `original` can hold a `>`.
+TEMPLATE_MARKUP = re.compile(r'<<(beginOptional|endOptional|var(?:;[a-z]+="(?:[^"\\]|\\.)*")*)>>')
+VAR_MATCH = re.compile(r'match="((?:[^"\\]|\\.)*)"')
+# Whatever whitespace and punctuation stand between two words. Possessive, so it gives nothing
+# back to a `.{0,20}` var beside it, which would otherwise backtrack across every character of
+# a `====` rule: a second, not a millisecond, on argmax-oss-swift's NOTICES.
+BETWEEN_WORDS = r"[\W_]*+"
+COPYRIGHT_SYMBOL = re.compile(r"©|\(c\)", re.IGNORECASE)
+COMMENT_MARKER = re.compile(r"^[ \t]*(?://+|/?\*+/?|#+)", re.MULTILINE)
+
+
+def words(literal):
+    return [re.escape(word) for word in re.findall(r"[^\W_]+", COPYRIGHT_SYMBOL.sub(" ", literal))]
+
+
+def template_pattern(template):
+    """An SPDX template as one regular expression, compared as SPDX's License Matching
+    Guidelines compare: the words, and not their case, the whitespace and punctuation between
+    them, or which of ©, (c) and none the copyright line uses. A search, not a full match: a
+    license file may carry more than the license, as a NOTICES file's preamble or an
+    exception appended to Apache-2.0 do."""
+    nested = [[]]
+    position = 0
+    for mark in TEMPLATE_MARKUP.finditer(template):
+        nested[-1] += words(template[position:mark.start()])
+        tag = mark.group(1)
+        if tag == "beginOptional":
+            nested.append([])
+        elif tag == "endOptional":
+            optional = nested.pop()
+            nested[-1].append(f"(?:{BETWEEN_WORDS.join(optional)})?")
+        else:
+            nested[-1].append(f"(?:{VAR_MATCH.search(tag).group(1)})")
+        position = mark.end()
+    nested[-1] += words(template[position:])
+    return re.compile(BETWEEN_WORDS.join(nested[0]), re.IGNORECASE)
+
+
+def comparable(text):
+    """A license text as a template's pattern reads it: without the comment markers at the
+    starts of its lines, which source files wrap a license in, and with its whitespace one
+    space wherever it stands, since a var's own expression can name a single space."""
+    return re.sub(r"\s+", " ", COPYRIGHT_SYMBOL.sub(" ", COMMENT_MARKER.sub("", text)))
 
 
 def vendored_version(component, checkout, rule):
@@ -290,7 +351,11 @@ def main():
         held = f"; the {' and '.join(confirmed)} rules held to the install in {store}"
     else:
         held = f"; {store} holds no install of the default model, so its rules were not confirmed"
-    print(f"{output}: {len(components)} components, {sum(len(c.get('components', [])) for c in components)} vendored{held}")
+    every = components + [vendored for c in components for vendored in c.get("components", [])]
+    texts = sum(p["name"] == "low-talker:license-text" for c in every for p in c["properties"])
+    print(f"{output}: {len(components)} components, {len(every) - len(components)} vendored, "
+          f"{texts} of {len(every)} license texts held to their ids{held}")
 
 
-main()
+if __name__ == "__main__":
+    main()
