@@ -60,7 +60,11 @@ let package = Package(
         // for only when called. Beneath the core and the setup list alike, so both read one
         // reading. [LAW:one-way-deps]
         .target(name: "Grants"),
-        .testTarget(name: "GrantsTests", dependencies: ["Grants"]),
+        // The one fake of microphone authorization and the contract it is held to, beside the
+        // port. It links only Grants, so a suite that stands in the authority links no engine.
+        // In no product. [LAW:one-source-of-truth]
+        .target(name: "GrantsFakes", dependencies: ["Grants"]),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "GrantsFakes"]),
         .target(
             name: "LowTalkerCore",
             dependencies: [
@@ -103,7 +107,7 @@ let package = Package(
         .target(name: "Onboarding", dependencies: ["Identity", "Grants", "InputSource"]),
         // The steps are what a person acts on, so they are asserted as values rather
         // than scraped off a terminal.
-        .testTarget(name: "OnboardingTests", dependencies: ["Onboarding", "Identity", "Grants"]),
+        .testTarget(name: "OnboardingTests", dependencies: ["Onboarding", "Identity", "Grants", "GrantsFakes"]),
         // Whether the app's icon is in the menu bar as its own: which process macOS holds
         // responsible for it, which decides whose row in the menu bar's allow list it is filed
         // under, and whether the icon came on screen. Out of the app target so `make test` runs it.
@@ -128,7 +132,7 @@ let package = Package(
         // The one fake of each store the loop keeps words and speech in, and the contracts they and
         // the files are held to, beside the ports. In no product. [LAW:one-source-of-truth]
         .target(name: "DictationFakes", dependencies: ["Dictation", "LowTalkerCore"]),
-        .testTarget(name: "DictationTests", dependencies: ["Dictation", "DictationFakes", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "Insertion", "InsertionFakes", "TestProbes", "Uptime"]),
+        .testTarget(name: "DictationTests", dependencies: ["Dictation", "DictationFakes", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "GrantsFakes", "Insertion", "InsertionFakes", "TestProbes", "Uptime"]),
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
@@ -201,6 +205,7 @@ let package = Package(
                 "LowTalkerCore",
                 "LowTalkerCoreFakes",
                 "Grants",
+                "GrantsFakes",
                 "Insertion",
                 "TestProbes",
                 "Uptime",

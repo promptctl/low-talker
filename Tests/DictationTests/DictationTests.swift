@@ -2,6 +2,7 @@ import Dictation
 import DictationFakes
 import Foundation
 import Grants
+import GrantsFakes
 import Insertion
 import InsertionFakes
 import LowTalkerCore
@@ -68,7 +69,7 @@ final class Rig {
         capture = AudioCapture(retaining: retaining, hardware: hardware, startingAt: Self.origin, reporting: { _ in })
         // Shut between presses unless a test says otherwise, which is the loop the app
         // runs when no config file asks for the microphone to be held.
-        try await capture.start(try MicrophonePermission(authority: Authorized()).current.grant(), atRest: atRest)
+        try await capture.start(try MicrophonePermission(authority: FakeMicrophoneAuthority()).current.grant(), atRest: atRest)
         let (stream, feed) = AsyncStream.makeStream(of: Dictation.Report.self)
         reports = stream
         let reported = reported

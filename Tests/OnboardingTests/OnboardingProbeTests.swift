@@ -1,5 +1,6 @@
 import AVFoundation
 import Grants
+import GrantsFakes
 import Testing
 @testable import Onboarding
 
@@ -23,12 +24,8 @@ import Testing
         #expect(microphoneRow(.notDetermined)?.reads == "not asked yet")
         #expect(microphoneRow(.denied)?.reads == "turned off")
         #expect(microphoneRow(.restricted)?.met == false)
-        let granted = OnboardingProbe.readiness(microphone: MicrophonePermission(authority: Authorized()).current)
+        let granted = OnboardingProbe.readiness(microphone: MicrophonePermission(authority: FakeMicrophoneAuthority()).current)
         #expect(granted.requirements.first { $0.row == .microphone }?.met == true)
     }
 }
 
-private struct Authorized: MicrophoneAuthority {
-    func status() -> AVAuthorizationStatus { .authorized }
-    func requestAccess() async -> Bool { true }
-}

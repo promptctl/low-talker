@@ -1,5 +1,6 @@
 import AVFoundation
 import Grants
+import GrantsFakes
 import LowTalkerCore
 import TestProbes
 import Testing
@@ -195,14 +196,10 @@ enum UnplugReports: CaseIterable, Sendable {
     case deviceFirst
 }
 
-private struct Authorized: MicrophoneAuthority {
-    func status() -> AVAuthorizationStatus { .authorized }
-    func requestAccess() async -> Bool { true }
-}
 
 @MainActor
 @Suite struct AudioCaptureTests {
-    private let grant = try! MicrophonePermission(authority: Authorized()).current.grant()
+    private let grant = try! MicrophonePermission(authority: FakeMicrophoneAuthority()).current.grant()
     /// Where every capture in this suite starts its timeline; any moment would do.
     private let origin = HostTime(uptime: .zero)
 

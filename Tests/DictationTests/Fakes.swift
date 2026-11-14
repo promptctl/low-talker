@@ -3,6 +3,7 @@ import Dictation
 import DictationFakes
 import Dispatch
 import Grants
+import GrantsFakes
 import Insertion
 import InsertionFakes
 import LowTalkerCore
@@ -102,8 +103,4 @@ final class FakeHardware: AudioHardware {
     func watchDefaultInput(_ onChange: @escaping @MainActor () -> Void) throws -> Disposal { {} }
 }
 
-struct Authorized: MicrophoneAuthority {
-    func status() -> AVAuthorizationStatus { .authorized }
-    func requestAccess() async -> Bool { true }
-}
 
