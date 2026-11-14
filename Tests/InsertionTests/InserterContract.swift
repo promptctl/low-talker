@@ -18,7 +18,7 @@ import Testing
     static let into = "com.example.editor"
 
     static let answers: [InsertionAnswer] = [
-        .inserted(characters: text.count, into: into),
+        .inserted(characters: text.count, into: into, landed: text, replaced: 0),
         .refused(.noTextFieldHasFocus),
         .refused(.dictationIsInAnotherApp),
         .notYetTaken(characters: text.count, into: into),
@@ -36,7 +36,7 @@ import Testing
     static func fake(answering answer: InsertionAnswer) -> FakeInputMethod {
         let inputMethod = FakeInputMethod()
         switch answer {
-        case .inserted(_, let into): inputMethod.reaching(into)
+        case .inserted(_, let into, _, _): inputMethod.reaching(into)
         case .refused(let refusal): inputMethod.refusing(.refused(refusal))
         case .notYetTaken(let characters, let into): inputMethod.refusing(.notYetTaken(NotYetTaken(characters: characters, into: into)))
         }
@@ -63,7 +63,7 @@ import Testing
     /// What each answer reads as, written out so the contract is not only that the two agree.
     static func expected(_ answer: InsertionAnswer) -> String {
         switch answer {
-        case let .inserted(characters, into): "inserted \(characters) into \(into)"
+        case let .inserted(characters, into, _, _): "inserted \(characters) into \(into)"
         case .refused(let refusal): "\(InsertFailure.refused(refusal))"
         case let .notYetTaken(characters, into): "\(InsertFailure.notYetTaken(NotYetTaken(characters: characters, into: into)))"
         }

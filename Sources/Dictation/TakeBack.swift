@@ -1,14 +1,15 @@
 import LowTalkerCore
 
 /// What a cancelled press's inserts put before the caret, and what taking its own words back
-/// leaves there, fed each insert that landed in the order the field holds its words: the held
-/// runs it carried, then the press's new words.
+/// leaves there, fed each insert that landed in the order the field holds them: the text as it
+/// landed, then the held runs it carried and the press's new words.
 ///
-/// [LAW:one-source-of-truth] `replacing` is the field's own text from the press's first word to the
-/// caret, earlier dictation an insert carried between its words included, so the one request the
-/// input method proves against the field is what the field holds, not a join of the press's words
-/// alone. Earlier dictation ahead of its first word is not between anything taken back, so it
-/// stays out of `replacing` and is left where it was delivered.
+/// [LAW:one-source-of-truth] `replacing` is the field's own text, as the input method answered it
+/// landed, from the first insert holding the press's own words to the caret. An insert is taken
+/// back whole: the input method fitted it to the field, so where one run ends inside it is not
+/// known here. The earlier dictation those inserts carried is `leaving`, as it was sent, and the
+/// input method fits it again to the text around the words it replaces. An insert ahead of the
+/// press's first word holds nothing to take back, so it stays where it was delivered.
 struct TakeBack: Sendable, Equatable {
     /// The text immediately before the caret that the take-back replaces.
     private(set) var replacing = ""
@@ -19,18 +20,17 @@ struct TakeBack: Sendable, Equatable {
     /// Earlier dictation its inserts carried into the field: delivered, not the press's, so it stays.
     private(set) var earlierWords = 0
 
-    /// An insert of `press`'s landed `carried` at the cursor, the hold's runs and who said each,
-    /// then `words`, the press's new ones.
-    mutating func landed(carrying carried: Held.Part?, then words: Transcript, of press: any Held.Owner) {
-        for run in carried?.runs ?? [] { landed(Transcript(words: run.words), own: run.said(by: press)) }
-        landed(words, own: true)
-    }
-
-    private mutating func landed(_ text: Transcript, own: Bool) {
-        if own { words += text.words.count } else { earlierWords += text.words.count }
+    /// An insert of `press`'s that landed as `landed`: `carried`, the hold's runs and who said
+    /// each, then `words`, the press's new ones.
+    mutating func landed(_ landed: String, carrying carried: Held.Part?, then words: Transcript, of press: any Held.Owner) {
+        let runs = carried?.runs ?? []
+        let own = runs.filter { $0.said(by: press) }.map { Transcript(words: $0.words) } + [words]
+        let earlier = runs.filter { !$0.said(by: press) }.map { Transcript(words: $0.words) }
+        self.words += own.map(\.words.count).reduce(0, +)
+        earlierWords += earlier.map(\.words.count).reduce(0, +)
         // Until the press's own text is in the field, nothing it carried sits between its words.
-        guard own || !replacing.isEmpty else { return }
-        replacing += text.text
-        if !own { leaving += text.text }
+        guard !replacing.isEmpty || own.contains(where: { !$0.text.isEmpty }) else { return }
+        replacing += landed
+        leaving += earlier.map(\.text).joined()
     }
 }

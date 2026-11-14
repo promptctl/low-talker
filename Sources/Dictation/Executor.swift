@@ -54,7 +54,13 @@ public struct Executor {
     /// One insert, done. The time is from the key event it is timed from to the input
     /// method's answer.
     public struct Performed: CustomStringConvertible, Sendable {
-        public let characters: Int
+        /// The text as it landed, which the input method fitted to the field: what a take-back
+        /// finds there. Never said: it is the person's words.
+        public let landed: String
+        /// How many characters of the field's own it took the place of, nil where the input method
+        /// did not say: it could not read the field, or is of a build before it read one.
+        public let replaced: Int?
+        public var characters: Int { landed.count }
         /// The app whose cursor took the words, as the input method names it - not
         /// necessarily the one in front at key-down: the person can move between the chord
         /// and the dictation's first words being ready, and those go where the cursor is then.
@@ -64,7 +70,9 @@ public struct Executor {
         public let since: Since.Key
 
         public var description: String {
-            "inserted \(counted(characters, "character", "characters")) at the cursor in \(into.rawValue), \(since.rawValue) to acknowledged \(Int(acknowledged / .milliseconds(1))) ms"
+            "inserted \(counted(characters, "character", "characters")) at the cursor in \(into.rawValue), "
+                + (replaced.map { "in place of \(counted($0, "character", "characters")), " } ?? "in place of what the input method did not say, ")
+                + "\(since.rawValue) to acknowledged \(Int(acknowledged / .milliseconds(1))) ms"
         }
     }
 
@@ -84,7 +92,8 @@ public struct Executor {
         // `Inserter` says in its own contract that the blocking call must not pump it.
         // [LAW:no-ambient-temporal-coupling]
         let inserted = try await inserter.insert(transcript.text, into: destination)
-        let done = Performed(characters: inserted.characters, into: BundleID(rawValue: inserted.into), acknowledged: clock.now - since.instant, since: since.key)
+        let done = Performed(landed: inserted.text, replaced: inserted.replaced, into: BundleID(rawValue: inserted.into),
+                             acknowledged: clock.now - since.instant, since: since.key)
         log.info("\(done.description, privacy: .public)")
         return done
     }
@@ -101,7 +110,8 @@ public struct Executor {
     func takeBack(_ landed: TakeBack, from last: Performed) async throws(InsertFailure) {
         guard !landed.replacing.isEmpty else { return }
         let started = clock.now
-        _ = try await inserter.insert(InsertRequest(landed.leaving, into: .app(last.into.rawValue), replacing: landed.replacing))
-        log.info("took back \(landed.replacing.utf16.count - landed.leaving.utf16.count, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public), replacing \(landed.replacing.utf16.count, privacy: .public) before the caret with \(landed.leaving.utf16.count, privacy: .public) of earlier dictation, in \(Int((clock.now - started) / .milliseconds(1)), privacy: .public) ms")
+        // What stays is counted as the input method answered it landed, fitted again where it now sits.
+        let left = try await inserter.insert(InsertRequest(landed.leaving, into: .app(last.into.rawValue), replacing: landed.replacing)).text.utf16.count
+        log.info("took back \(landed.replacing.utf16.count - left, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public), replacing \(landed.replacing.utf16.count, privacy: .public) before the caret with \(left, privacy: .public) of earlier dictation, in \(Int((clock.now - started) / .milliseconds(1)), privacy: .public) ms")
     }
 }

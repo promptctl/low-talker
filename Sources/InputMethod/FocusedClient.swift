@@ -346,9 +346,10 @@ nonisolated struct ClientName: CustomStringConvertible {
 /// process asks of it, decided over the calls `TextInputClient` names.
 ///
 /// `NSNotFound` as the replacement range is how the text input system is told "at the
-/// insertion point, and do not take anything away" - the same commit a Japanese or Chinese
-/// input method performs when the user accepts a candidate, which is why this reaches
-/// terminals, browsers and Electron apps that no synthesised keystroke would.
+/// selection": a caret takes the words in, and selected text is replaced by them, by the
+/// client's own rule - the same commit a Japanese or Chinese input method performs when the
+/// user accepts a candidate, which is why this reaches terminals, browsers and Electron apps
+/// that no synthesised keystroke would. A take-back names its range instead (`Commit`).
 ///
 /// Measured on low-input-method-s71.03j, while commits ran off the main thread: against 15,991
 /// reactivations landing inside an accepted commit's round trip, one of 3,471 accepted words
@@ -418,32 +419,32 @@ public final class Client: CustomStringConvertible {
     }
 
     /// The selection and the text around it, or why the client cannot be read: asked of the client
-    /// each time, as `field` is, and never kept.
+    /// each time, as `field` is, and never kept. Before the selection it reaches back a read's
+    /// bound past `reaching` units.
     ///
     /// [LAW:single-enforcer] The one edge where a read reaches the log, so no read goes unsaid. The
     /// line carries the event and never the text, which is the person's words.
-    func read() -> FieldReading {
-        let (reading, event) = FieldReading.read(from: client)
+    func read(reaching: Int) -> FieldReading {
+        let (reading, event) = FieldReading.read(from: client, reaching: reaching)
         insertLog.notice("read the field of \(self, privacy: .public): \(event, privacy: .public)")
         return reading
     }
 
-    /// Commits `text` at the insertion point in place of `replacing`, the text immediately before
-    /// it, which is nothing for every ordinary commit. Refuses, changing nothing, when the words
-    /// to take back are not there.
+    /// The commit `request` comes to against the field as it is now, or the refusal of a take-back
+    /// whose words are not there to take, which changes nothing.
     ///
     /// [LAW:no-silent-failure] A take-back that cannot be proved is refused with what was found,
     /// said in the log beside the refusal the app is told.
-    func commit(_ text: String, replacing: String) -> Refusal? {
-        let range: NSRange
-        do throws(Replacement.Unfound) {
-            range = try Replacement.range(of: replacing, selection: { client.selectedRange() }, text: client.string(in:)).get()
-        } catch {
-            insertLog.notice("words could not be taken back from \(self.application, privacy: .public): \(error.description, privacy: .public)")
+    func decide(_ request: InsertRequest) -> Result<Commit, Refusal> {
+        Commit.decide(request, against: read(reaching: request.replacing.utf16.count)).mapError { untaken in
+            insertLog.notice("words could not be taken back from \(self.application, privacy: .public): \(untaken.description, privacy: .public)")
             return .wordsCannotBeTakenBack
         }
-        client.insertText(text, replacementRange: range)
-        return nil
+    }
+
+    /// Makes `commit`: its text into the client, at its range.
+    func commit(_ commit: Commit) {
+        client.insertText(commit.text, replacementRange: commit.replacementRange)
     }
 }
 

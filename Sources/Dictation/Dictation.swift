@@ -106,11 +106,13 @@ public final class Dictation {
 
         /// A press the microphone opened for: what it showed while the key was down, the passes
         /// the engine failed to read once its decode was over, none when it read every one, and
-        /// what the microphone delivered for it.
+        /// what the microphone delivered for it, and how many characters of the field's own its
+        /// inserts took the place of, however it ended: a cancel takes back its words, not them.
         public struct Opened: Sendable {
             public let duringPress: DuringPress
             public let unread: Partial.Unread?
             public let capture: CapturedAudio.Reading
+            public let replaced: Int
         }
 
         /// What the microphone delivered, as the press's record says it.
@@ -353,7 +355,7 @@ public final class Dictation {
             state.withLock { state in
                 if let performed = placed.performed {
                     state.performed.append(performed)
-                    state.provenance.takeBack.landed(carrying: placed.carried, then: words, of: self)
+                    state.provenance.takeBack.landed(performed.landed, carrying: placed.carried, then: words, of: self)
                 }
                 state.words += placed.words
             }
@@ -533,7 +535,8 @@ public final class Dictation {
         let streaming: Streaming
 
         var opened: Report.Opened {
-            Report.Opened(duringPress: duringPress, unread: streaming.unread, capture: capture)
+            Report.Opened(duringPress: duringPress, unread: streaming.unread, capture: capture,
+                          replaced: streaming.landed.performed.compactMap(\.replaced).reduce(0, +))
         }
     }
 

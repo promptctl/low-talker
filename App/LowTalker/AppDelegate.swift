@@ -412,6 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for reason in untyped { menu.addItem(readout("    Not typed now: \(reason)")) }
         globeKey.map { menu.addItem(readout("    \($0)")) }
         app.lastFailure.map { menu.addItem(errorRow($0, .lastDictation)) }
+        app.lastReplacement.map { menu.addItem(readout($0)) }
         // What keeping the held words for the next launch failed at: a fact about the store,
         // not the words, and one the panel has nothing to show for when nothing is held.
         // [LAW:no-silent-failure]

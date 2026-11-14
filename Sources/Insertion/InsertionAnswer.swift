@@ -78,15 +78,21 @@ public struct InsertRequest: Codable, Equatable, Sendable {
 /// words are not at the cursor now, and nothing here puts them anywhere else.
 /// [LAW:types-are-the-program]
 public enum InsertionAnswer: Codable, Equatable, Sendable {
-    /// Committed into the client in front, replacing what the request named: nothing, for an
-    /// ordinary insert.
+    /// Committed into the client in front, in place of its selection, or of what the request
+    /// named to take back.
     ///
     /// `into` is the app whose client took it, which only this end knows: the app asked
     /// seconds earlier, while the person was still speaking, and by the time the words are
     /// ready the person may be somewhere else. An answer that left it out would leave the
     /// caller to name the app from what it remembered, and a log line naming the wrong
     /// window is worse than one naming none. [FRAMING:representation]
-    case inserted(characters: Int, into: String)
+    ///
+    /// `landed` is the text as it went in, fitted to the field, and `replaced` how many characters
+    /// it took the place of, the selection or the words a take-back named, nil where the field
+    /// could not be read. Both are
+    /// absent from an input method of a build before it fitted words, which commits the text as
+    /// sent and says nothing of the field; `characters` is said for an app of that build.
+    case inserted(characters: Int, into: String, landed: String?, replaced: Int?)
     /// Not committed, and why.
     case refused(Refusal)
     /// Handed to the client in front, which did not take them within the input method's
@@ -94,15 +100,30 @@ public enum InsertionAnswer: Codable, Equatable, Sendable {
     /// recovers, so this is never a refusal and must never be retried.
     case notYetTaken(characters: Int, into: String)
 
-    /// What the insert that met this answer comes to for its caller: words inserted, or the
+    /// What `request`, meeting this answer, comes to for its caller: words inserted, or the
     /// failure thrown. [LAW:parse-dont-validate] The wire's sum ends here: past it a refusal or
     /// words not yet taken is a failure thrown like the others, and a caller holds words
-    /// inserted or nothing.
-    public func outcome() throws(InsertFailure) -> Inserted {
+    /// inserted or nothing. An answer naming no landed text is from an input method that
+    /// commits the text as sent, so that is the text that landed.
+    public func outcome(of request: InsertRequest) throws(InsertFailure) -> Inserted {
         switch self {
-        case .inserted(let characters, let into): return Inserted(characters: characters, into: into)
+        case let .inserted(_, into, landed, replaced): return Inserted(text: landed ?? request.text, into: into, replaced: replaced)
         case .refused(let refusal): throw .refused(refusal)
         case .notYetTaken(let characters, let into): throw .notYetTaken(NotYetTaken(characters: characters, into: into))
+        }
+    }
+}
+
+/// An answer as the port's line says it: counts and apps, never the landed text, which is the
+/// person's words.
+extension InsertionAnswer: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case let .inserted(characters, into, _, replaced):
+            "inserted \(counted(characters, "character", "characters")) into \(into), "
+                + (replaced.map { "replacing \(counted($0, "character", "characters"))" } ?? "replacing what the field did not say")
+        case .refused(let refusal): "refused \(refusal.rawValue)"
+        case let .notYetTaken(characters, into): "not yet taken: \(counted(characters, "character", "characters")) into \(into)"
         }
     }
 }
@@ -140,15 +161,21 @@ public struct NotYetTaken: Error, Equatable, Sendable, InsertWarning {
     public var fate: String? { "The \(counted(characters, "character lands if it recovers; do not dictate it again.", "characters land if it recovers; do not dictate them again."))" }
 }
 
-/// Words committed at the cursor: how many, and the app whose client took them.
+/// Words committed at the cursor: the text as it landed, the app whose client took it, and how
+/// many characters it took the place of, the selection or the words a take-back named, nil where
+/// the field could not be read.
 public struct Inserted: Equatable, Sendable {
-    public let characters: Int
+    public let text: String
     public let into: String
+    public let replaced: Int?
 
-    public init(characters: Int, into: String) {
-        self.characters = characters
+    public init(text: String, into: String, replaced: Int?) {
+        self.text = text
         self.into = into
+        self.replaced = replaced
     }
+
+    public var characters: Int { text.count }
 }
 
 /// Why the input method did not insert.

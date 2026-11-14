@@ -81,33 +81,34 @@ public nonisolated final class Committer: Sendable {
     /// Let go at the claim, it makes no call into any app, so an insert the port has given up
     /// on costs a hung app nothing more. Let go after deciding, it commits nothing: the port
     /// has answered that the words were not sent.
+    ///
+    /// Deciding is choosing the cursor, reading its field and fitting the words to it, so a port
+    /// that gives up while the field is read has the words committed nowhere.
     @MainActor
     static func place(_ request: InsertRequest, turn: Turn, inFront: () -> InFront) -> Ended.Did {
         guard turn.claim() else { return .letGo }
         let clock = ContinuousClock()
         let started = clock.now
         let seen = inFront()
+        let decided = seen.cursor.flatMap { cursor in cursor.decide(request).map { (cursor, $0) } }
         let deciding = clock.now - started
         let line = seen.description
-        switch seen.cursor {
+        switch decided {
         case .failure(let refusal):
             let late = turn.answer(.refused(refusal), seen: line)
             return .refused(refusal, deciding: deciding, late: late)
-        case .success(let cursor):
-            let characters = request.text.count
+        case .success(let (cursor, commit)):
+            let characters = commit.text.count
             guard turn.begin(characters: characters, into: cursor.application, seen: line) else {
                 return .letGoAfterDeciding(deciding: deciding, seen: line)
             }
             let committed = clock.now
-            let refusal = cursor.commit(request.text, replacing: request.replacing)
+            cursor.commit(commit)
             let committing = clock.now - committed
-            // A commit the client's own checks refused changed nothing, said as the refusal it is.
-            if let refusal {
-                let late = turn.answer(.refused(refusal), seen: line)
-                return .refused(refusal, deciding: deciding + committing, late: late)
-            }
-            let late = turn.answer(.inserted(characters: characters, into: cursor.application), seen: line)
-            return .committed(characters: characters, into: cursor.application, deciding: deciding, committing: committing, late: late)
+            let late = turn.answer(.inserted(characters: characters, into: cursor.application, landed: commit.text, replaced: commit.replaced),
+                                   seen: line)
+            return .committed(characters: characters, into: cursor.application, fitting: commit.fitting, replaced: commit.replaced,
+                              deciding: deciding, committing: committing, late: late)
         }
     }
 }
@@ -227,7 +228,10 @@ public nonisolated struct Ended: Sendable, CustomStringConvertible {
         /// The port answered while the cursor was being decided, so nothing was committed.
         case letGoAfterDeciding(deciding: Duration, seen: String)
         case refused(Refusal, deciding: Duration, late: Bool)
-        case committed(characters: Int, into: String, deciding: Duration, committing: Duration, late: Bool)
+        /// `replaced` characters, the selection's or a take-back's, nil where the field could not be read, which
+        /// `fitting` then says why.
+        case committed(characters: Int, into: String, fitting: Fitting.Outcome, replaced: Int?, deciding: Duration,
+                       committing: Duration, late: Bool)
     }
 
     let insert: Int
@@ -245,8 +249,9 @@ public nonisolated struct Ended: Sendable, CustomStringConvertible {
             "\(main): let go after \(Self.ms(deciding)) deciding \(seen), since the port had already answered that the input method is busy; nothing was committed"
         case let .refused(refusal, deciding, late):
             "\(main): refused \(refusal.rawValue) after \(Self.ms(deciding)) deciding" + (late ? ", after the port had answered that the input method is busy" : "")
-        case let .committed(characters, application, deciding, committing, late):
+        case let .committed(characters, application, fitting, replaced, deciding, committing, late):
             "\(main): \(Self.ms(deciding)) deciding, then \(Self.ms(committing)) committing \(counted(characters, "character", "characters")) into \(application)"
+                + (replaced.map { " in place of \(counted($0, "character", "characters"))" } ?? "") + ", \(fitting)"
                 + (late ? ", finishing after the port had answered that they were not yet taken" : "")
         }
     }

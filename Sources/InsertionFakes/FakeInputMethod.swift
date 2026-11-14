@@ -24,8 +24,14 @@ public final class FakeInputMethod: Inserter, Sendable {
         /// What the app's document holds, its caret at the end: each commit's text where the text it
         /// replaced was, so what a cancel leaves in the field is read off it.
         var field = ""
+        /// How many UTF-16 units at the document's end the person has selected, which the next
+        /// dictation replaces.
+        var selected = 0
         /// An insert that fails as the app not answering, whose words landed anyway.
         var landingDespiteFailure = false
+        /// What a commit's text becomes as it lands: unchanged, unless a test stands in for the
+        /// input method fitting it to the field.
+        var landing: @Sendable (String) -> String = { $0 }
     }
 
     private let state = Mutex(State())
@@ -55,8 +61,18 @@ public final class FakeInputMethod: Inserter, Sendable {
     /// An insert refused with a failure that may have landed lands in the document anyway, which is
     /// what the failure means: the words are somewhere nobody was told.
     public func landingDespiteFailure(_ lands: Bool = true) { state.withLock { $0.landingDespiteFailure = lands } }
+    /// Every commit from now on lands as `change` makes its text, and is answered so, as the input
+    /// method answers words it fitted to the field.
+    public func landing(as change: @escaping @Sendable (String) -> String) { state.withLock { $0.landing = change } }
     /// The person types `text` at the caret, so words before it are no longer at the caret.
-    public func typing(_ text: String) { state.withLock { $0.field += text } }
+    public func typing(_ text: String) {
+        state.withLock { state in
+            state.field += text
+            state.selected = 0
+        }
+    }
+    /// The person selects the document's last `count` characters.
+    public func selecting(_ count: Int) { state.withLock { $0.selected = $0.field.suffix(count).utf16.count } }
     /// The app the next inserts say they reached, by bundle identifier.
     public func reaching(_ app: String) { state.withLock { $0.into = app } }
     /// Every insert from now on, a take-back among them, is refused with `refusal`, or none is when
@@ -95,24 +111,28 @@ public final class FakeInputMethod: Inserter, Sendable {
                 throw refusal
             }
             let inserted = try Self.commit(request, in: &state).get()
-            if !request.text.isEmpty { state.inserted.append(request.text) }
+            if !inserted.text.isEmpty { state.inserted.append(inserted.text) }
             return inserted
         }
     }
 
-    /// One commit, as the input method makes it: words bound to another app are refused, and the
-    /// text a request replaces is found before the caret by the input method's own rule, over the
-    /// document read as a client with its caret at the end and nothing selected, then replaced by
-    /// the request's text. An ordinary insert replaces nothing, at the caret.
-    /// [LAW:one-source-of-truth] [LAW:dataflow-not-control-flow]
+    /// One commit, as the input method makes it: words bound to another app are refused, a
+    /// dictation replaces the selection, and the text a take-back replaces is found before the
+    /// caret by the input method's own rule, over the document read as a client with its selection
+    /// at the end. Either is replaced by the request's text as the field lands it, and the answer
+    /// counts what it replaced. [LAW:one-source-of-truth]
     private static func commit(_ request: InsertRequest, in state: inout State) -> Result<Inserted, InsertFailure> {
         guard request.destination.admits(state.into) else { return .failure(.refused(.dictationIsInAnotherApp)) }
         let field = Array(state.field.utf16)
-        let found = Replacement.range(of: request.replacing, selection: { NSRange(location: field.count, length: 0) },
-                                      text: { String(decoding: field[$0.location..<NSMaxRange($0)], as: UTF16.self) })
+        let selection = NSRange(location: field.count - state.selected, length: state.selected)
+        let found: Result<NSRange, Replacement.Unfound> = request.replacing.isEmpty
+            ? .success(selection)
+            : Replacement.range(of: request.replacing, caret: selection, before: String(decoding: field[..<selection.location], as: UTF16.self))
         guard case .success(let range) = found else { return .failure(.refused(.wordsCannotBeTakenBack)) }
-        let kept = range.location == NSNotFound ? field.count : range.location
-        state.field = String(decoding: field[..<kept], as: UTF16.self) + request.text
-        return .success(Inserted(characters: request.text.count, into: state.into))
+        let landed = state.landing(request.text)
+        let replaced = String(decoding: field[range.location..<NSMaxRange(range)], as: UTF16.self)
+        state.field = String(decoding: field[..<range.location], as: UTF16.self) + landed + String(decoding: field[NSMaxRange(range)...], as: UTF16.self)
+        state.selected = 0
+        return .success(Inserted(text: landed, into: state.into, replaced: replaced.count))
     }
 }

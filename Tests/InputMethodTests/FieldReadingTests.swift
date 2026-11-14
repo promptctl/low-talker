@@ -169,10 +169,22 @@ import Testing
         let made = field.calls.count
         let since = Date.now
 
-        #expect(cursor.read() == .readable(DocumentContext(selection: NSRange(location: 6, length: 0), selected: "", before: "alpha ", after: "bravo")))
+        #expect(cursor.read(reaching: 0) == .readable(DocumentContext(selection: NSRange(location: 6, length: 0), selected: "", before: "alpha ", after: "bravo")))
         #expect(Array(field.calls.dropFirst(made)) == [.givesDocumentAccess, .selectedRange, Self.text(0, 6), Self.text(6, 1_000)])
         let event = FieldReading.Event.readable(selection: NSRange(location: 6, length: 0), before: 6, after: 5, asks: 2)
         #expect(try await loggedLines(category: "insert", since: since).contains("read the field of \(cursor): \(event)"))
+    }
+
+    /// A read asked to reach back reads its bound past that, and no further.
+    @Test func aReadReachesItsBoundPastWhatItIsAsked() {
+        let held = String(repeating: "x", count: 1_500)
+        let field = Self.field(.appKit, holding: held, selecting: NSRange(location: 1_500, length: 0))
+
+        let (reading, _) = FieldReading.read(from: field, reaching: 200)
+
+        #expect(reading == .readable(DocumentContext(selection: NSRange(location: 1_500, length: 0), selected: "",
+                                                     before: String(repeating: "x", count: 1_200), after: "")))
+        #expect(field.calls.contains(Self.text(300, 1_200)))
     }
 
     /// The event says lengths, ranges and reasons, never the field's text.

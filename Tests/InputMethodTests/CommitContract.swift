@@ -9,6 +9,9 @@ import Testing
 /// fake field, and the `FakeInputMethod` every loop test asks, handed the same field and the same
 /// request. A fake that took back, or put in, other text than the input method does would fail
 /// here before a cancel test built on it could pass. [LAW:behavior-not-structure]
+///
+/// The fake lands text as sent, so each case is one fitting leaves as it is: what fitting does is
+/// `FittingTests`', and a loop test that needs words changed as they land tells the fake how.
 @Suite struct CommitContract {
     static let into = "com.example.editor"
 
@@ -16,7 +19,7 @@ import Testing
     static let cases: [(before: String, request: InsertRequest)] = [
         ("say ", InsertRequest("🫠 hello", into: .app(into))),
         ("say 🫠 hello", InsertRequest("", into: .app(into), replacing: "🫠 hello")),
-        ("old words hello", InsertRequest("old words", into: .app(into), replacing: "old words hello")),
+        ("Say old words hello", InsertRequest("old words", into: .app(into), replacing: "old words hello")),
         ("say goodbye", InsertRequest("", into: .app(into), replacing: "hello")),
         ("hi", InsertRequest("", into: .app(into), replacing: "hello there")),
     ]
@@ -35,7 +38,7 @@ import Testing
         inputMethod.reaching(Self.into)
         _ = try inputMethod.insert(InsertRequest(before, into: .app(Self.into)))
 
-        #expect(Result { () throws(InsertFailure) in try inputMethod.insert(request) } == Result { () throws(InsertFailure) in try answer.outcome() })
+        #expect(Result { () throws(InsertFailure) in try inputMethod.insert(request) } == Result { () throws(InsertFailure) in try answer.outcome(of: request) })
         #expect(inputMethod.field == client.text)
     }
 }
