@@ -3,6 +3,7 @@ import Grants
 import LowTalkerCore
 import TestProbes
 import Testing
+import Uptime
 
 private struct NoDevice: Error, Equatable {}
 private struct BadBuffer: Error, Equatable {}

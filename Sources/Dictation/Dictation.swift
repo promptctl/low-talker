@@ -3,6 +3,7 @@ import GrammaticalNumber
 import Insertion
 import LowTalkerCore
 import Synchronization
+import Uptime
 
 /// The loop from a press of the hotkey to words at the cursor: key-down opens the microphone,
 /// marking where the utterance begins on the ring, and the engine starts hearing it as it is
@@ -238,7 +239,9 @@ public final class Dictation {
         /// [LAW:one-source-of-truth] The key event's own stamp, on the clock every insert is
         /// timed by: a key-down told late is timed from where the key went down, by every
         /// line that times from it.
-        private let keyDown: ContinuousClock.Instant
+        private let keyDown: HostTime
+        /// What a pass is timed on: the clock the key events are stamped on.
+        private let clock: HostClock
         private let state: Mutex<State>
         private let wake: AsyncStream<Void>.Continuation
         /// A wake for each pass, which may or may not have confirmed more words; ends when no
@@ -249,8 +252,9 @@ public final class Dictation {
         /// A wake for each pass, for whoever shows what the press has read; ends with `wakes`.
         let reads: AsyncStream<Void>
 
-        init(since keyDown: HostTime) {
-            self.keyDown = ContinuousClock.Instant(keyDown)
+        init(since keyDown: HostTime, on clock: HostClock) {
+            self.keyDown = keyDown
+            self.clock = clock
             state = Mutex(State())
             (wakes, wake) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
             (reads, read) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -279,7 +283,7 @@ public final class Dictation {
         }
 
         func heard(_ partial: Partial) {
-            let now = ContinuousClock.now
+            let now = clock.now
             state.withLock { state in
                 state.passes += 1
                 state.firstWords = state.firstWords ?? (partial.text.isEmpty ? nil : now - keyDown)
@@ -441,7 +445,7 @@ public final class Dictation {
     /// so served callers wait for this press's engine and not for an earlier press's insert.
     private struct Decoded: Sendable {
         let transcription: Result<Transcription, Failed>
-        let at: ContinuousClock.Instant
+        let at: HostTime
         let displaced: EngineHold.Displaced
     }
 
@@ -490,7 +494,7 @@ public final class Dictation {
     private enum Ending: Sendable {
         /// The key came up at `keyUp`, by its event's stamp, and this loop was told `delivery`
         /// after it.
-        case released(PressKind, keyUp: ContinuousClock.Instant, delivery: Duration)
+        case released(PressKind, keyUp: HostTime, delivery: Duration)
         case cut(Cut)
         /// A key was typed while the chord was down, so the chord was that key's modifier and
         /// the person was typing, not dictating. Nothing past the commits is inserted, held, or
@@ -555,6 +559,9 @@ public final class Dictation {
     private let engine: @MainActor () throws(EngineUnavailable) -> Engine
     private let turns: EngineTurns
     private let executor: Executor
+    /// [LAW:one-source-of-truth] The press is timed on the clock its inserts are acknowledged on,
+    /// so no figure of a press subtracts a moment of one clock from a moment of another.
+    private var clock: HostClock { executor.clock }
     private let hold: Hold
     private let report: @Sendable @MainActor (Report) -> Void
     private let showing: @Sendable @MainActor (Activity) -> Void
@@ -565,7 +572,7 @@ public final class Dictation {
     /// has nothing to transcribe, so it is not here and shows no panel on its way out.
     private var unreported: [Streaming] = []
     /// When a cursor last arrived while the open press was down, for the offer queued behind it.
-    private var arrivedDuringPress: ContinuousClock.Instant?
+    private var arrivedDuringPress: HostTime?
     /// Whether the person asked for the dismissed words back while the open press was down,
     /// for the bring-back queued behind it.
     private var broughtBackDuringPress = false
@@ -696,7 +703,7 @@ public final class Dictation {
             // and taken by every press, refused or not: a refused press lets go of it at once,
             // and a heard one when its decode stops. [LAW:dataflow-not-control-flow]
             let hold = turns.hold()
-            let streaming = Streaming(since: moment)
+            let streaming = Streaming(since: moment, on: clock)
             do throws(Failed) {
                 // The engine before the microphone, so a press nothing can hear is refused
                 // before the person speaks into it. [LAW:no-silent-failure]
@@ -735,13 +742,13 @@ public final class Dictation {
             press = .blocked(mode)
             show()
         case .ended(let ending):
-            let told = ContinuousClock.now
+            let told = clock.now
             // [LAW:one-source-of-truth] The key event's own stamp, as key-down's is: a key-up
             // told late is timed from where the key came up, by every figure timed from it.
             // A lapse had no key-up, and a chord used as a modifier inserts nothing to time
             // from one, so neither is given one.
-            let released: (kind: PressKind, keyUp: ContinuousClock.Instant)? = switch ending {
-            case .released(let kind, let moment): (kind, ContinuousClock.Instant(moment))
+            let released: (kind: PressKind, keyUp: HostTime)? = switch ending {
+            case .released(let kind, let moment): (kind, moment)
             case .lapsed, .usedAsModifier, .cancelled: nil
             }
             let open = press
@@ -900,6 +907,7 @@ public final class Dictation {
     /// with the stream. The hold is let go first, since there is no engine to serve anyone with.
     private func decode(_ audio: AsyncStream<AudioClip>, on hearing: @escaping Engine, expecting vocabulary: Vocabulary, into streaming: Streaming, releasing hold: EngineHold) -> Task<Decoded, Never> {
         let before = latestDecode
+        let clock = clock
         let decode = Task {
             _ = await before?.value
             let engine: any Transcriber
@@ -909,7 +917,7 @@ public final class Dictation {
                 for await clip in audio { samples += clip.samples }
                 streaming.decoded()
                 let unheard = PressUnheard(cause: error, speech: UnheardSpeech(said: .now, vocabulary: vocabulary.terms.map(\.text), samples: samples))
-                return Decoded(transcription: .failure(Failed(unheard)), at: .now, displaced: displaced)
+                return Decoded(transcription: .failure(Failed(unheard)), at: clock.now, displaced: displaced)
             }
             let transcription = await Result { () async throws(Failed) in
                 do throws(TranscriptionFailure) {
@@ -917,7 +925,7 @@ public final class Dictation {
                 } catch { throw Failed(error) }
             }
             streaming.decoded()
-            return Decoded(transcription: transcription, at: .now, displaced: hold.release())
+            return Decoded(transcription: transcription, at: clock.now, displaced: hold.release())
         }
         latestDecode = decode
         return decode
@@ -984,7 +992,7 @@ public final class Dictation {
     /// moves to mid-press arrives before the words refused there for it, and those are not
     /// typed into the app they moved to unless a cursor arrives after they are held.
     public func cursorArrived() {
-        let arrived = ContinuousClock.now
+        let arrived = clock.now
         switch press {
         case .down: arrivedDuringPress = hold.held.map { _ in arrived } ?? arrivedDuringPress
         case .up, .refused, .blocked: offer(since: .cursorArrived(arrived))
@@ -996,7 +1004,7 @@ public final class Dictation {
     /// once a press is closed: one made as a press begins is let go, and the panel offers
     /// Insert again once the press is over.
     public func insertHeld() {
-        let asked = ContinuousClock.now
+        let asked = clock.now
         let vouched = hold.standingGeneration
         switch press {
         case .down: Executor.log.notice("an ask to insert the held words came as a press began and was let go")

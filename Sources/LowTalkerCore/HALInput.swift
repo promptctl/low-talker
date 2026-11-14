@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Synchronization
+import Uptime
 
 /// The microphone, reached through an IOProc on the CoreAudio input device itself.
 ///

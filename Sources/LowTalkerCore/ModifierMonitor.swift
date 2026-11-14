@@ -1,6 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import os
+import Uptime
 
 /// The hotkey heard from the window server's own events: every change of the modifier keys,
 /// in any app, through a global and a local `NSEvent` monitor of `.flagsChanged`, turned into

@@ -1,4 +1,5 @@
 import Foundation
+import Uptime
 
 /// A session is two marks on the ring and the moment the key went down: the position
 /// where it began, the position where it ends, and the time the speaker addressed it

@@ -8,6 +8,7 @@ import LowTalkerCore
 import LowTalkerCoreFakes
 import Synchronization
 import TestProbes
+import Uptime
 
 /// A store kept in memory, outliving the rigs built over it as a file outlives the app, and
 /// keeping the store's contract.

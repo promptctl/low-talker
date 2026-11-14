@@ -2,6 +2,7 @@ import Carbon
 import Identity
 import Foundation
 import TextInputSources
+import Uptime
 
 /// Where the input method stands once the app has done what it can: switched on and
 /// selected, or registered and waiting for a person to switch it on.
@@ -215,7 +216,7 @@ public struct InstalledInputMethod: Sendable {
     static func source(
         named identifier: String, within deadline: Duration, where holds: (TISInputSource) -> Bool = { _ in true }
     ) async throws -> TISInputSource? {
-        let clock = ContinuousClock()
+        let clock = HostClock.system
         let giveUp = clock.now + deadline
         while true {
             if let found = source(named: identifier), holds(found) { return found }

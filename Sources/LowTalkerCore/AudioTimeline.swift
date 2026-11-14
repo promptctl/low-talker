@@ -1,4 +1,5 @@
 import Foundation
+import Uptime
 
 /// Where a ring's positions sit in time: the capture time of one known sample, which
 /// places every other, since samples arrive at a fixed rate. It turns the moment a

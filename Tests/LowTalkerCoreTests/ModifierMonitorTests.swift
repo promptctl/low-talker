@@ -2,6 +2,7 @@ import Carbon.HIToolbox
 import Dispatch
 @testable import LowTalkerCore
 import Testing
+import Uptime
 
 /// The hotkey's hearing, held through the press detection it feeds: a stream of the modifier
 /// keys held, as each change's event tells them, becomes presses.

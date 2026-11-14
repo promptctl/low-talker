@@ -3,6 +3,7 @@ import CoreAudio
 @testable import LowTalkerCore
 import Synchronization
 import Testing
+import Uptime
 
 /// The way a render's audio leaves CoreAudio's IO thread: pushed into a ring without waiting,
 /// popped and handed over by a thread that may wait. The contract is that every slice arrives

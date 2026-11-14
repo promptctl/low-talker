@@ -1,6 +1,7 @@
 import Foundation
 import Grants
 import Synchronization
+import Uptime
 
 /// Microphone capture whose engine lives for one session, or for the whole run when the
 /// user has asked for that. `start` holds the grant and watches the input device, and

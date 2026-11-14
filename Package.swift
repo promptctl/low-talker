@@ -43,6 +43,10 @@ let package = Package(
         // every library that tells a person a count, the input method's included, tells it
         // through this one rule. [LAW:one-way-deps]
         .target(name: "GrammaticalNumber"),
+        // The clock the machine has been up on, which key events and microphone buffers are
+        // stamped on, and the one clock any decision reads time from. It depends on nothing,
+        // so the core and the input source's watch read one clock. [LAW:one-way-deps]
+        .target(name: "Uptime"),
         .testTarget(name: "GrammaticalNumberTests", dependencies: ["GrammaticalNumber"]),
         // The Text Input Sources framework as this program uses it: where the
         // input source stands on this Mac, the steps that put it there, and the input method's
@@ -50,8 +54,8 @@ let package = Package(
         // Identity, the Text Input Sources lock beneath it, and Insertion for the build the
         // input method says, so the app reaches it without the input method process linking
         // anything of the app's. [LAW:one-way-deps]
-        .target(name: "InputSource", dependencies: ["Identity", "TextInputSources", "Insertion"]),
-        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion", "TestProbes"]),
+        .target(name: "InputSource", dependencies: ["Identity", "TextInputSources", "Insertion", "Uptime"]),
+        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion", "TestProbes", "Uptime"]),
         // What macOS has let this process do - listen - read without ever prompting, and asked
         // for only when called. Beneath the core and the setup list alike, so both read one
         // reading. [LAW:one-way-deps]
@@ -63,6 +67,7 @@ let package = Package(
                 "Identity",
                 "Grants",
                 "GrammaticalNumber",
+                "Uptime",
                 // The app's end of the hotkey port, which the input method tells each cursor
                 // arrival to.
                 "Insertion",
@@ -85,7 +90,7 @@ let package = Package(
         // side and the installer's write side are both exercised on. A plain target because
         // test targets cannot import one another's sources, and in no product because
         // nothing ships it. [LAW:one-source-of-truth]
-        .target(name: "TestProbes", dependencies: ["LowTalkerCore"]),
+        .target(name: "TestProbes", dependencies: ["LowTalkerCore", "Uptime"]),
         // The one fake of the engine port and the contract it is held to, beside the port, so
         // every caller's tests hear on the engine the contract checks. In no product.
         // [LAW:one-source-of-truth]
@@ -119,8 +124,8 @@ let package = Package(
         // Its own target rather than app code so the loop runs under `swift test`; the
         // app links it and hands over the real microphone, engine and inserter - the input
         // method in the app, a fake in a test. [LAW:decomposition] [LAW:composability]
-        .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber"]),
-        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "Insertion", "InsertionFakes", "TestProbes"]),
+        .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber", "Uptime"]),
+        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "Insertion", "InsertionFakes", "TestProbes", "Uptime"]),
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
@@ -195,6 +200,7 @@ let package = Package(
                 "Grants",
                 "Insertion",
                 "TestProbes",
+                "Uptime",
                 // The tests build WhisperKit's result types by hand to exercise the
                 // mapping without model weights.
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),

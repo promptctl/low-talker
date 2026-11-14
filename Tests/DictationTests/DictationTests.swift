@@ -8,6 +8,7 @@ import LowTalkerCoreFakes
 import Synchronization
 import Testing
 import TestProbes
+import Uptime
 
 private struct NoEngine: Error {}
 private struct BadBuffer: Error {}

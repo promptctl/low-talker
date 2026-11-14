@@ -7,6 +7,7 @@ import LowTalkerCore
 import LowTalkerCoreFakes
 import TestProbes
 import Testing
+import Uptime
 
 private struct LoadFailed: Error {}
 private struct BadBuffer: Error {}

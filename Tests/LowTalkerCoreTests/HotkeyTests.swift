@@ -3,6 +3,7 @@ import Foundation
 import LowTalkerCore
 import TestProbes
 import Testing
+import Uptime
 
 private struct Refused: Error, Equatable {}
 

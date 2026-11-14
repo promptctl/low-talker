@@ -1,3 +1,5 @@
+import Uptime
+
 /// A modifier key going down or up, with what the keyboard held once it had, and when a key
 /// was last typed.
 ///
