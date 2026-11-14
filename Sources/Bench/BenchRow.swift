@@ -17,7 +17,7 @@ public struct BenchRow: Hashable, Sendable {
     /// person dictated.
     public let narration: String
 
-    public init(model: ModelName, load: Duration, result: LatencyReport.FixtureResult) {
+    public init(model: Model, load: Duration, result: LatencyReport.FixtureResult) {
         let wer = result.wordErrorRate
         cells = [
             ("model", model.description),

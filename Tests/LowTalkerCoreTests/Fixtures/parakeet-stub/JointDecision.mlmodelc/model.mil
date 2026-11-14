@@ -1,0 +1,20 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3510.2.1"}, {"coremlc-version", "3505.4.1"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 640, 1]> decoder_step, tensor<fp32, [1, 1024, 1]> encoder_step) {
+            tensor<int32, [3]> slice_by_index_1_begin_0 = const()[name = tensor<string, []>("slice_by_index_1_begin_0"), val = tensor<int32, [3]>([0, 0, 0])];
+            tensor<int32, [3]> slice_by_index_1_end_0 = const()[name = tensor<string, []>("slice_by_index_1_end_0"), val = tensor<int32, [3]>([1, 1, 1])];
+            tensor<fp32, [1, 1, 1]> slice_by_index_1 = slice_by_index(begin = slice_by_index_1_begin_0, end = slice_by_index_1_end_0, x = encoder_step)[name = tensor<string, []>("slice_by_index_1")];
+            tensor<int32, [3]> slice_by_index_2_begin_0 = const()[name = tensor<string, []>("slice_by_index_2_begin_0"), val = tensor<int32, [3]>([0, 0, 0])];
+            tensor<int32, [3]> slice_by_index_2_end_0 = const()[name = tensor<string, []>("slice_by_index_2_end_0"), val = tensor<int32, [3]>([1, 1, 1])];
+            tensor<fp32, [1, 1, 1]> slice_by_index_2 = slice_by_index(begin = slice_by_index_2_begin_0, end = slice_by_index_2_end_0, x = decoder_step)[name = tensor<string, []>("slice_by_index_2")];
+            tensor<string, []> token_id_dtype_0 = const()[name = tensor<string, []>("token_id_dtype_0"), val = tensor<string, []>("int32")];
+            tensor<fp32, []> mul_2_y_0 = const()[name = tensor<string, []>("mul_2_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<fp32, [1, 1, 1]> mul_2 = mul(x = slice_by_index_2, y = mul_2_y_0)[name = tensor<string, []>("mul_2")];
+            tensor<fp32, []> token_prob_y_0 = const()[name = tensor<string, []>("token_prob_y_0"), val = tensor<fp32, []>(0x1p-1)];
+            tensor<fp32, [1, 1, 1]> token_prob = add(x = mul_2, y = token_prob_y_0)[name = tensor<string, []>("token_prob")];
+            tensor<string, []> duration_dtype_0 = const()[name = tensor<string, []>("duration_dtype_0"), val = tensor<string, []>("int32")];
+            tensor<int32, [1, 1, 1]> duration = cast(dtype = duration_dtype_0, x = slice_by_index_2)[name = tensor<string, []>("cast_0")];
+            tensor<int32, [1, 1, 1]> token_id = cast(dtype = token_id_dtype_0, x = slice_by_index_1)[name = tensor<string, []>("cast_1")];
+        } -> (token_id, token_prob, duration);
+}

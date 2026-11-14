@@ -58,14 +58,15 @@ final class AppRig {
         switchedOn: Bool = true,
         noticesRefused: PortNotHosted? = nil,
         serving: Bool = false,
-        heard: String = "hello"
+        heard: String = "hello",
+        holdingLoads: Bool = false
     ) {
         authority = FakeMicrophoneAuthority(status: microphone)
         config = FakeConfigFile(text)
         installation = FakeInputMethodInstallation(switchedOn: switchedOn)
         let changes = changes
         notices = FakeNoticeHost(refusing: noticesRefused, noting: changes)
-        model = FakeModelSupply(noting: changes) { turns in FakeTranscriber(turns: turns) { _ in Transcript(typed: heard) } }
+        model = FakeModelSupply(holding: holdingLoads, noting: changes) { turns in FakeTranscriber(turns: turns) { _ in Transcript(typed: heard) } }
         inputMethod.noting(changes)
         if serving {
             let domain = FileManager.default.temporaryDirectory.appendingPathComponent("LowTalkerAppTests-\(UUID().uuidString)")
@@ -270,6 +271,64 @@ final class Recorded<Value: Sendable>: Sendable {
         rig.chord(.up, .leftControl)
         await rig.until { rig.inputMethod.inserted == ["hello"] }
     }
+
+    /// The engine is the config's: a config naming Parakeet loads Parakeet, and the menu says so.
+    @Test func aConfigNamingParakeetLoadsParakeet() async {
+        let rig = AppRig(config: Self.parakeet)
+        await rig.launched()
+        await rig.until { if case .ready = rig.app.engineReadiness { true } else { false } }
+        #expect(rig.model.loaded == [.parakeet(.tdtV3)])
+        #expect(rig.app.engineReadiness.readout(at: rig.now).hasPrefix("ready (Parakeet parakeet-tdt-0.6b-v3)"))
+    }
+
+    /// A config refused at launch names no model, so the load fails with the refusal rather than
+    /// waiting on a reading that will never name one; the save that fixes it loads its model.
+    @Test func aRefusedConfigFailsTheLoadUntilASaveNamesAModel() async {
+        let rig = AppRig(config: ConfigSourceContract.notTOML)
+        rig.app.launch()
+        await rig.until { if case .failed = rig.app.engineReadiness { true } else { false } }
+        #expect(rig.model.loads == 0)
+        #expect(rig.app.engineReadiness.readout(at: rig.now).contains("is not TOML"))
+
+        rig.config.save(Self.parakeet)
+        await rig.until { if case .ready = rig.app.engineReadiness { true } else { false } }
+        #expect(rig.model.loaded == [.parakeet(.tdtV3)])
+    }
+
+    /// A save naming another model loads it, and the reload says the model moved.
+    @Test func aSaveNamingAnotherModelLoadsIt() async {
+        let rig = AppRig()
+        await rig.launched()
+        await rig.until { if case .ready = rig.app.engineReadiness { true } else { false } }
+
+        rig.config.save(Self.parakeet)
+        await rig.until { rig.model.loaded == [.default, .parakeet(.tdtV3)] }
+        await rig.until { if case .ready(.parakeet, _) = rig.app.engineReadiness { true } else { false } }
+        let moved = rig.events.compactMap { if case .configMoved(_, let moved) = $0 { moved } else { nil } }
+        #expect(moved == [["model parakeet-tdt-0.6b-v3"]])
+    }
+
+    /// A load the save has replaced lands nowhere: whichever load finishes last, the menu shows the
+    /// model the config now names, and the log says the replaced load landed and was let go.
+    @Test func aReplacedLoadLandsNowhere() async {
+        let rig = AppRig(holdingLoads: true)
+        await rig.launched()
+        await rig.until { rig.model.loads == 1 }
+        rig.config.save(Self.parakeet)
+        await rig.until { rig.model.loads == 2 }
+        rig.model.loading.open()
+        await rig.until { if case .ready(.parakeet, _) = rig.app.engineReadiness { true } else { false } }
+        await rig.hold()
+        await rig.until { rig.inputMethod.inserted == ["hello"] }
+        if case .ready(let model, _) = rig.app.engineReadiness { #expect(model == .parakeet(.tdtV3)) }
+        await rig.until { rig.lines.contains("model: a load a save replaced landed \(Model.default) and was let go") }
+    }
+
+    static let parakeet = """
+        model = "parakeet-tdt-0.6b-v3"
+        [[modes]]
+        name = "dictation"
+        """
 
     /// A save the file refuses moves nothing: the chord, the microphone and the server stay as
     /// they were, and the config line says why.

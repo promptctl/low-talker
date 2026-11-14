@@ -21,7 +21,7 @@ extension ModelStore {
     /// fetched is decided by its `Recording`, the domain's own discriminator, judged
     /// under the lock so it describes what this installer owns.
     public func install(
-        _ model: ModelName,
+        _ model: Model,
         from source: ModelSource,
         phase: @escaping @Sendable (InstallPhase) -> Void
     ) async throws -> InstalledModel {
@@ -31,38 +31,69 @@ extension ModelStore {
                 // [LAW:one-source-of-truth] The host `upstream(of:)` named the revision on,
                 // rather than HF_ENDPOINT, which the client would read otherwise.
                 let hub = HubApiWrapper(downloadBase: directory, endpoint: Hub.endpoint.absoluteString)
-                let weights = try await whole(.weights, of: model) {
-                    switch source {
-                    case .huggingFace(let revision):
-                        return try await fromHub(ModelRevision.weightsRepo, at: revision.weights, through: hub, phase: phase) { listing in
-                            (try ModelRevision.variantFolder(of: model, among: listing.files.map(\.path)), ["*"])
-                        }
-                    case .store(let store):
-                        return try await copy(.weights, of: model, from: store, phase: phase)
-                    }
+                switch model {
+                case .whisperKit: return try await installWhisperKit(model, from: source, through: hub, phase: phase)
+                case .parakeet: return try await installParakeet(model, from: source, through: hub, phase: phase)
                 }
-                let folder = directory.appending(path: weights.folder)
-                _ = try await whole(.tokenizer, of: model) {
-                    switch source {
-                    case .huggingFace(let revision):
-                        // WhisperKit fetches the tokenizer on first load, from the hub,
-                        // when it is not already here; taking it now is what lets that
-                        // load, and every one after, run with the network off.
-                        //
-                        // [LAW:one-source-of-truth] exception: the files are the ones that
-                        // load takes (`Hub.loadConfig` in ArgmaxCore, internal), fetched
-                        // here at the revision, which the load cannot be given.
-                        let variant = try ModelVariant(modelConfig: Data(contentsOf: folder.appending(path: "config.json")))
-                        return try await fromHub(variant.tokenizerRepo, at: revision.tokenizer, through: hub, phase: phase) { _ in
-                            (nil, ["config.json", "tokenizer_config.json", "chat_template.jinja", "chat_template.json", "tokenizer.json"])
-                        }
-                    case .store(let store):
-                        return try await copy(.tokenizer, of: model, from: store, phase: phase)
-                    }
-                }
-                return InstalledModel(model: model, folder: folder, hub: directory)
             }
         }
+    }
+
+    /// A Whisper model: its weights, a folder of the whisperkit-coreml repo, and the tokenizer
+    /// their config names, from an openai repo.
+    private func installWhisperKit(_ model: Model, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
+        // [LAW:parse-dont-validate] A revision names both parts, refused before either is fetched.
+        enum Parts { case hub(weights: ModelRevision.Commit, tokenizer: ModelRevision.Commit), store(ModelStore) }
+        let parts: Parts = switch source {
+        case .huggingFace(.weightsAndTokenizer(let weights, let tokenizer)): .hub(weights: weights, tokenizer: tokenizer)
+        case .huggingFace(let revision): throw ModelInstallError.revisionNotFor(model: model, revision: revision)
+        case .store(let store): .store(store)
+        }
+        let weights = try await whole(.weights, of: model) {
+            switch parts {
+            case .hub(let weights, _):
+                return try await fromHub(model.repo, at: weights, through: hub, phase: phase) { listing in
+                    (try ModelRevision.variantFolder(of: model, among: listing.files.map(\.path)), ["*"])
+                }
+            case .store(let store):
+                return try await copy(.weights, of: model, from: store, phase: phase)
+            }
+        }
+        let folder = directory.appending(path: weights.folder)
+        _ = try await whole(.tokenizer, of: model) {
+            switch parts {
+            case .hub(_, let tokenizer):
+                // WhisperKit fetches the tokenizer on first load, from the hub,
+                // when it is not already here; taking it now is what lets that
+                // load, and every one after, run with the network off.
+                //
+                // [LAW:one-source-of-truth] exception: the files are the ones that
+                // load takes (`Hub.loadConfig` in ArgmaxCore, internal), fetched
+                // here at the revision, which the load cannot be given.
+                let variant = try ModelVariant(modelConfig: Data(contentsOf: folder.appending(path: "config.json")))
+                return try await fromHub(variant.tokenizerRepo, at: tokenizer, through: hub, phase: phase) { _ in
+                    (nil, ["config.json", "tokenizer_config.json", "chat_template.jinja", "chat_template.json", "tokenizer.json"])
+                }
+            case .store(let store):
+                return try await copy(.tokenizer, of: model, from: store, phase: phase)
+            }
+        }
+        return InstalledModel(model: model, folder: folder, hub: directory)
+    }
+
+    /// A Parakeet model: the files of its repo the engine loads, at the repo's top, its
+    /// vocabulary among them.
+    private func installParakeet(_ model: Model, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
+        let weights = try await whole(.weights, of: model) {
+            switch source {
+            case .huggingFace(let revision):
+                guard case .weights(let commit) = revision else { throw ModelInstallError.revisionNotFor(model: model, revision: revision) }
+                return try await fromHub(model.repo, at: commit, through: hub, phase: phase) { _ in (nil, ParakeetModel.hubGlobs) }
+            case .store(let store):
+                return try await copy(.weights, of: model, from: store, phase: phase)
+            }
+        }
+        return InstalledModel(model: model, folder: directory.appending(path: weights.folder), hub: directory)
     }
 
     /// Writes `<directory>/<model>.zip`, the archive a published source serves: a
@@ -71,7 +102,7 @@ extension ModelStore {
     /// [LAW:composability] Packing is an install into an empty store and a zip of the
     /// result, so an archive holds exactly what an install certifies, manifests and
     /// all, and nothing a hub client left beside it.
-    public func pack(_ model: ModelName, into directory: URL, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> URL {
+    public func pack(_ model: Model, into directory: URL, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let scratch = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: directory, create: true)
         // [LAW:no-silent-failure] exception: a defer cannot throw, and a staging copy
@@ -86,7 +117,7 @@ extension ModelStore {
 
     /// The part's manifest, taking the part from `fetch` and recording what arrived
     /// when it is not already whole here.
-    private func whole(_ part: ModelPart, of model: ModelName, fetch: () async throws -> Manifest) async throws -> Manifest {
+    private func whole(_ part: ModelPart, of model: Model, fetch: () async throws -> Manifest) async throws -> Manifest {
         if case .whole(let manifest) = try recording(part, of: model) { return manifest }
         let manifest = try await fetch()
         try manifest.write(to: manifestURL(for: model, part))
@@ -149,7 +180,7 @@ extension ModelStore {
     /// Each file lands under a temporary name and is renamed into place, so a copy
     /// stopped part way leaves no listed file half written. Only the listed files are
     /// copied: a sidecar beside them in the source is not the model.
-    private func copy(_ part: ModelPart, of model: ModelName, from source: ModelStore, phase: (InstallPhase) -> Void) async throws -> Manifest {
+    private func copy(_ part: ModelPart, of model: Model, from source: ModelStore, phase: (InstallPhase) -> Void) async throws -> Manifest {
         let manifest: Manifest
         switch try source.recording(part, of: model) {
         case .whole(let whole): manifest = whole
@@ -245,19 +276,30 @@ private enum InstallLock {
     }
 }
 
+extension ParakeetModel {
+    /// The globs that take the engine's files from the repo's top and nothing else: a
+    /// `.mlmodelc` is a folder, and the hub client's globs cross `/`, so one glob takes it whole.
+    static let hubGlobs = files.map { $0.hasSuffix(".mlmodelc") ? "\($0)/*" : $0 }
+}
+
 public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
     case lockUnavailable(lock: URL, errno: Int32)
     /// A source store that does not hold the part whole, so there is nothing to take.
-    case sourceLacks(source: URL, model: ModelName, part: ModelPart, reason: String)
+    case sourceLacks(source: URL, model: Model, part: ModelPart, reason: String)
     /// A published base or huggingface.co answered with something other than what was asked.
     case downloadRefused(url: URL, status: Int?)
     /// No single folder in the weights repo is the model's, so no download could take one.
-    case noVariantFolder(model: ModelName, matches: [String])
+    case noVariantFolder(model: Model, matches: [String])
     case dittoFailed(arguments: [String], status: Int32, message: String)
     case renameFailed(from: URL, to: URL, errno: Int32)
     /// A download or copy finished without putting every file its manifest lists in place,
     /// at its size.
     case incomplete(folder: URL, faults: [Manifest.Fault])
+    /// Revisions given for an install that name none for the model being installed.
+    case noRevision(model: Model, revisions: ModelRevisions)
+    /// A revision of the other engine's shape: a Whisper model needs its tokenizer's commit,
+    /// and Parakeet has none.
+    case revisionNotFor(model: Model, revision: ModelRevision)
 
     public var description: String {
         switch self {
@@ -268,13 +310,17 @@ public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
         case .downloadRefused(let url, let status):
             "\(url.absoluteString) answered \(status.map { "HTTP \($0)" } ?? "with no HTTP status")"
         case .noVariantFolder(let model, let matches):
-            "no single folder in \(ModelRevision.weightsRepo) holds \(model): \(matches.isEmpty ? "none match" : matches.joined(separator: ", "))"
+            "no single folder in \(model.repo) holds \(model): \(matches.isEmpty ? "none match" : matches.joined(separator: ", "))"
         case .dittoFailed(let arguments, let status, let message):
             "ditto \(arguments.joined(separator: " ")) exited \(status): \(message)"
         case .renameFailed(let from, let to, let errno):
             "cannot move \(from.path) to \(to.path): \(String(cString: strerror(errno)))"
         case .incomplete(let folder, let faults):
             "\(folder.path) came up short after the install: \(faults.map(\.description).joined(separator: "; "))"
+        case .noRevision(let model, let revisions):
+            "the revisions \(revisions) name none for \(model)"
+        case .revisionNotFor(let model, let revision):
+            "\(revision) is not a revision of \(model), whose \(model.parts.count == 1 ? "repo is one commit" : "weights and tokenizer are two commits")"
         }
     }
 }

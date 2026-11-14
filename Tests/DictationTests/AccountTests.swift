@@ -15,7 +15,7 @@ import TestProbes
     @Test func wordsAReadingCarriesAreKeptApartFromItsFacts() async throws {
         let said = " the rest of what was said"
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count >= 2 ? "hello there" : "") }) { _ throws(TranscriptionFailure) in
-            throw .unreadable(.speechWithoutWords(text: said))
+            throw .unreadable(.whisperKit(.speechWithoutWords(text: said)))
         }
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))

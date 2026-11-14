@@ -57,7 +57,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// An engine failure fails its item, not the session: no `error` event, which Pipecat
     /// would take as fatal.
     @Test func anEngineFailureFailsTheItemAndNotTheSession() async throws {
-        let running = try await Running.start(.ready(stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
+        let running = try await Running.start(.ready(stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.whisperKit(.speechWithoutWords(text: " secret")))))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 0.5)
@@ -126,7 +126,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// The socket's one event says what happened on it, the passes the engine failed to read
     /// during its items included (low-reliability-z2z.5s1).
     @Test func theSocketsEventCountsWhatHappenedOnIt() async throws {
-        let running = try await Running.start(.ready(stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
+        let running = try await Running.start(.ready(stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 1, latest: .unreadable(.whisperKit(.speechWithoutWords(text: " secret")))))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 1)

@@ -1,0 +1,15 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3510.2.1"}, {"coremlc-version", "3505.4.1"}})]
+{
+    func main<ios17>(tensor<int32, [1]> audio_length, tensor<fp32, [1, 240000]> audio_signal) {
+            tensor<int32, [2]> slice_by_index_0_begin_0 = const()[name = tensor<string, []>("slice_by_index_0_begin_0"), val = tensor<int32, [2]>([0, 0])];
+            tensor<int32, [2]> slice_by_index_0_end_0 = const()[name = tensor<string, []>("slice_by_index_0_end_0"), val = tensor<int32, [2]>([1, 192128])];
+            tensor<fp32, [1, 192128]> slice_by_index_0 = slice_by_index(begin = slice_by_index_0_begin_0, end = slice_by_index_0_end_0, x = audio_signal)[name = tensor<string, []>("slice_by_index_0")];
+            tensor<int32, [3]> mel_shape_0 = const()[name = tensor<string, []>("mel_shape_0"), val = tensor<int32, [3]>([1, 128, 1501])];
+            tensor<fp32, [1, 128, 1501]> mel = reshape(shape = mel_shape_0, x = slice_by_index_0)[name = tensor<string, []>("mel")];
+            tensor<int32, []> floor_div_0_y_0 = const()[name = tensor<string, []>("floor_div_0_y_0"), val = tensor<int32, []>(160)];
+            tensor<int32, [1]> floor_div_0 = floor_div(x = audio_length, y = floor_div_0_y_0)[name = tensor<string, []>("floor_div_0")];
+            tensor<int32, []> mel_length_y_0 = const()[name = tensor<string, []>("mel_length_y_0"), val = tensor<int32, []>(1)];
+            tensor<int32, [1]> mel_length = add(x = floor_div_0, y = mel_length_y_0)[name = tensor<string, []>("mel_length")];
+        } -> (mel, mel_length);
+}

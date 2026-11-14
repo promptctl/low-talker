@@ -4,20 +4,20 @@
     scripts/sbom <model-tool> <output.cdx.json> [model store]
 
 CycloneDX 1.6, one component per thing that reaches a user's Mac: every package
-Package.resolved pins, the third-party code vendored inside those packages, and the model
-the app loads (its weights and its tokenizer). Identity, URL, version and revision come
-from Package.resolved, the checkouts under .build, and model-tool; sbom/rules.json holds
-only what none of those can say - the license of each component, which packages carry
-code no manifest declares, and which Hugging Face repos the default model's two parts come
-from. [LAW:one-source-of-truth]
+Package.resolved pins, the third-party code vendored inside those packages, and each part of
+every model the app carries (a Whisper model's weights and tokenizer, Parakeet's weights).
+Identity, URL, version and revision come from Package.resolved, the checkouts under .build,
+and model-tool; sbom/rules.json holds only what none of those can say - the license of each
+component, which packages carry code no manifest declares, and which Hugging Face repos each
+model's parts come from. [LAW:one-source-of-truth]
 
 A component the rules do not know stops the run and names it, because a row missing from
 an SBOM is believed. [LAW:no-silent-failure] The output carries no timestamp and no
 serial number, so the same checkout writes the same bytes twice.
 
-The model's repos are the one thing here a clean checkout cannot check, since WhisperKit
+The models' repos are the one thing here a clean checkout cannot check, since WhisperKit
 picks the tokenizer's repo off the weights' config once they are downloaded. So when a
-store holding the model is named, the rules are held to the folders its install
+store holding the models is named, the rules are held to the folders its install
 manifests record, and a rule naming a repo the install did not fetch from stops the run.
 The store changes nothing in the output; it only refuses a wrong rule.
 
@@ -119,6 +119,10 @@ VAR_MATCH = re.compile(r'match="((?:[^"\\]|\\.)*)"')
 # own expression opens with a space. A word stands whole, so two never run together.
 BETWEEN_WORDS = r"[\W_]*"
 COPYRIGHT_SYMBOL = re.compile(r"©|\(c\)", re.IGNORECASE)
+# Every dash is a hyphen, as the SPDX matching guidelines read them, so a var's `-` matches the
+# en dash CC-BY-4.0's sections are numbered with: the hyphens, figure, en and em dashes, the
+# horizontal bar, the minus sign, and their small and full-width forms.
+DASHES = re.compile("[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]")
 # The punctuation at either edge of a line: a comment's markers, in whatever syntax wraps the
 # license, and a box's borders. Inside a var only whitespace may stand between its words.
 LINE_EDGE = re.compile(r"^(?:(?!\n)[\W_])+|(?:(?!\n)[\W_])+$", re.MULTILINE)
@@ -238,9 +242,9 @@ def template_pattern(template):
 def comparable(text):
     """A license text as a template's pattern reads it: without the punctuation at the edges
     of its lines, which source files wrap a license in, its words spelled as the template's
-    are, and its whitespace one space wherever it stands, since a var's own expression can
-    name a single space."""
-    return re.sub(r"\s+", " ", LINE_EDGE.sub("", equivalent(COPYRIGHT_SYMBOL.sub(" ", text))))
+    are, its dashes hyphens, and its whitespace one space wherever it stands, since a var's own
+    expression can name a single space."""
+    return re.sub(r"\s+", " ", LINE_EDGE.sub("", equivalent(COPYRIGHT_SYMBOL.sub(" ", DASHES.sub("-", text)))))
 
 
 # Each template, by its id without regard to case: the id as the List spells it, and its pattern.
@@ -344,69 +348,92 @@ def vendored_component(identity, checkout, rule):
     }
 
 
+# Where in its repo a model's weights are: a folder named for the model, in a repo holding
+# many (whisperkit-coreml), or the repo itself (FluidInference's Parakeet).
+LAYOUTS = {"model-folder", "repo"}
+
+
 def model_components(tool, rules, store):
-    """The model model-tool names as the default, which is the one the release carries and
-    a launch loads where nothing names another. WhisperKit fetches its weights from the
-    repo it names and picks the tokenizer's repo off the weights' config, so both repos
-    are the rule's to state and the store's, when there is one, to confirm."""
+    """Every model model-tool names as carried, which are the models a release carries and a
+    config may name, with the parts a store installs for it. A rule lists exactly those parts:
+    the weights, whose `layout` says where in their repo they are, and, for a Whisper model, the
+    tokenizer WhisperKit picks off the weights' config. Each part's repo is the rule's to state
+    and the store's, when there is one, to confirm."""
     if not tool.is_file():
         fail(f"no model tool at {tool}; run `make model-tool`")
-    model = run(str(tool), ["default"], "the default model").strip()
-    if not model:
-        fail("`model-tool default` printed nothing")
-    rule = rules.get(model)
-    if rule is None:
-        fail(f"the default model is {model} and rules.json has no entry for it")
+    # [LAW:one-source-of-truth] A model's parts are the code's, so a rule missing one fails here.
+    parts = {line.split()[0]: line.split()[1:] for line in run(str(tool), ["carried"], "the carried models").splitlines() if line.strip()}
+    models = list(parts)
+    if not models:
+        fail("`model-tool carried` printed nothing")
+    unruled = [model for model in models if model not in rules]
+    if unruled:
+        fail(f"the carried models include {', '.join(unruled)} and rules.json has no entry for {'it' if len(unruled) == 1 else 'them'}")
+    stale = sorted(set(rules) - set(models))
+    if stale:
+        fail(f"rules.json has an entry for {', '.join(stale)}, which model-tool no longer carries")
     components = []
     confirmed = []
-    for part, kind in (("weights", "machine-learning-model"), ("tokenizer", "data")):
-        component = f"{model} {part}"
-        entry = need(rule, part, component)
-        repo = need(entry, "repo", component)
-        if repo.count("/") != 1:
-            fail(f"{component}: rules.json names the repo {repo!r}, not <owner>/<repo>")
-        licenses, properties = license_entry(component, repository, entry)
-        if store is not None and confirm_against_store(store, model, part, repo):
-            confirmed.append(part)
-        # The weights are one folder of a repo holding many models, so the repo is their
-        # group and the model their name; the tokenizer is a repo of its own.
-        group, name = (repo, model) if part == "weights" else repo.split("/", 1)
-        entry = {
-            "type": kind,
-            "bom-ref": f"huggingface.co/{repo}" + (f"/{model}" if part == "weights" else ""),
-            "group": group,
-            "name": name,
-            "licenses": licenses,
-            "externalReferences": [{"type": "distribution", "url": f"https://huggingface.co/{repo}"}],
-            "properties": [{"name": "low-talker:model-part", "value": part}] + properties,
-        }
-        if part == "weights":
-            entry["description"] = f"The folder of {repo} whose name ends in {model}, which is how WhisperKit picks it"
-        components.append(entry)
+    for model in models:
+        rule = rules[model]
+        if set(rule) != set(parts[model]):
+            fail(f"{model}: rules.json names the parts {', '.join(sorted(rule)) or 'none'}, and the model's parts are {', '.join(parts[model])}")
+        layout = need(rule["weights"], "layout", f"{model} weights")
+        if layout not in LAYOUTS:
+            fail(f"{model} weights: rules.json says layout {layout!r}, which is none of {', '.join(sorted(LAYOUTS))}")
+        for part in parts[model]:
+            kind = {"weights": "machine-learning-model", "tokenizer": "data"}[part]
+            component = f"{model} {part}"
+            entry = rule[part]
+            repo = need(entry, "repo", component)
+            if repo.count("/") != 1:
+                fail(f"{component}: rules.json names the repo {repo!r}, not <owner>/<repo>")
+            licenses, properties = license_entry(component, repository, entry)
+            # A folder of a repo holding many models is that repo's, named for the model; a repo
+            # that is one model, or a tokenizer, is a component of its own.
+            folder = part == "weights" and layout == "model-folder"
+            if store is not None and confirm_against_store(store, model, part, repo, folder):
+                confirmed.append(component)
+            group, name = (repo, model) if folder else repo.split("/", 1)
+            entry = {
+                "type": kind,
+                "bom-ref": f"huggingface.co/{repo}" + (f"/{model}" if folder else ""),
+                "group": group,
+                "name": name,
+                "licenses": licenses,
+                "externalReferences": [{"type": "distribution", "url": f"https://huggingface.co/{repo}"}],
+                "properties": [{"name": "low-talker:model-part", "value": part}] + properties,
+            }
+            if part == "weights":
+                entry["description"] = (f"The folder of {repo} whose name ends in {model}, which is how WhisperKit picks it" if folder
+                                        else f"The files of {repo} the Parakeet engine loads, which are the files it installs")
+            components.append(entry)
     return components, confirmed
 
 
-def confirm_against_store(store, model, part, repo):
+def confirm_against_store(store, model, part, repo, folder):
     """Holds a rule's repo to the folder the install wrote, as its manifest records it:
-    `models/<owner>/<repo>[/<folder>]`. A store with no manifest for this part has not
-    installed it - another model's store, or a download that stopped - and so has nothing
-    to hold the rule to; only a manifest that disagrees is a failure. Answers whether the
-    rule was confirmed."""
+    `models/<owner>/<repo>`, and below it a folder for the model where the weights are one
+    (`folder`). A store with no manifest for this part has not installed it - another model's
+    store, or a download that stopped - and so has nothing to hold the rule to; only a manifest
+    that disagrees is a failure. Answers whether the rule was confirmed."""
     manifest = store / "installed" / (f"tokenizer/{model}.json" if part == "tokenizer" else f"{model}.json")
     if not manifest.is_file():
         return False
     try:
-        folder = json.loads(manifest.read_text()).get("folder", "")
+        recorded = json.loads(manifest.read_text()).get("folder", "")
     except (OSError, ValueError) as error:
         fail(f"{model} {part}: manifest {manifest} cannot be read ({error}); reinstall the model into {store}")
-    parts = folder.split("/")
+    parts = recorded.split("/")
     if len(parts) < 3 or parts[0] != "models":
-        fail(f"{model} {part}: manifest {manifest} records folder {folder!r}, not a models/<owner>/<repo> path")
+        fail(f"{model} {part}: manifest {manifest} records folder {recorded!r}, not a models/<owner>/<repo> path")
     installed = f"{parts[1]}/{parts[2]}"
     if installed != repo:
-        fail(f"{model} {part}: rules.json says {repo}, and the install in {store} came from {installed} ({folder})")
-    if part == "weights" and not folder.endswith(model):
-        fail(f"{model} weights: the install in {store} is {folder}, which is not a folder for {model}")
+        fail(f"{model} {part}: rules.json says {repo}, and the install in {store} came from {installed} ({recorded})")
+    if folder and not recorded.endswith(model):
+        fail(f"{model} weights: the install in {store} is {recorded}, which is not a folder for {model}")
+    if part == "weights" and not folder and len(parts) != 3:
+        fail(f"{model} weights: the install in {store} is {recorded}, a folder inside {repo} rather than the repo")
     return True
 
 
@@ -455,9 +482,9 @@ def main():
     if store is None:
         held = ""
     elif confirmed:
-        held = f"; the {' and '.join(confirmed)} rules held to the install in {store}"
+        held = f"; the {', '.join(confirmed)} rules held to the install in {store}"
     else:
-        held = f"; {store} holds no install of the default model, so its rules were not confirmed"
+        held = f"; {store} holds no install of a carried model, so their rules were not confirmed"
     texts, every = license_texts_held(components)
     print(f"{output}: {len(components)} components, {every - len(components)} vendored, "
           f"{texts} of {every} license texts held to their ids{held}")

@@ -36,7 +36,7 @@ The release also offers `LowTalker-network.pkg`. It is identical except that it 
 
 ## Speed
 
-On an M2 Max with the default model, the transcript lands 0.3 to 0.6 seconds after release when you stop speaking before you let go of the key, and 0.6 to 0.9 seconds when speech runs right up to the release. The [engineering notes](docs/engineering.md#the-latency-harness) hold the full table, the models compared, and what the bench measures. The target is under 300 ms for a short utterance. Whisper's encoder puts a floor of about 0.4 seconds under any pass, so reaching it takes a different engine; Parakeet is planned as the second one.
+On an M2 Max with the default model, the transcript lands 0.3 to 0.6 seconds after release when you stop speaking before you let go of the key, and 0.6 to 0.9 seconds when speech runs right up to the release. The [engineering notes](docs/engineering.md#the-latency-harness) hold the full table, the models compared, and what the bench measures. The target is under 300 ms for a short utterance. Whisper's encoder puts a floor of about 0.4 seconds under any pass, so reaching it takes a different engine; Parakeet is the second one, and the bake-off between the two is still to run.
 
 <br clear="right">
 
@@ -45,7 +45,7 @@ On an M2 Max with the default model, the transcript lands 0.3 to 0.6 seconds aft
 One TOML file, read at launch and again on every save, so edits apply without a relaunch. It lives at `~/Library/Containers/ai.promptctl.low-talker/Data/.config/low-talker/config.toml`. With no file, LowTalker dictates on Right Option with the default model.
 
 ```toml
-model = "base.en"
+model = "large-v3-v20240930_turbo_632MB"
 
 [[modes]]
 name = "dictation"
@@ -57,7 +57,7 @@ chord = { modifiers = ["leftCommand", "leftShift"] }
 vocabulary = ["Kubernetes", "Anthropic"]
 ```
 
-A chord is one or more modifier keys, including Fn (`"function"`). A file LowTalker cannot read is never silently replaced by the defaults: the menu names the problem, and a bad save leaves the app on the last config that worked. The [engineering notes](docs/engineering.md#the-config-file) cover the rest: the microphone's resting state and the options for the server.
+The `model` is one the app carries: Whisper's `large-v3-v20240930_turbo_632MB`, the default, or NVIDIA's `parakeet-tdt-0.6b-v3`. Parakeet hears no vocabulary yet, so a mode that lists terms is refused under it. A chord is one or more modifier keys, including Fn (`"function"`). A file LowTalker cannot read is never silently replaced by the defaults: the menu names the problem, and a bad save leaves the app on the last config that worked. The [engineering notes](docs/engineering.md#the-config-file) cover the rest: the microphone's resting state and the options for the server.
 
 ## Transcription server
 

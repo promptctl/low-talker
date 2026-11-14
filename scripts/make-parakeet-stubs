@@ -1,0 +1,66 @@
+#!/bin/bash
+# Builds the four Core ML models CoreMLParakeetTests loads, into
+# Tests/LowTalkerCoreTests/Fixtures/parakeet-stub, where they are committed. Each has the
+# names, element types and shapes of the FluidInference/parakeet-tdt-0.6b-v3-coreml model it
+# stands for (see ParakeetInterface.published), and arithmetic a test can trace an input
+# through, in place of weights:
+#   Preprocessor  mel = the first 128 x 1501 samples; mel_length = audio_length / 160 + 1
+#   Encoder_v2    every feature of frame t is t; encoder_length = (mel_length - 1) / 8 + 1
+#   Decoder       every feature is the token fed in; h_out = h_in + 1, c_out = c_in + 2
+#   JointDecision token_id = encoder_step's first feature, token_prob = 0.5,
+#                 duration = decoder_step's first feature
+set -euo pipefail
+cd "$(dirname "$0")/.."
+out=Tests/LowTalkerCoreTests/Fixtures/parakeet-stub
+uv run --python 3.12 --with coremltools==9.0 python -I - "$out" <<'PYTHON'
+import shutil, sys
+from pathlib import Path
+import coremltools as ct
+from coremltools.converters.mil import Builder as mb
+from coremltools.converters.mil.mil import types
+
+out = Path(sys.argv[1])
+fp32, i32 = types.fp32, types.int32
+
+def spec(shape, dtype):
+    return mb.TensorSpec(shape=shape, dtype=dtype)
+
+@mb.program(input_specs=[spec((1, 240000), fp32), spec((1,), i32)], opset_version=ct.target.macOS14)
+def preprocessor(audio_signal, audio_length):
+    head = mb.slice_by_index(x=audio_signal, begin=[0, 0], end=[1, 128 * 1501])
+    mel = mb.reshape(x=head, shape=[1, 128, 1501], name="mel")
+    mel_length = mb.add(x=mb.floor_div(x=audio_length, y=160), y=1, name="mel_length")
+    return mel, mel_length
+
+@mb.program(input_specs=[spec((1, 128, 1501), fp32), spec((1,), i32)], opset_version=ct.target.macOS14)
+def encoder(mel, mel_length):
+    frames = mb.reshape(x=mb.range_1d(start=0.0, end=188.0, step=1.0), shape=[1, 1, 188])
+    held = mb.mul(x=mb.reduce_sum(x=mel, axes=[0, 1, 2], keep_dims=True), y=0.0)
+    encoded = mb.add(x=mb.tile(x=frames, reps=[1, 1024, 1]), y=held, name="encoder")
+    length = mb.add(x=mb.floor_div(x=mb.sub(x=mel_length, y=1), y=8), y=1, name="encoder_length")
+    return encoded, length
+
+@mb.program(input_specs=[spec((1, 1), i32), spec((1,), i32), spec((2, 1, 640), fp32), spec((2, 1, 640), fp32)], opset_version=ct.target.macOS14)
+def decoder(targets, target_length, h_in, c_in):
+    token = mb.reshape(x=mb.cast(x=targets, dtype="fp32"), shape=[1, 1, 1])
+    held = mb.mul(x=mb.reshape(x=mb.cast(x=target_length, dtype="fp32"), shape=[1, 1, 1]), y=0.0)
+    output = mb.add(x=mb.tile(x=token, reps=[1, 640, 1]), y=held, name="decoder")
+    return output, mb.add(x=h_in, y=1.0, name="h_out"), mb.add(x=c_in, y=2.0, name="c_out")
+
+@mb.program(input_specs=[spec((1, 1024, 1), fp32), spec((1, 640, 1), fp32)], opset_version=ct.target.macOS14)
+def joint(encoder_step, decoder_step):
+    frame = mb.slice_by_index(x=encoder_step, begin=[0, 0, 0], end=[1, 1, 1])
+    predicted = mb.slice_by_index(x=decoder_step, begin=[0, 0, 0], end=[1, 1, 1])
+    token = mb.cast(x=frame, dtype="int32", name="token_id")
+    probability = mb.add(x=mb.mul(x=predicted, y=0.0), y=0.5, name="token_prob")
+    duration = mb.cast(x=predicted, dtype="int32", name="duration")
+    return token, probability, duration
+
+for name, program in [("Preprocessor", preprocessor), ("Encoder_v2", encoder), ("Decoder", decoder), ("JointDecision", joint)]:
+    model = ct.convert(program, convert_to="mlprogram", compute_precision=ct.precision.FLOAT32, minimum_deployment_target=ct.target.macOS14)
+    target = out / f"{name}.mlmodelc"
+    shutil.rmtree(target, ignore_errors=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(model.get_compiled_model_path(), target)
+    print(target)
+PYTHON

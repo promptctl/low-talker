@@ -95,7 +95,7 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
     case nothingSpoken(peak: Float, quiet: Quiet)
     case vocabulary(VocabularyError)
     /// The engine read the audio and its reading could not become a transcript.
-    case unreadable(WhisperKitTranscriberError)
+    case unreadable(Unreadable)
     /// The engine's own library failed: a model, a decoder, a buffer. WhisperKit's errors
     /// (`WhisperError`) name a stage or a file, never what it read.
     case engine(any Error)
@@ -108,6 +108,21 @@ public enum TranscriptionFailure: Error, CustomStringConvertible {
         case .vocabulary(let refusal): "\(refusal)"
         case .unreadable(let reading): "\(reading)"
         case .engine(let error): "\(error)"
+        }
+    }
+}
+
+/// A reading an engine made of the audio that could not become a transcript, in the words of
+/// the engine that made it. A closed set, as `TranscriptionFailure` is, so each engine says what
+/// its reading carries before the log can hold it. [LAW:types-are-the-program]
+public enum Unreadable: Error, CustomStringConvertible {
+    case whisperKit(WhisperKitTranscriberError)
+    case parakeet(ParakeetReadingError)
+
+    public var description: String {
+        switch self {
+        case .whisperKit(let reading): "\(reading)"
+        case .parakeet(let reading): "\(reading)"
         }
     }
 }

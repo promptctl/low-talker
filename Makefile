@@ -25,9 +25,9 @@ ACCEPTS_CONNECTIONS_offline := NO
 ACCEPTS_CONNECTIONS_network := YES
 ACCEPTS_CONNECTIONS := $(or $(and $(filter $(VARIANT),$(VARIANTS)),$(ACCEPTS_CONNECTIONS_$(VARIANT))),$(error VARIANT is '$(VARIANT)', and it is one of $(VARIANTS)))
 
-# A store holding the model, for the bundle to carry.
+# A store holding the models, for the bundle to carry.
 #
-# Every bundle carries its model, the development build included. It is not an optimisation:
+# Every bundle carries its models, the development build included. It is not an optimisation:
 # `AppDelegate.loadEngine` has no other way to reach one, so a bundle built without a store
 # here launches and says it carries no model rather than reaching the network. A build-time
 # copy is the only door, which is what keeps a running app off the network entirely.
@@ -145,8 +145,8 @@ test: signing-identity
 test-watchdog:
 	scripts/test-with-watchdog
 
-# The model store, for the build: the default model's name, the commits `main` names for it,
-# and fetching, checking and packing it. Nothing in it loads a model, so it needs no signing
+# The model store, for the build: the carried models and their parts, the commits `main` names
+# for them, and fetching, checking and packing them. Nothing in it loads a model, so it needs no signing
 # identity; the ad-hoc signature the link leaves is enough. Prints its path.
 MODEL_TOOL := .build/debug/model-tool
 model-tool:
@@ -175,9 +175,9 @@ gate-replay-measure:
 
 # What a release ships and under what license, as CycloneDX, read off the resolved
 # build: Package.resolved, the checkouts `swift build` resolves under .build, and the
-# default model. The model tool is built because the model's name is read from it, not
-# copied, and building it is what resolves the checkouts on a clean clone. When this Mac's
-# store holds the model, the rules for its two repos are held to what that install wrote.
+# carried models. The model tool is built because the models and their parts are read from
+# it, not copied, and building it is what resolves the checkouts on a clean clone. When this
+# Mac's store holds a model, the rules for its repos are held to what that install wrote.
 # scripts/sbom stops and names any component sbom/rules.json cannot license.
 # [LAW:no-silent-failure]
 sbom: model-tool

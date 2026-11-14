@@ -5,7 +5,7 @@ import Uptime
 /// What a bench run tells its surface while it runs: a model about to load, and each row as
 /// its model's report comes in.
 public enum BenchEvent: Hashable, Sendable {
-    case loading(ModelName)
+    case loading(Model)
     case row(BenchRow)
 }
 
@@ -22,7 +22,7 @@ public enum Bench {
     public static func measure(
         _ fixtures: [Fixture],
         plan: BenchPlan,
-        load: @escaping @Sendable (ModelName) async throws -> LatencyHarness.Engine,
+        load: @escaping @Sendable (Model) async throws -> LatencyHarness.Engine,
         emit: (BenchEvent) async -> Void
     ) async throws {
         for model in plan.models {
@@ -46,7 +46,7 @@ public enum Bench {
         _ options: BenchOptions,
         folders: BenchFolders,
         carried: ModelStore?,
-        load: @escaping @Sendable (ModelStore, ModelName) async throws -> LatencyHarness.Engine,
+        load: @escaping @Sendable (ModelStore, Model) async throws -> LatencyHarness.Engine,
         emit: (BenchEvent) async -> Void
     ) async throws {
         let fixtures = try folders.open(options.fixtures).reading { try Fixture.load(directory: $0) }
@@ -67,10 +67,10 @@ public enum Bench {
 
     /// A model loaded in place from `store`, never written to, and the engine a bench holds
     /// it through: the app's own way to load, so the app's bench reads what dictation reads.
-    @Sendable public static func loadInPlace(_ store: ModelStore, _ model: ModelName) async throws -> LatencyHarness.Engine {
+    @Sendable public static func loadInPlace(_ store: ModelStore, _ model: Model) async throws -> LatencyHarness.Engine {
         let turns = EngineTurns()
-        let engine = try await WhisperKitTranscriber.loadInPlace(model, in: store, turns: turns) { _ in }
-        return LatencyHarness.Engine(dictation: engine, served: engine.served, turns: turns)
+        let engine = try await LoadedEngine(loading: store.installedModel(model), turns: turns)
+        return LatencyHarness.Engine(dictation: engine.dictation, served: engine.served, turns: turns)
     }
 }
 

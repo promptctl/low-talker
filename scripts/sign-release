@@ -44,8 +44,8 @@ cd "$(dirname "$0")/.."
 derived=$(mktemp -d "${TMPDIR:-/tmp}/lowtalker-release.XXXXXX")
 trap 'rm -rf "$derived"' EXIT
 
-# The model tool decides which model is the default and installs it whole, manifests and all, so
-# this script names neither. [LAW:one-source-of-truth] It fetches once here; `make package`
+# The model tool decides which models a bundle carries and installs them whole, manifests and
+# all, so this script names none. [LAW:one-source-of-truth] It fetches once here; `make package`
 # then copies the store the bundle carries out of the fetched one by the same rule every
 # build uses, so what the bundle carries is exactly what an install certifies.
 tool=$(make model-tool | tee /dev/stderr | tail -n 1)
@@ -88,7 +88,7 @@ release_package() {
   built=$(make package VARIANT="$variant" SIGNING_IDENTITY="$identity" DERIVED_DATA="$derived" MODEL_SOURCE="$fetched" | tee /dev/stderr | tail -n 1)
   codesign --verify --deep --strict "$app" || fail "$app does not verify"
   "$tool" status --models-dir "$app/Contents/Resources/$store" >&2 \
-    || fail "$app does not carry the default model whole"
+    || fail "$app does not carry every model whole"
   check "$app"
   # The input method bundle the package installs beside the app. The notary service refuses
   # the whole upload for one nested bundle it dislikes, long after this script has printed the

@@ -25,12 +25,12 @@ import Testing
     /// load's own words are the core's, and the road repeats them rather than keeping a
     /// second copy.
     @Test func phasesDescribeThemselves() {
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.waitingForAnotherInstall))" == "waiting for another install")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.downloading(fractionCompleted: 0.426)))" == "downloading 42%")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.unpacking))" == "unpacking model")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.copying))" == "copying model")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.evicting(["a.bin"])))" == "removing 1 damaged file: a.bin")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.loading)" == "\(WhisperKitTranscriber.LoadPhase.loading)")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.waitingForAnotherInstall))" == "waiting for another install")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.downloading(fractionCompleted: 0.426)))" == "downloading 42%")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.unpacking))" == "unpacking model")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.copying))" == "copying model")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.evicting(["a.bin"])))" == "removing 1 damaged file: a.bin")
+        #expect("\(LoadedEngine.InstallingLoadPhase.loading)" == "\(LoadPhase.loading)")
     }
 
     /// An unreadable manifest names no files, so the part is taken whole from the
@@ -48,6 +48,40 @@ import Testing
             return
         }
         #expect(try Manifest(contentsOf: destination.tokenizerManifestURL) == Manifest(contentsOf: source.tokenizerManifestURL))
+    }
+
+    /// A Parakeet model is copied as its weights alone, under the one manifest that proves it
+    /// whole, and a revision of WhisperKit's shape is refused for it before anything is fetched.
+    @Test func aParakeetModelIsInstalledAsItsWeightsAlone() async throws {
+        let source = try ScratchStore(files: [:])
+        let folder = source.root.appending(components: "models", "FluidInference", "parakeet-tdt-0.6b-v3-coreml")
+        for path in [ParakeetModel.vocabulary, "\(ParakeetModel.joint)/model.mil"] {
+            try FileManager.default.createDirectory(at: folder.appending(path: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "parakeet".write(to: folder.appending(path: path), atomically: true, encoding: .utf8)
+        }
+        try Manifest(recording: folder, relativeTo: source.root).write(to: source.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json"))
+        let destination = try ScratchStore(files: [:])
+        let store = ModelStore(directory: destination.root)
+        let installed = try await store.install(.parakeet(.tdtV3), from: .store(ModelStore(directory: source.root))) { _ in }
+        #expect(installed.folder.path.hasSuffix("models/FluidInference/parakeet-tdt-0.6b-v3-coreml"))
+        #expect(!FileManager.default.fileExists(atPath: destination.root.appending(components: "installed", "tokenizer", "parakeet-tdt-0.6b-v3.json").path))
+
+        let empty = try ScratchStore(files: [:])
+        let whisperShaped = try #require(ModelRevisions("parakeet-tdt-0.6b-v3@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))"))
+        await #expect(throws: ModelInstallError.revisionNotFor(model: .parakeet(.tdtV3), revision: whisperShaped.revisions[.parakeet(.tdtV3)]!)) {
+            try await ModelStore(directory: empty.root).install(.parakeet(.tdtV3), from: .huggingFace(whisperShaped)) { _ in }
+        }
+    }
+
+    /// A Whisper model at a revision naming its weights alone is refused before anything is
+    /// fetched: the store is left with no manifest, and no request reaches the hub.
+    @Test func aWhisperRevisionWithNoTokenizerIsRefusedBeforeAnyFetch() async throws {
+        let empty = try ScratchStore(files: [:])
+        let parakeetShaped = try #require(ModelRevisions("\(Model.default)@\(String(repeating: "a", count: 40))"))
+        await #expect(throws: ModelInstallError.revisionNotFor(model: .default, revision: parakeetShaped.revisions[.default]!)) {
+            try await ModelStore(directory: empty.root).install(.default, from: .huggingFace(parakeetShaped)) { _ in }
+        }
+        #expect(!FileManager.default.fileExists(atPath: empty.root.appending(components: "installed", "\(Model.default).json").path))
     }
 
     /// A folder standing where a listed file belongs is removed before the copy, so

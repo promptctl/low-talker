@@ -13,7 +13,7 @@ import WhisperKit
 /// [LAW:one-type-per-behavior] Dictation and the server hear through the same engine; what
 /// differs is only who is asking, so `served` is this value with its caller changed.
 public struct WhisperKitTranscriber: Transcriber {
-    public let model: ModelName
+    public let model: Model
     private let pipeline: Pipeline
     private let turns: EngineTurns
     private var caller: EngineTurns.Caller
@@ -34,38 +34,6 @@ public struct WhisperKitTranscriber: Transcriber {
         var served = self
         served.caller = .served
         return served
-    }
-
-    /// Loads a model a store already holds, verified in place and never written to: the
-    /// app's carried store is read-only and code-signed, so the model is confirmed
-    /// whole where it sits, with no install and no lock. There is no installing phase — a
-    /// store that does not hold the model whole fails with the reason before any load
-    /// begins. [LAW:parse-dont-validate]
-    public static func loadInPlace(
-        _ model: ModelName = .default,
-        in store: ModelStore,
-        turns: EngineTurns,
-        phase: @escaping @Sendable (LoadPhase) -> Void
-    ) async throws -> WhisperKitTranscriber {
-        let installed = try store.installedModel(model)
-        phase(.loading)
-        return try await WhisperKitTranscriber(installed, turns: turns)
-    }
-
-    /// What a load is doing right now. One step, because a store this module loads is
-    /// already whole: the road that first installs into a store, with its own phases, is
-    /// `ModelInstall`'s. There is no "ready" case: the returned transcriber is that state.
-    public enum LoadPhase: Equatable, Sendable, CustomStringConvertible {
-        /// Core ML is loading the model. The first load on a Mac, after an OS update,
-        /// or after a change to the app's signing identity also specializes the model
-        /// for the Neural Engine, which takes minutes.
-        case loading
-
-        public var description: String {
-            switch self {
-            case .loading: "loading model, minutes the first time on this Mac"
-            }
-        }
     }
 
     /// Hears the utterance in passes as its audio arrives. Whisper decodes a whole
@@ -228,7 +196,7 @@ public struct WhisperKitTranscriber: Transcriber {
             do throws(WhisperKitTranscriberError) {
                 return try Transcript(whisperKit: result.segments).words
             } catch {
-                throw .unreadable(error)
+                throw .unreadable(.whisperKit(error))
             }
         }
     }
@@ -241,7 +209,7 @@ public enum WhisperKitTranscriberError: Error, CustomStringConvertible {
     case probabilityOutsideUnitInterval(WordTiming)
     case wordEndsBeforeStart(WordTiming)
     /// WhisperKit loaded the model but holds no tokenizer for it.
-    case tokenizerNotLoaded(ModelName)
+    case tokenizerNotLoaded(Model)
 
     public var description: String {
         switch self {

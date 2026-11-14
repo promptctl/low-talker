@@ -113,7 +113,7 @@ import TestProbes
     /// the passes the engine failed to read with the
     /// latest failure's facts, none of its words (low-reliability-z2z.5s1).
     @Test func hearsAnMP3() async throws {
-        let stub = stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 2, latest: .unreadable(.speechWithoutWords(text: " secret"))))
+        let stub = stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 2, latest: .unreadable(.whisperKit(.speechWithoutWords(text: " secret")))))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -383,7 +383,7 @@ import TestProbes
     /// Its event counts the passes the engine failed to read before the failure
     /// (low-reliability-z2z.5s1).
     @Test func anEngineFailureIs500WithTheReason() async throws {
-        let running = try await Running.start(.ready(stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
+        let running = try await Running.start(.ready(stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.whisperKit(.speechWithoutWords(text: " secret")))))))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
         #expect(response.statusCode == 500)

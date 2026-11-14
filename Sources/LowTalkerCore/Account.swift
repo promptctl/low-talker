@@ -42,6 +42,27 @@ extension TranscriptionFailure: Accounted {
     }
 }
 
+extension Unreadable: Accounted {
+    public var account: Account {
+        switch self {
+        case .whisperKit(let reading): reading.account
+        case .parakeet(let reading): reading.account
+        }
+    }
+}
+
+extension ParakeetReadingError: Accounted {
+    public var account: Account {
+        switch self {
+        case .durationOutOfRange, .tokenOutsideVocabulary: Account(facts: description)
+        // A control piece is the model's, not the person's: `<unk>` says nothing that was said.
+        case .controlToken: Account(facts: description)
+        case .probabilityOutsideUnitInterval(let probability, let piece):
+            Account(facts: "Parakeet gave a token a probability \(probability), outside \(Confidence.range)", dictated: piece)
+        }
+    }
+}
+
 extension WhisperKitTranscriberError: Accounted {
     public var account: Account {
         switch self {

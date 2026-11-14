@@ -14,9 +14,12 @@ extension LowTalkerApp {
     public enum Event {
         /// The engine's readiness changed, read at `at`.
         case engine(EngineReadiness, at: HostTime)
+        /// A load a save naming another model replaced, ended: the model it landed, let go, or why
+        /// it failed. Nothing else says so, since it no longer moves the menu.
+        case engineReplaced(Result<Model, any Error>)
         case activity(Dictation.Activity)
         case hotkey(HotkeyStatus)
-        case prompts(PromptEncoder.Load)
+        case prompts(Prompting.Load)
         /// A reading of the config that moved nothing, because nothing ran before it or it was refused.
         case config(RunningConfig)
         /// A save, and each setting it moved with what came of moving it.
@@ -49,6 +52,8 @@ extension LowTalkerApp {
         public var lines: [Line] {
             switch self {
             case .engine(let readiness, let now): [Line(.engine, .info, "model: \(readiness.readout(at: now))")]
+            case .engineReplaced(.success(let model)): [Line(.engine, .notice, "model: a load a save replaced landed \(model) and was let go")]
+            case .engineReplaced(.failure(let error)): [Line(.engine, .notice, "model: a load a save replaced failed: \(error)")]
             case .activity(let activity): [Line(.dictation, .info, "activity: \(String(describing: activity))")]
             case .hotkey(let status): [Line(.engine, .notice, "hotkey: \(status)")]
             case .prompts(let load): [Line(.config, .notice, "\(load)")]

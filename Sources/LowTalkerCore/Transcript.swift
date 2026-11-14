@@ -119,4 +119,14 @@ public struct Confidence: Hashable, Codable, Sendable, Comparable, ExpressibleBy
     public static func < (lhs: Self, rhs: Self) -> Bool {
         lhs.value < rhs.value
     }
+
+    /// The probability that both happen, as of independent events: a product of two values in
+    /// 0...1 is in 0...1, so it is a confidence with nothing to check.
+    public static func * (lhs: Self, rhs: Self) -> Self {
+        Self(product: lhs.value * rhs.value)
+    }
+
+    private init(product value: Double) {
+        self.value = value
+    }
 }

@@ -27,7 +27,7 @@ import WhisperKit
     static let reading = [word(" see", 0.1, 0.4), word(" you", 0.5, 0.7)]
 
     /// What a pass the engine fails to read throws: a word WhisperKit timed as ending before it starts.
-    static let unreadable = TranscriptionFailure.unreadable(.wordEndsBeforeStart(WordTiming(word: " you", tokens: [0], start: 0.7, end: 0.5, probability: 0.9)))
+    static let unreadable = TranscriptionFailure.unreadable(.whisperKit(.wordEndsBeforeStart(WordTiming(word: " you", tokens: [0], start: 0.7, end: 0.5, probability: 0.9))))
 
     /// Runs the loop over `clips`, recording every pass and every partial; the passes
     /// numbered in `failing`, counting from 1, throw `unreadable`.
@@ -226,7 +226,7 @@ import WhisperKit
         #expect(partials.prefix(2).allSatisfy { $0.unread == nil })
         #expect(partials[2].text == partials[1].text)
         #expect(partials.dropFirst(2).allSatisfy { $0.unread?.passes == 1 })
-        guard case .unreadable(.wordEndsBeforeStart)? = partials.last?.unread?.latest else { Issue.record("latest unread \(String(describing: partials.last?.unread?.latest))"); return }
+        guard case .unreadable(.whisperKit(.wordEndsBeforeStart))? = partials.last?.unread?.latest else { Issue.record("latest unread \(String(describing: partials.last?.unread?.latest))"); return }
         #expect(transcription.transcript.text == " see you")
     }
 
@@ -242,6 +242,6 @@ import WhisperKit
                 feed.finish()
             }
         }
-        guard case .unreadable(.wordEndsBeforeStart)? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
+        guard case .unreadable(.whisperKit(.wordEndsBeforeStart))? = failure else { Issue.record("failed as \(String(describing: failure))"); return }
     }
 }

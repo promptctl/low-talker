@@ -22,7 +22,7 @@ private final class Picked: Sendable {
     let store: URL
     let folders: BenchFolders
 
-    init(fixtures names: [String], models: [ModelName] = []) throws {
+    init(fixtures names: [String], models: [Model] = []) throws {
         root = FileManager.default.temporaryDirectory.appending(path: "BenchTests-\(UUID().uuidString)")
         fixtures = root.appending(path: "fixtures")
         store = root.appending(path: "store")
@@ -275,6 +275,16 @@ private final class Picked: Sendable {
         #expect(throws: BenchOptionsError.nothingChosen("delivery")) { try BenchPlan(models: ["one"], arrivals: [], servings: [.idle], runs: 1, vocabulary: .empty) }
         #expect(throws: BenchOptionsError.nothingChosen("serving")) { try BenchPlan(models: ["one"], arrivals: [.batch], servings: [], runs: 1, vocabulary: .empty) }
         #expect(throws: BenchOptionsError.tooFewRuns(0)) { try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 0, vocabulary: .empty) }
+    }
+
+    /// A vocabulary Parakeet cannot be told is refused before any model loads, and a Whisper
+    /// model alone takes it.
+    @Test func aVocabularyAModelRefusesIsRefusedBeforeAnyLoad() throws {
+        let vocabulary = Vocabulary([try Vocabulary.Term("Kubernetes")])
+        #expect(throws: BenchOptionsError.vocabulary(.engineTakesNone(.parakeet(.tdtV3)))) {
+            try BenchPlan(models: [.default, .parakeet(.tdtV3)], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: vocabulary)
+        }
+        _ = try BenchPlan(models: [.default], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: vocabulary)
     }
 
     /// The window offers the models a store has recorded, by name and in order.

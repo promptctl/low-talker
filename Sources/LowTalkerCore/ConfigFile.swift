@@ -28,7 +28,7 @@ public extension Config {
     ///
     /// [LAW:effects-at-boundaries] Pure. It opens nothing and reads no clock, so a test
     /// hands it a string rather than a filesystem.
-    init(toml: String, prompting: PromptEncoder) throws(ConfigError) {
+    init(toml: String, prompting: Prompting) throws(ConfigError) {
         var decoder = TOMLDecoder()
         // A key this schema has no place for is a typo the author wants told, not a
         // line quietly doing nothing. [LAW:no-silent-failure]
@@ -50,10 +50,13 @@ public extension Config {
         // [LAW:one-source-of-truth] A key the file leaves out falls back to the value in
         // Config.default, which is where the no-file behaviour is written; no default is
         // spelled a second time here to drift from it.
+        let model = file.model ?? Config.default.model
+        // The modes are checked against the model this file names, the one the app will load.
+        let encoder = try prompting.encoder(for: model)
         try self.init(
-            model: file.model ?? Config.default.model,
+            model: model,
             microphone: file.microphone?.atRest ?? Config.default.microphone,
-            modes: try file.modes?.map { entry throws(ConfigError) in try entry.mode(prompting: prompting) } ?? Array(Config.default.modes),
+            modes: try file.modes?.map { entry throws(ConfigError) in try entry.mode(prompting: encoder) } ?? Array(Config.default.modes),
             serve: try file.serve.map { entry throws(ConfigError) in try entry.binding } ?? Config.default.serve
         )
     }
@@ -64,7 +67,7 @@ public extension Config {
     /// [LAW:no-silent-failure] Only a file that is not there yields the defaults. One
     /// that exists and cannot be read, or cannot be understood, throws - so a config the
     /// user wrote is never quietly replaced by one they did not.
-    static func load(_ url: URL = fileURL, prompting: PromptEncoder) throws(ConfigError) -> Config {
+    static func load(_ url: URL = fileURL, prompting: Prompting) throws(ConfigError) -> Config {
         let text: String
         do {
             text = try String(contentsOf: url, encoding: .utf8)
@@ -81,7 +84,7 @@ public extension Config {
 /// be the one a person would write, while `Config` stays the shape the app runs on;
 /// mapping between them is what parsing this file means.
 private struct ConfigFile: Decodable {
-    let model: ModelName?
+    let model: Model?
     let microphone: MicrophoneEntry?
     let modes: [ModeEntry]?
     let serve: ServeEntry?

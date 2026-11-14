@@ -17,8 +17,9 @@ import Foundation
 /// links, so a process linking only this one has no way to reach the network for
 /// a model.
 public struct ModelStore: Sendable {
-    /// The hub root. A model lives at `models/<org>/<repo>/<variant>` beneath it and
-    /// its tokenizer at `models/openai/<whisper variant>`.
+    /// The hub root. A Whisper model lives at `models/<org>/<repo>/<variant>` beneath it
+    /// and its tokenizer at `models/openai/<whisper variant>`; a Parakeet model is its
+    /// whole repo, at `models/<org>/<repo>`.
     public let directory: URL
 
     public init(directory: URL) {
@@ -60,23 +61,26 @@ public struct ModelStore: Sendable {
     ///
     /// [LAW:parse-dont-validate] The checkpoint. Everything past it takes an
     /// `InstalledModel` and never asks about files again.
-    public func presence(of model: ModelName) throws -> Presence {
-        let weights = try recording(.weights, of: model)
-        let tokenizer = try recording(.tokenizer, of: model)
-        switch (weights, tokenizer) {
-        case (.whole(let weights), .whole):
-            return .installed(InstalledModel(model: model, folder: directory.appending(path: weights.folder), hub: directory))
-        case (.unrecorded, .unrecorded):
-            return .missing
-        default:
-            return .damaged([(ModelPart.weights, weights), (.tokenizer, tokenizer)].compactMap { part, recording in
-                switch recording {
-                case .whole: nil
-                case .unrecorded: .unrecorded(part)
-                case .damaged(let damage): damage
-                }
-            })
+    public func presence(of model: Model) throws -> Presence {
+        // [LAW:one-source-of-truth] One rule for every engine: the model is whole when each
+        // of its parts' manifests is, and the weights' manifest says where the model is.
+        let recordings = try model.parts.map { part in (part, try recording(part, of: model)) }
+        let wholes = recordings.compactMap { part, recording in
+            if case .whole(let manifest) = recording { (part, manifest) } else { nil }
         }
+        if wholes.count == recordings.count, let weights = wholes.first(where: { $0.0 == .weights })?.1 {
+            return .installed(InstalledModel(model: model, folder: directory.appending(path: weights.folder), hub: directory))
+        }
+        if recordings.allSatisfy({ if case .unrecorded = $0.1 { true } else { false } }) {
+            return .missing
+        }
+        return .damaged(recordings.compactMap { part, recording in
+            switch recording {
+            case .whole: nil
+            case .unrecorded: .unrecorded(part)
+            case .damaged(let damage): damage
+            }
+        })
     }
 
     /// The model, verified present, or the reason the store does not hold it. A store
@@ -85,7 +89,7 @@ public struct ModelStore: Sendable {
     /// whole here — nothing to download, nowhere to write — so it fails with the part-level
     /// reason rather than a permission error from a lock it could not take.
     /// [LAW:parse-dont-validate] [LAW:no-silent-failure]
-    public func installedModel(_ model: ModelName) throws -> InstalledModel {
+    public func installedModel(_ model: Model) throws -> InstalledModel {
         switch try presence(of: model) {
         case .installed(let installed): return installed
         case .missing: throw ModelStoreError.storeLacksModel(store: directory, model: model, reason: "the model is not installed")
@@ -96,10 +100,10 @@ public struct ModelStore: Sendable {
     /// The models whose weights this store has recorded, by name, in order: what a bench can
     /// ask it for. Whether each is whole is `installedModel`'s to say as it loads. Throws for
     /// a folder that has never been a store, which has no record to list.
-    public func recordedModels() throws -> [ModelName] {
+    public func recordedModels() throws -> [Model] {
         try FileManager.default.contentsOfDirectory(atPath: directory.appending(path: "installed").path)
             .filter { $0.hasSuffix(".json") }
-            .compactMap { ModelName(rawValue: String($0.dropLast(".json".count))) }
+            .compactMap { Model(rawValue: String($0.dropLast(".json".count))) }
             .sorted { $0.rawValue < $1.rawValue }
     }
 
@@ -110,7 +114,7 @@ public struct ModelStore: Sendable {
         case damaged(Damage)
     }
 
-    package func recording(_ part: ModelPart, of model: ModelName) throws -> Recording {
+    package func recording(_ part: ModelPart, of model: Model) throws -> Recording {
         let manifestURL = manifestURL(for: model, part)
         let manifest: Manifest
         do {
@@ -129,7 +133,7 @@ public struct ModelStore: Sendable {
     /// tokenizer had a manifest already wrote it, and `installed/tokenizer/<model>.json`
     /// beside it. Kept per model rather than per tokenizer: a model knows its own
     /// manifests' names without reading its weights.
-    package func manifestURL(for model: ModelName, _ part: ModelPart) -> URL {
+    package func manifestURL(for model: Model, _ part: ModelPart) -> URL {
         let installed = directory.appending(path: "installed")
         return switch part {
         case .weights: installed.appending(path: "\(model.rawValue).json")
@@ -168,7 +172,7 @@ public struct ModelStore: Sendable {
 
 /// A part of a model, as a store installs it and a manifest records it.
 public enum ModelPart: String, Sendable, CustomStringConvertible {
-    /// The Core ML bundles and the model's config, in the whisperkit-coreml repo.
+    /// The Core ML bundles and what ships beside them in the model's repo.
     case weights
     /// The tokenizer the weights decode with, in an openai repo shared by every model
     /// of one Whisper size.
@@ -180,7 +184,7 @@ public enum ModelPart: String, Sendable, CustomStringConvertible {
 public enum ModelStoreError: Error, Equatable, CustomStringConvertible {
     /// A store that does not hold the model whole, with no source to make it whole from:
     /// the app's read-only carried store, verified in place. [LAW:no-silent-failure]
-    case storeLacksModel(store: URL, model: ModelName, reason: String)
+    case storeLacksModel(store: URL, model: Model, reason: String)
 
     public var description: String {
         switch self {
@@ -194,13 +198,13 @@ public enum ModelStoreError: Error, Equatable, CustomStringConvertible {
 /// one, so holding it means the check ran: here on a read, and in `ModelInstall` once
 /// an install has written both parts and their manifests.
 public struct InstalledModel: Sendable {
-    public let model: ModelName
-    /// The folder holding the `.mlmodelc` bundles and config.
+    public let model: Model
+    /// The folder holding the `.mlmodelc` bundles and what ships beside them.
     public let folder: URL
     /// The store root, where the tokenizer for this model lives or will be fetched.
     public let hub: URL
 
-    package init(model: ModelName, folder: URL, hub: URL) {
+    package init(model: Model, folder: URL, hub: URL) {
         self.model = model
         self.folder = folder
         self.hub = hub
