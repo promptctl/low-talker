@@ -36,11 +36,14 @@ import Testing
         Case(name: "before a word", before: "", after: "world", transcript: "hello", fitted: "Hello ", rules: [.capitalized, .spacedAfter]),
         Case(name: "before a number", before: "Room ", after: "4", transcript: "one", fitted: "one ", rules: [.spacedAfter]),
         Case(name: "before punctuation", before: "Say ", after: ", please", transcript: "hello", fitted: "hello", rules: []),
-        Case(name: "before a sentence that continues", before: "I think ", after: "and more", transcript: "so.", fitted: "so ", rules: [.closingDropped, .spacedAfter]),
-        Case(name: "before a space and a sentence that continues", before: "I think ", after: " and more", transcript: "so?!", fitted: "so", rules: [.closingDropped]),
+        Case(name: "before a sentence that continues", before: "I think ", after: "and more", transcript: "so.", fitted: "so ", rules: [.periodDropped, .spacedAfter]),
+        Case(name: "before a space and a sentence that continues", before: "I think ", after: " and more", transcript: "so.", fitted: "so", rules: [.periodDropped]),
+        Case(name: "a question mark before a sentence that continues", before: "", after: " he asked.", transcript: "Why?", fitted: "Why?", rules: []),
+        Case(name: "an ellipsis before a sentence that continues", before: "I think ", after: " and more", transcript: "so...", fitted: "so...", rules: []),
+        Case(name: "a decimal before a sentence that continues", before: "it costs ", after: "and more", transcript: "3.50.", fitted: "3.50 ", rules: [.periodDropped, .spacedAfter]),
         Case(name: "before a sentence that starts", before: "I think ", after: " And more", transcript: "so.", fitted: "so.", rules: []),
         Case(name: "before a new line that continues", before: "I think ", after: "\nand more", transcript: "so.", fitted: "so.", rules: []),
-        Case(name: "a closing mark alone is kept", before: "Yes", after: "and", transcript: ".", fitted: ". ", rules: [.spacedAfter]),
+        Case(name: "a period alone is kept", before: "Yes", after: "and", transcript: ".", fitted: ". ", rules: [.spacedAfter]),
         Case(name: "after an opening bracket", before: "note (", after: "", transcript: "see", fitted: "see", rules: []),
         Case(name: "after an opening curly quote", before: "He said “", after: "", transcript: "go", fitted: "go", rules: []),
         Case(name: "after an opening straight quote", before: "He said \"", after: "", transcript: "go", fitted: "go", rules: []),
@@ -50,8 +53,17 @@ import Testing
         Case(name: "a bracket opening the field", before: "(", after: "", transcript: "see", fitted: "See", rules: [.capitalized]),
         Case(name: "a quote opening the field", before: "", after: "", transcript: "\"wow\"", fitted: "\"Wow\"", rules: [.capitalized]),
         Case(name: "an abbreviation before a sentence that continues", before: "We met at 9 ", after: "and left", transcript: "a.m.", fitted: "a.m. ", rules: [.spacedAfter]),
+        Case(name: "after an initialism", before: "We met at 9 a.m. ", after: "", transcript: "and left", fitted: "and left", rules: []),
+        Case(name: "a first word with a capital inside", before: "", after: "", transcript: "iPhone is great", fitted: "iPhone is great", rules: []),
         Case(name: "after a hyphen in a word", before: "e-", after: "", transcript: "mail", fitted: "mail", rules: []),
         Case(name: "after a dash between words", before: "well -", after: "", transcript: "maybe", fitted: " maybe", rules: [.spacedBefore]),
+        Case(name: "after a closed-up em dash", before: "well—", after: "", transcript: "maybe", fitted: "maybe", rules: []),
+        Case(name: "after a range's en dash", before: "pages 3–", after: "", transcript: "5", fitted: "5", rules: []),
+        Case(name: "before an opening bracket", before: "Say ", after: "(below)", transcript: "see", fitted: "see ", rules: [.spacedAfter]),
+        Case(name: "before a currency sign", before: "it ", after: "$5", transcript: "costs", fitted: "costs ", rules: [.spacedAfter]),
+        Case(name: "before an opening straight quote", before: "he ", after: "\"hi\"", transcript: "said", fitted: "said ", rules: [.spacedAfter]),
+        Case(name: "before a closing straight quote", before: "\"hello", after: "\" he said", transcript: "world", fitted: " world", rules: [.spacedBefore]),
+        Case(name: "ending in a joiner before a word", before: "Open ", after: "main", transcript: "src/", fitted: "src/", rules: []),
         Case(name: "after a currency sign", before: "costs $", after: "", transcript: "5", fitted: "5", rules: []),
         Case(name: "after a slash", before: "src/", after: "", transcript: "main", fitted: "main", rules: []),
         Case(name: "after a hash", before: "in #", after: "", transcript: "general", fitted: "general", rules: []),
@@ -64,7 +76,7 @@ import Testing
         Case(name: "after an emoji", before: "👍", after: "", transcript: "nice", fitted: " nice", rules: [.spacedBefore]),
         Case(name: "blank", before: "Hi", after: "there", transcript: "  ", fitted: "", rules: [.trimmed]),
         Case(name: "a selection replaced, judged by what is around it", before: "Hi. ", selected: "world", after: "", transcript: "there", fitted: "There", rules: [.capitalized]),
-        Case(name: "a selection replaced mid-sentence", before: "a", selected: "big", after: "dog", transcript: "small.", fitted: " small ", rules: [.closingDropped, .spacedBefore, .spacedAfter]),
+        Case(name: "a selection replaced mid-sentence", before: "a", selected: "big", after: "dog", transcript: "small.", fitted: " small ", rules: [.periodDropped, .spacedBefore, .spacedAfter]),
     ]
 
     @Test(arguments: cases)
@@ -82,8 +94,8 @@ import Testing
 
     /// What the commit's event says: the rules in the order they apply, or the reason.
     @Test func theOutcomeSaysWhatFittingDid() {
-        #expect(Fitting.Outcome.fitted([.spacedAfter, .closingDropped, .capitalized, .spacedBefore, .trimmed]).description
-            == "fitted: edge whitespace trimmed, closing mark dropped, capitalized, space before, space after")
+        #expect(Fitting.Outcome.fitted([.spacedAfter, .periodDropped, .capitalized, .spacedBefore, .trimmed]).description
+            == "fitted: edge whitespace trimmed, closing period dropped, capitalized, space before, space after")
         #expect(Fitting.Outcome.fitted([]).description == "fitted, unchanged")
         #expect(Fitting.Outcome.unfitted(.noDocumentAccess).description == "unfitted, because it gives no document access")
     }

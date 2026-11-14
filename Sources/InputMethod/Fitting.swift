@@ -1,7 +1,7 @@
 import Foundation
 
 /// A transcript shaped to the text around where it goes: spaced from its neighbours, capitalised
-/// where a sentence starts, and without a closing mark where the field's text continues the
+/// where a sentence starts, and without a closing period where the field's text continues the
 /// sentence. The dictation commit and the marked-text preview fit the same way, so a final does
 /// not jump from the partials before it.
 ///
@@ -27,25 +27,26 @@ public nonisolated struct Fitting: Equatable, Sendable {
     }
 
     /// One change fitting can make, in the order fitting applies them: the edges are trimmed first,
-    /// the closing mark goes before the capital is judged, and all of them before the spaces go on.
+    /// the period goes before the capital is judged, and all of them before the spaces go on.
     public enum Rule: CaseIterable, Sendable, CustomStringConvertible {
         /// Its edge whitespace removed, which an engine puts before its words (`Transcript.text`),
         /// so the space rules alone decide the edges.
         case trimmed
-        /// Its closing `.`, `?`, `!` or `…` dropped, since the text after it continues the sentence.
-        /// A last word with a period inside, such as `a.m.`, keeps its own.
-        case closingDropped
-        /// Its first letter title-cased, since it starts the field, a line, or a sentence.
+        /// Its closing period dropped, since the text after it continues the sentence. A `?` or
+        /// `!` says what was said, so it stays, as do an ellipsis and an initialism's own period.
+        case periodDropped
+        /// Its first letter title-cased, since it starts the field, a line, or a sentence. A first
+        /// word that has a capital already, such as `iPhone`, is left as it is.
         case capitalized
-        /// A space before it, since the text before it ends a word the next one does not join.
+        /// A space before it, since neither it nor the text before it joins the other.
         case spacedBefore
-        /// A space after it, since a word follows it.
+        /// A space after it, since neither it nor the text after it joins the other.
         case spacedAfter
 
         public var description: String {
             switch self {
             case .trimmed: "edge whitespace trimmed"
-            case .closingDropped: "closing mark dropped"
+            case .periodDropped: "closing period dropped"
             case .capitalized: "capitalized"
             case .spacedBefore: "space before"
             case .spacedAfter: "space after"
@@ -58,27 +59,23 @@ public nonisolated struct Fitting: Equatable, Sendable {
             switch self {
             case .trimmed:
                 return text.trimmingCharacters(in: .whitespacesAndNewlines)
-            case .closingDropped:
-                let body = trimmingEnd(text[...], Self.terminal.contains)
-                let abbreviated = body.split(whereSeparator: \.isWhitespace).last?.contains(".") ?? false
+            case .periodDropped:
+                let body = text.dropLast()
+                let closes = text.last == "." && body.last.map { $0 != "." && !$0.isWhitespace } ?? false
                 let continues = after.drop(while: \.isSpaceOrTab).first?.isLowercase ?? false
-                return continues && !body.isEmpty && !abbreviated ? String(body) : text
+                return closes && continues && !Self.endsInInitialism(body) ? String(body) : text
             case .capitalized:
                 // Spaces, quotes and brackets sit between a sentence's end and its next word:
                 // `He said "Stop." ` and `Hi. (` each end one.
                 let end = trimmingEnd(before[...]) { $0.isSpaceOrTab || Self.openers.contains($0) || Self.closers.contains($0) }
-                let startsSentence = end.last.map { $0.isNewline || Self.terminal.contains($0) } ?? true
-                guard startsSentence, let first = text.firstIndex(where: { !Self.openers.contains($0) }),
-                      text[first].isLowercase else { return text }
+                let startsSentence = end.last.map { $0.isNewline || Self.terminal.contains($0) && !Self.endsInInitialism(end) } ?? true
+                guard startsSentence, let first = text.firstIndex(where: { !Self.openers.contains($0) }), text[first].isLowercase,
+                      !text[first...].prefix(while: { !$0.isWhitespace }).contains(where: \.isUppercase) else { return text }
                 return text.replacingCharacters(in: first...first, with: String(text[first]).capitalized)
             case .spacedBefore:
-                guard let first = text.first, !Self.joinsNext(before), !first.isUnspaced,
-                      !Self.closingPunctuation.contains(first) else { return text }
-                return " " + text
+                return Self.spaced(before, text) ? " " + text : text
             case .spacedAfter:
-                guard let last = text.last, let next = after.first, next.isLetter || next.isNumber,
-                      !last.isUnspaced, !next.isUnspaced else { return text }
-                return text + " "
+                return Self.spaced(text, after) ? text + " " : text
             }
         }
 
@@ -94,22 +91,47 @@ public nonisolated struct Fitting: Equatable, Sendable {
 
         /// What a word joins with no space before it: a currency sign, as in `$5`, and `/ \ @ # _`.
         private static let joiners: Set<Character> = ["/", "\\", "@", "#", "_"]
-        private static let hyphens: Set<Character> = ["-", "‐"]
+        /// A hyphen or dash, which closes up to the word on whichever side it touches.
+        private static let dashes: Set<Character> = ["-", "‐", "–", "—"]
+
+        /// Whether `text` ends in an initialism's period, as `a.m.`, `U.S.` and `e.g.` do: a word
+        /// of single letters each followed by a period.
+        private static func endsInInitialism(_ text: Substring) -> Bool {
+            let letters = text.split(whereSeparator: \.isWhitespace).last?.split(separator: ".") ?? []
+            return letters.count > 1 && letters.allSatisfy { $0.count == 1 && $0.first!.isLetter }
+        }
+
+        /// Whether a space goes between `left` and `right`: neither joins the other.
+        private static func spaced(_ left: String, _ right: String) -> Bool {
+            !joinsNext(left) && !joinsPrevious(right)
+        }
 
         /// Whether the next word follows the end of `text` with no space: at the field's start, and
         /// after whitespace, an opening bracket or quote, a joiner, or a script written without
         /// spaces. A straight quote opens only where a word could start, after whitespace or an
-        /// opener; after a letter it closes, as in `said "hi"`. A hyphen joins the word it is
-        /// attached to, as in `e-mail`; after a space it is a dash, as in `well - maybe`.
+        /// opener; after a letter it closes, as in `said "hi"`. A dash joins the word it is
+        /// attached to, as in `e-mail` and `3–5`; after a space it stands apart, as in `well - maybe`.
         private static func joinsNext(_ text: String) -> Bool {
             guard let last = text.last else { return true }
             let previous = text.dropLast().last
             if straightQuotes.contains(last) {
                 return previous.map { $0.isWhitespace || openingBrackets.contains($0) || openingQuotes.contains($0) } ?? true
             }
-            if hyphens.contains(last) { return previous.map { !$0.isWhitespace } ?? true }
+            if dashes.contains(last) { return previous.map { !$0.isWhitespace } ?? true }
             return last.isWhitespace || last.isCurrencySymbol || last.isUnspaced || joiners.contains(last)
                 || openingBrackets.contains(last) || openingQuotes.contains(last)
+        }
+
+        /// Whether the start of `text` follows the word before it with no space: at the field's
+        /// end, and at whitespace, closing punctuation, or a script written without spaces. A
+        /// straight quote closes where no word follows it, as in `"hi" he said`; before a word it
+        /// opens. A dash joins the word it is attached to, as in `—so`.
+        private static func joinsPrevious(_ text: String) -> Bool {
+            guard let first = text.first else { return true }
+            let next = text.dropFirst().first
+            if straightQuotes.contains(first) { return next.map { !($0.isLetter || $0.isNumber) } ?? true }
+            if dashes.contains(first) { return next.map { !$0.isWhitespace } ?? true }
+            return first.isWhitespace || first.isUnspaced || closingPunctuation.contains(first)
         }
     }
 
@@ -146,7 +168,7 @@ private nonisolated extension Character {
     var isSpaceOrTab: Bool { isWhitespace && !isNewline }
 
     /// Written in a script that puts no spaces between words: Han, kana, Thai, Lao, Myanmar or
-    /// Khmer, or CJK punctuation and full-width forms.
+    /// Khmer, or CJK punctuation and full-width forms (not halfwidth Hangul: Korean is spaced).
     var isUnspaced: Bool {
         unicodeScalars.first.map { scalar in
             scalar.properties.isIdeographic || Self.unspacedBlocks.contains { $0.contains(scalar.value) }
@@ -154,6 +176,6 @@ private nonisolated extension Character {
     }
 
     private static let unspacedBlocks: [ClosedRange<UInt32>] = [
-        0x0E00...0x0EFF, 0x1000...0x109F, 0x1780...0x17FF, 0x3000...0x30FF, 0x31F0...0x31FF, 0xFF00...0xFFEF,
+        0x0E00...0x0EFF, 0x1000...0x109F, 0x1780...0x17FF, 0x3000...0x30FF, 0x31F0...0x31FF, 0xFF00...0xFF9F, 0xFFE0...0xFFEF,
     ]
 }
