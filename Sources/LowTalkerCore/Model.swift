@@ -43,7 +43,7 @@ public enum Model: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByS
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         guard let model = Model(rawValue: raw) else {
-            throw decoder.fault("\"\(raw)\" is not a model name: one folder in the model repo, such as base.en, or \(ParakeetModel.allCases.map(\.rawValue).joined(separator: ", "))")
+            throw decoder.fault("\"\(raw)\" is not a model name: one folder in the model repo, such as \(Model.default), or \(ParakeetModel.allCases.map(\.rawValue).joined(separator: ", "))")
         }
         self = model
     }

@@ -337,6 +337,8 @@ public final class LowTalkerApp {
                 // passes wait while a press holds the engine. Starts a task and returns, so this
                 // load never waits on a decode that waits on the press that waits on this load.
                 keptSpeech.landed(loaded.served)
+            } else {
+                ports.told(.engineReplaced(.success(loaded.model)))
             }
             return loaded.dictation
         } catch {
@@ -345,6 +347,8 @@ public final class LowTalkerApp {
             if current() {
                 show(.failed("\(error)"))
                 ports.server?.answer(with: .failed("the model failed to load: \(error)"))
+            } else {
+                ports.told(.engineReplaced(.failure(error)))
             }
             throw error
         }

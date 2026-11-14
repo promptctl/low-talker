@@ -309,7 +309,7 @@ final class Recorded<Value: Sendable>: Sendable {
     }
 
     /// A load the save has replaced lands nowhere: whichever load finishes last, the menu shows the
-    /// model the config now names.
+    /// model the config now names, and the log says the replaced load landed and was let go.
     @Test func aReplacedLoadLandsNowhere() async {
         let rig = AppRig(holdingLoads: true)
         await rig.launched()
@@ -321,6 +321,7 @@ final class Recorded<Value: Sendable>: Sendable {
         await rig.hold()
         await rig.until { rig.inputMethod.inserted == ["hello"] }
         if case .ready(let model, _) = rig.app.engineReadiness { #expect(model == .parakeet(.tdtV3)) }
+        await rig.until { rig.lines.contains("model: a load a save replaced landed \(Model.default) and was let go") }
     }
 
     static let parakeet = """

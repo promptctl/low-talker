@@ -277,6 +277,16 @@ private final class Picked: Sendable {
         #expect(throws: BenchOptionsError.tooFewRuns(0)) { try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 0, vocabulary: .empty) }
     }
 
+    /// A vocabulary Parakeet cannot be told is refused before any model loads, and a Whisper
+    /// model alone takes it.
+    @Test func aVocabularyAModelRefusesIsRefusedBeforeAnyLoad() throws {
+        let vocabulary = Vocabulary([try Vocabulary.Term("Kubernetes")])
+        #expect(throws: BenchOptionsError.vocabulary(.engineTakesNone(.parakeet(.tdtV3)))) {
+            try BenchPlan(models: [.default, .parakeet(.tdtV3)], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: vocabulary)
+        }
+        _ = try BenchPlan(models: [.default], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: vocabulary)
+    }
+
     /// The window offers the models a store has recorded, by name and in order.
     @Test func aStoreListsTheModelsItRecorded() throws {
         let picked = try Picked(fixtures: [], models: ["zeta", "alpha"])

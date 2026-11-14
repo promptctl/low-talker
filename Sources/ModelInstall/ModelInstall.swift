@@ -42,10 +42,17 @@ extension ModelStore {
     /// A Whisper model: its weights, a folder of the whisperkit-coreml repo, and the tokenizer
     /// their config names, from an openai repo.
     private func installWhisperKit(_ model: Model, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
+        // [LAW:parse-dont-validate] A revision names both parts, refused before either is fetched.
+        enum Parts { case hub(weights: ModelRevision.Commit, tokenizer: ModelRevision.Commit), store(ModelStore) }
+        let parts: Parts = switch source {
+        case .huggingFace(.weightsAndTokenizer(let weights, let tokenizer)): .hub(weights: weights, tokenizer: tokenizer)
+        case .huggingFace(let revision): throw ModelInstallError.revisionNotFor(model: model, revision: revision)
+        case .store(let store): .store(store)
+        }
         let weights = try await whole(.weights, of: model) {
-            switch source {
-            case .huggingFace(let revision):
-                return try await fromHub(model.repo, at: revision.weights, through: hub, phase: phase) { listing in
+            switch parts {
+            case .hub(let weights, _):
+                return try await fromHub(model.repo, at: weights, through: hub, phase: phase) { listing in
                     (try ModelRevision.variantFolder(of: model, among: listing.files.map(\.path)), ["*"])
                 }
             case .store(let store):
@@ -54,9 +61,8 @@ extension ModelStore {
         }
         let folder = directory.appending(path: weights.folder)
         _ = try await whole(.tokenizer, of: model) {
-            switch source {
-            case .huggingFace(let revision):
-                guard case .weightsAndTokenizer(_, let tokenizer) = revision else { throw ModelInstallError.revisionNotFor(model: model, revision: revision) }
+            switch parts {
+            case .hub(_, let tokenizer):
                 // WhisperKit fetches the tokenizer on first load, from the hub,
                 // when it is not already here; taking it now is what lets that
                 // load, and every one after, run with the network off.

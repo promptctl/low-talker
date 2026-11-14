@@ -35,6 +35,18 @@ public struct PromptEncoder: Sendable {
         }
     }
 
+    /// The encoder `model` reads no file for, or nil where its tokenizer must be read: Parakeet's
+    /// refusal of every term, which a bench plan is checked against before anything loads.
+    ///
+    /// [LAW:types-are-the-program] Exhaustive, so an engine added to `Model` says here how it
+    /// is told a vocabulary before it compiles.
+    public static func withoutFiles(_ model: Model) -> PromptEncoder? {
+        switch model {
+        case .whisperKit: nil
+        case .parakeet: .takingNone(model)
+        }
+    }
+
     private init(encode: @escaping @Sendable (Vocabulary) throws(VocabularyError) -> [Int]) {
         self.encode = encode
     }
@@ -61,12 +73,7 @@ public struct PromptEncoder: Sendable {
     /// The size and the folders searched are WhisperKit's own, mirrored in
     /// `TokenizerChoice.swift`, so this reads the `tokenizer.json` the engine will.
     public static func load(_ installed: InstalledModel) async throws(PromptsUnavailable) -> PromptEncoder {
-        // [LAW:types-are-the-program] Exhaustive, so an engine added to `Model` says here how it
-        // is told a vocabulary before it compiles.
-        switch installed.model {
-        case .whisperKit: break
-        case .parakeet: return .takingNone(installed.model)
-        }
+        if let encoder = withoutFiles(installed.model) { return encoder }
         do {
             let variant = try ModelVariant(modelConfig: Data(contentsOf: installed.folder.appending(path: "config.json")))
             let tokenizer = try await ModelUtilities.loadTokenizer(

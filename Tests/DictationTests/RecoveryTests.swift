@@ -189,9 +189,11 @@ private struct LoadFailed: Error, CustomStringConvertible {
         let refusing = FakeTranscriber(refusing: { _ throws(VocabularyError) in throw .engineTakesNone(.parakeet(.tdtV3)) }, turns: rig.turns) { _ in Transcript(typed: " first") }
         rig.recovery.landed(refusing.served)
         await rig.recovery.settled()
-        #expect(rig.recovery.kept.count == 1)
+        #expect(rig.recovery.lines == ["Speech the model could not read: 1 s (parakeet-tdt-0.6b-v3 hears no vocabulary, so a mode that names it can list no terms)"])
 
         rig.recovery.landed(Self.reading(rig.turns).served)
+        // Until the new engine has tried it, it waits for that engine.
+        #expect(rig.recovery.lines == ["Speech waiting for the model: 1 s"])
         await rig.recovery.settled()
 
         #expect(rig.hold.held?.allWords.text == " first")

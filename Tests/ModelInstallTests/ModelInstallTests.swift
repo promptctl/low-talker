@@ -73,6 +73,17 @@ import Testing
         }
     }
 
+    /// A Whisper model at a revision naming its weights alone is refused before anything is
+    /// fetched: the store is left with no manifest, and no request reaches the hub.
+    @Test func aWhisperRevisionWithNoTokenizerIsRefusedBeforeAnyFetch() async throws {
+        let empty = try ScratchStore(files: [:])
+        let parakeetShaped = try #require(ModelRevisions("\(Model.default)@\(String(repeating: "a", count: 40))"))
+        await #expect(throws: ModelInstallError.revisionNotFor(model: .default, revision: parakeetShaped.revisions[.default]!)) {
+            try await ModelStore(directory: empty.root).install(.default, from: .huggingFace(parakeetShaped)) { _ in }
+        }
+        #expect(!FileManager.default.fileExists(atPath: empty.root.appending(components: "installed", "\(Model.default).json").path))
+    }
+
     /// A folder standing where a listed file belongs is removed before the copy, so
     /// the copy can be renamed into its place and the store is repaired.
     @Test func installFromAStoreReplacesAFolderInAFilesPlace() async throws {

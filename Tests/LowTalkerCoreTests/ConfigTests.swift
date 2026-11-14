@@ -276,7 +276,7 @@ import Testing
     /// [LAW:single-enforcer] The sentence is Model's own, so it speaks of model
     /// names rather than of the Swift type the parser happened to be building.
     @Test func aModelThatIsNotOneIsRefusedInItsOwnWords() {
-        #expect(throws: ConfigError.wrongShape(#"model: ".." is not a model name: one folder in the model repo, such as base.en, or parakeet-tdt-0.6b-v3"#)) {
+        #expect(throws: ConfigError.wrongShape(#"model: ".." is not a model name: one folder in the model repo, such as large-v3-v20240930_turbo_632MB, or parakeet-tdt-0.6b-v3"#)) {
             try Self.config(#"model = "..""#)
         }
     }

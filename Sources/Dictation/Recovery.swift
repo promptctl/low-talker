@@ -104,8 +104,9 @@ public final class Recovery {
     /// What the menu says: how much speech is kept and why it is not yet words, then every
     /// trouble with the store. Never the words, which are not yet words.
     public var lines: [String] {
-        let waiting = kept.filter { unread[$0.id] == nil }
-        let failed = kept.filter { unread[$0.id] != nil }
+        // A speech an earlier engine could not read waits for the latest to try it.
+        let waiting = kept.filter(untried)
+        let failed = kept.filter { !untried($0) }
         var lines: [String] = []
         if !waiting.isEmpty { lines.append("Speech waiting for the model: \(Self.spoken(waiting))") }
         if !failed.isEmpty {
