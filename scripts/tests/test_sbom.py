@@ -79,10 +79,10 @@ class LicenseTextTests(unittest.TestCase):
         _, properties = self.entry(spdx, text, **rule)
         self.assertIn({"name": "low-talker:license-text", "value": f"SPDX License List 3.29.0 {spdx} template"}, properties)
 
-    def assertRefused(self, spdx, text):
+    def assertRefused(self, spdx, text, **rule):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as exit:
-            self.entry(spdx, text)
+            self.entry(spdx, text, **rule)
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(stderr.getvalue(),
                          f"sbom: somepkg: LICENSE does not carry the text of {spdx} as the SPDX License List 3.29.0 "
@@ -117,18 +117,34 @@ class LicenseTextTests(unittest.TestCase):
         self.assertHeld("MIT", MIT.replace("(c)", "©"))
         self.assertHeld("MIT", MIT.replace("(c) ", ""))
 
-    def test_ids_find_their_template_without_regard_to_case(self):
-        self.assertHeld("mit", MIT)
+    def test_an_id_in_any_case_is_spelled_as_the_list_spells_it(self):
+        licenses, properties = self.entry("mit", MIT)
+        self.assertEqual(licenses[0]["license"]["id"], "MIT")
+        self.assertIn({"name": "low-talker:license-text", "value": "SPDX License List 3.29.0 MIT template"}, properties)
+
+    def test_words_run_together_are_not_the_license(self):
+        self.assertRefused("MIT", MIT.replace("Permission is hereby", "Permissionishereby"))
+
+    def test_a_var_that_opens_with_a_space_holds(self):
+        template = (scripts.parent / "sbom" / "spdx" / "BSD-3-Clause.template.txt").read_text()
+        text = rendered(template, True).replace("binary forms,", "binary forms of the theme,")
+        self.assertIn("of the theme,", text)
+        self.assertHeld("BSD-3-Clause", text)
 
     def test_the_license_match_part_is_what_is_held(self):
         self.assertHeld("MIT", GPL_NOTICE + "---\n" + MIT, licenseMatch=r"---\n(.*)")
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
-            self.entry("MIT", MIT + "---\n" + GPL_NOTICE, licenseMatch=r"---\n(.*)")
+        self.assertRefused("MIT", MIT + "---\n" + GPL_NOTICE, licenseMatch=r"---\n(.*)")
 
     def test_an_id_with_no_template_is_left_to_check_licenses(self):
         _, properties = self.entry("GPL-3.0-or-later", GPL_NOTICE)
         self.assertNotIn("low-talker:license-text", [p["name"] for p in properties])
+
+    def test_the_count_of_held_texts_reaches_vendored_components(self):
+        _, held = self.entry("MIT", MIT)
+        _, unheld = self.entry("GPL-3.0-or-later", GPL_NOTICE)
+        components = [{"properties": held, "components": [{"properties": unheld}, {"properties": held}]},
+                      {"properties": unheld}]
+        self.assertEqual(sbom.license_texts_held(components), (2, 4))
 
 
 if __name__ == "__main__":
