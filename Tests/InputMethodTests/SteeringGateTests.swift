@@ -50,9 +50,9 @@ import Testing
         let verdict = gate.verdict(at: 1).verdict
         order.add("the Return was let through: \(verdict == .pass)")
 
-        #expect(field.text == "the tail")
+        #expect(field.text == "The tail")
         #expect(order.all == [
-            "the app was answered \(InsertionAnswer.inserted(characters: 8, into: cursor.application))",
+            "the app was answered \(InsertionAnswer.inserted(characters: 8, into: cursor.application, landed: "The tail", replaced: 0))",
             "the Return was let through: true",
         ])
     }

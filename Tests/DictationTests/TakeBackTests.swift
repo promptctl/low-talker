@@ -8,15 +8,18 @@ import TestProbes
 @testable import Dictation
 
 /// What a cancel takes back, built from the inserts that landed in the order the field holds
-/// them, and asked of the fake input method, which proves it against the field by the input
-/// method's own rule (`Replacement`). [LAW:behavior-not-structure] Read off the field it leaves.
+/// them, as each was answered landing, and asked of the fake input method, which proves it against
+/// the field by the input method's own rule (`Replacement`). [LAW:behavior-not-structure] Read off
+/// the field it leaves.
 @Suite @MainActor struct TakeBackTests {
-    /// Inserts `texts` at the cursor, as a press's inserts put them, and answers the last.
-    private static func field(_ inputMethod: FakeInputMethod, _ texts: String...) async throws -> Executor.Performed {
+    /// Inserts `texts` at the cursor, as a press's inserts put them, and answers each as it landed.
+    private static func field(_ inputMethod: FakeInputMethod, _ texts: String...) async throws -> [Executor.Performed] {
         let executor = Executor(insertingThrough: inputMethod, clock: .system)
-        var last: Executor.Performed?
-        for text in texts { last = try await executor.insert(Transcript(typed: text), following: last, since: .keyUp(.now)) }
-        return try #require(last)
+        var performed: [Executor.Performed] = []
+        for text in texts {
+            performed.append(try #require(try await executor.insert(Transcript(typed: text), following: performed.last, since: .keyUp(.now))))
+        }
+        return performed
     }
 
     /// A held part of runs said by each owner, as the hold carries it ahead of an insert's words.
@@ -30,14 +33,15 @@ import TestProbes
     /// it was delivered.
     @Test func thePresssWordsOnBothSidesOfEarlierDictationAreTakenBack() async throws {
         let press = Speaker(), earlier = Speaker()
-        var landed = TakeBack()
-        landed.landed(carrying: nil, then: Transcript(typed: " hello"), of: press)
-        landed.landed(carrying: Self.carried((" first", earlier), (" again", press)), then: Transcript(typed: " there"), of: press)
         let inputMethod = FakeInputMethod()
-        let last = try await Self.field(inputMethod, " hello", " first again there")
+        let performed = try await Self.field(inputMethod, " hello", " first again there")
+        var landed = TakeBack()
+        landed.landed(performed[0].landed, carrying: nil, then: Transcript(typed: " hello"), of: press)
+        landed.landed(performed[1].landed, carrying: Self.carried((" first", earlier), (" again", press)), then: Transcript(typed: " there"), of: press)
         let since = Date.now
 
-        try await Executor(insertingThrough: inputMethod, clock: .system, log: Logger(subsystem: "lowtalker", category: "take-back-both-sides")).takeBack(landed, from: last)
+        try await Executor(insertingThrough: inputMethod, clock: .system, log: Logger(subsystem: "lowtalker", category: "take-back-both-sides"))
+            .takeBack(landed, from: performed[1])
 
         #expect(inputMethod.field == " first")
         #expect(landed.words == 3)
@@ -48,33 +52,50 @@ import TestProbes
         })
     }
 
-    /// Earlier dictation ahead of the press's first word is not between anything taken back, so
-    /// the request names only the press's words, and the earlier ones are not rewritten.
-    @Test func earlierDictationAheadOfThePresssFirstWordIsNotReplaced() async throws {
+    /// Earlier dictation ahead of the press's first word, in the same insert, is taken back with it
+    /// and put back in its place: the input method fitted the insert whole, so where the earlier
+    /// words end inside it is not known here.
+    @Test func earlierDictationInThePresssFirstInsertIsPutBack() async throws {
         let press = Speaker()
-        var landed = TakeBack()
-        landed.landed(carrying: Self.carried(("old words", nil)), then: Transcript(typed: " hello"), of: press)
         let inputMethod = FakeInputMethod()
-        let last = try await Self.field(inputMethod, "old words hello")
+        let performed = try await Self.field(inputMethod, "old words hello")
+        var landed = TakeBack()
+        landed.landed(performed[0].landed, carrying: Self.carried(("old words", nil)), then: Transcript(typed: " hello"), of: press)
 
-        try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: last)
+        try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: performed[0])
 
-        #expect(inputMethod.takeBacks == [" hello"])
+        #expect(inputMethod.takeBacks == ["old words hello"])
         #expect(inputMethod.field == "old words")
         #expect(landed.earlierWords == 2)
+    }
+
+    /// What is taken back is what the input method answered landed, not what was sent: words it
+    /// fitted to the field are found there as they were fitted.
+    @Test func wordsAreTakenBackAsTheyLanded() async throws {
+        let press = Speaker()
+        let inputMethod = FakeInputMethod()
+        inputMethod.landing { $0.capitalized }
+        let performed = try await Self.field(inputMethod, " hello there")
+        var landed = TakeBack()
+        landed.landed(performed[0].landed, carrying: nil, then: Transcript(typed: " hello there"), of: press)
+
+        try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: performed[0])
+
+        #expect(inputMethod.takeBacks == [" Hello There"])
+        #expect(inputMethod.field == "")
     }
 
     /// A field that no longer holds the stretch as the press put it is refused, and changes nothing.
     @Test func aStretchTheFieldNoLongerHoldsIsRefused() async throws {
         let press = Speaker()
-        var landed = TakeBack()
-        landed.landed(carrying: nil, then: Transcript(typed: " hello"), of: press)
-        landed.landed(carrying: Self.carried((" first", nil)), then: Transcript(typed: " there"), of: press)
         let inputMethod = FakeInputMethod()
-        let last = try await Self.field(inputMethod, " hello", " first", " typed", " there")
+        let performed = try await Self.field(inputMethod, " hello", " first", " typed", " there")
+        var landed = TakeBack()
+        landed.landed(" hello", carrying: nil, then: Transcript(typed: " hello"), of: press)
+        landed.landed(" first there", carrying: Self.carried((" first", nil)), then: Transcript(typed: " there"), of: press)
 
         await #expect(throws: InsertFailure.refused(.wordsCannotBeTakenBack)) {
-            try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: last)
+            try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: performed[3])
         }
         #expect(inputMethod.field == " hello first typed there")
     }
@@ -83,11 +104,11 @@ import TestProbes
     /// so there is nothing to take back and nothing is asked.
     @Test func onlyEarlierDictationLandedAsksNothing() async throws {
         let inputMethod = FakeInputMethod()
-        let last = try await Self.field(inputMethod, "old words")
+        let performed = try await Self.field(inputMethod, "old words")
         var landed = TakeBack()
-        landed.landed(carrying: Self.carried(("old words", nil)), then: Transcript(words: []), of: Speaker())
+        landed.landed(performed[0].landed, carrying: Self.carried(("old words", nil)), then: Transcript(words: []), of: Speaker())
 
-        try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: last)
+        try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: performed[0])
 
         #expect(inputMethod.asked == 1)
         #expect(inputMethod.field == "old words")

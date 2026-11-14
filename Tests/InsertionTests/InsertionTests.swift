@@ -12,8 +12,10 @@ import Testing
 /// way, and a test that pinned the JSON would fail on a change that broke nothing.
 @Suite struct WireTests {
     @Test(arguments: [
-        InsertionAnswer.inserted(characters: 0, into: "com.example.editor"),
-        .inserted(characters: 12, into: "com.example.editor"),
+        InsertionAnswer.inserted(characters: 0, into: "com.example.editor", landed: "", replaced: 0),
+        .inserted(characters: 12, into: "com.example.editor", landed: " Hello there", replaced: 5),
+        .inserted(characters: 12, into: "com.example.editor", landed: " hello there.", replaced: nil),
+        .inserted(characters: 12, into: "com.example.editor", landed: nil, replaced: nil),
         .refused(.noTextFieldHasFocus),
         .refused(.cursorIsInAnotherApp),
         .refused(.dictationIsInAnotherApp),
@@ -108,7 +110,7 @@ import Testing
         #expect(Wire.answer(of: aLaterRefusal) == nil)
         #expect(Wire.refusalReason(of: aLaterRefusal) == "aReasonFromALaterBuild")
         #expect(Wire.refusalReason(of: Wire.answer(.refused(.noTextFieldHasFocus))) == "noClientHasFocus")
-        #expect(Wire.refusalReason(of: Wire.answer(.inserted(characters: 1, into: anEditor))) == nil)
+        #expect(Wire.refusalReason(of: Wire.answer(.inserted(characters: 1, into: anEditor, landed: "a", replaced: 0))) == nil)
         #expect(Wire.refusalReason(of: Data("nonsense".utf8)) == nil)
         #expect(Wire.refusalReason(of: Data(#"{"refused":{"_0":"aReasonFromALaterBuild"},"inserted":{"_0":"x"}}"#.utf8)) == nil)
     }
@@ -131,7 +133,7 @@ import Testing
         #expect(Wire.greeting(of: Wire.said(nil)) == .admitted)
         #expect(Wire.greeting(of: Data()) == .admitted)
         #expect(Wire.greeting(of: Wire.answer(.refused(.senderIsNotThisInstallationsApp))) == .refused(.senderIsNotThisInstallationsApp))
-        #expect(Wire.greeting(of: Wire.answer(.inserted(characters: 1, into: "com.example.editor"))) == nil)
+        #expect(Wire.greeting(of: Wire.answer(.inserted(characters: 1, into: "com.example.editor", landed: "a", replaced: 0))) == nil)
         #expect(Wire.greeting(of: Data("nonsense".utf8)) == nil)
     }
 
@@ -153,8 +155,35 @@ import Testing
     /// An insert that reports no characters is a real answer - a zero-length request arrives
     /// as an empty request and is answered honestly - so nothing here may turn it away.
     @Test func anInsertOfNothingIntoARealAppStillCrosses() {
-        let nothing = InsertionAnswer.inserted(characters: 0, into: "com.example.editor")
+        let nothing = InsertionAnswer.inserted(characters: 0, into: "com.example.editor", landed: "", replaced: 0)
         #expect(Wire.answer(of: Wire.answer(nothing)) == nothing)
+    }
+
+    /// An input method of a build before it fitted words answers with no landed text and no
+    /// replaced count, and commits the text as sent: its answer reads, and the words it inserted
+    /// are the words the request carried. Pinned to the bytes that build writes, as the refusals
+    /// above are.
+    @Test func anInsertAnsweredByAnInputMethodThatDoesNotFitLandedAsSent() throws {
+        let answer = try #require(Wire.answer(of: Data(#"{"inserted":{"characters":6,"into":"com.example.editor"}}"#.utf8)))
+        #expect(answer == .inserted(characters: 6, into: "com.example.editor", landed: nil, replaced: nil))
+        let inserted = try answer.outcome(of: InsertRequest(" hello", into: .cursorInFront))
+        #expect(inserted == Inserted(text: " hello", into: "com.example.editor", replaced: nil))
+    }
+
+    /// An app of that build reads the count and the app off an answer of this one.
+    @Test func anAnswerThisBuildWritesHoldsWhatAnEarlierAppReads() throws {
+        let said = Wire.answer(.inserted(characters: 6, into: "com.example.editor", landed: " Hello", replaced: 3))
+        let inserted = try #require(JSONSerialization.jsonObject(with: said) as? [String: [String: Any]])["inserted"]
+        #expect(inserted?["characters"] as? Int == 6)
+        #expect(inserted?["into"] as? String == "com.example.editor")
+    }
+
+    /// The port's line says an answer without the words in it, which are the person's.
+    @Test func anAnswerIsSaidWithoutItsWords() {
+        let answer = InsertionAnswer.inserted(characters: 6, into: "com.example.editor", landed: " Hello", replaced: 3)
+        #expect(answer.description == "inserted 6 characters into com.example.editor, replacing 3 characters")
+        #expect(InsertionAnswer.inserted(characters: 6, into: "com.example.editor", landed: nil, replaced: nil).description
+            == "inserted 6 characters into com.example.editor, replacing what the field did not say")
     }
 }
 
@@ -189,11 +218,11 @@ private let anEditor = "com.example.editor"
         let seen = Seen()
         let port = try hostInsertion(name: name) { request in
             seen.record(request)
-            return .inserted(characters: request.text.count, into: anEditor)
+            return .inserted(characters: request.text.count, into: anEditor, landed: request.text, replaced: 0)
         }
 
         let answer = try await inserter(name).insert("hello there", into: .cursorInFront)
-        #expect(answer == Inserted(characters: 11, into: anEditor))
+        #expect(answer == Inserted(text: "hello there", into: anEditor, replaced: 0))
         #expect(seen.text == "hello there")
         withExtendedLifetime(port) {}
     }
@@ -205,7 +234,7 @@ private let anEditor = "com.example.editor"
         let seen = Seen()
         let port = try hostInsertion(name: name) { request in
             seen.record(request)
-            return .inserted(characters: request.text.count, into: anEditor)
+            return .inserted(characters: request.text.count, into: anEditor, landed: request.text, replaced: 0)
         }
 
         _ = try await inserter(name).insert("hello", into: .app(anEditor))
@@ -223,10 +252,10 @@ private let anEditor = "com.example.editor"
             portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: DispatchQueue(label: name),
             told: { Issue.record("the port was told \($0)") }
         ) { request in
-            Optional(request.text).map { InsertionAnswer.inserted(characters: $0.count, into: anEditor) } ?? .refused(.noTextFieldHasFocus)
+            Optional(request.text).map { InsertionAnswer.inserted(characters: $0.count, into: anEditor, landed: $0, replaced: 0) } ?? .refused(.noTextFieldHasFocus)
         }
 
-        #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(characters: 5, into: anEditor))
+        #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(text: "hello", into: anEditor, replaced: 0))
         withExtendedLifetime(port) {}
     }
 
@@ -235,9 +264,9 @@ private let anEditor = "com.example.editor"
     /// count, rather than be turned away on either end.
     @Test func emptyTextCrossesAsARequest() async throws {
         let name = aPortNobodyElseUses()
-        let port = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor) }
+        let port = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor, landed: $0.text, replaced: 0) }
 
-        #expect(try await inserter(name).insert("", into: .cursorInFront) == Inserted(characters: 0, into: anEditor))
+        #expect(try await inserter(name).insert("", into: .cursorInFront) == Inserted(text: "", into: anEditor, replaced: 0))
         withExtendedLifetime(port) {}
     }
 
@@ -245,10 +274,10 @@ private let anEditor = "com.example.editor"
     /// to it and take the same message again rather than lose it.
     @Test func aLongRequestCrossesWhole() async throws {
         let name = aPortNobodyElseUses()
-        let port = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor) }
+        let port = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor, landed: $0.text, replaced: 0) }
 
         let long = String(repeating: "dictated words ", count: 10_000)
-        #expect(try await inserter(name).insert(long, into: .cursorInFront) == Inserted(characters: long.count, into: anEditor))
+        #expect(try await inserter(name).insert(long, into: .cursorInFront) == Inserted(text: long, into: anEditor, replaced: 0))
         withExtendedLifetime(port) {}
     }
 
@@ -276,7 +305,7 @@ private let anEditor = "com.example.editor"
     /// instead of waiting out its timeout. [LAW:no-silent-failure]
     @Test func bytesThatAreNotARequestAreRefusedByName() async throws {
         let name = aPortNobodyElseUses()
-        let port = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor) }
+        let port = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor, landed: $0.text, replaced: 0) }
 
         // Sent by hand, because no `Inserter` can put bytes that are not a request onto the wire,
         // and on a thread of its own for the reason the suite doc gives.
@@ -289,7 +318,7 @@ private let anEditor = "com.example.editor"
     /// goes on answering with its own closure.
     @Test func aSecondPortOnOneNameIsRefused() async throws {
         let name = aPortNobodyElseUses()
-        let first = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor) }
+        let first = try hostInsertion(name: name) { .inserted(characters: $0.text.count, into: anEditor, landed: $0.text, replaced: 0) }
 
         #expect {
             _ = try hostInsertion(name: name) { _ in .refused(.noTextFieldHasFocus) }
@@ -297,7 +326,7 @@ private let anEditor = "com.example.editor"
             guard case PortNotHosted.nameIsTaken(name)? = error as? PortNotHosted else { return false }
             return true
         }
-        #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(characters: 5, into: anEditor))
+        #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(text: "hello", into: anEditor, replaced: 0))
         withExtendedLifetime(first) {}
     }
 }
@@ -316,7 +345,7 @@ private let anEditor = "com.example.editor"
         let us = try OwnProcess.identity()
         let port = try InsertionPort(portName: name, senders: us, build: aBuild, queue: DispatchQueue(label: name), told: told.record) { request in
             seen.record(request)
-            return .inserted(characters: request.text.count, into: anEditor)
+            return .inserted(characters: request.text.count, into: anEditor, landed: request.text, replaced: 0)
         }
 
         let printed = try await Probe.send("type this", to: name, answeredBy: us)
@@ -340,7 +369,7 @@ private let anEditor = "com.example.editor"
             portName: name, senders: probe.identity, build: aBuild, queue: DispatchQueue(label: name), told: { Issue.record("told \($0)") }
         ) { request in
             seen.record(request)
-            return .inserted(characters: request.text.count, into: anEditor)
+            return .inserted(characters: request.text.count, into: anEditor, landed: request.text, replaced: 0)
         }
 
         let printed = try await Probe.send("type this", to: name, answeredBy: try OwnProcess.identity(), from: probe.url)
@@ -358,7 +387,7 @@ private let anEditor = "com.example.editor"
         defer { try? FileManager.default.removeItem(at: probe.url) }
         let required = PeerIdentity.signed(identifier: "ai.promptctl.low-talker.test.app", certificate: probe.certificate)
         let port = try InsertionPort(portName: name, senders: required, build: aBuild, queue: DispatchQueue(label: name), told: told.record) {
-            .inserted(characters: $0.text.count, into: anEditor)
+            .inserted(characters: $0.text.count, into: anEditor, landed: $0.text, replaced: 0)
         }
 
         let printed = try await Probe.send("type this", to: name, answeredBy: try OwnProcess.identity(), from: probe.url)
@@ -377,7 +406,7 @@ private let anEditor = "com.example.editor"
         let seen = Seen()
         let port = try hostInsertion(name: name) { request in
             seen.record(request)
-            return .inserted(characters: request.text.count, into: anEditor)
+            return .inserted(characters: request.text.count, into: anEditor, landed: request.text, replaced: 0)
         }
 
         let us = try OwnProcess.identity()
@@ -399,10 +428,10 @@ private let anEditor = "com.example.editor"
         let seen = Seen()
         let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: said, queue: DispatchQueue(label: name), told: { _ in }) { request in
             seen.record(request)
-            return .inserted(characters: request.text.count, into: anEditor)
+            return .inserted(characters: request.text.count, into: anEditor, landed: request.text, replaced: 0)
         }
 
-        #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(characters: 5, into: anEditor))
+        #expect(try await inserter(name).insert("hello", into: .cursorInFront) == Inserted(text: "hello", into: anEditor, replaced: 0))
         #expect(seen.text == "hello")
         withExtendedLifetime(port) {}
     }
@@ -523,7 +552,7 @@ private let anEditor = "com.example.editor"
         // port then drains and answers what was queued, to nobody.
         defer { held.resume() }
         let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: held, told: { _ in }) {
-            .inserted(characters: $0.text.count, into: anEditor)
+            .inserted(characters: $0.text.count, into: anEditor, landed: $0.text, replaced: 0)
         }
 
         let budget = Duration.milliseconds(200)
@@ -585,7 +614,7 @@ private let anEditor = "com.example.editor"
         defer { done.signal() }
         let port = try InsertionPort(portName: name, senders: try OwnProcess.identity(), build: aBuild, queue: DispatchQueue(label: name), told: { _ in }) { request in
             done.wait()
-            return .inserted(characters: request.text.count, into: anEditor)
+            return .inserted(characters: request.text.count, into: anEditor, landed: request.text, replaced: 0)
         }
 
         // Quartered, because the four phases of an insert share the caller's budget and the

@@ -353,7 +353,7 @@ public final class Dictation {
             state.withLock { state in
                 if let performed = placed.performed {
                     state.performed.append(performed)
-                    state.provenance.takeBack.landed(carrying: placed.carried, then: words, of: self)
+                    state.provenance.takeBack.landed(performed.landed, carrying: placed.carried, then: words, of: self)
                 }
                 state.words += placed.words
             }

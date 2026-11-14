@@ -90,7 +90,8 @@ import TestProbes
     }
 
     /// Earlier dictation the press's first insert carried into the field was delivered, and
-    /// stays; only what the press said is taken back, and the request never carries held words.
+    /// stays: the insert is taken back whole, as the input method fitted it, and the earlier words
+    /// are put back in its place.
     @Test func earlierWordsTheFirstInsertDeliveredStayInTheField() async throws {
         let rig = try await Rig(hearing: Self.engine())
         try await Self.holdingEarlierWords(rig)
@@ -101,7 +102,7 @@ import TestProbes
         let cancelled = try #require(await rig.report().cancelled)
 
         #expect(rig.inputMethod.field == "old words")
-        #expect(rig.inputMethod.takeBacks == [" hello"])
+        #expect(rig.inputMethod.takeBacks == ["old words hello"])
         #expect(cancelled.takenBack == 1)
         #expect(cancelled.earlierWordsLanded == 2)
         #expect(rig.hold.held == nil)
@@ -123,7 +124,7 @@ import TestProbes
         _ = try #require(await rig.report().cancelled)
 
         #expect(rig.inputMethod.field == "yes")
-        #expect(rig.inputMethod.takeBacks == ["yes"])
+        #expect(rig.inputMethod.takeBacks == ["yesyes"])
     }
 
     // MARK: - what no cursor took
@@ -176,7 +177,7 @@ import TestProbes
         let cancelled = try #require(await rig.report().cancelled)
 
         #expect(rig.inputMethod.field == "old words")
-        #expect(rig.inputMethod.takeBacks == [" hello there"])
+        #expect(rig.inputMethod.takeBacks == ["old words hello there"])
         #expect(cancelled.takenBack == 2)
         #expect(cancelled.earlierWordsLanded == 2)
         #expect(rig.hold.held == nil)

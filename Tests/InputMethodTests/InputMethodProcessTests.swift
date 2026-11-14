@@ -26,8 +26,8 @@ import Testing
         let controller = assembled.controller()
 
         controller.activate(field)
-        #expect(await insert("hello", through: assembled) == .inserted(characters: 5, into: "com.example.editor"))
-        #expect(field.text == "hello")
+        #expect(await insert("hello", through: assembled) == .inserted(characters: 5, into: "com.example.editor", landed: "Hello", replaced: 0))
+        #expect(field.text == "Hello")
 
         controller.deactivateServer(nil)
         #expect(await insert(" again", through: assembled) == .refused(.noTextFieldHasFocus))
@@ -35,7 +35,7 @@ import Testing
         controller.activate(field)
         assembled.process.focused.applicationQuit("com.example.editor")
         #expect(await insert(" again", through: assembled) == .refused(.noTextFieldHasFocus))
-        #expect(field.text == "hello")
+        #expect(field.text == "Hello")
         withExtendedLifetime(controller) {}
         #expect(assembled.recorded.withLock { $0 } == [
             .footprint(0), .cursorArrived(in: "com.example.editor"),

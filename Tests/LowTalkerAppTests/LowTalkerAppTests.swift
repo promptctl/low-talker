@@ -209,6 +209,28 @@ final class Recorded<Value: Sendable>: Sendable {
         #expect(rig.lines.contains("config: running on the file as last saved"))
     }
 
+    /// A press whose words took the place of selected text says how much in the menu, until the
+    /// next press begins; one that replaced nothing says nothing.
+    @Test func aPressThatReplacedASelectionSaysSoUntilTheNextPress() async {
+        let rig = AppRig()
+        await rig.launched()
+        await rig.hold()
+        await rig.until { rig.reports.count == 1 }
+        #expect(rig.app.lastReplacement == nil)
+
+        rig.inputMethod.selecting(5)
+        await rig.hold()
+        await rig.until { rig.reports.count == 2 }
+        #expect(rig.inputMethod.field == "hello")
+        #expect(rig.app.lastReplacement == "Last dictation replaced 5 selected characters")
+
+        rig.chord(.down)
+        await rig.until { rig.app.lastReplacement == nil }
+        await rig.speak()
+        rig.chord(.up)
+        await rig.until { rig.reports.count == 3 }
+    }
+
     /// A microphone macOS was never asked about leaves the hotkey down saying where to allow it,
     /// and the guided setup is shown.
     @Test func aLaunchWithTheMicrophoneWithheldSaysWhereToAllowIt() async {

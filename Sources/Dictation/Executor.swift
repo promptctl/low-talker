@@ -54,7 +54,13 @@ public struct Executor {
     /// One insert, done. The time is from the key event it is timed from to the input
     /// method's answer.
     public struct Performed: CustomStringConvertible, Sendable {
-        public let characters: Int
+        /// The text as it landed, which the input method fitted to the field: what a take-back
+        /// finds there. Never said: it is the person's words.
+        public let landed: String
+        /// How many characters of the field's own it took the place of, nil where the input method
+        /// could not read the field.
+        public let replaced: Int?
+        public var characters: Int { landed.count }
         /// The app whose cursor took the words, as the input method names it - not
         /// necessarily the one in front at key-down: the person can move between the chord
         /// and the dictation's first words being ready, and those go where the cursor is then.
@@ -64,7 +70,9 @@ public struct Executor {
         public let since: Since.Key
 
         public var description: String {
-            "inserted \(counted(characters, "character", "characters")) at the cursor in \(into.rawValue), \(since.rawValue) to acknowledged \(Int(acknowledged / .milliseconds(1))) ms"
+            "inserted \(counted(characters, "character", "characters")) at the cursor in \(into.rawValue), "
+                + (replaced.map { "in place of \(counted($0, "character", "characters")), " } ?? "into a field the input method could not read, ")
+                + "\(since.rawValue) to acknowledged \(Int(acknowledged / .milliseconds(1))) ms"
         }
     }
 
@@ -84,7 +92,8 @@ public struct Executor {
         // `Inserter` says in its own contract that the blocking call must not pump it.
         // [LAW:no-ambient-temporal-coupling]
         let inserted = try await inserter.insert(transcript.text, into: destination)
-        let done = Performed(characters: inserted.characters, into: BundleID(rawValue: inserted.into), acknowledged: clock.now - since.instant, since: since.key)
+        let done = Performed(landed: inserted.text, replaced: inserted.replaced, into: BundleID(rawValue: inserted.into),
+                             acknowledged: clock.now - since.instant, since: since.key)
         log.info("\(done.description, privacy: .public)")
         return done
     }

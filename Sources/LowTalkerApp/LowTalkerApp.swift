@@ -44,6 +44,9 @@ public final class LowTalkerApp {
     public private(set) var activity: Dictation.Activity = .idle
     /// Why the last press's words reached no cursor, while no press has begun since.
     public private(set) var lastFailure: String?
+    /// How much of the field's own text the last press's words took the place of, while no press
+    /// has begun since: a selection is replaced whether or not the person meant to keep it.
+    public private(set) var lastReplacement: String?
 
     /// The config this app runs on, read once at launch and again at every save: what the
     /// microphone does at rest, the modes the hotkey listens for and where the server listens,
@@ -604,7 +607,7 @@ public final class LowTalkerApp {
         let hearing = notices.flatMap { stop in
             Result {
                 // A blocked chord is no press, so the last press's failure stands.
-                try hotkey.start(feeding: dictation) { [unowned self] in lastFailure = nil }
+                try hotkey.start(feeding: dictation) { [unowned self] in (lastFailure, lastReplacement) = (nil, nil) }
                 return stop
             }.mapError { error in
                 stop()
@@ -678,7 +681,15 @@ public final class LowTalkerApp {
         // [LAW:no-silent-failure] The words went nowhere, or only some of them did, so the menu
         // says why.
         if case .failed(let failed) = press.outcome { lastFailure = failureLine(failed.failure) }
+        if case .session(let session) = press.outcome { lastReplacement = Self.replacementLine(session.performed) }
         ports.told(.press(press))
+    }
+
+    /// What the menu says of a press whose inserts took the place of the field's own text, or nil
+    /// for one that replaced none.
+    static func replacementLine(_ performed: [Executor.Performed]) -> String? {
+        let replaced = performed.compactMap(\.replaced).reduce(0, +)
+        return replaced == 0 ? nil : "Last dictation replaced \(counted(replaced, "selected character", "selected characters"))"
     }
 
     /// A failure that was no press: the loop's sessions could not be waited out.

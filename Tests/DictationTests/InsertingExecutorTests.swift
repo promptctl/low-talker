@@ -32,7 +32,23 @@ import Testing
         #expect(inputMethod.inserted == ["héllo there"])
         #expect(performed.into == Self.textEdit)
         #expect(performed.characters == 11)
-        #expect("\(performed)".hasPrefix("inserted 11 characters at the cursor in com.apple.TextEdit, key-up to acknowledged "))
+        #expect("\(performed)".hasPrefix("inserted 11 characters at the cursor in com.apple.TextEdit, in place of 0 characters, key-up to acknowledged "))
+    }
+
+    /// What landed is what the input method answered landed, and the line says how much of the
+    /// field's own text it replaced, never the words.
+    @Test func whatLandedIsWhatTheInputMethodAnswered() async throws {
+        let inputMethod = Self.inserting(into: Self.textEdit)
+        inputMethod.typing("Good morning")
+        inputMethod.selecting(7)
+        inputMethod.landing { $0.uppercased() }
+        let performed = try #require(await Executor(insertingThrough: inputMethod, clock: .system)
+            .insert(Transcript(typed: " evening"), following: nil, since: .keyUp(.now)))
+
+        #expect(performed.landed == " EVENING")
+        #expect(performed.replaced == 7)
+        #expect(inputMethod.field == "Good  EVENING")
+        #expect("\(performed)".hasPrefix("inserted 8 characters at the cursor in com.apple.TextEdit, in place of 7 characters, key-up to acknowledged "))
     }
 
     /// The app the outcome names is the app the input method says it reached, which is not
@@ -44,7 +60,7 @@ import Testing
             .insert(Transcript(typed: "hi"), following: nil, since: .keyUp(.now)))
 
         #expect(performed.into == Self.slack)
-        #expect("\(performed)".hasPrefix("inserted 2 characters at the cursor in com.tinyspeck.slackmacgap, key-up to acknowledged "))
+        #expect("\(performed)".hasPrefix("inserted 2 characters at the cursor in com.tinyspeck.slackmacgap, in place of 0 characters, key-up to acknowledged "))
     }
 
     /// A dictation's first words go to the cursor in front, and each insert after them only

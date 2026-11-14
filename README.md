@@ -16,6 +16,8 @@ LowTalker lives in the menu bar and has no window to keep open. The default chor
 
 The text goes in wherever the cursor is, in any app that accepts typing: TextEdit, Safari, Chrome, iTerm2 and VS Code have all been checked. It is not inserted into password fields or other fields that macOS protects with Secure Event Input.
 
+Where the app lets an input method read the field, the words are fitted to the text around them, so a dictation reads as if you had typed it there. It gets a space where its neighbours need one, and none beside a bracket or a slash or in Chinese or Japanese text. It starts with a capital where it starts a sentence. Its closing period is dropped where the text after it carries on the sentence. Nothing else changes: a question mark or exclamation mark stays, and nothing is lowercased. Selected text is replaced by the dictation, and the menu says how many characters were replaced. An app that takes the words but does not let the field be read gets them exactly as the model heard them.
+
 When a dictation, the model, the hotkey, the microphone, the server or a config save fails, the menu says why on a line marked with a warning sign. Click that line to copy its full text.
 
 ## Install

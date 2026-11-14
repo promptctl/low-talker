@@ -127,7 +127,7 @@ public struct InputMethodInserter: Inserter {
         try greet(through: exchange)
         let data = try say(Wire.request(request), id: Wire.insert, through: exchange, at: .words)
         guard let answer = Wire.answer(of: data) else { throw unread(data, at: .words) }
-        return try answer.outcome()
+        return try answer.outcome(of: request)
     }
 
     /// The greeting every insert is preceded by. Who holds the name is asked before a word is
