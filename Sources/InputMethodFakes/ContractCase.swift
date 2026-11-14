@@ -47,6 +47,7 @@ public nonisolated struct ContractCase: Sendable, CustomStringConvertible {
 
     public var description: String {
         "\(profile), \(act) into \(holding.debugDescription) with \(selected) selected" + (maxLength.map { " (maxlength \($0))" } ?? "")
+            + ", reading \(reads)"
     }
 
     /// Makes the call on `client` and says every way it disagreed with the case; nothing, when it

@@ -1,6 +1,7 @@
 import Foundation
 @testable import InputMethod
 import InputMethodFakes
+import TestProbes
 import Testing
 
 /// What a read of the focused field says, over the fake answering as each profile does, and the
@@ -38,9 +39,21 @@ import Testing
         let (reading, event) = FieldReading.read(from: field)
 
         #expect(reading == .readable(DocumentContext(selection: NSRange(location: 6, length: 0), selected: "", before: "alpha ", after: "bravo")))
-        let searched = [1_000, 500, 250, 125, 62, 31, 15, 7, 3, 5, 6].map { Self.text(6, $0) }
+        let searched = [1_000, 1, 2, 4, 8, 6, 5].map { Self.text(6, $0) }
         #expect(field.calls == [.givesDocumentAccess, .selectedRange, Self.text(0, 6)] + searched)
-        #expect(event == .readable(selection: NSRange(location: 6, length: 0), before: 6, after: 5, asks: 12))
+        #expect(event == .readable(selection: NSRange(location: 6, length: 0), before: 6, after: 5, asks: 8))
+    }
+
+    /// A caret at the end of a field answering nothing past it settles in one ask after the whole
+    /// read, not a search down from the bound.
+    @Test func aCaretAtTheFieldsEndIsSettledInTwoAsks() {
+        let field = Self.field(.appKit, holding: "alpha", selecting: NSRange(location: 5, length: 0))
+
+        let (reading, event) = FieldReading.read(from: field)
+
+        #expect(reading == .readable(DocumentContext(selection: NSRange(location: 5, length: 0), selected: "", before: "alpha", after: "")))
+        #expect(field.calls == [.givesDocumentAccess, .selectedRange, Self.text(0, 5), Self.text(5, 1_000), Self.text(5, 1)])
+        #expect(event == .readable(selection: NSRange(location: 5, length: 0), before: 5, after: 0, asks: 3))
     }
 
     /// A selection is read whole, and the text before it and after it.
@@ -126,14 +139,17 @@ import Testing
         #expect(event == .unreadable(reason, asks: 1))
     }
 
-    /// A cursor reads its own client, and only it.
-    @Test func aCursorReadsItsClient() throws {
+    /// A cursor reads its own client, and only it, and logs the read's event.
+    @Test func aCursorReadsItsClient() async throws {
         let field = Self.field(.appKitAnsweringWhatIsThere, holding: "alpha bravo", selecting: NSRange(location: 6, length: 0))
         let cursor = try field.cursor()
         let made = field.calls.count
+        let since = Date.now
 
         #expect(cursor.read() == .readable(DocumentContext(selection: NSRange(location: 6, length: 0), selected: "", before: "alpha ", after: "bravo")))
         #expect(Array(field.calls.dropFirst(made)) == [.givesDocumentAccess, .selectedRange, Self.text(0, 6), Self.text(6, 1_000)])
+        let event = FieldReading.Event.readable(selection: NSRange(location: 6, length: 0), before: 6, after: 5, asks: 2)
+        #expect(try await loggedLines(category: "insert", since: since).contains("read the field of \(cursor): \(event)"))
     }
 
     /// The event says lengths, ranges and reasons, never the field's text.

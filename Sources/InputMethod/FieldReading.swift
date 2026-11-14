@@ -2,9 +2,9 @@ import Foundation
 
 /// What a client says of the text around its selection, or its own reason that it cannot be read.
 ///
-/// [LAW:parse-dont-validate] `read(from:)` is the one place a client's answers about its field's
-/// text are checked. Past it, a `DocumentContext` is text the client said is there, at the place
-/// its own selection puts it, and nothing downstream asks again.
+/// [LAW:parse-dont-validate] `read(from:)` checks a client's answers about the text around its
+/// selection. Past it, a `DocumentContext` is text the client said is there, at the place its own
+/// selection puts it, and nothing downstream asks again.
 public nonisolated enum FieldReading: Equatable, Sendable {
     case readable(DocumentContext)
     case unreadable(Unreadable)
@@ -98,10 +98,13 @@ public extension FieldReading {
             if let answer = text(whole) {
                 return answer.utf16.count <= bound ? .success(answer) : .failure(.contradicted(asked: whole, answered: answer.utf16.count))
             }
-            // Binary search: `known` answers in full, and a range `past` units long answers nothing.
+            // Galloping search: `known` answers in full, and a range `past` units long answers
+            // nothing. Doubling out from the selection's end settles a caret at the field's end,
+            // where dictation mostly is, in one more ask, and asks a client that has stopped
+            // answering once more rather than log2(bound) times; past the first nothing, it bisects.
             var known = "", past = bound
             while past - known.utf16.count > 1 {
-                let probe = NSRange(location: end, length: (known.utf16.count + past) / 2)
+                let probe = NSRange(location: end, length: min(max(1, 2 * known.utf16.count), (known.utf16.count + past) / 2))
                 switch text(probe) {
                 case nil: past = probe.length
                 case let answer? where answer.utf16.count == probe.length: known = answer
