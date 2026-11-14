@@ -7,17 +7,25 @@
 /// `Clock` leaves its instant abstract and an existential of it cannot be asked `now`. Its
 /// instant is the one key events and microphone buffers are already stamped on, so a figure
 /// timed from one of them is a subtraction on one clock.
-public struct HostClock: Clock, Sendable {
+public struct HostClock: Clock, Sendable, Equatable {
     public typealias Instant = HostTime
 
     private let read: @Sendable () -> HostTime
     private let wait: @Sendable (HostTime) async throws -> Void
+    /// What makes this clock itself: each one built is a clock of its own, and its copies are it.
+    private final class Identity: Sendable {}
+    private let identity = Identity()
 
     /// A clock that reads `now` and sleeps with `sleepUntil`, which throws `CancellationError`
     /// when the task sleeping is cancelled.
     public init(now: @escaping @Sendable () -> HostTime, sleepUntil: @escaping @Sendable (HostTime) async throws -> Void) {
         read = now
         wait = sleepUntil
+    }
+
+    /// Whether the two are one clock, so a moment read on one is a moment of the other.
+    public static func == (clock: HostClock, other: HostClock) -> Bool {
+        clock.identity === other.identity
     }
 
     public var now: HostTime { read() }

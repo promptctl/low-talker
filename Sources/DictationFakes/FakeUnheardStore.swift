@@ -36,6 +36,8 @@ public final class FakeUnheardStore: UnheardStore, Sendable {
         state.withLock { state in
             let setAside = state.files.filter { state.damaged.contains($0.entry.id) }.map { "kept speech in \($0.entry.id) could not be read (the file is unreadable); it was set aside" }
             state.files.removeAll { state.damaged.contains($0.entry.id) }
+            // Moved out of the listing, as `UnheardFiles` moves it: no longer there to read.
+            state.damaged.removeAll()
             return UnheardRead(entries: state.files.map(\.entry), setAside: setAside)
         }
     }

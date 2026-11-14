@@ -35,8 +35,11 @@ public final class FakeModifierFeed: ModifierFeed {
         return { installation.disposed = true }
     }
 
-    /// A modifier key moved, and every handler still installed is told.
+    /// A modifier key moved, and every handler still installed is told. [LAW:single-enforcer]
+    /// A key is told once it has been stamped, so a stamp later than the feed's clock is a test
+    /// describing a keyboard that cannot exist, and it stops here.
     public func type(_ event: KeyEvent) {
+        precondition(event.time <= clock.now, "a key stamped at \(event.time.uptime) was typed while the feed's clock read \(clock.now.uptime)")
         for installation in installations where !installation.disposed { installation.handle(event) }
     }
 }

@@ -26,11 +26,11 @@ private struct BadBuffer: Error {}
             try hotkey.start(feeding: rig.dictation)
         }
 
-        /// Right Option going down or up, `ms` milliseconds after the rig's clock, which the loop's
-        /// marks are on.
-        func chord(_ direction: KeyEvent.Direction, atMilliseconds ms: Int64) {
-            // The clock moves to the stamp: a key is typed at the moment it is stamped.
-            rig.clock.set(to: HostTime(uptime: rig.now.uptime + .milliseconds(ms)))
+        /// Right Option going down or up `ms` milliseconds from now on the rig's clock, which the
+        /// loop's marks are on, and stamped at that moment.
+        func chord(_ direction: KeyEvent.Direction, afterMilliseconds ms: Int64) {
+            // The time passes, and the key is stamped at the moment it is typed.
+            rig.clock.advance(by: .milliseconds(ms))
             feed.type(KeyEvent(
                 key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [],
                 time: rig.now, lastTyped: HostTime(uptime: .seconds(-60))))
@@ -50,18 +50,18 @@ private struct BadBuffer: Error {}
         let loop = try await Loop()
         loop.rig.hardware.failingToLaunch = BadBuffer()
 
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
-        loop.chord(.up, atMilliseconds: 100)
+        loop.chord(.up, afterMilliseconds: 100)
         await loop.delivered()
         #expect(loop.hotkey.phase == .idle)
         #expect(await loop.rig.report().failure is NoMicrophone)
 
         loop.rig.hardware.failingToLaunch = nil
-        loop.chord(.down, atMilliseconds: 1000)
+        loop.chord(.down, afterMilliseconds: 900)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
-        loop.chord(.up, atMilliseconds: 1500)
+        loop.chord(.up, afterMilliseconds: 500)
         await loop.delivered()
 
         #expect(try await loop.rig.session().transcription.transcript.text == "a")
@@ -75,17 +75,17 @@ private struct BadBuffer: Error {}
         let loop = try await Loop()
         loop.rig.hardware.failingToLaunch = BadBuffer()
 
-        loop.chord(.down, atMilliseconds: 0)
-        loop.chord(.up, atMilliseconds: 100)
+        loop.chord(.down, afterMilliseconds: 0)
+        loop.chord(.up, afterMilliseconds: 100)
         await loop.delivered()
         #expect(loop.hotkey.phase == .idle)
         #expect(await loop.rig.report().failure is NoMicrophone)
 
         loop.rig.hardware.failingToLaunch = nil
-        loop.chord(.down, atMilliseconds: 1000)
+        loop.chord(.down, afterMilliseconds: 900)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
-        loop.chord(.up, atMilliseconds: 1500)
+        loop.chord(.up, afterMilliseconds: 500)
         await loop.delivered()
         #expect(try await loop.rig.session().transcription.transcript.text == "a")
     }
@@ -96,17 +96,17 @@ private struct BadBuffer: Error {}
         let loop = try await Loop()
         loop.rig.hardware.failingToLaunch = BadBuffer()
 
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
-        loop.chord(.up, atMilliseconds: 600)
+        loop.chord(.up, afterMilliseconds: 600)
         await loop.delivered()
         #expect(await loop.rig.report().failure is NoMicrophone)
 
         loop.rig.hardware.failingToLaunch = nil
-        loop.chord(.down, atMilliseconds: 1000)
+        loop.chord(.down, afterMilliseconds: 400)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
-        loop.chord(.up, atMilliseconds: 1500)
+        loop.chord(.up, afterMilliseconds: 500)
         await loop.delivered()
         #expect(try await loop.rig.session().transcription.transcript.text == "a")
     }
@@ -115,10 +115,10 @@ private struct BadBuffer: Error {}
     @Test(.timeLimit(.minutes(1))) func aHeardTapStillLatches() async throws {
         let loop = try await Loop()
 
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
-        loop.chord(.up, atMilliseconds: 100)
+        loop.chord(.up, afterMilliseconds: 100)
         await loop.delivered()
 
         #expect(loop.hotkey.phase == .latched(Mode.dictation, since: Rig.origin))

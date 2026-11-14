@@ -73,7 +73,7 @@ private let fnBit: UInt64 = 0x800000
 private func installed(heard: @escaping @MainActor (KeyEvent) -> Void, noted: @escaping @MainActor (String) -> Void = { _ in },
                        session: @escaping @MainActor () -> SessionModifiers = { SessionModifiers(session: 0, fnKeyDown: false, changedAt: 0) })
     -> ModifierMonitor.Installed {
-    let installed = ModifierMonitor.Installed(told: ToldModifiers(held: []), session: session, noted: noted)
+    let installed = ModifierMonitor.Installed(told: ToldModifiers(held: []), session: session, noted: noted, clock: .system)
     installed.open = heard
     return installed
 }

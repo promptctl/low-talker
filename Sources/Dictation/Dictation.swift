@@ -561,7 +561,7 @@ public final class Dictation {
     private let executor: Executor
     /// [LAW:one-source-of-truth] The press is timed on the clock its inserts are acknowledged on,
     /// so no figure of a press subtracts a moment of one clock from a moment of another.
-    private var clock: HostClock { executor.clock }
+    var clock: HostClock { executor.clock }
     private let hold: Hold
     private let report: @Sendable @MainActor (Report) -> Void
     private let showing: @Sendable @MainActor (Activity) -> Void

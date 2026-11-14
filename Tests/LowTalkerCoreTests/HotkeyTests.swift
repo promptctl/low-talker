@@ -210,13 +210,15 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
     /// What the hotkey did is a record a test reads: each transition handed on, and the press the
     /// loop refused at `began`, whose ending is a transition of its own.
     @Test func aTransitionAndARefusedPressAreRecorded() async throws {
-        let feed = FakeModifierFeed(on: ManualHostClock(startingAt: at(50)).clock)
+        let clock = ManualHostClock()
+        let feed = FakeModifierFeed(on: clock.clock)
         let records = Records()
         let hotkey = Hotkey(modes: Config.default.modes, feed: feed) { records.all.append($0) }
         try hotkey.start(refusing(Box()))
         feed.type(rightOption(.down, at: 0))
         await settle()
         await settle()
+        clock.set(to: at(100))
         feed.type(rightOption(.up, at: 100))
         await settle()
         #expect(records.all == [
@@ -243,7 +245,8 @@ private func rightOption(_ direction: KeyEvent.Direction, at ms: Int64, typed: I
 @MainActor
 @Suite struct ModifierFeedContractTests {
     static let fake = ModifierFeedContract { refusing in
-        let feed = keyboard(refusing: refusing ? Refused() : nil)
+        // The contract's keys are stamped up to 30 ms: the clock reads past them.
+        let feed = FakeModifierFeed(on: ManualHostClock(startingAt: at(30)).clock, refusing: refusing ? Refused() : nil)
         return ModifierFeedContract.Subject(feed: feed, type: feed.type)
     }
 

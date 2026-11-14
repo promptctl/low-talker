@@ -186,13 +186,14 @@ public final class FakeHardware: AudioHardware {
     /// Another device became the default input, and the notification saying so has not landed yet.
     public func moveDefaultInput() { defaultInput += 1 }
 
-    /// The notification that the default input changed lands.
     /// The system posts that the default input moved, which reaches whatever watches it now:
     /// nothing, once the watch is disposed.
     public func postDefaultInputChange() {
         onDefaultInputChange?()
     }
 
+    /// The notification that the default input changed lands at the watch, which the test
+    /// calling this says is there: nothing watching fails it.
     public func announceDefaultInput() throws {
         let onChange = try #require(onDefaultInputChange, "nothing is watching the default input")
         onChange()

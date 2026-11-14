@@ -46,11 +46,11 @@ private struct BadBuffer: Error {}
             steering = KeySteering(dictation: dictation, hotkey: hotkey, holdsReturn: { holdsReturn }, dismissing: { box.escape(cancelling: $0, hold: hold) })
         }
 
-        /// Right Option going down or up, `held` milliseconds into the press, stamped on the
-        /// clock the loop's marks are on.
-        func chord(_ direction: KeyEvent.Direction, atMilliseconds ms: Int64) {
-            // The clock moves to the stamp: a key is typed at the moment it is stamped.
-            rig.clock.set(to: HostTime(uptime: rig.now.uptime + .milliseconds(ms)))
+        /// Right Option going down or up `ms` milliseconds from now on the rig's clock, which the
+        /// loop's marks are on, and stamped at that moment.
+        func chord(_ direction: KeyEvent.Direction, afterMilliseconds ms: Int64) {
+            // The time passes, and the key is stamped at the moment it is typed.
+            rig.clock.advance(by: .milliseconds(ms))
             feed.type(KeyEvent(
                 key: .rightOption, direction: direction, modifiers: direction == .down ? [.rightOption] : [],
                 time: rig.now, lastTyped: HostTime(uptime: .seconds(-60))))
@@ -62,19 +62,19 @@ private struct BadBuffer: Error {}
 
         /// A tap, which latches the press open, with words spoken into it.
         func latchedPress() async {
-            chord(.down, atMilliseconds: 0)
+            chord(.down, afterMilliseconds: 0)
             await delivered()
             rig.speak([1, 2, 3])
-            chord(.up, atMilliseconds: 100)
+            chord(.up, afterMilliseconds: 100)
             await delivered()
         }
 
         /// A hold, `samples` spoken into it, and its release.
         func release(speaking samples: [Float]) async {
-            chord(.down, atMilliseconds: 0)
+            chord(.down, afterMilliseconds: 0)
             await delivered()
             rig.speak(samples)
-            chord(.up, atMilliseconds: 400)
+            chord(.up, afterMilliseconds: 400)
             await delivered()
         }
 
@@ -139,13 +139,13 @@ private struct BadBuffer: Error {}
     /// release after it ends nothing.
     @Test(.timeLimit(.minutes(1))) func anEscapeTypedIntoAHeldPressCancelsIt() async throws {
         let loop = try await Loop()
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
 
         loop.steering.escape()
 
-        loop.chord(.up, atMilliseconds: 400)
+        loop.chord(.up, afterMilliseconds: 400)
         await loop.delivered()
         _ = try #require(await loop.rig.report().cancelled)
         #expect(loop.hotkey.phase == .idle)
@@ -361,10 +361,10 @@ private struct BadBuffer: Error {}
         loop.rig.inputMethod.hold()
         await loop.release(speaking: [1, 2, 3])
         await loop.rig.until { loop.rig.inputMethod.holding == 1 }
-        loop.chord(.down, atMilliseconds: 1000)
+        loop.chord(.down, afterMilliseconds: 1000)
         await loop.delivered()
         loop.rig.speak([4, 5, 6])
-        loop.chord(.up, atMilliseconds: 1400)
+        loop.chord(.up, afterMilliseconds: 400)
 
         loop.escapeTheBox()
         #expect(loop.rig.shown.activities.last == .transcribing)
@@ -388,7 +388,7 @@ private struct BadBuffer: Error {}
             }
         })
         let loop = try Loop(over: rig)
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
         loop.hotkey.stop()
@@ -408,11 +408,11 @@ private struct BadBuffer: Error {}
     /// not undo it.
     @Test(.timeLimit(.minutes(1))) func aPressCancelledBeforeItsReleaseIsDeliveredStaysCancelled() async throws {
         let loop = try await Loop()
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
 
-        loop.chord(.up, atMilliseconds: 400)
+        loop.chord(.up, afterMilliseconds: 400)
         loop.escapeTheBox()
         await loop.delivered()
 
@@ -429,12 +429,12 @@ private struct BadBuffer: Error {}
             return Transcript(typed: " one")
         })
         await loop.release(speaking: [1, 2, 3])
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
 
         loop.escapeTheBox()
-        loop.chord(.up, atMilliseconds: 400)
+        loop.chord(.up, afterMilliseconds: 400)
         await loop.delivered()
         gate.open()
 
@@ -471,11 +471,11 @@ private struct BadBuffer: Error {}
             return Transcript(typed: " one")
         })
         await loop.release(speaking: [1, 2, 3])
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
 
         loop.escapeTheBox()
         await loop.delivered()
-        loop.chord(.up, atMilliseconds: 400)
+        loop.chord(.up, afterMilliseconds: 400)
         await loop.delivered()
         gate.open()
 
@@ -493,12 +493,12 @@ private struct BadBuffer: Error {}
         })
         await loop.release(speaking: [1, 2, 3])
         loop.rig.hardware.failingToLaunch = BadBuffer()
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
 
         loop.escapeTheBox()
         gate.open()
-        loop.chord(.up, atMilliseconds: 400)
+        loop.chord(.up, afterMilliseconds: 400)
         await loop.delivered()
 
         _ = try await loop.rig.report().get()
@@ -513,7 +513,7 @@ private struct BadBuffer: Error {}
     @Test(.timeLimit(.minutes(1))) func anEscapeTheAppTakesCancelsThePressTheBoxShowed() async throws {
         let earlier = Held.unplaced(part(" earlier words", "WARNING: no text field took them"))
         let loop = try await Loop(keeping: FakeHeldStore(keeping: earlier))
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
         try loop.showTheBox()
@@ -525,7 +525,7 @@ private struct BadBuffer: Error {}
         #expect(loop.panel.shown.last == .away)
         #expect(loop.rig.hold.held == nil)
         #expect(loop.rig.hold.dismissed == earlier)
-        loop.chord(.up, atMilliseconds: 400)
+        loop.chord(.up, afterMilliseconds: 400)
         await loop.delivered()
         _ = try #require(await loop.rig.report().cancelled)
         #expect(loop.hotkey.phase == .idle)
@@ -565,12 +565,12 @@ private struct BadBuffer: Error {}
         loop.rig.inputMethod.hold()
         await loop.release(speaking: [1, 2, 3])
         await loop.rig.until { loop.rig.inputMethod.holding == 1 }
-        loop.chord(.down, atMilliseconds: 1000)
+        loop.chord(.down, afterMilliseconds: 1000)
         await loop.delivered()
         loop.rig.speak([4, 5, 6])
         try loop.showTheBox()
         #expect(await loop.escape() == .dismissal(.dismissed))
-        loop.chord(.up, atMilliseconds: 1400)
+        loop.chord(.up, afterMilliseconds: 400)
         await loop.delivered()
         try loop.showTheBox()
         #expect(!loop.panel.isShown)
@@ -635,7 +635,7 @@ private struct BadBuffer: Error {}
     /// nothing to wait for and nothing is waited for: not landed, at once, the press left open.
     @Test(.timeLimit(.minutes(1))) func aChordStillDownIsNotLandedAtOnceAndLeavesThePressOpen() async throws {
         let loop = try await Loop()
-        loop.chord(.down, atMilliseconds: 0)
+        loop.chord(.down, afterMilliseconds: 0)
         await loop.delivered()
         loop.rig.speak([1, 2, 3])
         let answers = FakeReply()
@@ -645,7 +645,7 @@ private struct BadBuffer: Error {}
         #expect(await answers.said() == .settlement(.notLanded))
         #expect(loop.rig.dictation.owes)
         // The chord coming up ends the press as it always did.
-        loop.chord(.up, atMilliseconds: 400)
+        loop.chord(.up, afterMilliseconds: 400)
         await loop.delivered()
         try await loop.rig.dictation.finish()
         #expect(loop.rig.inputMethod.inserted == ["a"])

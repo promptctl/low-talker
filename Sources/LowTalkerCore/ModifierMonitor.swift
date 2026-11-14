@@ -47,12 +47,15 @@ public struct ModifierMonitor: ModifierFeed {
         private let session: @MainActor () -> SessionModifiers
         /// Where each change heard is said.
         private let noted: @MainActor (String) -> Void
+        /// What a reading of the session is stamped on: the feed's clock.
+        private let clock: HostClock
 
         init(told: ToldModifiers, session: @escaping @MainActor () -> SessionModifiers,
-             noted: @escaping @MainActor (String) -> Void) {
+             noted: @escaping @MainActor (String) -> Void, clock: HostClock) {
             self.told = told
             self.session = session
             self.noted = noted
+            self.clock = clock
         }
 
         func heard(_ change: FlagsChanged) {
@@ -87,7 +90,7 @@ public struct ModifierMonitor: ModifierFeed {
                 timer.setEventHandler { [self] in
                     MainActor.assumeIsolated {
                         let reading = session()
-                        confirmed(reading, at: .now)
+                        confirmed(reading, at: clock.now)
                     }
                 }
                 timer.resume()
@@ -106,7 +109,7 @@ public struct ModifierMonitor: ModifierFeed {
         // What is held as listening begins is read, not assumed to be nothing, so a key
         // already down when this comes up is not heard going down when it next moves.
         let installed = Installed(told: ToldModifiers(held: Modifier.heldInSession()), session: SessionModifiers.read,
-                                  noted: { Logger.hotkey.info("\($0, privacy: .public)") })
+                                  noted: { Logger.hotkey.info("\($0, privacy: .public)") }, clock: clock)
         // The global monitor is handed what goes to every other app, and the local one what
         // comes to this app's own windows. Both call on the main thread.
         guard let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { event in
