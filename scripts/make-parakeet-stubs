@@ -8,7 +8,7 @@
 #   Encoder_v2    every feature of frame t is t; encoder_length = (mel_length - 1) / 8 + 1
 #   Decoder       every feature is the token fed in; h_out = h_in + 1, c_out = c_in + 2
 #   JointDecision token_id = encoder_step's first feature, token_prob = 0.5,
-#                 duration = decoder_step's first feature
+#                 duration = decoder_step's first feature mod 5, so the blank's 8192 is 2
 set -euo pipefail
 cd "$(dirname "$0")/.."
 out=Tests/LowTalkerCoreTests/Fixtures/parakeet-stub
@@ -53,7 +53,7 @@ def joint(encoder_step, decoder_step):
     predicted = mb.slice_by_index(x=decoder_step, begin=[0, 0, 0], end=[1, 1, 1])
     token = mb.cast(x=frame, dtype="int32", name="token_id")
     probability = mb.add(x=mb.mul(x=predicted, y=0.0), y=0.5, name="token_prob")
-    duration = mb.cast(x=predicted, dtype="int32", name="duration")
+    duration = mb.cast(x=mb.mod(x=predicted, y=5.0), dtype="int32", name="duration")
     return token, probability, duration
 
 for name, program in [("Preprocessor", preprocessor), ("Encoder_v2", encoder), ("Decoder", decoder), ("JointDecision", joint)]:
