@@ -1,6 +1,7 @@
 import Identity
 import Foundation
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Network
 @testable import Serve
 import Synchronization
@@ -11,11 +12,11 @@ import TestProbes
     /// A second server on an address already served is refused, naming the app and the
     /// address: two servers read as that, not as a bare socket error.
     @Test func aServedAddressIsRefusedByName() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let taken = ListenAddress(port: running.server.port)
         await #expect {
-            try await TranscriptionServer.listen(at: taken, engine: { .ready(Stub()) }, record: { _ in }).stop()
+            try await TranscriptionServer.listen(at: taken, engine: { .ready(stub()) }, record: { _ in }).stop()
         } throws: { error in
             "\(error)".hasPrefix("LowTalker cannot serve on 127.0.0.1:\(running.server.port): ")
                 && "\(error)".contains("Address already in use")
@@ -28,7 +29,7 @@ import TestProbes
     @Test(.timeLimit(.minutes(1))) func aListenCancelledWhileStartingEnds() async throws {
         for i in 0..<2000 {
             let listen = Task {
-                try await TranscriptionServer.listen(at: ListenAddress(port: .any), engine: { .ready(Stub()) }, record: { _ in })
+                try await TranscriptionServer.listen(at: ListenAddress(port: .any), engine: { .ready(stub()) }, record: { _ in })
             }
             try await Task.sleep(for: .microseconds(i % 400))
             listen.cancel()
@@ -46,7 +47,7 @@ import TestProbes
     /// hears the fixture and confirms words while the audio streams. The token checks skip,
     /// since this server requires none.
     @Test func passesTheConformanceSuite() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let results = try await running.conformance()
         #expect(results.count == 13, "\(results)")
@@ -61,7 +62,7 @@ import TestProbes
     /// without it and, for a socket, an error event then close 3000. Each refusal is on its
     /// connection's event.
     @Test func onTheLANTheSuitePassesWithTheTokenAndIsRefusedWithout() async throws {
-        let running = try await Running.startOnTheLAN(.ready(Stub()), token: "sk-lan-token")
+        let running = try await Running.startOnTheLAN(.ready(stub()), token: "sk-lan-token")
         defer { running.server.stop() }
         #expect(running.base == "http://\(try lanAddress()):\(running.server.port.rawValue)/v1")
         let results = try await running.conformance(token: "sk-lan-token")
@@ -96,7 +97,7 @@ import TestProbes
     /// sent is no upgrade: a 401, not the 404 or 400 that would describe the route to it.
     @Test(arguments: ["POST", "GET"])
     func withoutTheTokenTheRealtimeRouteIs401WhateverTheRequest(method: String) async throws {
-        let running = try await Running.startOnTheLAN(.ready(Stub()), token: "sk-lan-token")
+        let running = try await Running.startOnTheLAN(.ready(stub()), token: "sk-lan-token")
         defer { running.server.stop() }
         var request = URLRequest(url: URL(string: "\(running.base)/realtime?intent=transcription")!)
         request.httpMethod = method
@@ -112,7 +113,7 @@ import TestProbes
     /// the passes the engine failed to read with the
     /// latest failure's facts, none of its words (low-reliability-z2z.5s1).
     @Test func hearsAnMP3() async throws {
-        let stub = Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 2, latest: .unreadable(.speechWithoutWords(text: " secret"))))
+        let stub = stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 2, latest: .unreadable(.speechWithoutWords(text: " secret"))))
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("gpt-transcribe".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -120,7 +121,7 @@ import TestProbes
         #expect(try JSONSerialization.jsonObject(with: body) as? [String: AnyHashable] == [
             "text": "Hello world, this is LowTalker.", "usage": ["type": "duration", "seconds": 3] as [String: AnyHashable],
         ])
-        let seconds = try #require(stub.heard.withLock { $0.first?.seconds })
+        let seconds = try #require(stub.utterances.first?.seconds)
         #expect(seconds > 2.2 && seconds < 2.6)
         let event = try await running.nextEvent()
         #expect(event.status == 200 && event.words == 5 && event.model == "gpt-transcribe" && event.error == nil)
@@ -139,7 +140,7 @@ import TestProbes
         ("verbose_json", Data(#"{"duration":2.5,"language":"english","segments":[],"task":"transcribe","text":"","usage":{"seconds":3,"type":"duration"}}"#.utf8)),
     ])
     func anUploadWithNothingSpokenIsEmptyText(format: String, answer: Data) async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0, transients: .none))))
+        let running = try await Running.start(.ready(stub(quiet: Quiet(letGo: 2.5, room: 0.002, refusedAsRoom: 0, transients: .none))))
         defer { running.server.stop() }
         // 0.0025, about -52 dBFS: a quiet room's hold, under the speaker's level the stub hears words at.
         let (response, body) = try await running.post([
@@ -163,7 +164,7 @@ import TestProbes
     /// probabilities and its compression_ratio as Whisper measures it (zlib's, as Python's
     /// zlib.compress gives it). The event carries the same scores.
     @Test func verboseJSONServesTheSegmentsAverageLogProbability() async throws {
-        let stub = Stub(.success(Transcript(words: [
+        let stub = stub(.success(Transcript(words: [
             Transcript.Word(text: " Okay,", time: 0.25...0.5, confidence: 0.5),
             Transcript.Word(text: " now.", time: 0.5...0.75, confidence: 0.25),
         ])))
@@ -196,7 +197,7 @@ import TestProbes
     @Test func aRequestThatWaitedForAHoldSaysSoInItsEvent() async throws {
         let changes = Changes()
         let turns = EngineTurns(onReadingChanged: { changes.note() })
-        let running = try await Running.start(.ready(Turning(turns: turns)))
+        let running = try await Running.start(.ready(stub(turns: turns)))
         defer { running.server.stop() }
         let hold = turns.hold()
         async let answered = running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -211,7 +212,7 @@ import TestProbes
     @Test func anUploadPastTheLimitIs429WhileTheOneTakenInIsAnswered() async throws {
         let changes = Changes()
         let turns = EngineTurns(onReadingChanged: { changes.note() })
-        let running = try await Running.start(.ready(Turning(turns: turns)), limits: ServedLimits(uploads: 1, sockets: 1, audio: 60))
+        let running = try await Running.start(.ready(stub(turns: turns)), limits: ServedLimits(uploads: 1, sockets: 1, audio: 60))
         defer { running.server.stop() }
         let hold = turns.hold()
         let upload = [("model", nil, Data("m".utf8)), ("file", "audio.mp3", try fixture("hello-16k-mono.mp3"))] as [(name: String, filename: String?, value: Data)]
@@ -233,14 +234,14 @@ import TestProbes
     /// An upload holding more audio than the limit is refused by its length, before any of
     /// it is decoded or the engine hears it.
     @Test func anUploadLongerThanTheLimitIs400() async throws {
-        let stub = Stub()
+        let stub = stub()
         let running = try await Running.start(.ready(stub), limits: ServedLimits(uploads: 4, sockets: 1, audio: 1))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
         #expect(response.statusCode == 400)
         #expect(try error(body)["code"] as? String == "audio_too_long")
         #expect(try error(body)["param"] as? String == "file")
-        #expect(stub.heard.withLock { $0.isEmpty })
+        #expect(stub.utterances.isEmpty)
         let event = try await running.nextEvent()
         // The length its header gave, which is what refused it.
         let claimed = try #require(event.audioSeconds)
@@ -250,43 +251,43 @@ import TestProbes
     /// A header whose rate gives its audio no length (0 Hz, which AVAudioConverter takes) is
     /// a 400, not a length the server computes with.
     @Test func anUploadWhoseRateGivesNoLengthIs400() async throws {
-        let stub = Stub()
+        let stub = stub()
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("m".utf8)), ("file", "audio.caf", fixture("zero-rate.caf"))])
         #expect(response.statusCode == 400)
         #expect(try error(body)["code"] as? String == "invalid_audio")
-        #expect(stub.heard.withLock { $0.isEmpty })
+        #expect(stub.utterances.isEmpty)
     }
 
     /// The prompt is the vocabulary a dictation mode would give: one term, as written.
     @Test func promptIsTheVocabulary() async throws {
-        let stub = Stub()
+        let stub = stub()
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, _) = try await running.post([
             ("model", nil, Data("m".utf8)), ("prompt", nil, Data(" LowTalker ".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3")),
         ])
         #expect(response.statusCode == 200)
-        #expect(stub.heard.withLock { $0.first?.vocabulary } == Vocabulary([try Vocabulary.Term("LowTalker")]))
+        #expect(stub.expected.first == Vocabulary([try Vocabulary.Term("LowTalker")]))
         #expect(try await running.nextEvent().vocabularyTerms == 1)
     }
 
     /// A prompt with no word in it is ordinary speech: no vocabulary, and no refusal.
     @Test func aWordlessPromptIsNoVocabulary() async throws {
-        let stub = Stub()
+        let stub = stub()
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         let (response, _) = try await running.post([
             ("model", nil, Data("m".utf8)), ("prompt", nil, Data(" ... ".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3")),
         ])
         #expect(response.statusCode == 200)
-        #expect(stub.heard.withLock { $0.first?.vocabulary } == Vocabulary([]))
+        #expect(stub.expected.first == Vocabulary([]))
     }
 
     /// No words heard in real audio is an empty transcript, not a failure.
     @Test func realAudioWithNoWordsIsAnEmptyTranscript() async throws {
-        let running = try await Running.start(.ready(Stub(.success(Transcript(words: [])))))
+        let running = try await Running.start(.ready(stub(.success(Transcript(words: [])))))
         defer { running.server.stop() }
         let (response, body) = try await running.post([
             ("model", nil, Data("m".utf8)), ("response_format", nil, Data("text".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3")),
@@ -321,7 +322,7 @@ import TestProbes
 
     /// A prompt the engine cannot take is the client's to fix, so it is a 400 naming it.
     @Test func aPromptTheEngineRefusesIs400() async throws {
-        let running = try await Running.start(.ready(Stub(.failure(.vocabulary(.tooLong(tokens: 300, limit: 224))))))
+        let running = try await Running.start(.ready(stub(refusing: { _ throws(VocabularyError) in throw .tooLong(tokens: 300, limit: 224) })))
         defer { running.server.stop() }
         let (response, body) = try await running.post([
             ("model", nil, Data("m".utf8)), ("prompt", nil, Data("a long paragraph".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3")),
@@ -335,7 +336,7 @@ import TestProbes
     /// larger than the socket holds, and the drain is recorded. How much of the body the
     /// client goes on sending once it hears the refusal is the client's choice.
     @Test func aRefusedBodyIsDrainedSoTheClientHearsTheRefusal() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let oversize = TranscriptionServer.bodyLimit + 1024 * 1024
         let (response, body) = try await running.post(Data(count: oversize))
@@ -347,7 +348,7 @@ import TestProbes
 
     /// A client that closes before its request is whole is recorded as lost, unanswered.
     @Test func aConnectionClosedMidRequestIsLost() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let connection = NWConnection(host: .ipv4(.loopback), port: running.server.port, using: .tcp)
         connection.start(queue: DispatchQueue(label: "test.client"))
@@ -360,7 +361,7 @@ import TestProbes
     /// A client that expects to be told to go on hears 100 Continue before it sends a byte
     /// of body, then the answer.
     @Test func aClientExpectingContinueIsToldToSendTheBody() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let connection = NWConnection(host: .ipv4(.loopback), port: running.server.port, using: .tcp)
         connection.start(queue: DispatchQueue(label: "test.client"))
@@ -374,7 +375,7 @@ import TestProbes
     }
 
     @Test func stoppingEndsTheServer() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         running.server.stop()
         try await running.server.finished()
     }
@@ -382,7 +383,7 @@ import TestProbes
     /// Its event counts the passes the engine failed to read before the failure
     /// (low-reliability-z2z.5s1).
     @Test func anEngineFailureIs500WithTheReason() async throws {
-        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
+        let running = try await Running.start(.ready(stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         let (response, body) = try await running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
         #expect(response.statusCode == 500)
@@ -401,7 +402,7 @@ import TestProbes
         ([("model", nil, "m"), ("language", nil, "fr"), ("file", "audio.wav", "RIFF")], 400, "unsupported_value", "language"),
     ] as [([(String, String?, String)], Int, String, String)])
     func refusesAndSaysWhat(fields: [(String, String?, String)], status: Int, code: String, param: String) async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let (response, body) = try await running.post(fields.map { ($0.0, $0.1, Data($0.2.utf8)) })
         #expect(response.statusCode == status)
@@ -412,7 +413,7 @@ import TestProbes
     }
 
     @Test func anotherPathIs404() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let (response, body) = try await running.post([], path: "audio/translations")
         #expect(response.statusCode == 404)

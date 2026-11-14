@@ -2,30 +2,16 @@ import ArgumentParser
 import Bench
 import Foundation
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Synchronization
 import TestProbes
 import Testing
 
-/// An engine that hears every clip as the same words, after its gate opens, and keeps what
-/// it was told to expect.
-private final class ScriptedEar: Transcriber {
-    let gate: Gate
-    let expected = Mutex<[Vocabulary]>([])
-
-    init(gate: Gate = { let gate = Gate(); gate.open(); return gate }()) {
-        self.gate = gate
-    }
-
-    func transcribe(
-        _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
-        expecting vocabulary: Vocabulary,
-        partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcription {
-        expected.withLock { $0.append(vocabulary) }
-        for await _ in audio {}
-        await gate.wait()
-        guard !Task.isCancelled else { throw .cancelled }
-        return Transcription(transcript: Transcript(typed: "hello world"), quiet: .none)
+/// The one fake engine, hearing every clip as the same words, once `gate` opens if one is given.
+private func scriptedEar(after gate: Gate? = nil) -> FakeTranscriber {
+    FakeTranscriber { _ in
+        await gate?.wait()
+        return Transcript(typed: "hello world")
     }
 }
 
@@ -70,7 +56,7 @@ private final class Picked: Sendable {
     /// expecting the vocabulary.
     @Test func everyOptionReachesTheHarness() async throws {
         let picked = try Picked(fixtures: ["a", "b"]).remembered()
-        let ear = ScriptedEar()
+        let ear = scriptedEar()
         let vocabulary = Vocabulary([try Vocabulary.Term("Kubernetes")])
         let plan = try BenchPlan(models: ["one", "two"], arrivals: [.batch, .streamed], servings: [.idle], runs: 2, vocabulary: vocabulary)
         let loads = Mutex<[String]>([])
@@ -80,7 +66,7 @@ private final class Picked: Sendable {
             folders: picked.folders, carried: nil,
             load: { store, model in
                 loads.withLock { $0.append("\(store.directory.lastPathComponent)/\(model)") }
-                return LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                return LatencyHarness.Engine(ear)
             },
             emit: { if case .row(let row) = $0 { rows.withLock { $0.append(row) } } })
         #expect(loads.withLock { $0 } == ["store/one", "store/two"])
@@ -90,21 +76,21 @@ private final class Picked: Sendable {
             "two a batch idle", "two a streamed idle", "two b batch idle", "two b streamed idle",
         ])
         // Two models, two fixtures, two deliveries, two runs each.
-        #expect(ear.expected.withLock { $0 } == Array(repeating: vocabulary, count: 16))
+        #expect(ear.expected == Array(repeating: vocabulary, count: 16))
     }
 
     /// The carried store is the default, and a process carrying none says so rather than
     /// reading some other store.
     @Test func theCarriedStoreIsReadWhereItIs() async throws {
         let picked = try Picked(fixtures: ["a"]).remembered()
-        let ear = ScriptedEar()
+        let ear = scriptedEar()
         let plan = try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: .empty)
         let options = BenchOptions(fixtures: picked.fixtures, store: .carried, plan: plan)
         let carried = ModelStore(directory: URL(fileURLWithPath: "/carried"))
         let loaded = Mutex<URL?>(nil)
         try await Bench.run(options, folders: picked.folders, carried: carried, load: { store, _ in
             loaded.withLock { $0 = store.directory }
-            return LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+            return LatencyHarness.Engine(ear)
         }, emit: { _ in })
         #expect(loaded.withLock { $0 } == carried.directory)
         await #expect(throws: CarriesNoStore.self) {
@@ -140,7 +126,7 @@ private final class Picked: Sendable {
     /// ends, and hands the surface each event it logs.
     @Test func eachRowIsOneLogEvent() async throws {
         let picked = try Picked(fixtures: ["a"]).remembered()
-        let ear = ScriptedEar()
+        let ear = scriptedEar()
         let plan = try BenchPlan(models: ["one"], arrivals: [.batch, .streamed], servings: [.idle], runs: 1, vocabulary: .empty)
         let lines = Mutex<[String]>([])
         let runs = await BenchRuns(turns: EngineTurns()) { line in lines.withLock { $0.append(line) } }
@@ -149,7 +135,7 @@ private final class Picked: Sendable {
         let options = BenchOptions(fixtures: picked.fixtures, store: .folder(picked.store), plan: plan)
         let run = try await runs.start("over a", work: { emit in
             try await Bench.run(options, folders: picked.folders, carried: nil, load: { _, _ in
-                LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                LatencyHarness.Engine(ear)
             }, emit: emit)
         }, events: { event in seen.withLock { $0.append(event) } }, ended: { end in ending.withLock { $0 = end } })
         await run.value
@@ -164,7 +150,8 @@ private final class Picked: Sendable {
     /// refused.
     @Test func cancellingEndsTheRunAndASecondRunIsRefusedUntilThen() async throws {
         let picked = try Picked(fixtures: ["a"]).remembered()
-        let ear = ScriptedEar(gate: Gate())
+        let gate = Gate()
+        let ear = scriptedEar(after: gate)
         let plan = try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 3, vocabulary: .empty)
         let lines = Mutex<[String]>([])
         let runs = await BenchRuns(turns: EngineTurns()) { line in lines.withLock { $0.append(line) } }
@@ -172,10 +159,10 @@ private final class Picked: Sendable {
         let options = BenchOptions(fixtures: picked.fixtures, store: .folder(picked.store), plan: plan)
         let run = try await runs.start("over a", work: { emit in
             try await Bench.run(options, folders: picked.folders, carried: nil, load: { _, _ in
-                LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                LatencyHarness.Engine(ear)
             }, emit: emit)
         }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
-        while ear.gate.waiting == 0 { await Task.yield() }
+        await gate.changed.settled { gate.waiting == 1 }
 
         await #expect(throws: RunRefused.benchmarkRunning) {
             try await runs.start("again", work: { _ in }, events: { _ in }, ended: { _ in })
@@ -192,7 +179,8 @@ private final class Picked: Sendable {
     /// stopped it.
     @Test func aPressHeardDuringARunStopsItAndItsLineSaysSo() async throws {
         let picked = try Picked(fixtures: ["a"]).remembered()
-        let ear = ScriptedEar(gate: Gate())
+        let gate = Gate()
+        let ear = scriptedEar(after: gate)
         let plan = try BenchPlan(models: ["one"], arrivals: [.batch], servings: [.idle], runs: 3, vocabulary: .empty)
         let lines = Mutex<[String]>([])
         let turns = EngineTurns()
@@ -201,10 +189,10 @@ private final class Picked: Sendable {
         let options = BenchOptions(fixtures: picked.fixtures, store: .folder(picked.store), plan: plan)
         let run = try await runs.start("over a", work: { emit in
             try await Bench.run(options, folders: picked.folders, carried: nil, load: { _, _ in
-                LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                LatencyHarness.Engine(ear)
             }, emit: emit)
         }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
-        while ear.gate.waiting == 0 { await Task.yield() }
+        await gate.changed.settled { gate.waiting == 1 }
 
         let press = turns.hold()
         _ = try await turns.decode(as: .dictation) { () throws(TranscriptionFailure) in "heard" }

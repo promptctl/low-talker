@@ -1,6 +1,7 @@
 @testable import Dictation
 import Insertion
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Synchronization
 import Testing
 

@@ -4,6 +4,7 @@ import Grants
 import Insertion
 import InsertionFakes
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Synchronization
 import Testing
 import TestProbes
@@ -109,9 +110,10 @@ final class Rig {
         retaining: TimeInterval = AudioCapture.defaultRetention,
         atRest: MicrophoneAtRest = .shut,
         keeping store: FakeHeldStore = FakeHeldStore(),
-        keepingSpeech unheard: FakeUnheardStore = FakeUnheardStore()
+        keepingSpeech unheard: FakeUnheardStore = FakeUnheardStore(),
+        turns: EngineTurns = EngineTurns()
     ) async throws {
-        try await self.init(engine: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard)
+        try await self.init(engine: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard, turns: turns)
     }
 
     convenience init(
@@ -121,7 +123,7 @@ final class Rig {
         keeping store: FakeHeldStore = FakeHeldStore(),
         keepingSpeech unheard: FakeUnheardStore = FakeUnheardStore()
     ) async throws {
-        try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard)
+        try await self.init(transcriber: { transcriber }, retaining: retaining, atRest: atRest, keeping: store, keepingSpeech: unheard, turns: transcriber.turns)
         transcriber.noting(changes)
     }
 
@@ -1199,7 +1201,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A press whose engine refused the mode's vocabulary is reported in that mode, so the
     /// record says whose terms to cut.
     @Test func aFailedPressIsReportedInTheModeItBeganIn() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber { _ throws(TranscriptionFailure) in throw .vocabulary(.tooLong(tokens: 300, limit: 224)) })
+        let rig = try await Rig(hearing: FakeTranscriber(refusing: { _ throws(VocabularyError) in throw .tooLong(tokens: 300, limit: 224) }) { _ in Transcript(typed: "a") })
         rig.hold(in: Self.notes)
         let report = await rig.pressReport()
         #expect(report.mode == Self.notes)

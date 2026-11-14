@@ -1,5 +1,6 @@
 import Foundation
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Network
 @testable import Serve
 import Synchronization
@@ -56,7 +57,7 @@ import Testing
             ("model", nil, Data("m".utf8)), ("response_format", nil, Data("text".utf8)), ("file", "audio.mp3", try fixture("hello-16k-mono.mp3")),
         ]
         #expect(try await running.post(upload).0.statusCode == 503)
-        server.answer(with: .ready(Stub()))
+        server.answer(with: .ready(stub()))
         let (response, body) = try await running.post(upload)
         #expect(response.statusCode == 200)
         #expect(String(decoding: body, as: UTF8.self) == "Hello world, this is LowTalker.\n")
@@ -72,7 +73,7 @@ import Testing
         await server.running?.value
         #expect("\(server.state)" == "off")
         #expect(!aSwitch().chosen)
-        let again = try await TranscriptionServer.listen(at: ListenAddress(port: port), engine: { .ready(Stub()) }, record: { _ in })
+        let again = try await TranscriptionServer.listen(at: ListenAddress(port: port), engine: { .ready(stub()) }, record: { _ in })
         again.stop()
     }
 
@@ -94,7 +95,7 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func aRestartListensAgainOnTheSamePort() async throws {
         let server = aSwitch()
         defer { server.choose(false, at: { .loopback }) }
-        server.answer(with: .ready(Stub()))
+        server.answer(with: .ready(stub()))
         server.choose(true, at: { .loopback })
         let running = try await listening(server)
         // Answered with `connection: close`, so the server's side closes first.
@@ -116,7 +117,7 @@ import Testing
         server.choose(false, at: { .loopback })
         await server.running?.value
         #expect("\(server.state)" == "off")
-        let again = try await TranscriptionServer.listen(at: ListenAddress(port: held.port.withLock { $0 }), engine: { .ready(Stub()) }, record: { _ in })
+        let again = try await TranscriptionServer.listen(at: ListenAddress(port: held.port.withLock { $0 }), engine: { .ready(stub()) }, record: { _ in })
         again.stop()
     }
 
@@ -142,7 +143,7 @@ import Testing
     /// An address another process holds, and a config that names none, each leave the switch
     /// on and the server stopped, saying why.
     @Test func whatKeepsItFromListeningIsSaid() async throws {
-        let holder = try await TranscriptionServer.listen(at: ListenAddress(port: .any), engine: { .ready(Stub()) }, record: { _ in })
+        let holder = try await TranscriptionServer.listen(at: ListenAddress(port: .any), engine: { .ready(stub()) }, record: { _ in })
         defer { holder.stop() }
         held.port.withLock { $0 = holder.port }
         let taken = aSwitch()

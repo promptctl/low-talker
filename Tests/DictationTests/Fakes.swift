@@ -5,6 +5,7 @@ import Grants
 import Insertion
 import InsertionFakes
 import LowTalkerCore
+import LowTalkerCoreFakes
 import Synchronization
 import TestProbes
 
@@ -138,71 +139,3 @@ struct Authorized: MicrophoneAuthority {
     func requestAccess() async -> Bool { true }
 }
 
-/// An engine that answers however the test says, and keeps what it was given to
-/// hear. One fake for every behavior - a scripted transcript, a refusal, a wait on a
-/// gate - since the answer is a value. [LAW:composability]
-final class FakeTranscriber: Transcriber {
-    private let heard = Mutex<[AudioClip]>([])
-    private let told = Mutex<[Vocabulary]>([])
-    private let arrived = Mutex<[Float]>([])
-    private let reading: @Sendable ([Float]) -> Transcript
-    private let confirming: @Sendable ([Float]) -> Transcript
-    private let repunctuating: @Sendable ([Float]) -> Int
-    private let unreading: @Sendable ([Float]) -> Partial.Unread?
-    private let missedAtKeyUp: Partial.Unread?
-    private let quiet: Quiet
-    private let answer: @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
-    /// A test's signal, set by the Rig, moved whenever the audio heard so far changes so a test
-    /// awaits the engine hearing it instead of polling for it. [LAW:no-ambient-temporal-coupling]
-    private let onChange = Mutex<Changes?>(nil)
-    func noting(_ changes: Changes) { onChange.withLock { $0 = changes } }
-    private func moved() { onChange.withLock { $0 }?.note() }
-
-    /// `reading` is what a pass makes of the audio so far and `confirming` the words two
-    /// passes have agreed on, which the answer has to begin with, and `repunctuating` how
-    /// many passes so far changed a settled word's punctuation, and `unreading` how many
-    /// the engine failed to read and why the latest did; one pass runs per clip as
-    /// it arrives, and reads and confirms nothing unless a test says otherwise. A pass the key
-    /// came up during that the engine failed to read is told as `missedAtKeyUp`, once the audio
-    /// has ended. Every answer is told with `quiet`, none unless a test says otherwise.
-    init(
-        reading: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
-        confirming: @escaping @Sendable ([Float]) -> Transcript = { _ in Transcript(typed: "") },
-        repunctuating: @escaping @Sendable ([Float]) -> Int = { _ in 0 },
-        unreading: @escaping @Sendable ([Float]) -> Partial.Unread? = { _ in nil },
-        missedAtKeyUp: Partial.Unread? = nil,
-        quiet: Quiet = .none,
-        _ answer: @escaping @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
-    ) {
-        self.reading = reading
-        self.confirming = confirming
-        self.repunctuating = repunctuating
-        self.unreading = unreading
-        self.missedAtKeyUp = missedAtKeyUp
-        self.quiet = quiet
-        self.answer = answer
-    }
-
-    /// Every utterance so far, each as the one clip its audio added up to.
-    var clips: [AudioClip] { heard.withLock { $0 } }
-    /// What each utterance so far was heard expecting, in the order they were begun.
-    var expected: [Vocabulary] { told.withLock { $0 } }
-    /// The audio of the utterance being heard, as far as it has arrived and been read.
-    var hearing: [Float] { arrived.withLock { $0 } }
-
-    func transcribe(_ audio: some AsyncSequence<AudioClip, Never> & Sendable, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void) async throws(TranscriptionFailure) -> Transcription {
-        told.withLock { $0.append(vocabulary) }
-        var samples: [Float] = []
-        for await clip in audio {
-            samples += clip.samples
-            partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: unreading(samples)))
-            arrived.withLock { $0 = samples }
-            moved()
-        }
-        missedAtKeyUp.map { partial(Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: $0)) }
-        let clip = AudioClip(samples: samples)
-        heard.withLock { $0.append(clip) }
-        moved()
-        return Transcription(transcript: try await answer(clip), quiet: quiet)
-    }
-}

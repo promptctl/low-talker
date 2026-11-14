@@ -1,5 +1,6 @@
 import Foundation
 import LowTalkerCore
+import LowTalkerCoreFakes
 @testable import Serve
 import Synchronization
 import TestProbes
@@ -13,7 +14,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// Server-side turn detection is refused by name, and the socket stays open: the same
     /// socket then transcribes a turn the client commits.
     @Test func refusesServerVADAndStaysOpen() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         var client = Client(running)
         _ = try await client.until("session.created")
@@ -33,7 +34,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// answers a turn with nothing said in it: completed, with an empty transcript, and never
     /// failed (low-serve-7t8). The socket's event counts it.
     @Test func aSilentTurnIsCompletedWithNothingSaid() async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0, transients: .none))))
+        let running = try await Running.start(.ready(stub(quiet: Quiet(letGo: 1, room: 0.002, refusedAsRoom: 0, transients: .none))))
         defer { running.server.stop() }
         var client = Client(running)
         // 100 of 32767, about -50 dBFS: a quiet room, under the speaker's level the stub hears words at.
@@ -56,7 +57,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// An engine failure fails its item, not the session: no `error` event, which Pipecat
     /// would take as fatal.
     @Test func anEngineFailureFailsTheItemAndNotTheSession() async throws {
-        let running = try await Running.start(.ready(Stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
+        let running = try await Running.start(.ready(stub(.failure(.engine(StubFailure())), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 0.5)
@@ -75,7 +76,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// The prompt a session is updated with is the vocabulary its next item is heard with,
     /// and the language and model are echoed back.
     @Test func thePromptIsTheItemsVocabulary() async throws {
-        let stub = Stub()
+        let stub = stub()
         let running = try await Running.start(.ready(stub))
         defer { running.server.stop() }
         var client = Client(running)
@@ -86,13 +87,13 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         try await client.append(seconds: 0.3)
         try await client.send(["type": "input_audio_buffer.commit"])
         _ = try await client.until("conversation.item.input_audio_transcription.completed")
-        #expect(stub.heard.withLock { $0.first?.vocabulary } == Vocabulary([try Vocabulary.Term("LowTalker")]))
+        #expect(stub.expected.first == Vocabulary([try Vocabulary.Term("LowTalker")]))
         client.task.cancel(with: .normalClosure, reason: nil)
     }
 
     /// An event the server does not know is refused naming its type, and nothing else ends.
     @Test func anUnknownEventIsRefusedByType() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.send(["type": "response.create", "event_id": "event_client_1"])
@@ -106,7 +107,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
 
     /// Two turns on one socket are two items, the second following the first.
     @Test func eachCommitIsAnItemFollowingTheLast() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 0.3)
@@ -125,7 +126,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// The socket's one event says what happened on it, the passes the engine failed to read
     /// during its items included (low-reliability-z2z.5s1).
     @Test func theSocketsEventCountsWhatHappenedOnIt() async throws {
-        let running = try await Running.start(.ready(Stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
+        let running = try await Running.start(.ready(stub(quiet: Quiet(letGo: 1.5, room: 0.25, refusedAsRoom: 0.5, transients: Transients(count: 2, longest: 0.03)), unread: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " secret"))))))
         defer { running.server.stop() }
         var client = Client(running)
         try await client.append(seconds: 1)
@@ -157,15 +158,15 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// the client keeps pace with the engine as a client appending in real time does: each
     /// second's appends wait for the item they let go to have started (low-tests-ape).
     @Test(.timeLimit(.minutes(1))) func appendingPastTheLimitWithoutACommitStartsTheItemOverAndIsNeverRefused() async throws {
-        let stub = Stub()
-        let (starts, started) = AsyncStream<Void>.makeStream()
-        let running = try await Running.start(.ready(Starting(stub: stub, started: started)), limits: ServedLimits(uploads: 1, sockets: 1, audio: 4))
+        let stub = stub()
+        let changes = Changes()
+        stub.noting(changes)
+        let running = try await Running.start(.ready(stub), limits: ServedLimits(uploads: 1, sockets: 1, audio: 4))
         defer { running.server.stop() }
         var client = Client(running)
-        var heardStarting = starts.makeAsyncIterator()
         try await client.append(seconds: 2)
-        for _ in 1...8 {
-            try #require(await heardStarting.next() != nil)
+        for started in 1...8 {
+            await changes.settled { stub.utterances.count >= started }
             try await client.append(seconds: 1)
         }
         try await client.send(["type": "input_audio_buffer.commit"])
@@ -173,7 +174,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         let completed = try await client.until("conversation.item.input_audio_transcription.completed")
         #expect(completed["item_id"] as? String == committed)
         client.task.cancel(with: .normalClosure, reason: nil)
-        let heard = stub.heard.withLock { $0 }
+        let heard = stub.utterances
         let letGo = heard.filter(\.cancelled)
         #expect(heard.count == 9 && letGo.count == 8 && letGo.allSatisfy { $0.seconds < 2.01 })
         #expect(heard.filter { !$0.cancelled }.map { abs($0.seconds - 2) < 0.01 } == [true])
@@ -191,7 +192,8 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// open item over, and 1.9 s more takes the socket to 6.5 s, or 8.5 s had the 2 s let go
     /// stayed held. The update's answer is a barrier past the start-over.
     @Test func anItemLetGoWhileItWaitsItsTurnIsFreedAtOnce() async throws {
-        let gated = Gated()
+        let gate = Gate()
+        let gated = stub(after: gate)
         let running = try await Running.start(.ready(gated), limits: ServedLimits(uploads: 1, sockets: 1, audio: 8))
         defer { running.server.stop() }
         var client = Client(running)
@@ -203,7 +205,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         try await client.append(seconds: 1.9)
         try await client.send(["type": "input_audio_buffer.commit"])
         _ = try await client.until("input_audio_buffer.committed")
-        gated.gate.cancel()
+        gate.open()
         _ = try await client.until("conversation.item.input_audio_transcription.completed")
         _ = try await client.until("conversation.item.input_audio_transcription.completed")
         client.task.cancel(with: .normalClosure, reason: nil)
@@ -240,7 +242,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// A socket opened while the server holds its limit of them is refused with a 429 before
     /// it upgrades; the place is given back when a socket closes.
     @Test func aSocketPastTheLimitIsRefusedBeforeItUpgrades() async throws {
-        let running = try await Running.start(.ready(Stub()), limits: ServedLimits(uploads: 1, sockets: 1, audio: 60))
+        let running = try await Running.start(.ready(stub()), limits: ServedLimits(uploads: 1, sockets: 1, audio: 60))
         defer { running.server.stop() }
         var open = Client(running)
         _ = try await open.until("session.created")
@@ -262,7 +264,8 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// after the one before it is answered, so they are answered in the order committed, and
     /// the audio they held is free again.
     @Test func aSocketWhoseItemsWaitOnTheEngineKeepsReading() async throws {
-        let gated = Gated()
+        let gate = Gate()
+        let gated = stub(after: gate)
         let running = try await Running.start(.ready(gated), limits: ServedLimits(uploads: 1, sockets: 1, audio: 6))
         defer { running.server.stop() }
         var client = Client(running)
@@ -286,7 +289,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         #expect(refusal["code"] as? String == "audio_too_long")
         try await client.send(["type": "input_audio_buffer.commit"])
         committed.append(try #require(try await client.until("input_audio_buffer.committed")["item_id"] as? String))
-        gated.gate.cancel()
+        gate.open()
         var completed: [String] = []
         for _ in 0..<4 {
             completed.append(try #require(try await client.until("conversation.item.input_audio_transcription.completed")["item_id"] as? String))
@@ -296,7 +299,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
         try await client.send(["type": "input_audio_buffer.commit"])
         _ = try await client.until("conversation.item.input_audio_transcription.completed")
         client.task.cancel(with: .normalClosure, reason: nil)
-        #expect(gated.started.withLock { $0 } == [0, 1, 2, 3, 4])
+        #expect(gated.utterances.map(\.answeredBefore) == [0, 1, 2, 3, 4])
         let realtime = try #require(try await running.nextEvent().realtime)
         #expect(realtime.items == 5 && realtime.sent.completed == 5 && realtime.refusals == ["audio_too_long": 1])
         let refused = try #require(realtime.refusedAudioSeconds)
@@ -307,7 +310,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// read no further once the frames left unsent pass the outbox's limit: its own sends
     /// stall, and the server holds no more than the limit and one message's answer.
     @Test func aClientThatDoesNotReadIsNotRead() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         let port = running.server.port.rawValue
         let batch = Data((0..<1_000).flatMap { _ in masked(0x1, Data(#"{"type":"x"}"#.utf8)) })
@@ -324,7 +327,7 @@ private func update(_ input: [String: Any]) -> [String: Any] {
     /// An append that holds no whole sample puts no audio in the buffer, so committing it
     /// is refused as committing nothing is.
     @Test func aCommitWithNoWholeSampleIsRefusedAsEmpty() async throws {
-        let running = try await Running.start(.ready(Stub()))
+        let running = try await Running.start(.ready(stub()))
         defer { running.server.stop() }
         var client = Client(running)
         for audio in ["", Data([0x01]).base64EncodedString()] {
@@ -482,19 +485,4 @@ private func deltas(_ body: (Outbox) -> Void) async -> [String] {
     var sent: [String] = []
     for await case .event(.delta(_, let text)) in outbox.frames.map(\.frame) { sent.append(text) }
     return sent
-}
-
-/// The stub, saying as each transcribe starts.
-private struct Starting: Transcriber {
-    let stub: Stub
-    let started: AsyncStream<Void>.Continuation
-
-    func transcribe(
-        _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
-        expecting vocabulary: Vocabulary,
-        partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcription {
-        started.yield()
-        return try await stub.transcribe(audio, expecting: vocabulary, partial: partial)
-    }
 }

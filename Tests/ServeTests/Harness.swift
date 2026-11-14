@@ -1,4 +1,5 @@
 import Foundation
+import LowTalkerCoreFakes
 @testable import LowTalkerCore
 import Network
 @testable import Serve
@@ -6,92 +7,48 @@ import Synchronization
 import TestProbes
 import Testing
 
-/// An engine that hears the conformance fixture's words in whatever it is given, and keeps
-/// what it was given. While audio streams in it confirms a word per half second heard, up
-/// to half the words, so a streamed utterance has words confirmed before it ends and
-/// words left for the final transcript. Audio that never reaches `Utterance.audible` it
-/// refuses as nothing spoken, as the engine's gate refuses audio under its floor, with
-/// `quiet`, and noise it hears its words in doubtfully.
-/// Its partials say it failed to read the passes `unread` counts.
-final class Stub: Transcriber {
-    let heard = Mutex<[(seconds: TimeInterval, vocabulary: Vocabulary, cancelled: Bool)]>([])
-    let answer: Result<Transcript, TranscriptionFailure>
-    let quiet: Quiet
-    let unread: Partial.Unread?
-
-    init(_ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")), quiet: Quiet = .none, unread: Partial.Unread? = nil) {
-        self.answer = answer
-        self.quiet = quiet
-        self.unread = unread
-    }
-
-    func transcribe(
-        _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
-        expecting vocabulary: Vocabulary,
-        partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcription {
-        let words = (try? answer.get())?.words ?? []
-        var seconds: TimeInterval = 0
-        var loudest: Float = 0
-        var crossings = 0, samples = 0, last: Float = 0
-        for await clip in audio {
-            seconds += clip.duration
-            loudest = max(loudest, clip.peak)
-            for sample in clip.samples {
-                crossings += (sample < 0) != (last < 0) ? 1 : 0
-                last = sample
-            }
-            samples += clip.samples.count
-            let confirmed = loudest < Utterance.audible ? 0 : min(words.count / 2, Int(seconds / 0.5))
-            partial(Partial(confirmed: Transcript(words: Array(words.prefix(confirmed))), tentative: Transcript(words: []), repunctuated: 0, unread: unread))
-        }
-        heard.withLock { $0.append((seconds, vocabulary, Task.isCancelled)) }
-        guard loudest >= Utterance.audible else { throw .nothingSpoken(peak: loudest, quiet: quiet) }
+/// The one fake engine, hearing the conformance fixture's words in whatever it is given. While
+/// audio streams in it confirms a word per half second heard, up to half the words, so a
+/// streamed utterance has words confirmed before it ends and words left for the final
+/// transcript. Audio that never reaches `Utterance.audible` it refuses as nothing spoken, as the
+/// engine's gate refuses audio under its floor, with `quiet`, and noise it hears its words in
+/// doubtfully. Its partials say it failed to read the passes `unread` counts. It answers only
+/// once `gate` opens, when one is given, and decodes on `turns` as the server's callers do.
+func stub(
+    _ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")),
+    quiet: Quiet = .none,
+    unread: Partial.Unread? = nil,
+    refusing: @escaping @Sendable (Vocabulary) throws(VocabularyError) -> Void = { _ in },
+    after gate: Gate? = nil,
+    turns: EngineTurns = EngineTurns()
+) -> FakeTranscriber {
+    let words = (try? answer.get())?.words ?? []
+    return FakeTranscriber(
+        confirming: { samples in
+            let heard = AudioClip(samples: samples)
+            return Transcript(words: Array(words.prefix(heard.peak < Utterance.audible ? 0 : min(words.count / 2, Int(heard.duration / 0.5)))))
+        },
+        unreading: { _ in unread },
+        quiet: quiet,
+        refusing: refusing,
+        turns: turns
+    ) { clip throws(TranscriptionFailure) in
+        await gate?.wait()
+        guard clip.peak >= Utterance.audible else { throw .nothingSpoken(peak: clip.peak, quiet: quiet) }
         let transcript = try answer.get()
         // White noise changes sign on about half its samples, speech and a tone on far fewer.
         // Noise is read as the engine reads a primed hallucination over it: words, barely believed.
-        let noise = Double(crossings) / Double(samples) > 0.3
-        return Transcription(transcript: noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: Self.doubted) }) : transcript, quiet: quiet)
-    }
-
-    /// The probability the stub gives every word it reads into noise.
-    static let doubted: Confidence = 0.05
+        let crossings = zip(clip.samples, clip.samples.dropFirst()).count { ($0 < 0) != ($1 < 0) }
+        let noise = Double(crossings) / Double(clip.samples.count) > 0.3
+        return noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: doubted) }) : transcript
+    }.served
 }
 
-/// The stub, heard as a served caller of `turns`, as the app's engine is.
-struct Turning: Transcriber {
-    let turns: EngineTurns
+/// The probability the stub gives every word it reads into noise.
+let doubted: Confidence = 0.05
 
-    func transcribe(
-        _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
-        expecting vocabulary: Vocabulary,
-        partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcription {
-        var clip: [Float] = []
-        for await chunk in audio { clip += chunk.samples }
-        return try await turns.decode(as: .served) { [clip] () async throws(TranscriptionFailure) in
-            try await Stub().transcribe(AudioClip(samples: clip), expecting: vocabulary)
-        }
-    }
-}
-
-/// The stub, answering nothing until `gate` is cancelled, and recording for each transcribe
-/// how many had been answered when it started.
-final class Gated: Transcriber {
-    let gate = Task<Void, Never> { try? await Task.sleep(for: .seconds(3600)) }
-    let started = Mutex<[Int]>([])
-    private let answered = Mutex(0)
-
-    func transcribe(
-        _ audio: some AsyncSequence<AudioClip, Never> & Sendable,
-        expecting vocabulary: Vocabulary,
-        partial: @escaping @Sendable (Partial) -> Void
-    ) async throws(TranscriptionFailure) -> Transcription {
-        started.withLock { $0.append(answered.withLock { $0 }) }
-        await gate.value
-        defer { answered.withLock { $0 += 1 } }
-        return try await Stub().transcribe(audio, expecting: vocabulary, partial: partial)
-    }
+extension FakeTranscriber.Heard {
+    var seconds: TimeInterval { AudioClip(samples: samples).duration }
 }
 
 struct StubFailure: Error, CustomStringConvertible {
