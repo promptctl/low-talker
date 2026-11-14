@@ -212,6 +212,8 @@ private struct LoadFailed: Error, CustomStringConvertible {
         #expect(rig.inputMethod.inserted == [" live"])
         #expect(rig.hold.held?.allWords.text == " first")
         #expect(recovering.utterances.count == 1)
+        // The press cancelled the recovery's decode, which ran again once the press let go.
+        #expect(turns.reading.tally.cancelled == 1)
     }
 
     /// The load does not wait on the recovery: a press waiting on the load that lands is heard,

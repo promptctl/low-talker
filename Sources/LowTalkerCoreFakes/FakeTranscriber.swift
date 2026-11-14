@@ -19,7 +19,7 @@ public final class FakeTranscriber: Transcriber {
     /// One utterance as far as the fake has heard it.
     public struct Heard: Sendable {
         public let vocabulary: Vocabulary
-        /// Utterances the fake had answered when this one began.
+        /// Utterances the fake had answered, with words or a failure, when this one began.
         public let answeredBefore: Int
         public fileprivate(set) var samples: [Float] = []
         public fileprivate(set) var clips = 0
@@ -130,32 +130,39 @@ public final class FakeTranscriber: Transcriber {
             state.utterances.append(Heard(vocabulary: vocabulary, answeredBefore: state.answered))
             return state.utterances.count - 1
         }
-        defer { log.update { $0.utterances[index].cancelled = Task.isCancelled } }
-        // [LAW:single-enforcer] The turn rules are `EngineTurns`': each decode waits its turn,
-        // and one a hold cancelled is run again.
-        let turns = turns, caller = caller, refusing = refusing
-        try await turns.decode(as: caller) { () throws(TranscriptionFailure) in
+        defer {
+            log.update { state in
+                state.utterances[index].cancelled = Task.isCancelled
+                state.answered += 1
+            }
+        }
+        let refusing = refusing
+        try await decode { () throws(TranscriptionFailure) in
             do throws(VocabularyError) { try refusing(vocabulary) } catch { throw .vocabulary(error) }
         }
         var samples: [Float] = []
         var confirmed = Transcript(words: [])
-        for await clip in audio {
-            samples += clip.samples
-            let heard = try await turns.decode(as: caller) { [samples] () throws(TranscriptionFailure) in self.pass(over: samples, unread: self.unreading(samples)) }
+        // One pass over the audio so far, held to the contract as it is told.
+        func hear(_ unread: Partial.Unread?) async throws(TranscriptionFailure) {
+            let heard = try await decode { [samples] () throws(TranscriptionFailure) in self.pass(over: samples, unread: unread) }
             if let broken = EngineContract.confirming(heard.confirmed, after: confirmed) { Issue.record("the fake broke the engine's contract: \(broken)") }
             confirmed = heard.confirmed
             partial(heard)
+        }
+        for await clip in audio {
+            samples += clip.samples
+            try await hear(unreading(samples))
             log.update { state in
                 state.utterances[index].samples += clip.samples
                 state.utterances[index].clips += 1
             }
         }
-        missedAtKeyUp.map { partial(pass(over: samples, unread: $0)) }
+        if let missedAtKeyUp { try await hear(missedAtKeyUp) }
         log.update { $0.utterances[index].ended = true }
         let clip = AudioClip(samples: samples)
         let answer = answer
         let answered = await Result { () async throws(TranscriptionFailure) in
-            try await turns.decode(as: caller) { () async throws(TranscriptionFailure) in try await answer(clip) }
+            try await decode { () async throws(TranscriptionFailure) in try await answer(clip) }
         }
         if case .failure(.vocabulary(let refusal)) = answered {
             Issue.record("the fake refused its vocabulary (\(refusal)) after hearing the audio; a vocabulary is refused through `refusing`, before any is taken")
@@ -163,8 +170,18 @@ public final class FakeTranscriber: Transcriber {
         if case .success(let transcript) = answered, let broken = EngineContract.ending(transcript, after: confirmed) {
             Issue.record("the fake broke the engine's contract: \(broken)")
         }
-        log.update { $0.answered += 1 }
         return Transcription(transcript: try answered.get(), quiet: quiet)
+    }
+
+    /// A decode on `turns` as `caller`. [LAW:single-enforcer] The turn rules are `EngineTurns`':
+    /// each decode waits its turn, and one a hold cancelled while it ran fails, as the real
+    /// engine's does, and is run again.
+    private func decode<T: Sendable>(_ body: @escaping @Sendable () async throws(TranscriptionFailure) -> T) async throws(TranscriptionFailure) -> T {
+        try await turns.decode(as: caller) { () async throws(TranscriptionFailure) in
+            let decoded = try await body()
+            if Task.isCancelled { throw .cancelled }
+            return decoded
+        }
     }
 
     private func pass(over samples: [Float], unread: Partial.Unread?) -> Partial {

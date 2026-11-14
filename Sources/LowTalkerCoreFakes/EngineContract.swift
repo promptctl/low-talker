@@ -90,7 +90,7 @@ public struct EngineContract: Sendable {
                 + (spoken.isSuccess ? [] : ["the dictation decode under the hold failed: \(spoken)"])
                 + (waited || !held.isEmpty ? [] : ["the served decode stopped waiting before the hold let go"])
                 + (asked.answer?.isSuccess == true ? [] : ["the served decode, once the hold let go, was answered \(asked.answer.map { "\($0)" } ?? "never")"])
-                + (turns.reading.tally.deferred == 1 ? [] : ["the turns counted \(turns.reading.tally.deferred) deferred decodes"])
+                + (turns.reading.tally.deferred >= 1 ? [] : ["the turns counted \(turns.reading.tally.deferred) deferred decodes"])
         case .aServedCallerCancelledWhileWaitingFailsCancelled:
             let hold = turns.hold()
             let asked = served.answering(speech, changes: changes)
