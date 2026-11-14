@@ -93,10 +93,12 @@ public struct EngineContract: Sendable {
                 + (turns.reading.tally.deferred == 1 ? [] : ["the turns counted \(turns.reading.tally.deferred) deferred decodes"])
         case .aServedCallerCancelledWhileWaitingFailsCancelled:
             let hold = turns.hold()
-            defer { hold.release() }
             let asked = served.answering(speech, changes: changes)
             await changes.settled { turns.reading.waiting == 1 || asked.answer != nil }
             asked.task.cancel()
+            // Let go before waiting, so an engine that kept waiting through the cancel is
+            // answered and told so, rather than waiting on this hold forever.
+            hold.release()
             await changes.settled { asked.answer != nil }
             guard case .failure(.cancelled) = asked.answer else { return ["the cancelled served caller was answered \(asked.answer.map { "\($0)" } ?? "never")"] }
             return []

@@ -9,8 +9,9 @@ import Testing
 /// one engine whose semantics `EngineContract` states. [LAW:one-type-per-behavior]
 ///
 /// It hears as the real engine does where a caller can tell: the vocabulary is refused, if at
-/// all, before any audio is taken in; a pass runs per clip as it arrives; and the final answer is
-/// decoded through `turns` as `caller`, so holds and served callers meet the real turn rules.
+/// all, before any audio is taken in; a pass runs per clip as it arrives; and the refusal, every
+/// pass and the final answer are each a decode on `turns` as `caller`, so holds and served
+/// callers meet the real turn rules.
 /// A configuration that would make it an engine `EngineContract` says cannot exist - confirmed
 /// words that shrink, a final that does not open with them, a vocabulary refused once audio was
 /// taken - fails the test that built it. [LAW:no-silent-failure]
@@ -22,7 +23,8 @@ public final class FakeTranscriber: Transcriber {
         public let answeredBefore: Int
         public fileprivate(set) var samples: [Float] = []
         public fileprivate(set) var clips = 0
-        /// Whether its audio has ended, and whether the caller had been cancelled by then.
+        /// Whether its audio has ended, and whether the caller had been cancelled by the time
+        /// the fake stopped hearing it, however that was.
         public fileprivate(set) var ended = false
         public fileprivate(set) var cancelled = false
     }
@@ -52,7 +54,8 @@ public final class FakeTranscriber: Transcriber {
     private let missedAtKeyUp: Partial.Unread?
     private let quiet: Quiet
     private let refusing: @Sendable (Vocabulary) throws(VocabularyError) -> Void
-    private let turns: EngineTurns
+    /// The turns every decode runs on, which a caller holding the engine must hold.
+    public let turns: EngineTurns
     private let caller: EngineTurns.Caller
     private let answer: @Sendable (AudioClip) async throws(TranscriptionFailure) -> Transcript
 
@@ -123,40 +126,36 @@ public final class FakeTranscriber: Transcriber {
     public var hearing: [Float] { utterances.last?.samples ?? [] }
 
     public func transcribe(_ audio: some AsyncSequence<AudioClip, Never> & Sendable, expecting vocabulary: Vocabulary, partial: @escaping @Sendable (Partial) -> Void) async throws(TranscriptionFailure) -> Transcription {
-        do throws(VocabularyError) { try refusing(vocabulary) } catch { throw .vocabulary(error) }
         let index = log.update { state in
             state.utterances.append(Heard(vocabulary: vocabulary, answeredBefore: state.answered))
             return state.utterances.count - 1
+        }
+        defer { log.update { $0.utterances[index].cancelled = Task.isCancelled } }
+        // [LAW:single-enforcer] The turn rules are `EngineTurns`': each decode waits its turn,
+        // and one a hold cancelled is run again.
+        let turns = turns, caller = caller, refusing = refusing
+        try await turns.decode(as: caller) { () throws(TranscriptionFailure) in
+            do throws(VocabularyError) { try refusing(vocabulary) } catch { throw .vocabulary(error) }
         }
         var samples: [Float] = []
         var confirmed = Transcript(words: [])
         for await clip in audio {
             samples += clip.samples
-            let heard = pass(over: samples, unread: unreading(samples))
+            let heard = try await turns.decode(as: caller) { [samples] () throws(TranscriptionFailure) in self.pass(over: samples, unread: self.unreading(samples)) }
             if let broken = EngineContract.confirming(heard.confirmed, after: confirmed) { Issue.record("the fake broke the engine's contract: \(broken)") }
             confirmed = heard.confirmed
             partial(heard)
             log.update { state in
-                state.utterances[index].samples = samples
+                state.utterances[index].samples += clip.samples
                 state.utterances[index].clips += 1
             }
         }
         missedAtKeyUp.map { partial(pass(over: samples, unread: $0)) }
-        log.update { state in
-            state.utterances[index].ended = true
-            state.utterances[index].cancelled = Task.isCancelled
-        }
+        log.update { $0.utterances[index].ended = true }
         let clip = AudioClip(samples: samples)
         let answer = answer
-        // [LAW:single-enforcer] The turn rules are `EngineTurns`'; a decode a hold cancelled
-        // fails, as the real engine's does, and is run again.
-        let turns = turns, caller = caller
         let answered = await Result { () async throws(TranscriptionFailure) in
-            try await turns.decode(as: caller) { () async throws(TranscriptionFailure) in
-                    let transcript = try await answer(clip)
-                if Task.isCancelled { throw .cancelled }
-                return transcript
-            }
+            try await turns.decode(as: caller) { () async throws(TranscriptionFailure) in try await answer(clip) }
         }
         if case .failure(.vocabulary(let refusal)) = answered {
             Issue.record("the fake refused its vocabulary (\(refusal)) after hearing the audio; a vocabulary is refused through `refusing`, before any is taken")
@@ -170,5 +169,13 @@ public final class FakeTranscriber: Transcriber {
 
     private func pass(over samples: [Float], unread: Partial.Unread?) -> Partial {
         Partial(confirmed: confirming(samples), tentative: reading(samples), repunctuated: repunctuating(samples), unread: unread)
+    }
+}
+
+extension LatencyHarness.Engine {
+    /// The fake as the harness loads the real engine: hearing for dictation and served callers
+    /// alike on its own turns, so a hold the harness takes is one its served callers meet.
+    public init(_ engine: FakeTranscriber) {
+        self.init(dictation: engine, served: engine.served, turns: engine.turns)
     }
 }

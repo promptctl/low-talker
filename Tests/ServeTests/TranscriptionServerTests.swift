@@ -197,7 +197,7 @@ import TestProbes
     @Test func aRequestThatWaitedForAHoldSaysSoInItsEvent() async throws {
         let changes = Changes()
         let turns = EngineTurns(onReadingChanged: { changes.note() })
-        let running = try await Running.start(.ready(stub(turns: turns).served))
+        let running = try await Running.start(.ready(stub(turns: turns)))
         defer { running.server.stop() }
         let hold = turns.hold()
         async let answered = running.post([("model", nil, Data("m".utf8)), ("file", "audio.mp3", fixture("hello-16k-mono.mp3"))])
@@ -212,7 +212,7 @@ import TestProbes
     @Test func anUploadPastTheLimitIs429WhileTheOneTakenInIsAnswered() async throws {
         let changes = Changes()
         let turns = EngineTurns(onReadingChanged: { changes.note() })
-        let running = try await Running.start(.ready(stub(turns: turns).served), limits: ServedLimits(uploads: 1, sockets: 1, audio: 60))
+        let running = try await Running.start(.ready(stub(turns: turns)), limits: ServedLimits(uploads: 1, sockets: 1, audio: 60))
         defer { running.server.stop() }
         let hold = turns.hold()
         let upload = [("model", nil, Data("m".utf8)), ("file", "audio.mp3", try fixture("hello-16k-mono.mp3"))] as [(name: String, filename: String?, value: Data)]

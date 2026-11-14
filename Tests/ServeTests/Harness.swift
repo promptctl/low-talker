@@ -13,7 +13,7 @@ import Testing
 /// transcript. Audio that never reaches `Utterance.audible` it refuses as nothing spoken, as the
 /// engine's gate refuses audio under its floor, with `quiet`, and noise it hears its words in
 /// doubtfully. Its partials say it failed to read the passes `unread` counts. It answers only
-/// once `gate` opens, when one is given, and decodes on `turns`.
+/// once `gate` opens, when one is given, and decodes on `turns` as the server's callers do.
 func stub(
     _ answer: Result<Transcript, TranscriptionFailure> = .success(Transcript(typed: " Hello world, this is LowTalker.")),
     quiet: Quiet = .none,
@@ -41,7 +41,7 @@ func stub(
         let crossings = zip(clip.samples, clip.samples.dropFirst()).count { ($0 < 0) != ($1 < 0) }
         let noise = Double(crossings) / Double(clip.samples.count) > 0.3
         return noise ? Transcript(words: transcript.words.map { Transcript.Word(text: $0.text, time: $0.time, confidence: doubted) }) : transcript
-    }
+    }.served
 }
 
 /// The probability the stub gives every word it reads into noise.

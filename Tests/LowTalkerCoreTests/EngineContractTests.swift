@@ -60,12 +60,12 @@ import Testing
     /// The fake fails the test that configures it as an engine that cannot exist.
     @Test func theFakeRefusesConfirmedWordsThatShrink() async throws {
         let engine = FakeTranscriber(confirming: { samples in Transcript(typed: samples.count > 1_600 ? " one" : " one two") }) { _ in Self.words }
-        await withKnownIssue { _ = try await engine.transcribe(Buffers.stream(Self.speech), expecting: .empty, partial: { _ in }) }
+        await withKnownIssue { _ = try? await engine.transcribe(Buffers.stream(Self.speech), expecting: .empty, partial: { _ in }) }
     }
 
     @Test func theFakeRefusesAFinalThatDoesNotOpenWithItsConfirmedWords() async throws {
         let engine = FakeTranscriber(confirming: { _ in Transcript(typed: " two") }) { _ in Self.words }
-        await withKnownIssue { _ = try await engine.transcribe(Self.speech, expecting: .empty) }
+        await withKnownIssue { _ = try? await engine.transcribe(Self.speech, expecting: .empty) }
     }
 
     @Test func theFakeRefusesAVocabularyRefusedAfterHearing() async throws {

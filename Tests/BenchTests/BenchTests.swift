@@ -66,7 +66,7 @@ private final class Picked: Sendable {
             folders: picked.folders, carried: nil,
             load: { store, model in
                 loads.withLock { $0.append("\(store.directory.lastPathComponent)/\(model)") }
-                return LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                return LatencyHarness.Engine(ear)
             },
             emit: { if case .row(let row) = $0 { rows.withLock { $0.append(row) } } })
         #expect(loads.withLock { $0 } == ["store/one", "store/two"])
@@ -90,7 +90,7 @@ private final class Picked: Sendable {
         let loaded = Mutex<URL?>(nil)
         try await Bench.run(options, folders: picked.folders, carried: carried, load: { store, _ in
             loaded.withLock { $0 = store.directory }
-            return LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+            return LatencyHarness.Engine(ear)
         }, emit: { _ in })
         #expect(loaded.withLock { $0 } == carried.directory)
         await #expect(throws: CarriesNoStore.self) {
@@ -135,7 +135,7 @@ private final class Picked: Sendable {
         let options = BenchOptions(fixtures: picked.fixtures, store: .folder(picked.store), plan: plan)
         let run = try await runs.start("over a", work: { emit in
             try await Bench.run(options, folders: picked.folders, carried: nil, load: { _, _ in
-                LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                LatencyHarness.Engine(ear)
             }, emit: emit)
         }, events: { event in seen.withLock { $0.append(event) } }, ended: { end in ending.withLock { $0 = end } })
         await run.value
@@ -159,7 +159,7 @@ private final class Picked: Sendable {
         let options = BenchOptions(fixtures: picked.fixtures, store: .folder(picked.store), plan: plan)
         let run = try await runs.start("over a", work: { emit in
             try await Bench.run(options, folders: picked.folders, carried: nil, load: { _, _ in
-                LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                LatencyHarness.Engine(ear)
             }, emit: emit)
         }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
         await gate.changed.settled { gate.waiting == 1 }
@@ -189,7 +189,7 @@ private final class Picked: Sendable {
         let options = BenchOptions(fixtures: picked.fixtures, store: .folder(picked.store), plan: plan)
         let run = try await runs.start("over a", work: { emit in
             try await Bench.run(options, folders: picked.folders, carried: nil, load: { _, _ in
-                LatencyHarness.Engine(dictation: ear, served: ear, turns: EngineTurns())
+                LatencyHarness.Engine(ear)
             }, emit: emit)
         }, events: { _ in }, ended: { end in ending.withLock { $0 = end } })
         await gate.changed.settled { gate.waiting == 1 }
