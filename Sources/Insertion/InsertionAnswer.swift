@@ -37,9 +37,10 @@ public struct InsertRequest: Codable, Equatable, Sendable {
     public let text: String
     public let destination: Destination
     /// The text immediately before the caret that this commit takes the place of: empty for
-    /// every ordinary insert, and a cancelled dictation's own words when it takes them back
-    /// with `text` empty. [LAW:dataflow-not-control-flow] One request whose value says what it
-    /// replaces, nothing for an insert, rather than a second kind of request.
+    /// every ordinary insert, and what a cancelled dictation's inserts put there when it takes
+    /// its own words back, with `text` the earlier dictation among them.
+    /// [LAW:dataflow-not-control-flow] One request whose value says what it replaces, nothing
+    /// for an insert, rather than a second kind of request.
     public let replacing: String
 
     public init(_ text: String, into destination: Destination, replacing: String = "") {

@@ -35,6 +35,9 @@ public enum Held: Sendable, Equatable {
         /// Kept weakly: nothing asks which words a press said once it is reported, and a press is
         /// far more than its identity.
         weak var by: (any Owner)?
+
+        /// [LAW:single-enforcer] The one test of which press said a run.
+        func said(by owner: any Owner) -> Bool { by === owner }
     }
 
     /// Words held, and why the latest of them were.
@@ -70,13 +73,13 @@ public enum Held: Sendable, Equatable {
 
         /// How many of the words `owner` said.
         func count(by owner: any Owner) -> Int {
-            runs.filter { $0.by === owner }.reduce(0) { $0 + $1.words.count }
+            runs.filter { $0.said(by: owner) }.reduce(0) { $0 + $1.words.count }
         }
 
         /// What is held without the words `owner` said, each word left under the warning it was
         /// held with, or nothing when those are all.
         func without(_ owner: any Owner) -> Part? {
-            Part(runs: runs.filter { $0.by !== owner })
+            Part(runs: runs.filter { !$0.said(by: owner) })
         }
 
         /// What a part is to everything that compares one, the person shown it and the store

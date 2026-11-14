@@ -206,11 +206,9 @@ public final class Dictation {
         /// that cancelling it can take back exactly what it put at the cursor. What it failed to put
         /// there is the hold's to tell, by the press. [LAW:one-source-of-truth]
         struct Provenance: Sendable {
-            /// The press's own words that landed, as the text the field holds, and how many.
-            var landedText = ""
-            var landedWords = 0
-            /// Earlier words an insert of the press carried into the field: delivered, not the press's.
-            var earlierWordsLanded = 0
+            /// What its inserts that landed put before the caret, its own words and the earlier
+            /// dictation they carried, and what taking its own back leaves.
+            var takeBack = TakeBack()
             /// Words in inserts that may have landed, the press's own and the earlier ones they
             /// carried: the hold stands them, as it does for any such insert.
             var standingWords = 0
@@ -343,17 +341,15 @@ public final class Dictation {
             state.withLock { $0.cursor.advance(through: transcript.words) }
         }
 
-        /// An insert of `words` of the press's landed at the cursor, carrying `placed.offered`
-        /// ahead of them. The press's own are those words and the held ones the hold says it said,
-        /// which is what it would take back; the rest it carried is delivered earlier dictation.
+        /// An insert of `words` of the press's landed at the cursor, carrying the held runs of
+        /// `placed` ahead of them, in that order. The press's own are those words and the held
+        /// ones the hold says it said, which is what it would take back; the rest it carried is
+        /// delivered earlier dictation.
         func landed(_ placed: Placed, _ words: Transcript) {
             state.withLock { state in
                 if let performed = placed.performed {
                     state.performed.append(performed)
-                    let own = (placed.carried?.runs ?? []).filter { $0.by === self }.flatMap(\.words) + words.words
-                    state.provenance.landedText += own.map(\.text).joined()
-                    state.provenance.landedWords += own.count
-                    state.provenance.earlierWordsLanded += placed.offered.words.count - own.count
+                    state.provenance.takeBack.landed(carrying: placed.carried, then: words, of: self)
                 }
                 state.words += placed.words
             }
@@ -454,8 +450,6 @@ public final class Dictation {
     private struct Placed: Sendable {
         let performed: Executor.Performed?
         let words: Int
-        /// What the insert carried: the hold's offered words, then the new ones.
-        let offered: Transcript
         /// What of the hold's it carried, and who said it.
         let carried: Held.Part?
     }
@@ -975,7 +969,7 @@ public final class Dictation {
             let performed = try await executor.insert(offered, following: last, since: since)
             // An insert of nothing is no proof a cursor takes words, so a warning stands.
             performed.map { _ in hold.landed() }
-            return Placed(performed: performed, words: performed.map { _ in offered.words.count } ?? 0, offered: offered, carried: carried)
+            return Placed(performed: performed, words: performed.map { _ in offered.words.count } ?? 0, carried: carried)
         } catch {
             let forgotten = hold.failed(words, by: owner, with: error)
             throw Unplaced(failure: error, carried: offered.words.count, forgotten: forgotten)
@@ -1066,12 +1060,13 @@ public final class Dictation {
     /// Throws a cancelled press away, as soon as its commits have drained.
     ///
     /// What it put at the cursor is taken back by one request through the executor, never through
-    /// `place`, which would carry held words into it. What no cursor took of its own words the hold
-    /// let go at the throw (`threwAway`), held or dismissed, since a cancel discards what is not in
-    /// the field, and the report counts it. What was said past the commits is dropped, as for a chord
-    /// that was a typed key's modifier. Words an insert may have landed stand with the hold's
-    /// warning, and earlier dictation that landed with the press's first insert stays in the
-    /// field: the report counts both.
+    /// `place`, which would carry held words into it: the request replaces the stretch from its
+    /// first word to the caret with the earlier dictation inside it (`TakeBack`). What no cursor
+    /// took of its own words the hold let go at the throw (`threwAway`), held or dismissed, since
+    /// a cancel discards what is not in the field, and the report counts it. What was said past
+    /// the commits is dropped, as for a chord that was a typed key's modifier. Words an insert
+    /// may have landed stand with the hold's warning, and earlier dictation the press's inserts
+    /// carried stays in the field: the report counts both.
     ///
     /// [LAW:no-silent-failure] A take-back that did not happen is a failure saying how many words
     /// stay at the cursor, and it is never retried: a second one could remove words that are not
@@ -1080,17 +1075,17 @@ public final class Dictation {
         let own = heard.streaming.provenance
         var couldNot: (app: BundleID, cause: InsertFailure)?
         if let last = heard.streaming.landed.performed.last {
-            do throws(InsertFailure) { try await executor.takeBack(own.landedText, from: last) } catch { couldNot = (last.into, error) }
+            do throws(InsertFailure) { try await executor.takeBack(own.takeBack, from: last) } catch { couldNot = (last.into, error) }
         }
         // The engine's turn passes on only when the decode ends, so it is waited out, and what it
         // heard past the commits is counted as dropped.
         let dropped = words(past: heard.streaming, in: await heard.decode.value)
         let cancelled = Cancelled(
-            takenBack: couldNot == nil ? own.landedWords : 0, earlierWordsLanded: own.earlierWordsLanded,
+            takenBack: couldNot == nil ? own.takeBack.words : 0, earlierWordsLanded: own.takeBack.earlierWords,
             forgotten: own.forgotten,
             standing: own.standingWords, discarded: dropped.isBlank ? 0 : dropped.words.count)
         if let couldNot {
-            throw Failed(CancelLeftWords(left: own.landedWords, app: couldNot.app, cause: couldNot.cause, cancelled: cancelled))
+            throw Failed(CancelLeftWords(left: own.takeBack.words, app: couldNot.app, cause: couldNot.cause, cancelled: cancelled))
         }
         return .cancelled(cancelled)
     }
@@ -1195,7 +1190,7 @@ public final class Dictation {
 public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
     /// Its own words that had landed, taken back out of the field.
     public let takenBack: Int
-    /// Earlier dictation its first insert carried into the field: delivered, not this press's, so it stays.
+    /// Earlier dictation its inserts carried into the field: delivered, not this press's, so it stays.
     public let earlierWordsLanded: Int
     /// Its own words no cursor took, let go from the hold, held or dismissed.
     public let forgotten: Int
@@ -1214,7 +1209,7 @@ public struct Cancelled: Sendable, Equatable, CustomStringConvertible {
 
     public var description: String {
         "\(counted(takenBack, "word", "words")) taken back, \(counted(forgotten, "held word", "held words")) let go, \(discarded) heard after the commits dropped; "
-            + "\(counted(earlierWordsLanded, "earlier word delivered with its first insert stays", "earlier words delivered with its first insert stay")), "
+            + "\(counted(earlierWordsLanded, "earlier word delivered with its inserts stays", "earlier words delivered with its inserts stay")), "
             + "\(counted(standing, "word that may have landed stands", "words that may have landed stand"))"
     }
 }

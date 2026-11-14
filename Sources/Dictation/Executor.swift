@@ -84,18 +84,19 @@ public struct Executor {
         return done
     }
 
-    /// Takes back `landed`, the text a cancelled dictation's own inserts put at the cursor, from
-    /// the app the latest of them went to: the input method reads the field before it changes
-    /// it, and refuses, changing nothing, when the words are not there to take.
+    /// Takes back what a cancelled dictation's own inserts put at the cursor, from the app the
+    /// latest of them went to: the stretch from its first word to the caret is replaced by the
+    /// earlier dictation inside it. The input method reads the field before it changes it, and
+    /// refuses, changing nothing, when that stretch is not there.
     ///
-    /// Not an insert of words, so not `insert`: nothing is carried ahead of it, and a blank
-    /// `landed` is not asked at all, since replacing nothing with nothing is not a request.
+    /// Not an insert of words, so not `insert`: nothing is carried ahead of it, and a press none
+    /// of whose own words landed is not asked at all, since replacing nothing is not a request.
     /// Throws as `insert` does, and a failure that may have landed is not retried: a second
     /// take-back could remove words that are not this dictation's. [LAW:no-silent-failure]
-    public func takeBack(_ landed: String, from last: Performed) async throws(InsertFailure) {
-        guard !landed.isEmpty else { return }
+    func takeBack(_ landed: TakeBack, from last: Performed) async throws(InsertFailure) {
+        guard !landed.replacing.isEmpty else { return }
         let started = ContinuousClock.now
-        _ = try await inserter.insert(InsertRequest("", into: .app(last.into.rawValue), replacing: landed))
-        log.info("took back \(landed.utf16.count, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public) in \(Int((ContinuousClock.now - started) / .milliseconds(1)), privacy: .public) ms")
+        _ = try await inserter.insert(InsertRequest(landed.leaving, into: .app(last.into.rawValue), replacing: landed.replacing))
+        log.info("took back \(landed.replacing.utf16.count - landed.leaving.utf16.count, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public), replacing \(landed.replacing.utf16.count, privacy: .public) before the caret with \(landed.leaving.utf16.count, privacy: .public) of earlier dictation, in \(Int((ContinuousClock.now - started) / .milliseconds(1)), privacy: .public) ms")
     }
 }
