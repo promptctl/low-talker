@@ -391,7 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let keptSpeech = app.keptSpeech
 
         menu.removeAllItems()
-        let model = "Whisper model: \(app.engineReadout)"
+        let model = "Model: \(app.engineReadout)"
         let modelRow = if case .failed = engineReadiness { errorRow(model, .model) } else { readout(model) }
         menu.addItem(modelRow)
         // A press made during the wait is not lost, and nothing else on screen says so.
