@@ -43,6 +43,10 @@ let package = Package(
         // every library that tells a person a count, the input method's included, tells it
         // through this one rule. [LAW:one-way-deps]
         .target(name: "GrammaticalNumber"),
+        // The clock the machine has been up on, which key events and microphone buffers are
+        // stamped on, and which a decision reads time from through `HostClock`. It depends on
+        // nothing, so the core and the input source's watch read one clock. [LAW:one-way-deps]
+        .target(name: "Uptime"),
         .testTarget(name: "GrammaticalNumberTests", dependencies: ["GrammaticalNumber"]),
         // The Text Input Sources framework as this program uses it: where the
         // input source stands on this Mac, the steps that put it there, and the input method's
@@ -50,19 +54,24 @@ let package = Package(
         // Identity, the Text Input Sources lock beneath it, and Insertion for the build the
         // input method says, so the app reaches it without the input method process linking
         // anything of the app's. [LAW:one-way-deps]
-        .target(name: "InputSource", dependencies: ["Identity", "TextInputSources", "Insertion"]),
-        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion", "TestProbes"]),
+        .target(name: "InputSource", dependencies: ["Identity", "TextInputSources", "Insertion", "Uptime"]),
+        .testTarget(name: "InputSourceTests", dependencies: ["InputSource", "Identity", "Insertion", "TestProbes", "Uptime"]),
         // What macOS has let this process do - listen - read without ever prompting, and asked
         // for only when called. Beneath the core and the setup list alike, so both read one
         // reading. [LAW:one-way-deps]
         .target(name: "Grants"),
-        .testTarget(name: "GrantsTests", dependencies: ["Grants"]),
+        // The one fake of microphone authorization and the contract it is held to, beside the
+        // port. It links only Grants, so a suite that stands in the authority links no engine.
+        // In no product. [LAW:one-source-of-truth]
+        .target(name: "GrantsFakes", dependencies: ["Grants"]),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "GrantsFakes"]),
         .target(
             name: "LowTalkerCore",
             dependencies: [
                 "Identity",
                 "Grants",
                 "GrammaticalNumber",
+                "Uptime",
                 // The app's end of the hotkey port, which the input method tells each cursor
                 // arrival to.
                 "Insertion",
@@ -85,11 +94,11 @@ let package = Package(
         // side and the installer's write side are both exercised on. A plain target because
         // test targets cannot import one another's sources, and in no product because
         // nothing ships it. [LAW:one-source-of-truth]
-        .target(name: "TestProbes", dependencies: ["LowTalkerCore"]),
+        .target(name: "TestProbes", dependencies: ["LowTalkerCore", "Uptime"]),
         // The one fake of the engine port and the contract it is held to, beside the port, so
         // every caller's tests hear on the engine the contract checks. In no product.
         // [LAW:one-source-of-truth]
-        .target(name: "LowTalkerCoreFakes", dependencies: ["LowTalkerCore", "TestProbes"]),
+        .target(name: "LowTalkerCoreFakes", dependencies: ["LowTalkerCore", "TestProbes", "Uptime"]),
         // Everything that must hold before low-talker can hear and type, as a list a reader
         // can act on: what was read off this Mac, and the step for whatever is missing. It
         // links the identity, the grants and the input source's switch, and not the core - so
@@ -98,7 +107,7 @@ let package = Package(
         .target(name: "Onboarding", dependencies: ["Identity", "Grants", "InputSource"]),
         // The steps are what a person acts on, so they are asserted as values rather
         // than scraped off a terminal.
-        .testTarget(name: "OnboardingTests", dependencies: ["Onboarding", "Identity", "Grants"]),
+        .testTarget(name: "OnboardingTests", dependencies: ["Onboarding", "Identity", "Grants", "GrantsFakes"]),
         // Whether the app's icon is in the menu bar as its own: which process macOS holds
         // responsible for it, which decides whose row in the menu bar's allow list it is filed
         // under, and whether the icon came on screen. Out of the app target so `make test` runs it.
@@ -119,8 +128,11 @@ let package = Package(
         // Its own target rather than app code so the loop runs under `swift test`; the
         // app links it and hands over the real microphone, engine and inserter - the input
         // method in the app, a fake in a test. [LAW:decomposition] [LAW:composability]
-        .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber"]),
-        .testTarget(name: "DictationTests", dependencies: ["Dictation", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "Insertion", "InsertionFakes", "TestProbes"]),
+        .target(name: "Dictation", dependencies: ["LowTalkerCore", "Insertion", "GrammaticalNumber", "Uptime"]),
+        // The one fake of each store the loop keeps words and speech in, and the contracts they and
+        // the files are held to, beside the ports. In no product. [LAW:one-source-of-truth]
+        .target(name: "DictationFakes", dependencies: ["Dictation", "LowTalkerCore"]),
+        .testTarget(name: "DictationTests", dependencies: ["Dictation", "DictationFakes", "LowTalkerCore", "LowTalkerCoreFakes", "Grants", "GrantsFakes", "Insertion", "InsertionFakes", "TestProbes", "Uptime"]),
         // What the input method process answers with, kept out of the process itself so the
         // suite compiles and exercises it: an Xcode-only target would be invisible to
         // `make test` the way App/LowTalker's sources are.
@@ -162,7 +174,7 @@ let package = Package(
         // The bench: its options, flags, table, the folders a person picked for it, and the
         // one run at a time the app's window and `LowTalker --bench` start. Beneath the app;
         // the engine it loads is the core's, read in place, never installed.
-        .target(name: "Bench", dependencies: ["LowTalkerCore", "GrammaticalNumber", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
+        .target(name: "Bench", dependencies: ["LowTalkerCore", "GrammaticalNumber", "Uptime", .product(name: "ArgumentParser", package: "swift-argument-parser")]),
         .testTarget(name: "BenchTests", dependencies: ["Bench", "LowTalkerCore", "LowTalkerCoreFakes", "TestProbes"]),
         // The write side of the model store: fetching from huggingface.co or a published
         // base, copying from another store, packing one to publish. Beneath `model-tool`
@@ -193,8 +205,10 @@ let package = Package(
                 "LowTalkerCore",
                 "LowTalkerCoreFakes",
                 "Grants",
+                "GrantsFakes",
                 "Insertion",
                 "TestProbes",
+                "Uptime",
                 // The tests build WhisperKit's result types by hand to exercise the
                 // mapping without model weights.
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),

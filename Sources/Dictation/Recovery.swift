@@ -2,6 +2,7 @@ import Foundation
 import GrammaticalNumber
 import LowTalkerCore
 import os
+import Uptime
 
 /// The one consumer of speech no engine heard: it keeps it, and once an engine has landed reads it
 /// into words and hands them to the `Hold`.
@@ -37,8 +38,12 @@ public final class Recovery {
     private var engine: (any Transcriber)?
     private var recovering: Task<Void, Never>?
 
-    public init(store: any UnheardStore, hold: Hold, sessions: SerialQueue) {
+    /// What a read of kept speech is timed on.
+    private let clock: HostClock
+
+    public init(store: any UnheardStore, hold: Hold, sessions: SerialQueue, clock: HostClock = .system) {
         self.store = store
+        self.clock = clock
         self.hold = hold
         self.sessions = sessions
         let read = store.entries()
@@ -140,7 +145,7 @@ public final class Recovery {
         } catch {
             return fail(entry, "\(error)")
         }
-        let began = ContinuousClock.now
+        let began = clock.now
         let transcription: Transcription
         do throws(TranscriptionFailure) {
             transcription = try await engine.transcribe(Self.audio(samples), expecting: vocabulary, partial: { _ in })
@@ -169,7 +174,7 @@ public final class Recovery {
             preconditionFailure("kept speech could not be handed to the hold: \(error)")
         }
         if handed {
-            Self.log.notice("read \(entry.seconds, privacy: .public) s of kept speech into \(counted(words.words.count, "held word", "held words"), privacy: .public) in \(began.duration(to: .now), privacy: .public)")
+            Self.log.notice("read \(entry.seconds, privacy: .public) s of kept speech into \(counted(words.words.count, "held word", "held words"), privacy: .public) in \(began.duration(to: self.clock.now), privacy: .public)")
             finish(entry)
         } else {
             Self.log.notice("kept speech \(entry.id, privacy: .public) was discarded while it was being read, so its words were dropped")

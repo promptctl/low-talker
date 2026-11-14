@@ -1,5 +1,6 @@
 import LowTalkerCore
 import Testing
+import Uptime
 
 private let rightOption = Mode(name: "dictation", chord: KeyChord(modifiers: .rightOption))
 private let command = Mode(name: "command", chord: KeyChord(modifiers: .rightOption, .leftShift))

@@ -1,5 +1,6 @@
 import LowTalkerCore
 import Testing
+import Uptime
 
 @Suite struct AudioTimelineTests {
     private let origin = HostTime(uptime: .zero)

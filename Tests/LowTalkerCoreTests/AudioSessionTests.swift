@@ -1,5 +1,6 @@
 import LowTalkerCore
 import Testing
+import Uptime
 
 @Suite struct AudioSessionTests {
     /// When the key went down. These tests are about the arithmetic between two marks,

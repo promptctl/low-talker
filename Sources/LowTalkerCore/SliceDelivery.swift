@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Synchronization
+import Uptime
 
 /// One press's audio on its way from CoreAudio's IO thread to the pipeline.
 ///

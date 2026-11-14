@@ -1,6 +1,7 @@
 import AVFoundation
 @testable import LowTalkerCore
 import Testing
+import Uptime
 
 @Suite struct AudioHardwareTests {
     /// A CoreAudio stamp counts the machine's raw ticks, so 1.5 s of them comes back as

@@ -1,29 +1,8 @@
 import AVFoundation
 import Grants
+import GrantsFakes
 import Synchronization
 import Testing
-
-/// A TCC that a test controls: a status, and the decision the user makes at the prompt.
-private final class FakeAuthority: MicrophoneAuthority {
-    private let status_: Mutex<AVAuthorizationStatus>
-    /// What the status becomes when the prompt is answered.
-    private let decision: AVAuthorizationStatus
-
-    init(status: AVAuthorizationStatus, decision: AVAuthorizationStatus = .authorized) {
-        status_ = Mutex(status)
-        self.decision = decision
-    }
-
-    func status() -> AVAuthorizationStatus { status_.withLock { $0 } }
-
-    /// The user changed their mind in System Settings.
-    func set(_ status: AVAuthorizationStatus) { status_.withLock { $0 = status } }
-
-    func requestAccess() async -> Bool {
-        set(decision)
-        return decision == .authorized
-    }
-}
 
 @Suite struct MicrophonePermissionTests {
     @Test(arguments: [
@@ -32,13 +11,13 @@ private final class FakeAuthority: MicrophoneAuthority {
         (.restricted, .restricted),
     ])
     func everyWayOfSayingNoIsWithheldWithItsReason(status: AVAuthorizationStatus, reason: MicrophoneAuthorization.Withheld) {
-        let permission = MicrophonePermission(authority: FakeAuthority(status: status))
+        let permission = MicrophonePermission(authority: FakeMicrophoneAuthority(status: status))
         #expect(permission.current == .withheld(reason))
         #expect(throws: reason) { try permission.current.grant() }
     }
 
     @Test func authorizedIsAGrant() throws {
-        let permission = MicrophonePermission(authority: FakeAuthority(status: .authorized))
+        let permission = MicrophonePermission(authority: FakeMicrophoneAuthority(status: .authorized))
         guard case .granted(let grant) = permission.current else {
             Issue.record("authorized did not parse as granted")
             return
@@ -50,15 +29,15 @@ private final class FakeAuthority: MicrophoneAuthority {
     /// both answer false at the prompt and are told apart afterwards.
     @Test(arguments: [AVAuthorizationStatus.authorized, .denied, .restricted])
     func requestReportsTheDecision(decision: AVAuthorizationStatus) async {
-        let authority = FakeAuthority(status: .notDetermined, decision: decision)
+        let authority = FakeMicrophoneAuthority(status: .notDetermined, decision: decision)
         let answer = await MicrophonePermission(authority: authority).request()
-        #expect(answer == MicrophonePermission(authority: FakeAuthority(status: decision)).current)
+        #expect(answer == MicrophonePermission(authority: FakeMicrophoneAuthority(status: decision)).current)
     }
 
     /// The stream opens with where things stand and then yields each change, so a
     /// switch flipped in System Settings reaches the app without a relaunch.
     @Test func changesYieldTheCurrentValueThenEachChange() async throws {
-        let authority = FakeAuthority(status: .notDetermined)
+        let authority = FakeMicrophoneAuthority(status: .notDetermined)
         var changes = MicrophonePermission(authority: authority).changes(every: .milliseconds(1)).makeAsyncIterator()
 
         #expect(await changes.next() == .withheld(.notDetermined))
@@ -69,5 +48,15 @@ private final class FakeAuthority: MicrophoneAuthority {
         // Reads that see no change yield nothing: the next value out is the next change.
         authority.set(.restricted)
         #expect(await changes.next() == .withheld(.restricted))
+    }
+}
+
+/// The authority's contract against its one fake, which every suite that stands in TCC uses.
+@Suite struct MicrophoneAuthorityContractTests {
+    static let fake = MicrophoneAuthorityContract { FakeMicrophoneAuthority(status: $0, decision: $1) }
+
+    @Test(arguments: MicrophoneAuthorityContract.Statement.allCases)
+    func theFakeKeepsTheStatement(_ statement: MicrophoneAuthorityContract.Statement) async {
+        #expect(await Self.fake.disagreements(with: statement) == [])
     }
 }

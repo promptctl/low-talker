@@ -2,57 +2,8 @@ import Foundation
 import Synchronization
 import Testing
 import TestProbes
+import Uptime
 @testable import InputSource
-
-/// A monotonic clock the test moves by hand: `now` only changes when the test calls `advance`,
-/// and a `sleep(until:)` comes back the moment `now` reaches its deadline. So a throttle proves
-/// its gap against time the test owns, not against the scheduler getting CPU within a window.
-/// [LAW:no-ambient-temporal-coupling] The `MonotonicClock` port's test fake (laws:testing P5),
-/// shaped like `Changes`/`Gate`: a count-free condition cannot lose a wake because a waiter is
-/// filed and read under the one lock `advance` takes, and a cancelled sleep comes back rather
-/// than staying parked, the reason those do.
-final class ManualClock: MonotonicClock {
-    private struct State {
-        var now: ContinuousClock.Instant
-        var sleepers: [Int: (deadline: ContinuousClock.Instant, continuation: CheckedContinuation<Void, Error>)] = [:]
-        var next = 0
-    }
-
-    private let state: Mutex<State>
-
-    init(startingAt start: ContinuousClock.Instant = ContinuousClock.now) { state = Mutex(State(now: start)) }
-
-    var now: ContinuousClock.Instant { state.withLock { $0.now } }
-
-    func sleep(until deadline: ContinuousClock.Instant) async throws {
-        try Task.checkCancellation()
-        let id = state.withLock { state in let id = state.next; state.next += 1; return id }
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                let resumeNow = state.withLock { state -> (() -> Void)? in
-                    if Task.isCancelled { return { continuation.resume(throwing: CancellationError()) } }
-                    if state.now >= deadline { return { continuation.resume() } }
-                    state.sleepers[id] = (deadline, continuation)
-                    return nil
-                }
-                resumeNow?()
-            }
-        } onCancel: {
-            state.withLock { $0.sleepers.removeValue(forKey: id)?.continuation }?.resume(throwing: CancellationError())
-        }
-    }
-
-    /// Move `now` forward and wake every sleeper whose deadline it has reached.
-    func advance(by duration: Duration) {
-        let woken = state.withLock { state -> [CheckedContinuation<Void, Error>] in
-            state.now = state.now.advanced(by: duration)
-            let due = state.sleepers.filter { $0.value.deadline <= state.now }
-            due.keys.forEach { state.sleepers.removeValue(forKey: $0) }
-            return due.values.map(\.continuation)
-        }
-        woken.forEach { $0.resume() }
-    }
-}
 
 /// The supervisor against processes a test ends, so what it tells and when it opens again
 /// is read without launching anything.
@@ -61,15 +12,15 @@ final class ManualClock: MonotonicClock {
     /// Processes handed out in order, each ended when the test says, and every open counted
     /// with the clock instant it came at.
     @MainActor final class Launches {
-        private(set) var opens: [ContinuousClock.Instant] = []
+        private(set) var opens: [HostTime] = []
         private var endings: [Int32: AsyncStream<Never>.Continuation] = [:]
         /// What each open answers in turn: a pid for a process, nil for a refusal.
         var answers: [Int32?]
         /// The clock each open is stamped on - the supervisor's own, so gaps between opens are
         /// read on the time the test advances, not on the wall.
-        let clock: any MonotonicClock
+        let clock: HostClock
 
-        init(answering answers: [Int32?], clock: any MonotonicClock = SystemMonotonicClock()) {
+        init(answering answers: [Int32?], clock: HostClock = .system) {
             self.answers = answers
             self.clock = clock
         }
@@ -115,10 +66,10 @@ final class ManualClock: MonotonicClock {
     }
 
     @Test func aRefusedOpenIsToldAndTriedAgainNoSoonerThanTheThrottleAllows() async {
-        let clock = ManualClock()
-        let launches = Launches(answering: [nil, 7], clock: clock)
+        let clock = ManualHostClock()
+        let launches = Launches(answering: [nil, 7], clock: clock.clock)
         let told = Told()
-        let supervisor = InputMethodSupervisor(throttleInterval: .milliseconds(300), clock: clock, open: launches.open, told: told.tell)
+        let supervisor = InputMethodSupervisor(throttleInterval: .milliseconds(300), clock: clock.clock, open: launches.open, told: told.tell)
         defer { supervisor.stop() }
         // The first open is refused and told; the watch is now parked in the throttle.
         #expect(await told.until(1) == [.notOpened("refused", opening: 1)])
@@ -129,7 +80,7 @@ final class ManualClock: MonotonicClock {
         // At the throttle the watch opens again.
         clock.advance(by: .milliseconds(1))
         #expect(await told.until(2) == [.notOpened("refused", opening: 1), .running(pid: 7, opening: 2)])
-        #expect(launches.opens[0].duration(to: launches.opens[1]) >= .milliseconds(300))
+        #expect(launches.opens[0].duration(to: launches.opens[1]) == .milliseconds(300))
     }
 
     @Test func aStoppedWatchTellsNothingMoreAndOpensNothingMore() async {

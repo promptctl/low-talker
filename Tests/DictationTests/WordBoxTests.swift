@@ -1,4 +1,5 @@
 @testable import Dictation
+import DictationFakes
 import Insertion
 import LowTalkerCore
 import LowTalkerCoreFakes

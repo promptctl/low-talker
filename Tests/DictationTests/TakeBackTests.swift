@@ -13,7 +13,7 @@ import TestProbes
 @Suite @MainActor struct TakeBackTests {
     /// Inserts `texts` at the cursor, as a press's inserts put them, and answers the last.
     private static func field(_ inputMethod: FakeInputMethod, _ texts: String...) async throws -> Executor.Performed {
-        let executor = Executor(insertingThrough: inputMethod)
+        let executor = Executor(insertingThrough: inputMethod, clock: .system)
         var last: Executor.Performed?
         for text in texts { last = try await executor.insert(Transcript(typed: text), following: last, since: .keyUp(.now)) }
         return try #require(last)
@@ -37,7 +37,7 @@ import TestProbes
         let last = try await Self.field(inputMethod, " hello", " first again there")
         let since = Date.now
 
-        try await Executor(insertingThrough: inputMethod, log: Logger(subsystem: "lowtalker", category: "take-back-both-sides")).takeBack(landed, from: last)
+        try await Executor(insertingThrough: inputMethod, clock: .system, log: Logger(subsystem: "lowtalker", category: "take-back-both-sides")).takeBack(landed, from: last)
 
         #expect(inputMethod.field == " first")
         #expect(landed.words == 3)
@@ -57,7 +57,7 @@ import TestProbes
         let inputMethod = FakeInputMethod()
         let last = try await Self.field(inputMethod, "old words hello")
 
-        try await Executor(insertingThrough: inputMethod).takeBack(landed, from: last)
+        try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: last)
 
         #expect(inputMethod.takeBacks == [" hello"])
         #expect(inputMethod.field == "old words")
@@ -74,7 +74,7 @@ import TestProbes
         let last = try await Self.field(inputMethod, " hello", " first", " typed", " there")
 
         await #expect(throws: InsertFailure.refused(.wordsCannotBeTakenBack)) {
-            try await Executor(insertingThrough: inputMethod).takeBack(landed, from: last)
+            try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: last)
         }
         #expect(inputMethod.field == " hello first typed there")
     }
@@ -87,7 +87,7 @@ import TestProbes
         var landed = TakeBack()
         landed.landed(carrying: Self.carried(("old words", nil)), then: Transcript(words: []), of: Speaker())
 
-        try await Executor(insertingThrough: inputMethod).takeBack(landed, from: last)
+        try await Executor(insertingThrough: inputMethod, clock: .system).takeBack(landed, from: last)
 
         #expect(inputMethod.asked == 1)
         #expect(inputMethod.field == "old words")

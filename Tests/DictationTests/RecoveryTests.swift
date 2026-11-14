@@ -1,4 +1,5 @@
 import Dictation
+import DictationFakes
 import Foundation
 import Insertion
 import LowTalkerCore
@@ -158,8 +159,8 @@ private struct LoadFailed: Error, CustomStringConvertible {
     /// and it stays kept, named in the menu, until the person lets it go.
     @Test(.timeLimit(.minutes(1))) func aSpeechThatCannotBeReadStaysKeptAndTheOnesBehindItAreRead() async throws {
         let store = try Self.store(Self.said(9), Self.said(2))
-        store.makeUnreadable(try #require(store.ids.first))
         let rig = try await Self.rig(over: store)
+        store.damage(try #require(store.ids.first))
 
         rig.recovery.landed(Self.reading(rig.turns).served)
         await rig.recovery.settled()

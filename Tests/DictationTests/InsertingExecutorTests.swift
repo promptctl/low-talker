@@ -26,7 +26,7 @@ import Testing
 
     @Test func wordsAtTheFocusAreInsertedAtTheCursor() async throws {
         let inputMethod = Self.inserting(into: Self.textEdit)
-        let performed = try #require(await Executor(insertingThrough: inputMethod)
+        let performed = try #require(await Executor(insertingThrough: inputMethod, clock: .system)
             .insert(Transcript(typed: "héllo there"), following: nil, since: .keyUp(.now)))
 
         #expect(inputMethod.inserted == ["héllo there"])
@@ -40,7 +40,7 @@ import Testing
     /// window and is somewhere else by the time the words are ready, and the input method
     /// commits where the cursor is then. [FRAMING:representation]
     @Test func theAppNamedIsTheOneTheInputMethodReached() async throws {
-        let performed = try #require(await Executor(insertingThrough: Self.inserting(into: Self.slack))
+        let performed = try #require(await Executor(insertingThrough: Self.inserting(into: Self.slack), clock: .system)
             .insert(Transcript(typed: "hi"), following: nil, since: .keyUp(.now)))
 
         #expect(performed.into == Self.slack)
@@ -51,7 +51,7 @@ import Testing
     /// to the app the one before it reached.
     @Test func eachInsertIsBoundToTheAppTheOneBeforeItReached() async throws {
         let inputMethod = Self.inserting(into: Self.textEdit)
-        let executor = Executor(insertingThrough: inputMethod)
+        let executor = Executor(insertingThrough: inputMethod, clock: .system)
         let first = try #require(await executor.insert(Transcript(typed: "one"), following: nil, since: .keyDown(.now)))
         let second = try #require(await executor.insert(Transcript(typed: " two"), following: first, since: .keyDown(.now)))
         _ = try await executor.insert(Transcript(typed: " three"), following: second, since: .keyUp(.now))
@@ -62,7 +62,7 @@ import Testing
     /// Nothing said is nothing inserted: the input method is never asked.
     @Test func aBlankTranscriptInsertsNothing() async throws {
         let inputMethod = Self.inserting(into: Self.textEdit)
-        let executor = Executor(insertingThrough: inputMethod)
+        let executor = Executor(insertingThrough: inputMethod, clock: .system)
         for blank in [Transcript(words: []), Transcript(words: [.init(text: " ", time: 0...0, confidence: 1.0)])] {
             #expect(try await executor.insert(blank, following: nil, since: .keyUp(.now)) == nil)
         }
@@ -76,7 +76,7 @@ import Testing
         let inputMethod = FakeInputMethod()
         inputMethod.refusing(failed.failure)
         let thrown = try await #require(throws: InsertFailure.self) {
-            try await Executor(insertingThrough: inputMethod)
+            try await Executor(insertingThrough: inputMethod, clock: .system)
                 .insert(Transcript(typed: "héllo there"), following: nil, since: .keyUp(.now))
         }
 

@@ -1,6 +1,7 @@
 import Dispatch
 import Identity
 import os
+import Uptime
 
 extension Logger {
     /// [LAW:one-source-of-truth] The `hotkey` category of the unified log, for everything
@@ -45,7 +46,30 @@ public final class Hotkey {
         config.modes.map { named($0.chord) }.joined(separator: " or ")
     }
 
+    /// What the hotkey did: each transition it handed on, and each press the loop refused at
+    /// `began`. [LAW:nothing-unseen] Every one is recorded, and `log` renders it in the unified
+    /// log, so what a test reads is what the log says.
+    public enum Record: Hashable, Sendable, CustomStringConvertible {
+        case transition(HotkeyDetector.Transition)
+        /// The press begun at this moment was refused by the loop. Whether the detector ended it
+        /// then or leaves it to end as the chord comes up, its ending is a transition of its own.
+        case refused(pressBegunAt: HostTime)
+
+        public var description: String {
+            switch self {
+            case .transition(let transition): "\(transition)"
+            case .refused(let moment): "the press begun \(moment.onUptime) was refused"
+            }
+        }
+    }
+
+    /// The app's rendering of a record: a line under the `hotkey` category.
+    nonisolated public static func log(_ record: Record) {
+        Logger.hotkey.notice("\(record, privacy: .public)")
+    }
+
     private let feed: any ModifierFeed
+    private let recording: @MainActor (Record) -> Void
     private var detector: HotkeyDetector
     /// The feed that is running, and the handler its presses go to - kept together because a
     /// press still open when the feed stops is ended at that same handler.
@@ -54,8 +78,10 @@ public final class Hotkey {
     /// Hears each transition and answers whether it refused the press that began.
     public typealias Handler = @MainActor (HotkeyDetector.Transition) -> PressRefusal?
 
-    public init(modes: Modes, tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed) {
+    /// Every record goes to `recording`.
+    public init(modes: Modes, tapThreshold: Duration = defaultTapThreshold, feed: any ModifierFeed, recording: @escaping @MainActor (Record) -> Void = Hotkey.log) {
         self.feed = feed
+        self.recording = recording
         detector = HotkeyDetector(modes: modes, tapThreshold: tapThreshold)
     }
 
@@ -66,6 +92,10 @@ public final class Hotkey {
     }
 
     public var phase: HotkeyDetector.Phase { detector.phase }
+
+    /// [LAW:one-source-of-truth] The clock the feed stamps its key events on, which a refusal is
+    /// timed on too, and which whatever times a press from those stamps must read.
+    public var clock: HostClock { feed.clock }
 
     /// Whether the feed is running and presses are being heard.
     ///
@@ -143,16 +173,16 @@ public final class Hotkey {
     // Only the feed stops: nothing is left to hear an ending told from here.
     deinit { MainActor.assumeIsolated { installed?.dispose() } }
 
-    /// Logs `transition`, then hands it to `onTransition` on the main queue, after the event
+    /// Records `transition`, then hands it to `onTransition` on the main queue, after the event
     /// that caused it has been read.
     ///
     /// [LAW:single-enforcer] The one way anything leaves this class, so every transition
-    /// is logged, a lapse at `stop` among them. The main queue is
+    /// is recorded, a lapse at `stop` among them. The main queue is
     /// first-in-first-out, which is what keeps a `began` ahead of the `ended` that
     /// follows it: `Dictation.press` traps on a pair out of order rather than repairing
     /// one, so the order is a correctness property and not a preference.
     private func deliver(_ transition: HotkeyDetector.Transition, to onTransition: @escaping Handler) {
-        Logger.hotkey.notice("\(transition, privacy: .public)")
+        recording(.transition(transition))
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 let refusal = onTransition(transition)
@@ -161,11 +191,11 @@ public final class Hotkey {
         }
     }
 
-    /// The press begun at `moment` was refused by the loop. [LAW:nothing-unseen] The log says so
-    /// whether the detector ends the press now or leaves it to end as the chord comes up.
+    /// The press begun at `moment` was refused by the loop. [LAW:nothing-unseen] The record says
+    /// so whether the detector ends the press now or leaves it to end as the chord comes up.
     private func refuse(pressBegunAt moment: HostTime, to onTransition: @escaping Handler) {
-        Logger.hotkey.notice("the press begun at \(moment.uptime / .milliseconds(1)) ms of uptime was refused")
-        detector.refuse(pressBegunAt: moment, at: .now).map { deliver($0, to: onTransition) }
+        recording(.refused(pressBegunAt: moment))
+        detector.refuse(pressBegunAt: moment, at: clock.now).map { deliver($0, to: onTransition) }
     }
 
     private func handle(_ event: KeyEvent, _ onTransition: @escaping Handler) {

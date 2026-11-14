@@ -3,6 +3,7 @@ import GrammaticalNumber
 import Insertion
 import LowTalkerCore
 import os
+import Uptime
 
 /// Inserts what was heard: text at the focus asked of the input method, which commits it at
 /// the cursor through the text input system - no key posted, no pasteboard touched, and no
@@ -15,12 +16,16 @@ import os
 public struct Executor {
     private let inserter: any Inserter
     private let log: Logger
+    /// What an insert's acknowledgement is timed on, and the press that made it: the clock the
+    /// key events it is timed from are stamped on, which is why it has no default.
+    public let clock: HostClock
 
     /// Words that do not reach the cursor are a failure and are thrown as one: the input
     /// method's refusal or the channel's, by name. Nothing puts them anywhere else.
     /// [LAW:no-silent-failure]
-    public init(insertingThrough inserter: any Inserter, log: Logger = Executor.log) {
+    public init(insertingThrough inserter: any Inserter, clock: HostClock, log: Logger = Executor.log) {
         self.inserter = inserter
+        self.clock = clock
         self.log = log
     }
 
@@ -38,12 +43,12 @@ public struct Executor {
         }
 
         public let key: Key
-        public let instant: ContinuousClock.Instant
+        public let instant: HostTime
 
-        public static func keyDown(_ instant: ContinuousClock.Instant) -> Since { Since(key: .down, instant: instant) }
-        public static func keyUp(_ instant: ContinuousClock.Instant) -> Since { Since(key: .up, instant: instant) }
-        public static func cursorArrived(_ instant: ContinuousClock.Instant) -> Since { Since(key: .cursorArrived, instant: instant) }
-        public static func asked(_ instant: ContinuousClock.Instant) -> Since { Since(key: .asked, instant: instant) }
+        public static func keyDown(_ instant: HostTime) -> Since { Since(key: .down, instant: instant) }
+        public static func keyUp(_ instant: HostTime) -> Since { Since(key: .up, instant: instant) }
+        public static func cursorArrived(_ instant: HostTime) -> Since { Since(key: .cursorArrived, instant: instant) }
+        public static func asked(_ instant: HostTime) -> Since { Since(key: .asked, instant: instant) }
     }
 
     /// One insert, done. The time is from the key event it is timed from to the input
@@ -79,7 +84,7 @@ public struct Executor {
         // `Inserter` says in its own contract that the blocking call must not pump it.
         // [LAW:no-ambient-temporal-coupling]
         let inserted = try await inserter.insert(transcript.text, into: destination)
-        let done = Performed(characters: inserted.characters, into: BundleID(rawValue: inserted.into), acknowledged: ContinuousClock.now - since.instant, since: since.key)
+        let done = Performed(characters: inserted.characters, into: BundleID(rawValue: inserted.into), acknowledged: clock.now - since.instant, since: since.key)
         log.info("\(done.description, privacy: .public)")
         return done
     }
@@ -95,8 +100,8 @@ public struct Executor {
     /// take-back could remove words that are not this dictation's. [LAW:no-silent-failure]
     func takeBack(_ landed: TakeBack, from last: Performed) async throws(InsertFailure) {
         guard !landed.replacing.isEmpty else { return }
-        let started = ContinuousClock.now
+        let started = clock.now
         _ = try await inserter.insert(InsertRequest(landed.leaving, into: .app(last.into.rawValue), replacing: landed.replacing))
-        log.info("took back \(landed.replacing.utf16.count - landed.leaving.utf16.count, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public), replacing \(landed.replacing.utf16.count, privacy: .public) before the caret with \(landed.leaving.utf16.count, privacy: .public) of earlier dictation, in \(Int((ContinuousClock.now - started) / .milliseconds(1)), privacy: .public) ms")
+        log.info("took back \(landed.replacing.utf16.count - landed.leaving.utf16.count, privacy: .public) UTF-16 units from \(last.into.rawValue, privacy: .public), replacing \(landed.replacing.utf16.count, privacy: .public) before the caret with \(landed.leaving.utf16.count, privacy: .public) of earlier dictation, in \(Int((clock.now - started) / .milliseconds(1)), privacy: .public) ms")
     }
 }

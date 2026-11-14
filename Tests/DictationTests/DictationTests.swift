@@ -1,6 +1,8 @@
 import Dictation
+import DictationFakes
 import Foundation
 import Grants
+import GrantsFakes
 import Insertion
 import InsertionFakes
 import LowTalkerCore
@@ -8,6 +10,7 @@ import LowTalkerCoreFakes
 import Synchronization
 import Testing
 import TestProbes
+import Uptime
 
 private struct NoEngine: Error {}
 private struct BadBuffer: Error {}
@@ -25,10 +28,12 @@ final class Rig {
     /// Where the fake microphone's clock starts; any moment would do, since a timeline
     /// is measured in differences.
     static let origin = HostTime(uptime: .zero)
-    /// The host clock the fake microphone stamps its buffers with. It starts where the
-    /// capture's timeline does and advances by the audio the test feeds, so a test can
-    /// name the moment a key went down in the middle of speech already spoken.
-    private(set) var now = Rig.origin
+    /// The host clock the fake microphone stamps its buffers with, and the clock the loop times
+    /// every figure on. It starts where the capture's timeline does and advances by the audio
+    /// the test feeds and the waits it makes, so a test can name the moment a key went down in
+    /// the middle of speech already spoken, and state each figure of a press exactly.
+    let clock = ManualHostClock(startingAt: Rig.origin)
+    var now: HostTime { clock.now }
     let inputMethod = FakeInputMethod()
     let turns: EngineTurns
     let dictation: Dictation
@@ -66,7 +71,7 @@ final class Rig {
         capture = AudioCapture(retaining: retaining, hardware: hardware, startingAt: Self.origin, reporting: { _ in })
         // Shut between presses unless a test says otherwise, which is the loop the app
         // runs when no config file asks for the microphone to be held.
-        try await capture.start(try MicrophonePermission(authority: Authorized()).current.grant(), atRest: atRest)
+        try await capture.start(try MicrophonePermission(authority: FakeMicrophoneAuthority()).current.grant(), atRest: atRest)
         let (stream, feed) = AsyncStream.makeStream(of: Dictation.Report.self)
         reports = stream
         let reported = reported
@@ -80,12 +85,12 @@ final class Rig {
             showing: { shown.states.append($0); changes.note() }
         )
         self.unheard = unheard
-        recovery = Recovery(store: unheard, hold: hold, sessions: sessions)
+        recovery = Recovery(store: unheard, hold: hold, sessions: sessions, clock: clock.clock)
         dictation = Dictation(
             capture: capture,
             engine: engine,
             turns: turns,
-            executor: Executor(insertingThrough: inputMethod),
+            executor: Executor(insertingThrough: inputMethod, clock: clock.clock),
             hold: hold,
             sessions: sessions,
             recovery: recovery,
@@ -128,17 +133,26 @@ final class Rig {
     }
 
     /// Audio captured from `now` on, stamped as the microphone would stamp it, into
-    /// whichever engine is running: a replaced one is deaf, as it is on a real Mac.
+    /// whichever engine is running: a replaced one is deaf, as it is on a real Mac. The buffer
+    /// arrives once its samples have been said, as a real one does, so the engine's pass,
+    /// which reads the clock on a thread of its own, reads it after the speaking.
+    /// [LAW:no-ambient-temporal-coupling]
     func speak(_ samples: [Float]) {
-        hardware.live.appending(samples, now)
-        now = now + .seconds(AudioClip.duration(for: samples.count))
+        let said = now
+        clock.advance(by: Self.spoken(samples.count))
+        hardware.live.appending(samples, said)
+    }
+
+    /// How long `samples` samples take to say.
+    static func spoken(_ samples: Int) -> Duration {
+        .seconds(AudioClip.duration(for: samples))
     }
 
     /// Time passing with nothing appended: the speaker may be talking, and that is exactly
     /// what nothing is capturing. This is how a test says a key-down reached the loop late:
     /// the stamp is taken before the wait and the press is made after it.
     func wait(_ duration: TimeInterval) {
-        now = now + .seconds(duration)
+        clock.advance(by: .seconds(duration))
     }
 
     /// The input device changes: macOS stops the engine and posts the change, and capture
@@ -157,10 +171,10 @@ final class Rig {
         keyUp()
     }
 
-    /// The key of a hold coming up, its event stamped on the real host clock - the clock
-    /// key-up figures are timed by - and told to the loop `late` after it was stamped.
+    /// The key of a hold coming up, its event stamped on the rig's clock, and told to the loop
+    /// `late` after it was stamped.
     func keyUp(deliveredLate late: Duration = .zero) {
-        dictation.press(.ended(.released(.hold, at: HostTime(uptime: HostTime.now.uptime - late))))
+        dictation.press(.ended(.released(.hold, at: HostTime(uptime: now.uptime - late))))
     }
 
     /// A hold that opens no microphone, because something refused the press before one
@@ -344,14 +358,12 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
             Transcript(typed: samples.count >= 6 ? "hello there my" : samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
         }) { _ in Transcript(typed: "hello there my friend") }
         let rig = try await Rig(hearing: engine)
-        let keyDown = HostTime.now
-        rig.dictation.press(.began(Rig.dictation, at: keyDown))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
         await rig.until { rig.inputMethod.inserted == ["hello"] }
         rig.speak([3])
         rig.speak([4])
         await rig.until { rig.inputMethod.inserted == ["hello", " there"] }
-        let landed = HostTime.now
         rig.inputMethod.hold()
         rig.speak([5, 6])
         await rig.until { rig.inputMethod.holding == 1 }
@@ -363,8 +375,10 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(session.performed.count == 4)
         #expect(duringPress.commits == 2)
         #expect(duringPress.wordsCommitted == 2)
+        // Acknowledged once the two samples that confirmed it were said, and before the commit
+        // the fourth confirmed could run.
         let firstCommit = try #require(duringPress.firstCommit)
-        #expect(firstCommit > .zero && firstCommit <= landed - keyDown)
+        #expect((Rig.spoken(2)...Rig.spoken(4)).contains(firstCommit))
         #expect("\(duringPress)".contains("2 commits of 2 words, the first \(Int(firstCommit / .milliseconds(1))) ms after key-down"))
         #expect("\(session.performed[2])".contains("key-down to acknowledged"))
         #expect("\(session.performed[3])".contains("key-up to acknowledged"))
@@ -803,12 +817,11 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func aPressIsHeardWhileTheKeyIsStillDown() async throws {
         let engine = FakeTranscriber(reading: { Transcript(typed: $0.isEmpty ? "" : "hello") }, repunctuating: { $0.isEmpty ? 0 : 2 }, unreading: { $0.isEmpty ? nil : Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " hello"))) }) { _ in Transcript(typed: "hello") }
         let rig = try await Rig(hearing: engine)
-        let keyDown = HostTime.now
-        rig.dictation.press(.began(Rig.dictation, at: keyDown))
+        rig.dictation.press(.began(Rig.dictation, at: rig.now))
+        rig.wait(0.25)
         rig.speak([1, 2])
         await rig.until { engine.hearing == [1, 2] }
         #expect(engine.clips.isEmpty)
-        let read = HostTime.now
         rig.keyUp()
         let report = await rig.pressReport()
         _ = try report.outcome.get()
@@ -818,9 +831,8 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(duringPress.repunctuated == 2)
         #expect(report.opened?.unread?.passes == 1)
         #expect(!report.record.contains("hello"))
-        let firstWords = try #require(duringPress.firstWords)
-        #expect(firstWords > .zero && firstWords <= read - keyDown)
-        #expect(report.record.contains("passes during the press, 2 repunctuating a settled word, first words \(Int(firstWords / .milliseconds(1))) ms after key-down"))
+        #expect(duringPress.firstWords == .milliseconds(250) + Rig.spoken(2))
+        #expect(report.record.contains("passes during the press, 2 repunctuating a settled word, first words 250 ms after key-down"))
         #expect(report.record.contains("1 pass the engine failed to read, the latest as WhisperKit returned a segment of 6 characters without word timings; microphone: "))
         #expect(rig.inputMethod.inserted == ["hello"])
     }
@@ -886,21 +898,38 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(failureLine(stopped) == "\(Refusal.noTextFieldHasFocus) Your last dictation stopped: NoEngine().")
     }
 
-    /// A key-up told late is timed from where the key came up, as a key-down is: the input
-    /// method's hop to the app and the main queue's wait behind it are inside every key-up
-    /// figure, and the session names how long the telling took.
-    @Test func aKeyUpDeliveredLateIsTimedFromTheKeyComingUp() async throws {
-        let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "hi") })
-        let late = Duration.milliseconds(300)
+    /// Every figure of a press is a subtraction on the clock the test sets: first words from
+    /// key-down, each insert from the key it is timed from to the input method's answer, and a
+    /// key-up told late timed from where the key came up, as a key-down is. The input method's
+    /// hop to the app and the main queue's wait behind it are inside every key-up figure, and the
+    /// session names how long the telling took.
+    @Test func everyFigureOfAPressIsTimedOnTheClockTheTestSets() async throws {
+        let engine = FakeTranscriber(confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ in Transcript(typed: "hello there") }
+        let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
-        rig.speak([1, 2, 3])
-        rig.keyUp(deliveredLate: late)
-        let session = try await rig.session()
-        #expect(session.keyUpDelivery >= late)
-        #expect(session.keyUpToTranscript >= session.keyUpDelivery)
-        let insert = try #require(session.performed.last)
-        #expect(insert.since == .up && insert.acknowledged >= session.keyUpDelivery)
-        #expect("\(session)".contains("after key-up (delivered \(Int(session.keyUpDelivery / .milliseconds(1))) ms after it;"))
+        rig.wait(0.1)
+        rig.inputMethod.hold()
+        rig.speak([1, 2])
+        // The first words are read and their commit waits on the input method.
+        await rig.until { rig.inputMethod.holding == 1 }
+        rig.wait(0.05)
+        // [LAW:no-ambient-temporal-coupling] The clock stands still from here to the key-up's
+        // insert waiting, so the commit is acknowledged at this moment however late the loop
+        // counts it, and the transcript is out at the moment the key-up is told.
+        rig.inputMethod.letGo()
+        rig.inputMethod.hold()
+        rig.keyUp(deliveredLate: .milliseconds(30))
+        // Inserts run one at a time, so the key-up's waiting is the proof the commit was counted.
+        await rig.until { rig.inputMethod.inserted == ["hello"] && rig.inputMethod.holding == 1 }
+        rig.wait(0.02)
+        rig.inputMethod.letGo()
+        let (session, duringPress) = try await rig.pressed()
+        #expect(duringPress.firstWords == .milliseconds(100) + Rig.spoken(2))
+        #expect(session.keyUpDelivery == .milliseconds(30))
+        #expect(session.keyUpToTranscript == .milliseconds(30))
+        #expect(session.performed.map(\.since) == [.down, .up])
+        #expect(session.performed.map(\.acknowledged) == [.milliseconds(150) + Rig.spoken(2), .milliseconds(50)])
+        #expect("\(session)".contains("30 ms after key-up (delivered 30 ms after it;"))
     }
 
     /// A press whose engine read nothing before the key came up says so, rather than
@@ -1796,8 +1825,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// A store that cannot be read at launch holds nothing, offers nothing, and says why.
     @Test func anUnreadableStoreHoldsNothingAndSaysWhy() async throws {
         let store = FakeHeldStore(keeping: .unplaced(part("a", "\(Refusal.noTextFieldHasFocus)")))
-        let unreadable = HeldUnreadable(why: "torn", kept: .movedTo("/kept.json"))
-        store.unreadable = unreadable
+        let unreadable = store.spoil(why: "torn", movedTo: "/kept.json")
         let rig = try await Rig(hearing: FakeTranscriber { _ in Transcript(typed: "b") }, keeping: store)
         #expect(rig.hold.held == nil)
         #expect(rig.hold.unrestored == unreadable)
@@ -1952,7 +1980,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         try await rig.dictation.finish()
         let rebuilt = Dictation(
             capture: rig.capture, engine: { { FakeTranscriber { _ in Transcript(typed: "") } } }, turns: rig.turns,
-            executor: Executor(insertingThrough: rig.inputMethod), hold: rig.hold,
+            executor: Executor(insertingThrough: rig.inputMethod, clock: rig.clock.clock), hold: rig.hold,
             sessions: rig.sessions, recovery: rig.recovery,
             report: { _ in }, showing: { _ in })
         rig.inputMethod.refusing(nil)
@@ -2163,7 +2191,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let report = await rig.pressReport()
         #expect(try report.outcome.get().transcription.transcript.text == "a")
         #expect(report.opened?.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 2, peak: 0.5, firstSample: .zero))
-        #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
+        #expect(report.microphone == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered 0.0 s (2 samples) peaking at -6.0 dBFS, the first 0 ms after the key went down")
     }
 
     /// The press the ticket was filed for: the microphone opened and delivered nothing, and
@@ -2175,7 +2203,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         let (_, lost) = try #require(report.outcome.stopped(by: SpeechLost.self))
         #expect(lost.lost.unopened == .noAudio)
         #expect(report.opened?.capture == CapturedAudio.Reading(inputs: [FakeHardware.microphone], samples: 0, peak: 0, firstSample: nil))
-        #expect(report.microphone == "\"Fake Microphone\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered nothing after the key went down")
+        #expect(report.microphone == "\"Device 1\" (device 1, 48000 Hz, 1 channel, heard on channel 1) delivered nothing after the key went down")
     }
 
     /// A press refused before any microphone opened has no reading, and its record says that

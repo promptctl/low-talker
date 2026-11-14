@@ -1,4 +1,5 @@
 import Dictation
+import DictationFakes
 import Foundation
 import Insertion
 import InsertionFakes

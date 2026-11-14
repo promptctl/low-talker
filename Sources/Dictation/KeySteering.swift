@@ -2,6 +2,7 @@ import Foundation
 import Insertion
 import LowTalkerCore
 import os
+import Uptime
 
 /// How the app answers the input method about a Return or an Escape it is holding.
 ///

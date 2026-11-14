@@ -1,5 +1,6 @@
 import AppKit
 import Identity
+import Uptime
 
 /// The input method's process kept running for as long as the app listens: opened through
 /// LaunchServices, watched until it ends, and opened again.
@@ -51,7 +52,7 @@ public final class InputMethodSupervisor {
         throttleInterval: Duration = InputMethodSupervisor.throttleInterval,
         // [LAW:effects-at-boundaries] The throttle's clock is an effect the watch takes as a
         // parameter, not the global one it reaches for, so a test drives it on controllable time.
-        clock: any MonotonicClock = SystemMonotonicClock(),
+        clock: HostClock = .system,
         open: @escaping @MainActor () async throws -> RunningInputMethod = { try await .open(InstalledInputMethod().bundle()) },
         told: @escaping @MainActor (Event) -> Void
     ) {
@@ -86,24 +87,6 @@ public final class InputMethodSupervisor {
     // Released without a stop, it stops: a watch nobody holds would open the input method
     // forever. Only main-actor code holds this class, so its last release is there.
     deinit { MainActor.assumeIsolated { watching?.cancel() } }
-}
-
-/// The monotonic clock the watch throttles on: what `now` is, and a sleep until an instant of
-/// it. A narrow port with a concrete `Instant` so `any MonotonicClock` stays usable - stdlib
-/// `Clock` pins only its `Duration`, leaving `Instant` abstract and `now`/`sleep(until:)`
-/// uncallable through the existential. [LAW:effects-at-boundaries] [LAW:no-ambient-temporal-coupling]
-public protocol MonotonicClock: Sendable {
-    var now: ContinuousClock.Instant { get }
-    func sleep(until deadline: ContinuousClock.Instant) async throws
-}
-
-/// The real monotonic clock: `ContinuousClock`, which counts on past sleep and is never set back.
-public struct SystemMonotonicClock: MonotonicClock {
-    public init() {}
-    public var now: ContinuousClock.Instant { ContinuousClock.now }
-    public func sleep(until deadline: ContinuousClock.Instant) async throws {
-        try await Task.sleep(until: deadline)
-    }
 }
 
 /// One process of the input method, as LaunchServices answered for it.
