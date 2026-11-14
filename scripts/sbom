@@ -101,6 +101,12 @@ def license_entry(component, root, rule):
     )
 
 
+# The SPDX License List release sbom/spdx holds, named by its one directory: the template of
+# each license check-licenses accepts, byte for byte from license-list-data's template/, and
+# the words SPDX matches as one, from license-list-XML's equivalentwords.txt, at that tag.
+[license_list] = [path for path in (repository / "sbom" / "spdx").iterdir() if path.is_dir()]
+SPDX_LICENSE_LIST = license_list.name
+
 # The template markup: optional text, and a var, which is a span the template's own regular
 # expression matches. A var's fields are quoted, and its `original` can hold a `>`.
 TEMPLATE_MARKUP = re.compile(r'<<(beginOptional|endOptional|var(?:;[a-z]+="(?:[^"\\]|\\.)*")*)>>')
@@ -109,18 +115,52 @@ VAR_MATCH = re.compile(r'match="((?:[^"\\]|\\.)*)"')
 # own expression opens with a space. A word stands whole, so two never run together.
 BETWEEN_WORDS = r"[\W_]*"
 COPYRIGHT_SYMBOL = re.compile(r"©|\(c\)", re.IGNORECASE)
-COMMENT_MARKER = re.compile(r"^[ \t]*(?://+|/?\*+/?|#+)", re.MULTILINE)
+# The punctuation at either edge of a line: a comment's markers, in whatever syntax wraps the
+# license, and a box's borders. Inside a var only whitespace may stand between its words.
+LINE_EDGE = re.compile(r"^(?:(?!\n)[\W_])+|(?:(?!\n)[\W_])+$", re.MULTILINE)
+
+
+def spelled(form):
+    """A form of an equivalent word as a pattern: its words, each whole, with anything between
+    them but nothing; or a form with no words, as `&` is, as itself."""
+    found = r"[\W_]+".join(map(re.escape, re.findall(r"[^\W_]+", form)))
+    return rf"(?<![^\W_]){found}(?![^\W_])" if found else re.escape(form)
+
+
+def equivalent_words(listing):
+    """Each line's later forms, as patterns, with the form to read them as: the line's first,
+    or what that is read as where an earlier line lists it. A form whose words are its first
+    form's, as `sub license` beside `sub-license`, already reads the same."""
+    read_as = {}
+    for line in listing.splitlines():
+        first, *others = line.split(",")
+        for form in others:
+            if spelled(form) != spelled(first):
+                read_as[spelled(form)] = read_as.get(spelled(first), first)
+    return [(re.compile(pattern, re.IGNORECASE), f" {first} ") for pattern, first in read_as.items()]
+
+
+EQUIVALENT_WORDS = equivalent_words((license_list / "equivalentwords.txt").read_text())
+
+
+def equivalent(text):
+    """The text with each varietal spelling read as the one SPDX lists first. The spaces around
+    it keep `&` from joining the words beside it."""
+    for form, first in EQUIVALENT_WORDS:
+        text = form.sub(lambda _: first, text)
+    return text
 
 
 def words(literal):
     return [rf"(?<![^\W_]){re.escape(word)}(?![^\W_])"
-            for word in re.findall(r"[^\W_]+", COPYRIGHT_SYMBOL.sub(" ", literal))]
+            for word in re.findall(r"[^\W_]+", equivalent(COPYRIGHT_SYMBOL.sub(" ", literal)))]
 
 
 def template_pattern(template):
     """An SPDX template as one regular expression, compared as SPDX's License Matching
-    Guidelines compare: the words, and not their case, the whitespace and punctuation between
-    them, or which of ©, (c) and none the copyright line uses. A search, not a full match: a
+    Guidelines compare: the words, and not their case, their varietal spellings, the
+    whitespace and punctuation between them, or which of ©, (c) and none the copyright line
+    uses. A search, not a full match: a
     license file may carry more than the license, as a NOTICES file's preamble or an
     exception appended to Apache-2.0 do."""
     nested = [[]]
@@ -149,19 +189,17 @@ def template_pattern(template):
 
 
 def comparable(text):
-    """A license text as a template's pattern reads it: without the comment markers at the
-    starts of its lines, which source files wrap a license in, and with its whitespace one
-    space wherever it stands, since a var's own expression can name a single space."""
-    return re.sub(r"\s+", " ", COPYRIGHT_SYMBOL.sub(" ", COMMENT_MARKER.sub("", text)))
+    """A license text as a template's pattern reads it: without the punctuation at the edges
+    of its lines, which source files wrap a license in, its words spelled as the template's
+    are, and its whitespace one space wherever it stands, since a var's own expression can
+    name a single space."""
+    return re.sub(r"\s+", " ", equivalent(LINE_EDGE.sub("", COPYRIGHT_SYMBOL.sub(" ", text))))
 
 
-# The SPDX License List's template for each license check-licenses accepts, byte for byte
-# from https://github.com/spdx/license-list-data/tree/v3.29.0/template: the id as the List
-# spells it, and its pattern, by the id without regard to case.
-SPDX_LICENSE_LIST = "3.29.0"
+# Each template, by its id without regard to case: the id as the List spells it, and its pattern.
 license_templates = {
     spdx.casefold(): (spdx, template_pattern(path.read_text()))
-    for path in (repository / "sbom" / "spdx").glob("*.template.txt")
+    for path in license_list.glob("*.template.txt")
     for spdx in [path.name.removesuffix(".template.txt")]
 }
 

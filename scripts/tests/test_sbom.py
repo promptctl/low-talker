@@ -5,6 +5,7 @@ import importlib.util
 import io
 import re
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -77,7 +78,7 @@ class LicenseTextTests(unittest.TestCase):
 
     def assertHeld(self, spdx, text, **rule):
         _, properties = self.entry(spdx, text, **rule)
-        self.assertIn({"name": "low-talker:license-text", "value": f"SPDX License List 3.29.0 {spdx} template"}, properties)
+        self.assertIn({"name": "low-talker:license-text", "value": f"SPDX License List {sbom.SPDX_LICENSE_LIST} {spdx} template"}, properties)
 
     def assertRefused(self, spdx, text, **rule):
         stderr = io.StringIO()
@@ -85,11 +86,11 @@ class LicenseTextTests(unittest.TestCase):
             self.entry(spdx, text, **rule)
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(stderr.getvalue(),
-                         f"sbom: somepkg: LICENSE does not carry the text of {spdx} as the SPDX License List 3.29.0 "
+                         f"sbom: somepkg: LICENSE does not carry the text of {spdx} as the SPDX License List {sbom.SPDX_LICENSE_LIST} "
                          "template reads it, so the rule names a license the file does not state\n")
 
     def test_every_template_holds_its_own_text(self):
-        for path in sorted((scripts.parent / "sbom" / "spdx").glob("*.template.txt")):
+        for path in sorted(sbom.license_list.glob("*.template.txt")):
             template = path.read_text()
             for optional in (True, False):
                 with self.subTest(template=path.name, optional=optional):
@@ -120,16 +121,31 @@ class LicenseTextTests(unittest.TestCase):
     def test_an_id_in_any_case_is_spelled_as_the_list_spells_it(self):
         licenses, properties = self.entry("mit", MIT)
         self.assertEqual(licenses[0]["license"]["id"], "MIT")
-        self.assertIn({"name": "low-talker:license-text", "value": "SPDX License List 3.29.0 MIT template"}, properties)
+        self.assertIn({"name": "low-talker:license-text", "value": f"SPDX License List {sbom.SPDX_LICENSE_LIST} MIT template"}, properties)
 
     def test_words_run_together_are_not_the_license(self):
         self.assertRefused("MIT", MIT.replace("Permission is hereby", "Permissionishereby"))
 
     def test_a_var_that_opens_with_a_space_holds(self):
-        template = (scripts.parent / "sbom" / "spdx" / "BSD-3-Clause.template.txt").read_text()
+        template = (sbom.license_list / "BSD-3-Clause.template.txt").read_text()
         text = rendered(template, True).replace("binary forms,", "binary forms of the theme,")
         self.assertIn("of the theme,", text)
         self.assertHeld("BSD-3-Clause", text)
+
+    def test_a_var_wrapped_across_comment_lines_in_any_syntax_holds(self):
+        wrapped = MIT.replace("of this software", "of this\nsoftware")
+        for marker in ("-- ", ";; ", "//! ", "# "):
+            with self.subTest(marker=marker):
+                self.assertHeld("MIT", "".join(f"{marker}{line}\n" for line in wrapped.splitlines()))
+        self.assertHeld("MIT", "".join(f"/* {line:<80} */\n" for line in wrapped.splitlines()))
+
+    def test_varietal_spellings_read_as_one(self):
+        self.assertHeld("MIT", MIT.replace("sublicense", "sub-licence").replace("and/or", "&/or"))
+
+    def test_refusing_a_large_header_is_quick(self):
+        start = time.monotonic()
+        self.assertRefused("ISC", "// unrelated code, line after line\n" * 12000)
+        self.assertLess(time.monotonic() - start, 5)
 
     def test_the_license_match_part_is_what_is_held(self):
         self.assertHeld("MIT", GPL_NOTICE + "---\n" + MIT, licenseMatch=r"---\n(.*)")
