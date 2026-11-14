@@ -341,14 +341,10 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 /// The adapter over four stub models built by scripts/make-parakeet-stubs with the published
 /// names, element types and shapes, and arithmetic that shows each input reaching its output.
 @Suite struct CoreMLParakeetTests {
-    static func stubs() throws -> URL {
-        try #require(Bundle.module.url(forResource: "parakeet-stub", withExtension: nil, subdirectory: "Fixtures"))
-    }
-
     /// The audio and its length reach the encoder: a second of audio is 13 frames of 80 ms, each
     /// frame's features its own index.
     @Test func aWindowIsEncodedIntoItsFrames() async throws {
-        let network = try await CoreMLParakeet(folder: Self.stubs(), computeUnits: .cpuOnly)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
         let window = try network.encode([Float](repeating: 0.25, count: 16_000)[...])
         #expect(window.frames.count == 13)
         #expect(window.frames[5].features.count == 1024)
@@ -357,19 +353,20 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 
     /// The token and the state reach the predictor, and its output and new state come back.
     @Test func aTokenIsPredictedFromItsState() async throws {
-        let network = try await CoreMLParakeet(folder: Self.stubs(), computeUnits: .cpuOnly)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
         let (prediction, state) = try network.predict(7, from: network.startState)
         #expect(prediction.features == [Float](repeating: 7, count: 640))
         #expect(state.hidden == [Float](repeating: 1, count: ParakeetInterface.stateCount))
         #expect(state.cell == [Float](repeating: 2, count: ParakeetInterface.stateCount))
     }
 
-    /// The frame and the prediction both reach the joint, and its three answers come back.
+    /// The frame and the prediction both reach the joint, and its three answers come back: the
+    /// duration is the prediction mod 5, so 7 reads 2.
     @Test func theJointReadsItsFrameAndPrediction() async throws {
-        let network = try await CoreMLParakeet(folder: Self.stubs(), computeUnits: .cpuOnly)
-        let (prediction, _) = try network.predict(3, from: network.startState)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
+        let (prediction, _) = try network.predict(7, from: network.startState)
         let step = try network.joint(EncodedFrame(features: [Float](repeating: 5, count: 1024)), prediction)
-        #expect(step == JointStep(token: 5, probability: 0.5, duration: 3))
+        #expect(step == JointStep(token: 5, probability: 0.5, duration: 2))
     }
 
     /// A model whose interface is not the published one is refused at load, naming what differs.
@@ -383,35 +380,4 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
         found["token_id"] = ParakeetInterface.Feature(type: .float32, shape: [1, 1, 1])
         #expect(throws: ParakeetLoadError.interface(model: "JointDecision", "token_id is Float32 [1, 1, 1] where the decoder reads Int32 [1, 1, 1]")) { try joint.check("JointDecision", found) }
     }
-}
-
-/// The bench's way to a Parakeet model, over the stubs installed as the store installs the real
-/// one: `LoadedEngine(loading:)`, the one load the app and `Bench.loadInPlace` share, and the
-/// harness holding a fixture on what it loads. The words are the stubs' arithmetic decoded by
-/// the TDT rules: a token per frame index, a duration index of the fed token mod 5, the blank's 2.
-@Suite struct InstalledParakeetTests {
-    @Test func theBenchHoldsAFixtureOnAnInstalledParakeetModel() async throws {
-        let scratch = try ScratchStore(files: [:])
-        let folder = scratch.root.appending(components: "models", "FluidInference", "parakeet-tdt-0.6b-v3-coreml")
-        try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: CoreMLParakeetTests.stubs(), to: folder)
-        // Every id a plain word, so whatever token the stubs' arithmetic emits is read.
-        let pieces = Dictionary(uniqueKeysWithValues: (0..<ParakeetWindow.blank).map { (String($0), " w\($0)") })
-        try JSONEncoder().encode(pieces).write(to: folder.appending(path: ParakeetModel.vocabulary))
-        try Manifest(recording: folder, relativeTo: scratch.root).write(to: scratch.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json"))
-        let store = ModelStore(directory: scratch.root)
-        let fixture = try Fixture(name: "second", clip: AudioClip(samples: [Float](repeating: 0.25, count: 16_000)), reference: Self.heard)
-        let report = try await LatencyHarness.measure([fixture], arrivals: [.batch], servings: [.idle], reruns: 0, expecting: .empty, on: ContinuousClock()) {
-            let turns = EngineTurns()
-            let engine = try await LoadedEngine(loading: store.installedModel(Model.parakeet(.tdtV3)), turns: turns)
-            #expect(engine.model == .parakeet(.tdtV3))
-            return LatencyHarness.Engine(dictation: engine.dictation, served: engine.served, turns: turns)
-        }
-        let row = try #require(report.fixtures.first)
-        #expect(report.fixtures.count == 1)
-        #expect(row.transcript.text == " \(Self.heard)")
-        #expect(row.wordErrorRate.errors == 0)
-    }
-
-    static let heard = "w0 w2 w2 w4 w6 w10 w11 w11 w12 w13 w15"
 }

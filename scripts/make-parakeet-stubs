@@ -1,6 +1,7 @@
 #!/bin/bash
-# Builds the four Core ML models CoreMLParakeetTests loads, into
-# Tests/LowTalkerCoreTests/Fixtures/parakeet-stub, where they are committed. Each has the
+# Builds the four Core ML models CoreMLParakeetTests and the bench's Parakeet test load, into
+# Sources/TestProbes/Fixtures/parakeet-stub, where they are committed. The bench test's words
+# are this arithmetic decoded, the duration's mod 5 included. Each has the
 # names, element types and shapes of the FluidInference/parakeet-tdt-0.6b-v3-coreml model it
 # stands for (see ParakeetInterface.published), and arithmetic a test can trace an input
 # through, in place of weights:
@@ -11,7 +12,7 @@
 #                 duration = decoder_step's first feature mod 5, so the blank's 8192 is 2
 set -euo pipefail
 cd "$(dirname "$0")/.."
-out=Tests/LowTalkerCoreTests/Fixtures/parakeet-stub
+out=Sources/TestProbes/Fixtures/parakeet-stub
 uv run --python 3.12 --with coremltools==9.0 python -I - "$out" <<'PYTHON'
 import shutil, sys
 from pathlib import Path

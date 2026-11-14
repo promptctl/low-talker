@@ -96,8 +96,9 @@ let package = Package(
         // concurrent work to see where it has got to, and the scratch store the core's read
         // side and the installer's write side are both exercised on. A plain target because
         // test targets cannot import one another's sources, and in no product because
-        // nothing ships it. [LAW:one-source-of-truth]
-        .target(name: "TestProbes", dependencies: ["LowTalkerCore", "Uptime"]),
+        // nothing ships it. Its fixtures are the stub Parakeet models the core's adapter tests
+        // and the bench's tests both load. [LAW:one-source-of-truth]
+        .target(name: "TestProbes", dependencies: ["LowTalkerCore", "Uptime"], resources: [.copy("Fixtures")]),
         // The one fake of the engine port and the contract it is held to, beside the port, so
         // every caller's tests hear on the engine the contract checks. In no product.
         // [LAW:one-source-of-truth]

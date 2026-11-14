@@ -293,4 +293,28 @@ private final class Picked: Sendable {
         #expect(try ModelStore(directory: picked.store).recordedModels() == ["alpha", "zeta"])
         #expect(throws: (any Error).self) { try ModelStore(directory: picked.fixtures).recordedModels() }
     }
+
+    /// The bench holds a fixture on a Parakeet model installed as ModelInstall lays out the
+    /// repo, the stub models in place of weights, loaded by `Bench.loadInPlace`. The utterance
+    /// hands the pass the second of audio and its 0.3 s hangover, 17 frames. Each id is read as
+    /// the word `w<id>`, and at each step the stub joint emits its frame's index and moves on by
+    /// the token fed before it mod 5, the blank's 8192 first: 0 +2, 2 +0, 2 +2, 4 +2, 6 +4,
+    /// 10 +1, 11 +0, 11 +1, 12 +1, 13 +2, 15 +3, past the last frame.
+    @Test func aFixtureIsHeldOnAnInstalledParakeetModel() async throws {
+        let scratch = try ScratchStore(files: [:])
+        let pieces = Dictionary(uniqueKeysWithValues: (0..<ParakeetWindow.blank).map { (String($0), " w\($0)") })
+        try scratch.installParakeet(copying: ScratchStore.parakeetStubs, files: [ParakeetModel.vocabulary: String(decoding: JSONEncoder().encode(pieces), as: UTF8.self)])
+        let store = ModelStore(directory: scratch.root)
+        let heard = "w0 w2 w2 w4 w6 w10 w11 w11 w12 w13 w15"
+        let fixture = try Fixture(name: "second", clip: AudioClip(samples: [Float](repeating: 0.25, count: 16_000)), reference: heard)
+        let plan = try BenchPlan(models: [.parakeet(.tdtV3)], arrivals: [.batch], servings: [.idle], runs: 1, vocabulary: .empty)
+        let rows = Mutex<[BenchRow]>([])
+        try await Bench.measure([fixture], plan: plan, load: { try await Bench.loadInPlace(store, $0) }, emit: {
+            if case .row(let row) = $0 { rows.withLock { $0.append(row) } }
+        })
+        let held = rows.withLock { $0 }
+        #expect(held.map { $0.cells.first { $0.name == "model" }?.value } == ["parakeet-tdt-0.6b-v3"])
+        let row = try #require(held.first)
+        #expect(row.narration.hasPrefix("second batch idle: heard \" \(heard)\","))
+    }
 }
