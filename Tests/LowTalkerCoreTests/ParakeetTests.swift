@@ -3,6 +3,7 @@ import Foundation
 @testable import LowTalkerCore
 import LowTalkerCoreFakes
 import Synchronization
+import TestProbes
 import Testing
 
 /// A Parakeet network whose joint reads from a script: a token at each sample it names, a blank
@@ -340,14 +341,10 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 /// The adapter over four stub models built by scripts/make-parakeet-stubs with the published
 /// names, element types and shapes, and arithmetic that shows each input reaching its output.
 @Suite struct CoreMLParakeetTests {
-    static func stubs() throws -> URL {
-        try #require(Bundle.module.url(forResource: "parakeet-stub", withExtension: nil, subdirectory: "Fixtures"))
-    }
-
     /// The audio and its length reach the encoder: a second of audio is 13 frames of 80 ms, each
     /// frame's features its own index.
     @Test func aWindowIsEncodedIntoItsFrames() async throws {
-        let network = try await CoreMLParakeet(folder: Self.stubs(), computeUnits: .cpuOnly)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
         let window = try network.encode([Float](repeating: 0.25, count: 16_000)[...])
         #expect(window.frames.count == 13)
         #expect(window.frames[5].features.count == 1024)
@@ -356,19 +353,20 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
 
     /// The token and the state reach the predictor, and its output and new state come back.
     @Test func aTokenIsPredictedFromItsState() async throws {
-        let network = try await CoreMLParakeet(folder: Self.stubs(), computeUnits: .cpuOnly)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
         let (prediction, state) = try network.predict(7, from: network.startState)
         #expect(prediction.features == [Float](repeating: 7, count: 640))
         #expect(state.hidden == [Float](repeating: 1, count: ParakeetInterface.stateCount))
         #expect(state.cell == [Float](repeating: 2, count: ParakeetInterface.stateCount))
     }
 
-    /// The frame and the prediction both reach the joint, and its three answers come back.
+    /// The frame and the prediction both reach the joint, and its three answers come back: the
+    /// duration is the prediction mod 5, so 7 reads 2.
     @Test func theJointReadsItsFrameAndPrediction() async throws {
-        let network = try await CoreMLParakeet(folder: Self.stubs(), computeUnits: .cpuOnly)
-        let (prediction, _) = try network.predict(3, from: network.startState)
+        let network = try await CoreMLParakeet(folder: ScratchStore.parakeetStubs, computeUnits: .cpuOnly)
+        let (prediction, _) = try network.predict(7, from: network.startState)
         let step = try network.joint(EncodedFrame(features: [Float](repeating: 5, count: 1024)), prediction)
-        #expect(step == JointStep(token: 5, probability: 0.5, duration: 3))
+        #expect(step == JointStep(token: 5, probability: 0.5, duration: 2))
     }
 
     /// A model whose interface is not the published one is refused at load, naming what differs.

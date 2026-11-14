@@ -13,8 +13,10 @@ program(1.0)
             tensor<fp32, [1, 1, 1]> mul_2 = mul(x = slice_by_index_2, y = mul_2_y_0)[name = tensor<string, []>("mul_2")];
             tensor<fp32, []> token_prob_y_0 = const()[name = tensor<string, []>("token_prob_y_0"), val = tensor<fp32, []>(0x1p-1)];
             tensor<fp32, [1, 1, 1]> token_prob = add(x = mul_2, y = token_prob_y_0)[name = tensor<string, []>("token_prob")];
+            tensor<fp32, []> mod_0_y_0 = const()[name = tensor<string, []>("mod_0_y_0"), val = tensor<fp32, []>(0x1.4p+2)];
+            tensor<fp32, [1, 1, 1]> mod_0 = mod(x = slice_by_index_2, y = mod_0_y_0)[name = tensor<string, []>("mod_0")];
             tensor<string, []> duration_dtype_0 = const()[name = tensor<string, []>("duration_dtype_0"), val = tensor<string, []>("int32")];
-            tensor<int32, [1, 1, 1]> duration = cast(dtype = duration_dtype_0, x = slice_by_index_2)[name = tensor<string, []>("cast_0")];
+            tensor<int32, [1, 1, 1]> duration = cast(dtype = duration_dtype_0, x = mod_0)[name = tensor<string, []>("cast_0")];
             tensor<int32, [1, 1, 1]> token_id = cast(dtype = token_id_dtype_0, x = slice_by_index_1)[name = tensor<string, []>("cast_1")];
         } -> (token_id, token_prob, duration);
 }

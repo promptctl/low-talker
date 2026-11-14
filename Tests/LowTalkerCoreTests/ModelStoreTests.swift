@@ -304,11 +304,11 @@ import Testing
             Issue.record("a store with no Parakeet manifest must not hold Parakeet")
             return
         }
-        let folder = scratch.root.appending(components: "models", "FluidInference", "parakeet-tdt-0.6b-v3-coreml")
+        let folder = try scratch.installParakeet(files: [ParakeetModel.vocabulary: "{}"])
+        // The layout every install already on disk was written in, spelled out here alone.
+        #expect(folder.path(percentEncoded: false).hasSuffix("/models/FluidInference/parakeet-tdt-0.6b-v3-coreml"))
+        #expect(FileManager.default.fileExists(atPath: scratch.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json").path(percentEncoded: false)))
         let vocabulary = folder.appending(path: ParakeetModel.vocabulary)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try "{}".write(to: vocabulary, atomically: true, encoding: .utf8)
-        try Manifest(recording: folder, relativeTo: scratch.root).write(to: scratch.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json"))
         #expect(try store.installedModel(parakeet).folder.standardizedFileURL == folder.standardizedFileURL)
         try FileManager.default.removeItem(at: vocabulary)
         guard case .damaged(let damages) = try store.presence(of: parakeet) else {
