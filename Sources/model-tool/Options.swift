@@ -10,7 +10,7 @@ import Synchronization
 /// model out of, so a download here is what the next build carries.
 struct ModelOptions: ParsableArguments {
     @Option(help: "A model folder name in the whisperkit-coreml repo.")
-    var model: ModelName = .default
+    var model: Model = .default
 
     @Option(name: .customLong("models-dir"), help: "Where models are stored. Defaults to low-talker's store under Application Support, which `make app` copies a bundle's model out of.", transform: URL.init(fileURLWithPath:))
     var modelsDirectory: URL?
@@ -20,7 +20,7 @@ struct ModelOptions: ParsableArguments {
     }
 }
 
-extension ModelName: ExpressibleByArgument {}
+extension Model: ExpressibleByArgument {}
 
 /// [LAW:parse-dont-validate] Two commits are a revision on huggingface.co, a URL with an
 /// http or https scheme is a published base, and anything else is a path to a store, so

@@ -7,7 +7,7 @@ import GrammaticalNumber
 /// `Config(toml:)` is where a file becomes one.
 ///
 public struct Config: Hashable, Sendable {
-    public let model: ModelName
+    public let model: Model
     /// What the microphone does while nobody is dictating. The config file is its only
     /// writer, so a microphone held at rest is one the user asked for in writing.
     /// [LAW:single-enforcer]
@@ -15,7 +15,7 @@ public struct Config: Hashable, Sendable {
     public let modes: Modes
     public let serve: ServeBinding
 
-    public init(model: ModelName, microphone: MicrophoneAtRest, modes: [Mode], serve: ServeBinding) throws(ConfigError) {
+    public init(model: Model, microphone: MicrophoneAtRest, modes: [Mode], serve: ServeBinding) throws(ConfigError) {
         self.model = model
         self.microphone = microphone
         self.modes = try Modes(modes)
@@ -128,6 +128,10 @@ public enum ConfigError: Error, Equatable, Sendable, CustomStringConvertible {
     case twoModesOnOneChord(String)
     /// A mode whose vocabulary the engine cannot be told, named with why.
     case vocabulary(mode: String, VocabularyError)
+    /// A model this build does not carry, so nothing could load it.
+    case modelNotCarried(Model, carried: [Model])
+    /// The model's vocabulary check did not load, so no mode's terms can be checked against it.
+    case prompts(Model, PromptsUnavailable)
     /// A `[serve]` table that names no binding a server can listen on.
     case serve(ServeBindingError)
     /// The file exists but could not be read at all, in the words the system used.
@@ -154,6 +158,10 @@ public enum ConfigError: Error, Equatable, Sendable, CustomStringConvertible {
             "mode \"\(name)\" answers to a chord another mode already answers to"
         case .vocabulary(let name, let error):
             "mode \"\(name)\": \(error)"
+        case .modelNotCarried(let model, let carried):
+            "this build carries no model \"\(model)\"; it carries \(carried.map { "\"\($0)\"" }.joined(separator: " and "))"
+        case .prompts(let model, let failure):
+            "\(model): \(failure)"
         case .serve(let error):
             "\(error)"
         case .unreadable(let path, let why):

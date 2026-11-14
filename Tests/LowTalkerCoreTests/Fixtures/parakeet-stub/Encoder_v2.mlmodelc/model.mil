@@ -1,0 +1,19 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3510.2.1"}, {"coremlc-version", "3505.4.1"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 128, 1501]> mel, tensor<int32, [1]> mel_length) {
+            tensor<int32, [3]> reduce_sum_0_axes_0 = const()[name = tensor<string, []>("reduce_sum_0_axes_0"), val = tensor<int32, [3]>([0, 1, 2])];
+            tensor<bool, []> reduce_sum_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_sum_0_keep_dims_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1, 1]> reduce_sum_0 = reduce_sum(axes = reduce_sum_0_axes_0, keep_dims = reduce_sum_0_keep_dims_0, x = mel)[name = tensor<string, []>("reduce_sum_0")];
+            tensor<fp32, []> mul_0_y_0 = const()[name = tensor<string, []>("mul_0_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<fp32, [1, 1, 1]> mul_0 = mul(x = reduce_sum_0, y = mul_0_y_0)[name = tensor<string, []>("mul_0")];
+            tensor<fp32, [1, 1024, 188]> tile_0 = const()[name = tensor<string, []>("tile_0"), val = tensor<fp32, [1, 1024, 188]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];
+            tensor<fp32, [1, 1024, 188]> encoder = add(x = tile_0, y = mul_0)[name = tensor<string, []>("encoder")];
+            tensor<int32, []> sub_0_y_0 = const()[name = tensor<string, []>("sub_0_y_0"), val = tensor<int32, []>(1)];
+            tensor<int32, [1]> sub_0 = sub(x = mel_length, y = sub_0_y_0)[name = tensor<string, []>("sub_0")];
+            tensor<int32, []> floor_div_1_y_0 = const()[name = tensor<string, []>("floor_div_1_y_0"), val = tensor<int32, []>(8)];
+            tensor<int32, [1]> floor_div_1 = floor_div(x = sub_0, y = floor_div_1_y_0)[name = tensor<string, []>("floor_div_1")];
+            tensor<int32, []> encoder_length_y_0 = const()[name = tensor<string, []>("encoder_length_y_0"), val = tensor<int32, []>(1)];
+            tensor<int32, [1]> encoder_length = add(x = floor_div_1, y = encoder_length_y_0)[name = tensor<string, []>("encoder_length")];
+        } -> (encoder, encoder_length);
+}

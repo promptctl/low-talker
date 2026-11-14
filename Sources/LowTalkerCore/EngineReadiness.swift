@@ -14,10 +14,10 @@ import Uptime
 public enum EngineReadiness: Sendable, Equatable {
     /// Not yet able to hear, waiting `since` that instant: `phase` is nil until the load
     /// reports its first step.
-    case preparing(WhisperKitTranscriber.LoadPhase?, since: HostTime)
+    case preparing(LoadPhase?, since: HostTime)
     /// Loaded, the wait having lasted `after`. Kept rather than measured when read, so the
     /// menu opened an hour later says how long the load took, not how long ago launch was.
-    case ready(ModelName, after: Duration)
+    case ready(Model, after: Duration)
     /// The load stopped with this reason; the next press is refused and starts it again.
     case failed(String)
 
@@ -29,7 +29,7 @@ public enum EngineReadiness: Sendable, Equatable {
     /// their own, and nothing orders them against the load's return, so a "copying"
     /// queued just before a fast failure can run after it. The transition, not the
     /// timing, is what keeps a failed load from being drawn as a wait forever.
-    public func reporting(_ phase: WhisperKitTranscriber.LoadPhase) -> EngineReadiness {
+    public func reporting(_ phase: LoadPhase) -> EngineReadiness {
         switch self {
         case .preparing(_, let since): .preparing(phase, since: since)
         case .ready, .failed: self
@@ -41,7 +41,7 @@ public enum EngineReadiness: Sendable, Equatable {
     public func readout(at now: HostTime) -> String {
         switch self {
         case .preparing(let phase, let since): "\(phase?.description ?? "checking the model"), \(Self.spoken(since.duration(to: now))) so far"
-        case .ready(let model, let wait): "ready (\(model)) after \(Self.spoken(wait))"
+        case .ready(let model, let wait): "ready (\(model.engine) \(model)) after \(Self.spoken(wait))"
         case .failed(let reason): "failed — \(reason)"
         }
     }

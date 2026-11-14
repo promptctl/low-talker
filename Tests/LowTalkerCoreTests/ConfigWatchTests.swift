@@ -97,7 +97,9 @@ import Testing
         #expect(was.settings(changedFrom: was) == [])
         #expect(try Self.config(Self.onLeftControl).settings(changedFrom: was) == [.modes])
         #expect(try Self.config(Self.onRightCommand + "\nvocabulary = [\"Brynleigh\"]").settings(changedFrom: was) == [.modes])
+        #expect(try Self.config("model = \"parakeet-tdt-0.6b-v3\"\n" + Self.onRightCommand).settings(changedFrom: was) == [.model])
         let everything = try Self.config("""
+            model = "parakeet-tdt-0.6b-v3"
             microphone = { at_rest = "open" }
             [serve]
             interface = "192.168.1.20"
@@ -106,7 +108,7 @@ import Testing
             name = "dictation"
             chord = { modifiers = ["leftControl"] }
             """)
-        #expect(everything.settings(changedFrom: was) == [.modes, .microphone, .serve])
+        #expect(everything.settings(changedFrom: was) == [.modes, .microphone, .serve, .model])
     }
 
     // MARK: - Against a real file

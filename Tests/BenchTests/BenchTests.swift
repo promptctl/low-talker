@@ -22,7 +22,7 @@ private final class Picked: Sendable {
     let store: URL
     let folders: BenchFolders
 
-    init(fixtures names: [String], models: [ModelName] = []) throws {
+    init(fixtures names: [String], models: [Model] = []) throws {
         root = FileManager.default.temporaryDirectory.appending(path: "BenchTests-\(UUID().uuidString)")
         fixtures = root.appending(path: "fixtures")
         store = root.appending(path: "store")

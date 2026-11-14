@@ -42,13 +42,13 @@ public struct ModelRevision: Hashable, Sendable, LosslessStringConvertible {
     /// The revision `main` names now: the commit it points at in the weights repo, and in
     /// the tokenizer repo those weights' config picks. Asks the hub three small questions
     /// and downloads no weights.
-    public static func upstream(of model: ModelName) async throws -> ModelRevision {
+    public static func upstream(of model: Model) async throws -> ModelRevision {
         try await upstream(of: model, asking: Hub.get)
     }
 
     /// [LAW:effects-at-boundaries] The questions and what is made of the answers, with
     /// the asking handed in, so the answers can be ones captured from the hub.
-    static func upstream(of model: ModelName, asking get: (URL) async throws -> Data) async throws -> ModelRevision {
+    static func upstream(of model: Model, asking get: (URL) async throws -> Data) async throws -> ModelRevision {
         let weights = try await Hub.Revision.asking(get, for: "main", of: weightsRepo)
         let folder = try variantFolder(of: model, among: weights.files.map(\.path))
         let config = try await get(Hub.file("\(folder)/config.json", in: weightsRepo, at: weights.commit))
@@ -63,7 +63,7 @@ public struct ModelRevision: Hashable, Sendable, LosslessStringConvertible {
     /// [LAW:one-source-of-truth] exception: WhisperKit makes this choice inside a download
     /// that fetches only `main`, and exposes no function for it. The globs are matched by
     /// ArgmaxCore's own `matching(glob:)`, so only the fallback order is mirrored.
-    static func variantFolder(of model: ModelName, among files: [String]) throws -> String {
+    static func variantFolder(of model: Model, among files: [String]) throws -> String {
         let candidates = ["*\(model.rawValue)/*", "*openai*\(model.rawValue)/*"].map { glob in
             Set(files.matching(glob: glob).compactMap { $0.split(separator: "/").first.map(String.init) })
         }

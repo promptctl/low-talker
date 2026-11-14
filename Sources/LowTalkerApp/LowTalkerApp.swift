@@ -50,8 +50,8 @@ public final class LowTalkerApp {
     /// from one reading, so none of them comes from a different version of the file. Only
     /// `follow` changes it once it is read. [LAW:one-source-of-truth]
     ///
-    /// Nil until `reading` ends: the file is read only once the model's tokenizer can check
-    /// every mode's vocabulary, and everything that runs on the config awaits that reading.
+    /// Nil until `reading` ends: the file is read only once each carried model's tokenizer can
+    /// check every mode's vocabulary, and everything that runs on the config awaits that reading.
     public private(set) var running: RunningConfig?
     private var config: Result<Config, ConfigError>? { running?.config }
 
@@ -121,7 +121,9 @@ public final class LowTalkerApp {
         // Once the config is read, each save is a reload of the config the server and the loop
         // started on.
         reloading = Task {
-            guard case .success(let prompts) = await prompting.value, case .success(let read) = await reading.value, !Task.isCancelled else { return }
+            let prompts = await prompting.value
+            let read = await reading.value
+            guard !Task.isCancelled else { return }
             for await next in ports.config.reloads(after: read, prompting: prompts) { follow(next) }
         }
     }
@@ -295,66 +297,80 @@ public final class LowTalkerApp {
     /// [LAW:no-ambient-temporal-coupling] Nothing can call the transcriber before it is resident:
     /// the only handle is the supply's task, which yields the value only when the load has
     /// returned. Lazy so that it can name `loadEngine`; touching it is what starts the load.
-    private lazy var engine = EngineSupply { [unowned self] attempt in try await loadEngine(attempt: attempt) }
+    private lazy var engine = supplyEngine()
 
-    private func loadEngine(attempt: Int) async throws -> any Transcriber {
+    /// Which supply is the app's: each one counts up from the last, and only the current one's
+    /// load may say what the engine is. [LAW:one-source-of-truth]
+    private var engineGeneration = 0
+
+    /// A supply whose loads take the model the running config names: at launch, and again when a
+    /// save names another model. A load from a supply since replaced lands nowhere, so a slow
+    /// load of the old model never takes the menu, the server or kept speech from the new one.
+    /// [LAW:no-ambient-temporal-coupling]
+    private func supplyEngine() -> EngineSupply {
+        engineGeneration += 1
+        let generation = engineGeneration
+        return EngineSupply { [unowned self] attempt in try await loadEngine(attempt: attempt, generation: generation) }
+    }
+
+    private func loadEngine(attempt: Int, generation: Int) async throws -> any Transcriber {
         // The first attempt's wait counts from launch, and a later one's from the press that
         // started it.
-        let since = attempt == 1 ? launched : ports.clock.now
+        let since = attempt == 1 && generation == 1 ? launched : ports.clock.now
+        let current = { @MainActor [unowned self] in generation == engineGeneration }
         show(.preparing(nil, since: since))
         ports.server?.answer(with: .loading)
         do {
-            let loaded = try await ports.model.load(turns: turns) { phase in
+            // The model is the config's, so the load waits on its reading; a config that was
+            // refused fails the load with the refusal, said where a failed load is said.
+            let model = try await readConfig().model
+            let loaded = try await ports.model.load(model, turns: turns) { phase in
                 Task { @MainActor in
                     let next = self.engineReadiness.reporting(phase)
-                    if next != self.engineReadiness { self.show(next) }
+                    if current(), next != self.engineReadiness { self.show(next) }
                 }
             }
-            show(.ready(loaded.model, after: since.duration(to: ports.clock.now)))
-            ports.server?.answer(with: .ready(loaded.served))
-            // Reads the speech kept while no engine could hear it, as a served caller: its passes
-            // wait while a press holds the engine. Starts a task and returns, so this load never
-            // waits on a decode that waits on the press that waits on this load.
-            keptSpeech.landed(loaded.served)
+            if current() {
+                show(.ready(loaded.model, after: since.duration(to: ports.clock.now)))
+                ports.server?.answer(with: .ready(loaded.served))
+                // Reads the speech kept while no engine could hear it, as a served caller: its
+                // passes wait while a press holds the engine. Starts a task and returns, so this
+                // load never waits on a decode that waits on the press that waits on this load.
+                keptSpeech.landed(loaded.served)
+            }
             return loaded.dictation
         } catch {
             // [LAW:no-silent-failure] A model that failed to load is the one thing the menu must
             // say, since every press after this would otherwise fail with no explanation on screen.
-            show(.failed("\(error)"))
-            ports.server?.answer(with: .failed("the model failed to load: \(error)"))
+            if current() {
+                show(.failed("\(error)"))
+                ports.server?.answer(with: .failed("the model failed to load: \(error)"))
+            }
             throw error
         }
     }
 
     // MARK: - the config
 
-    /// The model's tokenizer alone, loaded from launch: a fraction of a second, where the model it
-    /// belongs to can take minutes.
-    private lazy var prompting: Task<Result<PromptEncoder, PromptsUnavailable>, Never> = Task { @MainActor in
+    /// Each carried model's tokenizer alone, loaded from launch: a fraction of a second, where the
+    /// model it belongs to can take minutes.
+    private lazy var prompting: Task<Prompting, Never> = Task { @MainActor in
         let loading = ports.clock.now
-        let prompts = await Result { () async throws(PromptsUnavailable) in try await ports.model.prompts() }
+        let prompts = await ports.model.prompting()
         // [LAW:nothing-unseen] The reading of the config waits on this, so it is told.
-        let load: PromptEncoder.Load = switch prompts {
-        case .success: .loaded(after: loading.duration(to: ports.clock.now))
-        case .failure(let failure): .failed(failure)
-        }
-        ports.told(.prompts(load))
+        ports.told(.prompts(Prompting.Load(after: loading.duration(to: ports.clock.now), prompting: prompts)))
         return prompts
     }
 
-    /// The config's reading at launch, through the tokenizer, so a mode the engine could not be
-    /// told is refused as the file is read. A tokenizer that did not load reads nothing: the file
-    /// is never run on unchecked, and it is not blamed for the store. [LAW:no-silent-failure]
-    private lazy var reading: Task<Result<RunningConfig, PromptsUnavailable>, Never> = Task { @MainActor in
-        let prompts: PromptEncoder
-        switch await prompting.value {
-        case .success(let loaded): prompts = loaded
-        case .failure(let failure): return .failure(failure)
-        }
-        let read = RunningConfig(reading: ports.config.read(prompting: prompts))
+    /// The config's reading at launch, through the tokenizers, so a mode the model it names could
+    /// not be told is refused as the file is read. A model whose tokenizer did not load refuses
+    /// the config that names it, in its own words, and the file is never run on unchecked.
+    /// [LAW:no-silent-failure]
+    private lazy var reading: Task<RunningConfig, Never> = Task { @MainActor in
+        let read = RunningConfig(reading: ports.config.read(prompting: await prompting.value))
         running = read
         ports.told(.config(read))
-        return .success(read)
+        return read
     }
 
     /// The config as it stands once the launch reading has ended. Awaited, never assumed: a
@@ -362,7 +378,7 @@ public final class LowTalkerApp {
     /// for the reading. [LAW:no-ambient-temporal-coupling] What they then run on is the config as
     /// it stands, which a save may have moved past the launch reading.
     private func readConfig() async throws -> Config {
-        _ = try await reading.value.get()
+        _ = await reading.value
         guard let config else { preconditionFailure("the launch reading sets the running config before it ends") }
         return try config.get()
     }
@@ -391,6 +407,8 @@ public final class LowTalkerApp {
         // refusal among them. A refusal with a config running before it reads as that config,
         // `.kept`, so it arrives below and moves nothing.
         guard let was, case .success(let now) = next.config else {
+            // The load before this reading failed for want of a config; this one's model loads.
+            if case .success = next.config { engine = supplyEngine() }
             ports.told(.config(next))
             ports.server?.resume(at: serveBinding)
             lifecycle.comeUp()
@@ -412,6 +430,11 @@ public final class LowTalkerApp {
             case .serve:
                 ports.server?.resume(at: serveBinding)
                 return "server binding"
+            case .model:
+                // The next press waits for the new model; a press in flight finishes on the one
+                // it took.
+                engine = supplyEngine()
+                return "model \(now.model)"
             }
         }
         ports.told(.configMoved(next, moved: moved))

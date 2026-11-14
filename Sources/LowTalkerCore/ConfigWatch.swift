@@ -78,7 +78,7 @@ public enum RunningConfig: Equatable, Sendable, CustomStringConvertible {
     /// [LAW:no-ambient-temporal-coupling] `running` was read before this stream existed, so
     /// a save that landed in between would be missed by the watch. Reading once after the
     /// watch is up and before its first tick closes that window by construction.
-    public static func reloads(of url: URL = Config.fileURL, after running: RunningConfig, prompting: PromptEncoder) -> AsyncStream<RunningConfig> {
+    public static func reloads(of url: URL = Config.fileURL, after running: RunningConfig, prompting: Prompting) -> AsyncStream<RunningConfig> {
         // The default unbounded buffer, unlike the ticks underneath, which keep only the
         // newest: a tick repeated says the same thing twice, two reloads never do.
         AsyncStream { continuation in
@@ -110,6 +110,8 @@ extension Config {
         case microphone
         /// Where the server listens.
         case serve
+        /// The model the engine hears through.
+        case model
     }
 
     /// The settings this config gives a value `earlier` did not, in `Setting.allCases` order.
@@ -122,6 +124,7 @@ extension Config {
             case .modes: modes != earlier.modes
             case .microphone: microphone != earlier.microphone
             case .serve: serve != earlier.serve
+            case .model: model != earlier.model
             }
         }
     }

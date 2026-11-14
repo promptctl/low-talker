@@ -1,0 +1,23 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3510.2.1"}, {"coremlc-version", "3505.4.1"}})]
+{
+    func main<ios17>(tensor<fp32, [2, 1, 640]> c_in, tensor<fp32, [2, 1, 640]> h_in, tensor<int32, [1]> target_length, tensor<int32, [1, 1]> targets) {
+            tensor<string, []> cast_0_dtype_0 = const()[name = tensor<string, []>("cast_0_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [3]> reshape_1_shape_0 = const()[name = tensor<string, []>("reshape_1_shape_0"), val = tensor<int32, [3]>([1, 1, 1])];
+            tensor<fp32, [1, 1]> cast_0 = cast(dtype = cast_0_dtype_0, x = targets)[name = tensor<string, []>("cast_1")];
+            tensor<fp32, [1, 1, 1]> reshape_1 = reshape(shape = reshape_1_shape_0, x = cast_0)[name = tensor<string, []>("reshape_1")];
+            tensor<string, []> cast_1_dtype_0 = const()[name = tensor<string, []>("cast_1_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [3]> reshape_2_shape_0 = const()[name = tensor<string, []>("reshape_2_shape_0"), val = tensor<int32, [3]>([1, 1, 1])];
+            tensor<fp32, [1]> cast_1 = cast(dtype = cast_1_dtype_0, x = target_length)[name = tensor<string, []>("cast_0")];
+            tensor<fp32, [1, 1, 1]> reshape_2 = reshape(shape = reshape_2_shape_0, x = cast_1)[name = tensor<string, []>("reshape_2")];
+            tensor<fp32, []> mul_1_y_0 = const()[name = tensor<string, []>("mul_1_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<fp32, [1, 1, 1]> mul_1 = mul(x = reshape_2, y = mul_1_y_0)[name = tensor<string, []>("mul_1")];
+            tensor<int32, [3]> tile_1_reps_0 = const()[name = tensor<string, []>("tile_1_reps_0"), val = tensor<int32, [3]>([1, 640, 1])];
+            tensor<fp32, [1, 640, 1]> tile_1 = tile(reps = tile_1_reps_0, x = reshape_1)[name = tensor<string, []>("tile_1")];
+            tensor<fp32, [1, 640, 1]> decoder = add(x = tile_1, y = mul_1)[name = tensor<string, []>("decoder")];
+            tensor<fp32, []> h_out_y_0 = const()[name = tensor<string, []>("h_out_y_0"), val = tensor<fp32, []>(0x1p+0)];
+            tensor<fp32, [2, 1, 640]> h_out = add(x = h_in, y = h_out_y_0)[name = tensor<string, []>("h_out")];
+            tensor<fp32, []> c_out_y_0 = const()[name = tensor<string, []>("c_out_y_0"), val = tensor<fp32, []>(0x1p+1)];
+            tensor<fp32, [2, 1, 640]> c_out = add(x = c_in, y = c_out_y_0)[name = tensor<string, []>("c_out")];
+        } -> (decoder, h_out, c_out);
+}

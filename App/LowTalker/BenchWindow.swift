@@ -164,7 +164,7 @@ final class BenchWindow: NSObject, NSTableViewDataSource {
         modelBoxes.arrangedSubviews.forEach { $0.removeFromSuperview() }
         do {
             let recorded = try recordedModels()
-            let fallback = recorded.contains(.default) ? ModelName.default : recorded.first
+            let fallback = recorded.contains(.default) ? Model.default : recorded.first
             let keeps = recorded.contains(where: checked.contains)
             for model in recorded {
                 modelBoxes.addArrangedSubview(check(model.rawValue, on: keeps ? checked.contains(model) : model == fallback))
@@ -175,11 +175,11 @@ final class BenchWindow: NSObject, NSTableViewDataSource {
     }
 
     /// The models whose boxes are checked, in the order the store lists them.
-    private var checkedModels: [ModelName] {
-        modelBoxes.arrangedSubviews.compactMap { $0 as? NSButton }.filter { $0.state == .on }.compactMap { ModelName(rawValue: $0.title) }
+    private var checkedModels: [Model] {
+        modelBoxes.arrangedSubviews.compactMap { $0 as? NSButton }.filter { $0.state == .on }.compactMap { Model(rawValue: $0.title) }
     }
 
-    private func recordedModels() throws -> [ModelName] {
+    private func recordedModels() throws -> [Model] {
         switch store {
         case .carried:
             guard let carried else { throw CarriesNoStore() }

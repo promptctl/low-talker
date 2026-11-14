@@ -31,7 +31,7 @@ public enum ModelSource: Sendable, CustomStringConvertible {
     }
 
     /// The archive a published base serves for `model`.
-    public static func archiveName(of model: ModelName) -> String {
+    public static func archiveName(of model: Model) -> String {
         "\(model.rawValue).zip"
     }
 }
@@ -49,7 +49,7 @@ enum OpenSource {
 
     static func with<T>(
         _ source: ModelSource,
-        _ model: ModelName,
+        _ model: Model,
         beside destination: ModelStore,
         phase: @escaping @Sendable (ModelStore.InstallPhase) -> Void,
         _ body: (OpenSource) async throws -> T

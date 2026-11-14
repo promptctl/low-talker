@@ -28,7 +28,7 @@ struct ModelTool: AsyncParsableCommand {
         )
 
         func run() {
-            print(ModelName.default.rawValue)
+            print(Model.default.rawValue)
         }
     }
 
@@ -42,7 +42,7 @@ struct ModelTool: AsyncParsableCommand {
         )
 
         @Option(help: "A model folder name in the whisperkit-coreml repo.")
-        var model: ModelName = .default
+        var model: Model = .default
 
         func run() async throws {
             print(try await ModelRevision.upstream(of: model))

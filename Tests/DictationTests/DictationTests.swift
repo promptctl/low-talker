@@ -773,7 +773,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// commits, under the cut's warning and one saying the words after them are missing, and
     /// is reported as the failure (low-reliability-z2z.5s1).
     @Test func aCutPressWhoseLastReadingFailsHoldsWhatThePassesRead() async throws {
-        let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ throws(TranscriptionFailure) in throw .unreadable(.speechWithoutWords(text: " friend")) }
+        let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }) { _ throws(TranscriptionFailure) in throw .unreadable(.whisperKit(.speechWithoutWords(text: " friend"))) }
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -781,7 +781,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.dictation.press(.ended(.lapsed))
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
-        guard case .cut(is PressLapsed, after: nil, unread: let unread?) = stopped.cause, case .unreadable(.speechWithoutWords)? = unread as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
+        guard case .cut(is PressLapsed, after: nil, unread: let unread?) = stopped.cause, case .unreadable(.whisperKit(.speechWithoutWords))? = unread as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
         #expect(failureLine(stopped) == "WARNING: The hotkey stopped listening during your dictation. Your last dictation stopped: \(unread). 1 word of your dictation was inserted before it. 2 words are held. No others were inserted or held.")
         #expect(stopped.account == Account(facts: "1 word inserted, 0 that may have been, 2 held, before: WARNING: The hotkey stopped listening during your dictation.; \(unread.account.facts)", dictated: " friend"))
         #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The hotkey stopped listening during your dictation. WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing.")))
@@ -793,7 +793,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// failed press's line counts the passes the engine failed to read before it, as an
     /// inserted press's does (low-reliability-z2z.5s1).
     @Test func aReleasedPressWhoseLastReadingFailsHoldsWhatThePassesRead() async throws {
-        let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }, unreading: { $0.count >= 2 ? Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " friend"))) : nil }) { _ throws(TranscriptionFailure) in throw .unreadable(.speechWithoutWords(text: " friend")) }
+        let engine = FakeTranscriber(reading: { Transcript(typed: $0.count >= 2 ? " there friend" : "") }, confirming: { Transcript(typed: $0.count >= 2 ? "hello" : "") }, unreading: { $0.count >= 2 ? Partial.Unread(passes: 1, latest: .unreadable(.whisperKit(.speechWithoutWords(text: " friend")))) : nil }) { _ throws(TranscriptionFailure) in throw .unreadable(.whisperKit(.speechWithoutWords(text: " friend"))) }
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -805,7 +805,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         #expect(report.opened?.unread?.passes == 1)
         #expect(report.record.contains("1 pass the engine failed to read, the latest as WhisperKit returned a segment of 7 characters without word timings"))
         #expect(!report.record.contains("friend"))
-        guard case .unreadable(.speechWithoutWords)? = stopped.soleCause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
+        guard case .unreadable(.whisperKit(.speechWithoutWords))? = stopped.soleCause as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
         #expect(rig.inputMethod.inserted == ["hello"])
         #expect(rig.hold.held == .unplaced(part(" there friend", "WARNING: The engine failed before it finished reading your dictation, so words said after its earlier readings are missing.")))
     }
@@ -815,7 +815,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// the passes run by key-up, how many re-punctuated a settled word, how many the engine
     /// failed to read, and how long after key-down the first words came.
     @Test func aPressIsHeardWhileTheKeyIsStillDown() async throws {
-        let engine = FakeTranscriber(reading: { Transcript(typed: $0.isEmpty ? "" : "hello") }, repunctuating: { $0.isEmpty ? 0 : 2 }, unreading: { $0.isEmpty ? nil : Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " hello"))) }) { _ in Transcript(typed: "hello") }
+        let engine = FakeTranscriber(reading: { Transcript(typed: $0.isEmpty ? "" : "hello") }, repunctuating: { $0.isEmpty ? 0 : 2 }, unreading: { $0.isEmpty ? nil : Partial.Unread(passes: 1, latest: .unreadable(.whisperKit(.speechWithoutWords(text: " hello")))) }) { _ in Transcript(typed: "hello") }
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.wait(0.25)
@@ -841,7 +841,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     /// line: the count is read once the decode is over, not with what the press showed while
     /// the key was down (low-reliability-z2z.5s1).
     @Test func aPassThatFailsAfterKeyUpIsCounted() async throws {
-        let engine = FakeTranscriber(missedAtKeyUp: Partial.Unread(passes: 1, latest: .unreadable(.speechWithoutWords(text: " hello")))) { _ in Transcript(typed: "hello") }
+        let engine = FakeTranscriber(missedAtKeyUp: Partial.Unread(passes: 1, latest: .unreadable(.whisperKit(.speechWithoutWords(text: " hello"))))) { _ in Transcript(typed: "hello") }
         let rig = try await Rig(hearing: engine)
         rig.hold(speaking: [1, 2])
         let report = await rig.pressReport()
@@ -855,7 +855,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
     @Test func aRefusedCommitIsReportedBeforeAFailedLastReading() async throws {
         let engine = FakeTranscriber(confirming: { samples in
             Transcript(typed: samples.count >= 4 ? "hello there" : samples.count >= 2 ? "hello" : "")
-        }) { _ throws(TranscriptionFailure) in throw .unreadable(.speechWithoutWords(text: " friend")) }
+        }) { _ throws(TranscriptionFailure) in throw .unreadable(.whisperKit(.speechWithoutWords(text: " friend"))) }
         let rig = try await Rig(hearing: engine)
         rig.dictation.press(.began(Rig.dictation, at: rig.now))
         rig.speak([1, 2])
@@ -866,7 +866,7 @@ let failedInserts: [FailedInsert] = Refusal.allCases.map { FailedInsert(failure:
         rig.keyUp()
         let stopped = try #require(await rig.report().failure as? PressStopped)
         #expect(stopped.landed == 1)
-        guard case .reading(let reading, after: .refused(.cursorIsInAnotherApp)?) = stopped.cause, case .unreadable(.speechWithoutWords)? = reading as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
+        guard case .reading(let reading, after: .refused(.cursorIsInAnotherApp)?) = stopped.cause, case .unreadable(.whisperKit(.speechWithoutWords))? = reading as? TranscriptionFailure else { Issue.record("stopped by \(stopped.causes)"); return }
         #expect(failureLine(stopped) == "WARNING: \(Refusal.cursorIsInAnotherApp.reason) Your last dictation stopped: \(reading). 1 word of your dictation was inserted before it. 1 word is held. No others were inserted or held.")
         #expect(stopped.account == Account(facts: "1 word inserted, 0 that may have been, 1 held, before: \(InsertFailure.refused(.cursorIsInAnotherApp)); \(reading.account.facts)", dictated: " friend"))
     }

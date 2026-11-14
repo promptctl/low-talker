@@ -7,7 +7,7 @@ import Synchronization
 public final class FakeConfigFile: ConfigSource, Sendable {
     private struct Watch {
         var last: RunningConfig
-        let prompting: PromptEncoder
+        let prompting: Prompting
         let continuation: AsyncStream<RunningConfig>.Continuation
     }
 
@@ -33,11 +33,11 @@ public final class FakeConfigFile: ConfigSource, Sendable {
         for (continuation, next) in told { continuation.yield(next) }
     }
 
-    public func read(prompting: PromptEncoder) -> Result<Config, ConfigError> {
+    public func read(prompting: Prompting) -> Result<Config, ConfigError> {
         Self.reading(state.withLock { $0.text }, prompting: prompting)
     }
 
-    public func reloads(after running: RunningConfig, prompting: PromptEncoder) -> AsyncStream<RunningConfig> {
+    public func reloads(after running: RunningConfig, prompting: Prompting) -> AsyncStream<RunningConfig> {
         let (stream, continuation) = AsyncStream.makeStream(of: RunningConfig.self)
         let (id, first) = state.withLock { state -> (Int, (AsyncStream<RunningConfig>.Continuation, RunningConfig)?) in
             let id = state.next
@@ -62,7 +62,7 @@ public final class FakeConfigFile: ConfigSource, Sendable {
 
     /// What `Config.load` answers for this text: the defaults with no file, and the parse of it
     /// otherwise.
-    private static func reading(_ text: String?, prompting: PromptEncoder) -> Result<Config, ConfigError> {
+    private static func reading(_ text: String?, prompting: Prompting) -> Result<Config, ConfigError> {
         guard let text else { return .success(.default) }
         return Result { () throws(ConfigError) in try Config(toml: text, prompting: prompting) }
     }

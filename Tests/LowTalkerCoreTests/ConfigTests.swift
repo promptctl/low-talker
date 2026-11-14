@@ -97,7 +97,7 @@ import Testing
     /// [LAW:one-source-of-truth] The defaults are the values their own owners name, so
     /// this fails the moment a second spelling of one appears.
     @Test func theDefaultsAreTheValuesTheirOwnersName() {
-        #expect(Config.default.model == ModelName.default)
+        #expect(Config.default.model == Model.default)
         #expect(Array(Config.default.modes) == [Mode.dictation])
         #expect(Mode.dictation.chord == Hotkey.defaultChord)
         #expect(Mode.dictation.vocabulary == .empty)
@@ -273,12 +273,43 @@ import Testing
         }
     }
 
-    /// [LAW:single-enforcer] The sentence is ModelName's own, so it speaks of model
+    /// [LAW:single-enforcer] The sentence is Model's own, so it speaks of model
     /// names rather than of the Swift type the parser happened to be building.
-    @Test func aModelNameThatIsNotOneIsRefusedInItsOwnWords() {
-        #expect(throws: ConfigError.wrongShape(#"model: ".." is not a model name: one folder in the model repo, such as base.en"#)) {
+    @Test func aModelThatIsNotOneIsRefusedInItsOwnWords() {
+        #expect(throws: ConfigError.wrongShape(#"model: ".." is not a model name: one folder in the model repo, such as base.en, or parakeet-tdt-0.6b-v3"#)) {
             try Self.config(#"model = "..""#)
         }
+    }
+
+    /// A model is parsed once into its engine: Parakeet's names are Parakeet's, and any other
+    /// folder name is WhisperKit's.
+    @Test func aModelNamesItsEngine() throws {
+        #expect(try Self.config(#"model = "parakeet-tdt-0.6b-v3""#).model == .parakeet(.tdtV3))
+        #expect(try Self.config(#"model = "base.en""#).model == .whisperKit("base.en"))
+    }
+
+    /// Until Parakeet has a word spotter (low-engines-7ht.eed), a mode that lists terms for it is
+    /// refused by the mode's name, and one with none is taken.
+    @Test func aParakeetModeWithVocabularyIsRefusedByName() throws {
+        let prompting = Prompting([.parakeet(.tdtV3): .success(.takingNone(.parakeet(.tdtV3)))])
+        let named = """
+            model = "parakeet-tdt-0.6b-v3"
+            [[modes]]
+            name = "names"
+            vocabulary = ["Fryslie"]
+            """
+        #expect(throws: ConfigError.vocabulary(mode: "names", .engineTakesNone(.parakeet(.tdtV3)))) { try Config(toml: named, prompting: prompting) }
+        let bare = """
+            model = "parakeet-tdt-0.6b-v3"
+            [[modes]]
+            name = "plain"
+            """
+        #expect(try Config(toml: bare, prompting: prompting).model == .parakeet(.tdtV3))
+    }
+
+    /// A model this build does not carry is refused as the file is read, with the ones it does.
+    @Test func aModelTheBuildDoesNotCarryIsRefused() {
+        #expect(throws: ConfigError.modelNotCarried("tiny.en", carried: Prompting.countingWords().models)) { try Self.config(#"model = "tiny.en""#) }
     }
 
     /// A modifier that is not one is answered with the ones that are.

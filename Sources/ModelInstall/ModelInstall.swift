@@ -21,7 +21,7 @@ extension ModelStore {
     /// fetched is decided by its `Recording`, the domain's own discriminator, judged
     /// under the lock so it describes what this installer owns.
     public func install(
-        _ model: ModelName,
+        _ model: Model,
         from source: ModelSource,
         phase: @escaping @Sendable (InstallPhase) -> Void
     ) async throws -> InstalledModel {
@@ -71,7 +71,7 @@ extension ModelStore {
     /// [LAW:composability] Packing is an install into an empty store and a zip of the
     /// result, so an archive holds exactly what an install certifies, manifests and
     /// all, and nothing a hub client left beside it.
-    public func pack(_ model: ModelName, into directory: URL, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> URL {
+    public func pack(_ model: Model, into directory: URL, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let scratch = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: directory, create: true)
         // [LAW:no-silent-failure] exception: a defer cannot throw, and a staging copy
@@ -86,7 +86,7 @@ extension ModelStore {
 
     /// The part's manifest, taking the part from `fetch` and recording what arrived
     /// when it is not already whole here.
-    private func whole(_ part: ModelPart, of model: ModelName, fetch: () async throws -> Manifest) async throws -> Manifest {
+    private func whole(_ part: ModelPart, of model: Model, fetch: () async throws -> Manifest) async throws -> Manifest {
         if case .whole(let manifest) = try recording(part, of: model) { return manifest }
         let manifest = try await fetch()
         try manifest.write(to: manifestURL(for: model, part))
@@ -149,7 +149,7 @@ extension ModelStore {
     /// Each file lands under a temporary name and is renamed into place, so a copy
     /// stopped part way leaves no listed file half written. Only the listed files are
     /// copied: a sidecar beside them in the source is not the model.
-    private func copy(_ part: ModelPart, of model: ModelName, from source: ModelStore, phase: (InstallPhase) -> Void) async throws -> Manifest {
+    private func copy(_ part: ModelPart, of model: Model, from source: ModelStore, phase: (InstallPhase) -> Void) async throws -> Manifest {
         let manifest: Manifest
         switch try source.recording(part, of: model) {
         case .whole(let whole): manifest = whole
@@ -248,11 +248,11 @@ private enum InstallLock {
 public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
     case lockUnavailable(lock: URL, errno: Int32)
     /// A source store that does not hold the part whole, so there is nothing to take.
-    case sourceLacks(source: URL, model: ModelName, part: ModelPart, reason: String)
+    case sourceLacks(source: URL, model: Model, part: ModelPart, reason: String)
     /// A published base or huggingface.co answered with something other than what was asked.
     case downloadRefused(url: URL, status: Int?)
     /// No single folder in the weights repo is the model's, so no download could take one.
-    case noVariantFolder(model: ModelName, matches: [String])
+    case noVariantFolder(model: Model, matches: [String])
     case dittoFailed(arguments: [String], status: Int32, message: String)
     case renameFailed(from: URL, to: URL, errno: Int32)
     /// A download or copy finished without putting every file its manifest lists in place,

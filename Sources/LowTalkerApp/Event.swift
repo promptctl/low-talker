@@ -16,7 +16,7 @@ extension LowTalkerApp {
         case engine(EngineReadiness, at: HostTime)
         case activity(Dictation.Activity)
         case hotkey(HotkeyStatus)
-        case prompts(PromptEncoder.Load)
+        case prompts(Prompting.Load)
         /// A reading of the config that moved nothing, because nothing ran before it or it was refused.
         case config(RunningConfig)
         /// A save, and each setting it moved with what came of moving it.

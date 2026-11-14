@@ -12,7 +12,7 @@ public struct BenchFlags: ParsableArguments {
     var fixtures: URL
 
     @Option(name: .customLong("model"), help: "A model the store holds. Repeat for several.")
-    var models: [ModelName] = [.default]
+    var models: [Model] = [.default]
 
     @Option(name: .customLong("delivery"), help: "How a hold's audio reaches the engine: batch (the whole clip at key-up) or streamed (a microphone buffer at a time). Repeat for both.")
     var arrivals: [LatencyHarness.Arrival] = LatencyHarness.Arrival.allCases
@@ -47,4 +47,4 @@ public struct BenchFlags: ParsableArguments {
 /// that names nothing is refused before any model loads.
 extension LatencyHarness.Arrival: ExpressibleByArgument {}
 extension LatencyHarness.Serving: ExpressibleByArgument {}
-extension ModelName: ExpressibleByArgument {}
+extension Model: ExpressibleByArgument {}

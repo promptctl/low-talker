@@ -16,8 +16,8 @@ import Uptime
     /// hour later still says how long the wait was.
     @Test func theEndOfTheWaitSaysHowLongItTook() {
         let ready = EngineReadiness.ready(.default, after: .seconds(60))
-        #expect(ready.readout(at: launch) == "ready (\(ModelName.default)) after 1 min 0 s")
-        #expect(ready.readout(at: launch + .seconds(3600)) == "ready (\(ModelName.default)) after 1 min 0 s")
+        #expect(ready.readout(at: launch) == "ready (WhisperKit \(Model.default)) after 1 min 0 s")
+        #expect(ready.readout(at: launch + .seconds(3600)) == "ready (WhisperKit \(Model.default)) after 1 min 0 s")
         #expect(EngineReadiness.failed("no model").readout(at: launch) == "failed — no model")
     }
 

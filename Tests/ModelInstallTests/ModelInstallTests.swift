@@ -25,12 +25,12 @@ import Testing
     /// load's own words are the core's, and the road repeats them rather than keeping a
     /// second copy.
     @Test func phasesDescribeThemselves() {
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.waitingForAnotherInstall))" == "waiting for another install")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.downloading(fractionCompleted: 0.426)))" == "downloading 42%")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.unpacking))" == "unpacking model")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.copying))" == "copying model")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.installing(.evicting(["a.bin"])))" == "removing 1 damaged file: a.bin")
-        #expect("\(WhisperKitTranscriber.InstallingLoadPhase.loading)" == "\(WhisperKitTranscriber.LoadPhase.loading)")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.waitingForAnotherInstall))" == "waiting for another install")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.downloading(fractionCompleted: 0.426)))" == "downloading 42%")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.unpacking))" == "unpacking model")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.copying))" == "copying model")
+        #expect("\(LoadedEngine.InstallingLoadPhase.installing(.evicting(["a.bin"])))" == "removing 1 damaged file: a.bin")
+        #expect("\(LoadedEngine.InstallingLoadPhase.loading)" == "\(LoadPhase.loading)")
     }
 
     /// An unreadable manifest names no files, so the part is taken whole from the

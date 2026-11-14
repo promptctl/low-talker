@@ -106,7 +106,7 @@ import Testing
     /// The menu bar and the log both show the phase's own words, so the words are
     /// pinned once, here.
     @Test func phasesDescribeThemselves() {
-        #expect("\(WhisperKitTranscriber.LoadPhase.loading)" == "loading model, minutes the first time on this Mac")
+        #expect("\(LoadPhase.loading)" == "loading model, minutes the first time on this Mac")
     }
 
     /// A file this process may not reach is not a missing file: a download would
@@ -219,11 +219,11 @@ import Testing
 
     @Test(arguments: ["a/b", "..", ".", "", "/x"])
     func modelNameRefusesAnythingButOnePathStep(raw: String) {
-        #expect(ModelName(rawValue: raw) == nil)
+        #expect(Model(rawValue: raw) == nil)
     }
 
     @Test func modelNameAcceptsAFolderName() {
-        #expect(ModelName(rawValue: "base.en")?.rawValue == "base.en")
+        #expect(Model(rawValue: "base.en")?.rawValue == "base.en")
     }
 
     /// A whole store loads read-only, in place. A release's carried store sits inside a
@@ -292,5 +292,29 @@ import Testing
             return
         }
         #expect(damages.map(\.description) == ["config.json is 1 bytes, expected 2", "tokenizer.json is 1 bytes, expected 13"])
+    }
+
+    /// A Parakeet model is its weights alone, its vocabulary beside them: one manifest makes it
+    /// installed, by the same rule a Whisper model's two make it so, and its folder is the repo.
+    @Test func aParakeetModelIsInstalledByItsWeightsAlone() throws {
+        let scratch = try ScratchStore(files: [:])
+        let store = ModelStore(directory: scratch.root)
+        let parakeet = Model.parakeet(.tdtV3)
+        guard case .missing = try store.presence(of: parakeet) else {
+            Issue.record("a store with no Parakeet manifest must not hold Parakeet")
+            return
+        }
+        let folder = scratch.root.appending(components: "models", "FluidInference", "parakeet-tdt-0.6b-v3-coreml")
+        let vocabulary = folder.appending(path: ParakeetModel.vocabulary)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "{}".write(to: vocabulary, atomically: true, encoding: .utf8)
+        try Manifest(recording: folder, relativeTo: scratch.root).write(to: scratch.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json"))
+        #expect(try store.installedModel(parakeet).folder.standardizedFileURL == folder.standardizedFileURL)
+        try FileManager.default.removeItem(at: vocabulary)
+        guard case .damaged(let damages) = try store.presence(of: parakeet) else {
+            Issue.record("a Parakeet model missing a file must be damaged")
+            return
+        }
+        #expect(damages.map(\.description) == ["parakeet_v3_vocab.json is missing"])
     }
 }

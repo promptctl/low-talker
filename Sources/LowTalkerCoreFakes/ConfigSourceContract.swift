@@ -1,5 +1,14 @@
 import LowTalkerCore
 
+extension Prompting {
+    /// Every carried model, and `base.en`, told a vocabulary through an encoder that counts its
+    /// words against `limit`: a tokenization a test can count by eye.
+    public static func counting(limit: Int, models: [Model] = Model.carried + ["base.en"]) -> Prompting {
+        let encoder = PromptEncoder(limit: limit) { text in text.split(separator: " ").map { _ in 0 } }
+        return Prompting(Dictionary(uniqueKeysWithValues: models.map { ($0, .success(encoder)) }))
+    }
+}
+
 /// A config source's semantics, stated once. Each statement runs one fresh source and says every
 /// way it disagreed; nothing, when it agreed. `FakeConfigFile` runs it, and so does
 /// `ConfigFileSource` on a file of its own. [LAW:one-source-of-truth]
@@ -46,8 +55,9 @@ public struct ConfigSourceContract: Sendable {
     public static let onLeftControl = file(chord: "leftControl")
     /// TOML that stops being TOML part way through a table header.
     public static let notTOML = "model = \"base.en\"\n[[modes\n"
-    /// An encoder that counts words, so every mode here is told.
-    public static let prompting = PromptEncoder(limit: 1000) { text in text.split(separator: " ").map { _ in 0 } }
+    /// An encoder that counts words for every model the app carries and the `base.en` these
+    /// files name, so every mode here is told.
+    public static let prompting = Prompting.counting(limit: 1000)
 
     public func disagreements(with statement: Statement) async throws -> [String] {
         let (source, save) = try subject()

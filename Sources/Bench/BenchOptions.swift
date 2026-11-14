@@ -8,7 +8,7 @@ import LowTalkerCore
 /// [LAW:parse-dont-validate] Made only through `init`, which refuses an empty list and a
 /// run count under one, so a plan in hand always measures something.
 public struct BenchPlan: Equatable, Sendable {
-    public let models: [ModelName]
+    public let models: [Model]
     public let arrivals: [LatencyHarness.Arrival]
     public let servings: [LatencyHarness.Serving]
     /// How many times each fixture is held, per delivery and serving; the first hold after a
@@ -17,7 +17,7 @@ public struct BenchPlan: Equatable, Sendable {
     public let vocabulary: Vocabulary
 
     public init(
-        models: [ModelName],
+        models: [Model],
         arrivals: [LatencyHarness.Arrival],
         servings: [LatencyHarness.Serving],
         runs: Int,

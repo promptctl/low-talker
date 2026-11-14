@@ -6,10 +6,10 @@ import Foundation
 /// than reaching for the file, and a test hands it a file it saves itself.
 public protocol ConfigSource: Sendable {
     /// The config as it stands now, every mode's vocabulary checked through `prompting`.
-    func read(prompting: PromptEncoder) -> Result<Config, ConfigError>
+    func read(prompting: Prompting) -> Result<Config, ConfigError>
     /// Every change to what the app runs on, from `running` on, as the config is saved, until the
     /// consuming task stops. A save that reads back as the last one did says nothing.
-    func reloads(after running: RunningConfig, prompting: PromptEncoder) -> AsyncStream<RunningConfig>
+    func reloads(after running: RunningConfig, prompting: Prompting) -> AsyncStream<RunningConfig>
 }
 
 /// The config file at `url`, the app's own unless a test says otherwise.
@@ -20,11 +20,11 @@ public struct ConfigFileSource: ConfigSource {
         self.url = url
     }
 
-    public func read(prompting: PromptEncoder) -> Result<Config, ConfigError> {
+    public func read(prompting: Prompting) -> Result<Config, ConfigError> {
         Result { () throws(ConfigError) in try Config.load(url, prompting: prompting) }
     }
 
-    public func reloads(after running: RunningConfig, prompting: PromptEncoder) -> AsyncStream<RunningConfig> {
+    public func reloads(after running: RunningConfig, prompting: Prompting) -> AsyncStream<RunningConfig> {
         RunningConfig.reloads(of: url, after: running, prompting: prompting)
     }
 }
