@@ -69,4 +69,30 @@ public struct HiddenIconNotice {
     public func silence() {
         defaults.set(true, forKey: Self.silencedKey)
     }
+
+    /// Whether the person is told, at the sighting's `verdict`. [LAW:effects-at-boundaries] The
+    /// whole decision; the app runs the alert only on `.told`.
+    public func telling(_ verdict: StatusItemSighting.Verdict, quitting: Bool) -> Telling {
+        guard verdict == .hidden else { return .notHidden }
+        // Asking whether to keep running means nothing to an app already on its way out.
+        if quitting { return .notToldQuitting }
+        return silenced ? .notToldSilenced : .told
+    }
+
+    /// What came of a sighting's verdict, in the words the log says it after the verdict.
+    public enum Telling: Equatable, Sendable, CustomStringConvertible {
+        case notHidden
+        case notToldQuitting
+        case notToldSilenced
+        case told
+
+        public var description: String {
+            switch self {
+            case .notHidden: "nothing to tell"
+            case .notToldQuitting: "not said, as \(AppIdentity.displayName) is quitting"
+            case .notToldSilenced: "not said, as the person asked"
+            case .told: "told the person"
+            }
+        }
+    }
 }

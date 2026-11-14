@@ -133,6 +133,18 @@ import Testing
         }
     }
 
+    /// Only a hidden icon is told, and never to an app quitting or a person who silenced it.
+    @Test func aHiddenIconIsToldUnlessQuittingOrSilenced() {
+        withScratch { defaults in
+            let notice = HiddenIconNotice(defaults: defaults, allowList: true)
+            #expect(notice.telling(.hidden, quitting: false) == .told)
+            #expect(notice.telling(.shown(after: .seconds(1)), quitting: false) == .notHidden)
+            #expect(notice.telling(.hidden, quitting: true) == .notToldQuitting)
+            notice.silence()
+            #expect(notice.telling(.hidden, quitting: false) == .notToldSilenced)
+        }
+    }
+
     @Test func theNoticeIsSaidUntilThePersonSilencesIt() {
         withScratch { defaults in
             #expect(!HiddenIconNotice(defaults: defaults, allowList: true).silenced)

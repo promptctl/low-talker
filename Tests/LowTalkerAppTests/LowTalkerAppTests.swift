@@ -493,5 +493,60 @@ final class Recorded<Value: Sendable>: Sendable {
         #expect(rig.app.hold.held == nil)
         #expect(rig.app.hold.dismissed != nil)
     }
+
+    /// The guided setup's microphone step asks macOS only while macOS has never been asked, and
+    /// otherwise answers with where the step stands.
+    @Test(arguments: [
+        (AVAuthorizationStatus.notDetermined, SetUpRequest.answered),
+        (.denied, .sentToSystemSettings("macOS asks only once. Turn on \(AppIdentity.displayName) in the \(Requirement.Row.microphone.rawValue) list in System Settings.")),
+        (.restricted, .failed("A policy on this Mac blocks the microphone.")),
+        (.authorized, .made),
+    ])
+    func theMicrophoneStepAnswersForEachAuthorization(_ status: AVAuthorizationStatus, _ answer: SetUpRequest) async {
+        let rig = AppRig(microphone: status)
+        #expect(await rig.app.ask(.microphone) == answer)
+    }
+
+    /// A press made while the model loads shows the box while it is held and puts it away at its
+    /// release, since a press waiting on the load has nothing to show; the circle puts it away
+    /// and a second press shows it again.
+    @Test func theWordBoxThroughAPressWaitingOnTheLoad() async {
+        let rig = AppRig(holdingLoads: true)
+        await rig.launched()
+        #expect(!rig.panel.isShown)
+
+        rig.chord(.down)
+        await rig.until { rig.panel.isShown }
+        await rig.speak()
+        rig.chord(.up)
+        await rig.until { !rig.panel.isShown }
+
+        rig.app.dismissBox()
+        #expect(!rig.panel.isShown)
+
+        rig.chord(.down)
+        await rig.until { rig.panel.isShown }
+        await rig.speak()
+        rig.chord(.up)
+        rig.model.loading.open()
+        await rig.until { rig.reports.count == 2 }
+    }
+
+    /// The menu the app opens is drawn from its own state and the edge's two readings, and the
+    /// opening is told with what it read.
+    @Test func theMenuIsReadFromTheAppAndTold() async {
+        let rig = AppRig()
+        await rig.launched()
+        let menu = rig.app.menu(openAtLogin: .requiresApproval, globeKey: .startDictation)
+        #expect(menu.untypedBecause.isEmpty)
+        #expect(menu.rows.contains(.readout("Hotkey: \(rig.listening())")))
+        #expect(menu.rows.contains(.item("Open at Login", .toggleOpenAtLogin, check: .mixed)))
+        #expect(rig.lines.suffix(4) == [
+            "microphone at rest: \(rig.app.microphone)",
+            "hotkey: words held, not typed, because []",
+            "hotkey: Globe key startDictation; no clash with the chords",
+            "open at login: \(LoginItemStatus.requiresApproval)",
+        ])
+    }
 }
 

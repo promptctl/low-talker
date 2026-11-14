@@ -176,6 +176,27 @@ public final class LowTalkerApp {
         lifecycle.settle(requirementsMet: readiness.ready)
     }
 
+    /// The menu, from a reading of everything it says taken now: an `LSUIElement` app has no
+    /// window to activate, so opening the menu is the moment to re-read. Its reading of the
+    /// requirements is taken up as any other is. `openAtLogin` and `globeKey` are the readings
+    /// only the app's edge can take.
+    public func menu(openAtLogin: LoginItemStatus, globeKey: GlobeKeyAction) -> Menu {
+        let readiness = readiness()
+        settle(readiness)
+        let menu = Menu(Menu.Readings(
+            engine: engineReadiness, engineReadout: engineReadout,
+            serving: ports.server.map { (state: $0.state, chosen: $0.chosen) },
+            microphone: microphone, hotkey: hotkeyStatus, inputMethodSelected: ports.inputMethod.isSelected,
+            globeKey: globeKey, running: running, lastFailure: lastFailure, lastReplacement: lastReplacement,
+            heldTroubles: [hold.unrestored?.description, hold.unkept?.description].compactMap { $0 },
+            dismissedWords: hold.dismissed?.allWords.words.count,
+            keptSpeech: (lines: keptSpeech.lines, seconds: keptSpeech.kept.isEmpty ? nil : keptSpeech.keptSeconds),
+            benchRunning: benchRuns.isRunning, readiness: readiness, openAtLogin: openAtLogin,
+            returnHolds: ports.returnHolds()))
+        ports.told(.menu(menu))
+        return menu
+    }
+
     /// The app's microphone authorization as it stands now.
     private func readMicrophone() -> MicrophoneAuthorization {
         let microphone = MicrophonePermission(authority: ports.microphone).current
@@ -656,15 +677,7 @@ public final class LowTalkerApp {
     /// whatever build. `InputMethodWatch` decides when the line is written and when the log hears it.
     private func showInputMethod(_ showing: InputMethodWatch.Showing) {
         if showing.isNew { ports.told(.inputMethod(showing.standing)) }
-        let status: HotkeyStatus = switch showing.standing {
-        case .running: .listening(listeningStatus)
-        case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
-        case .overMemoryCeiling(_, let overrun):
-            .off("the input method is ending itself, \(overrun); \(AppIdentity.displayName) will start it again")
-        case .notOpened(let reason):
-            .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
-        }
-        showHotkeyStatus(status)
+        showHotkeyStatus(.showing(showing.standing, listening: listeningStatus))
     }
 
     /// The status line of a hotkey that is listening, and the input method that last ended itself

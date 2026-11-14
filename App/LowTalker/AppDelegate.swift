@@ -281,20 +281,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let notice = HiddenIconNotice.forThisMac()
         // Where the window stands, which is where a hidden one is parked.
         let seen = "\(verdict), its window at \(NSStringFromRect(statusItem.button!.window!.frame))"
-        guard verdict == .hidden else {
-            menuBarLog.notice("menu bar: \(seen, privacy: .public)")
-            return
-        }
-        // Asking whether to keep running means nothing to an app already on its way out.
-        guard !app.quitting else {
-            menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as \(AppIdentity.displayName, privacy: .public) is quitting")
-            return
-        }
-        guard !notice.silenced else {
-            menuBarLog.notice("menu bar: \(seen, privacy: .public); not said, as the person asked")
-            return
-        }
-        menuBarLog.notice("menu bar: \(seen, privacy: .public); told the person")
+        let telling = notice.telling(verdict, quitting: app.quitting)
+        menuBarLog.notice("menu bar: \(seen, privacy: .public); \(telling, privacy: .public)")
+        guard telling == .told else { return }
         let alert = NSAlert()
         alert.messageText = notice.title
         alert.informativeText = notice.body
@@ -339,132 +328,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - the menu
 
-    /// Why the words of a press would be held rather than typed right now, read at the moment
-    /// the menu opens: the input method types only while its source is the one in use. Empty while
-    /// it is. The chord is heard either way.
+    /// The menu's rows, as the app decides them from what this Mac reads now, drawn. The two
+    /// readings only AppKit's side can take are taken here: the login item, and the Globe key's
+    /// setting, so one changed in System Settings shows the next time the menu opens.
     ///
-    /// [LAW:no-silent-failure] A hotkey line that read as working while nothing could type
-    /// would send the person after a broken app rather than the Input menu.
-    private func untypedBecause() -> [String] {
-        let found = installedInputMethod.isSelected ? [] : ["\(AppIdentity.displayName) is not the selected input source"]
-        log.notice("hotkey: words held, not typed, because [\(found.joined(separator: "; "), privacy: .public)]")
-        return found
-    }
-
-    /// What macOS also does with the Fn key when a chord the config listens for holds it, read
-    /// at the moment the menu opens, so a setting changed in System Settings shows the next
-    /// time it does. Nil when no chord holds Fn or the Globe key does nothing.
-    private func globeKeyClash() -> String? {
-        let stored = CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString) as? Int
-        let action = GlobeKeyAction(appleFnUsageType: stored)
-        let clash: String? = switch app.running?.config {
-        case .success(let config)?: action.clash(with: config.modes.chords)
-        // The status line already says why no chord is heard.
-        case .failure?, nil: nil
-        }
-        log.notice("hotkey: Globe key \(String(describing: action), privacy: .public); \(clash ?? "no clash with the chords", privacy: .public)")
-        return clash
-    }
-
-    /// Everything the menu says, made here, every time, from what this Mac reads now.
-    ///
-    /// An `LSUIElement` app has no window to activate, so opening the menu is the moment
-    /// to re-read. `menuNeedsUpdate` rather than `menuWillOpen`: AppKit calls this one
-    /// before the menu is laid out, so the items are in place when it is measured.
+    /// `menuNeedsUpdate` rather than `menuWillOpen`: AppKit calls this one before the menu is
+    /// laid out, so the items are in place when it is measured.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        let readiness = app.readiness()
-        app.settle(readiness)
-
-        // What the user's microphone is doing, on the surface the epic exists for: the
-        // menu-bar indicator says the device is open and only this says why, so a lit
-        // microphone on an idle Mac is either explained here or is a bug - and a dark one
-        // the config asked to hold open says so here too. [LAW:no-silent-failure]
-        let microphone = app.microphone
-        log.notice("microphone at rest: \(microphone, privacy: .public)")
-        let untyped = untypedBecause()
-        let globeKey = globeKeyClash()
-        let openAtLogin = loginItem.current
-        loginLog.notice("open at login: \(openAtLogin, privacy: .public)")
-        let engineReadiness = app.engineReadiness
-        let hotkeyStatus = app.hotkeyStatus
-        let hold = app.hold
-        let keptSpeech = app.keptSpeech
-
+        let globeKey = GlobeKeyAction(appleFnUsageType: CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString) as? Int)
         menu.removeAllItems()
-        let model = "Model: \(app.engineReadout)"
-        let modelRow = if case .failed = engineReadiness { errorRow(model, .model) } else { readout(model) }
-        menu.addItem(modelRow)
-        // A press made during the wait is not lost, and nothing else on screen says so.
-        if case .preparing = engineReadiness { menu.addItem(readout("A press now is heard once the model is ready")) }
-        // Beside the model it answers with. [LAW:dataflow-not-control-flow] The offline build
-        // has no switch, so no line.
-        app.serving.map { serving in
-            let server = "Server: \(serving.state)"
-            let serverRow = if case .stopped = serving.state { errorRow(server, .server) } else { readout(server) }
-            menu.addItem(serverRow)
+        for row in app.menu(openAtLogin: loginItem.current, globeKey: globeKey).rows {
+            menu.addItem(item(row))
         }
-        let mic = "Microphone: \(microphone)"
-        let micRow = if case .stopped = microphone { errorRow(mic, .microphone) } else { readout(mic) }
-        menu.addItem(micRow)
-        let hotkey = "Hotkey: \(hotkeyStatus)"
-        let hotkeyRow = if case .off = hotkeyStatus { errorRow(hotkey, .hotkey) } else { readout(hotkey) }
-        menu.addItem(hotkeyRow)
-        for reason in untyped { menu.addItem(readout("    Not typed now: \(reason)")) }
-        globeKey.map { menu.addItem(readout("    \($0)")) }
-        app.lastFailure.map { menu.addItem(errorRow($0, .lastDictation)) }
-        app.lastReplacement.map { menu.addItem(readout($0)) }
-        // What keeping the held words for the next launch failed at: a fact about the store,
-        // not the words, and one the panel has nothing to show for when nothing is held.
-        // [LAW:no-silent-failure]
-        for trouble in [hold.unrestored?.description, hold.unkept?.description].compactMap({ $0 }) {
-            menu.addItem(errorRow("Held words: \(trouble)", .heldWords))
+    }
+
+    private func item(_ row: Menu.Row) -> NSMenuItem {
+        switch row {
+        // An item with no action is one AppKit disables on its own, which is the whole of what
+        // a readout is.
+        case .readout(let title): return NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        case .failed(let text, let line): return errorRow(text, line)
+        case .separator: return .separator()
+        case .item(let title, let action, let check):
+            let item = NSMenuItem(title: title, action: selector(action), keyEquivalent: action == .quit ? "q" : "")
+            item.state = switch check {
+            case .on?: .on
+            case .mixed?: .mixed
+            case .off?, nil: .off
+            }
+            return item
         }
-        // The one step back from a click on the panel's circle.
-        if let dismissed = hold.dismissed {
-            menu.addItem(withTitle: "Bring Back Dismissed Words (\(dismissed.allWords.words.count))", action: #selector(bringBackDismissed), keyEquivalent: "")
+    }
+
+    private func selector(_ action: Menu.Action) -> Selector {
+        switch action {
+        case .bringBackDismissed: #selector(bringBackDismissed)
+        case .discardKeptSpeech: #selector(discardKeptSpeech)
+        case .openSetUp: #selector(openSetUp)
+        case .openBench: #selector(openBench)
+        case .toggleOpenAtLogin: #selector(toggleOpenAtLogin)
+        case .toggleReturnHold: #selector(toggleReturnHold)
+        case .toggleServing: #selector(toggleServing)
+        case .openNotices: #selector(openNotices)
+        case .quit: #selector(NSApplication.terminate(_:))
         }
-        // Speech a press said before the model had loaded, which is audio until an engine reads it:
-        // how much, why it is not yet words, and the person's one discard of it. [LAW:nothing-unseen]
-        for line in keptSpeech.lines { menu.addItem(errorRow(line, .keptSpeech)) }
-        if !keptSpeech.kept.isEmpty {
-            menu.addItem(withTitle: "Discard Kept Speech (\(keptSpeech.keptSeconds) s)", action: #selector(discardKeptSpeech), keyEquivalent: "")
-        }
-        if let running = app.running, running.refusal != nil { menu.addItem(errorRow("Config: \(running)", .config)) }
-        if app.benchRuns.isRunning { menu.addItem(readout("A benchmark is running: the next press heard stops it")) }
-        // Every requirement, met or not, and its step under it as the lines it was
-        // written in - one item per line, so nothing here wraps text the requirement
-        // already broke. A list that showed only what was missing would leave a reader
-        // unable to tell "checked and fine" from "never checked".
-        // [LAW:dataflow-not-control-flow]
-        for requirement in readiness.requirements {
-            menu.addItem(readout("\(requirement.name): \(requirement.reads)"))
-            for line in requirement.stepLines { menu.addItem(readout("    \(line)")) }
-        }
-        // The way into the guided setup, always there, and saying how much is left in it.
-        let left = readiness.unmet.count
-        let stepsLeft = left == 0 ? "" : " (\(left) left)"
-        menu.addItem(withTitle: "\(GuidedSetup.title)\(stepsLeft)", action: #selector(openSetUp), keyEquivalent: "")
-        menu.addItem(withTitle: "Benchmark…", action: #selector(openBench), keyEquivalent: "")
-        let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleOpenAtLogin), keyEquivalent: "")
-        // Mixed while it waits on System Settings: chosen here, not yet allowed there.
-        login.state = switch openAtLogin {
-        case .on: .on
-        case .requiresApproval: .mixed
-        case .off, .unrecognized: .off
-        }
-        // Anything but plainly on or off is said under the item, since a checkmark cannot say it.
-        if openAtLogin != .on, openAtLogin != .off { menu.addItem(readout("    \(openAtLogin)")) }
-        // Off by default. On, a Return typed while dictating is sent after the dictated words, so
-        // the message goes out with them in it; the input method holds a Return only when this is on.
-        let holdItem = menu.addItem(withTitle: "Hold Return for Dictated Words", action: #selector(toggleReturnHold), keyEquivalent: "")
-        holdItem.state = ReturnHoldSetting.isOn ? .on : .off
-        if let serving = app.serving {
-            let item = menu.addItem(withTitle: "Serve Transcription", action: #selector(toggleServing), keyEquivalent: "")
-            item.state = serving.chosen ? .on : .off
-        }
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Acknowledgements", action: #selector(openNotices), keyEquivalent: "")
-        menu.addItem(withTitle: "Quit \(AppIdentity.displayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 
     @objc private func discardKeptSpeech() {
@@ -475,19 +382,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         app.bringBackDismissed()
     }
 
-    /// A line the menu says and nothing a reader can press. An item with no action is
-    /// one AppKit disables on its own, which is the whole of what "readout" means here.
-    private func readout(_ title: String) -> NSMenuItem {
-        NSMenuItem(title: title, action: nil, keyEquivalent: "")
-    }
-
-    /// Which of the menu's lines failed, as the log names it when that line is copied.
-    private enum FailedLine: String {
-        case model, server, microphone, hotkey, lastDictation, heldWords, keptSpeech, config
-    }
-
     /// A line that says what failed, which a click copies whole to the clipboard.
-    private func errorRow(_ text: String, _ line: FailedLine) -> NSMenuItem {
+    private func errorRow(_ text: String, _ line: Menu.FailedLine) -> NSMenuItem {
         ErrorRow(text, copyingTo: .general) { [menuBarLog] copied in
             // [LAW:nothing-unseen] The count, not the text: a failure line can carry dictated words.
             if copied.taken {

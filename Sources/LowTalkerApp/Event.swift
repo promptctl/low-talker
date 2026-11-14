@@ -46,6 +46,8 @@ extension LowTalkerApp {
         case heldUnrestored(HeldUnreadable)
         /// What a click on the word box came to.
         case box(BoxClick)
+        /// The menu, as it opened.
+        case menu(Menu)
 
         /// The log line or lines this record is, in its category, with any words the person
         /// dictated apart so the log keeps them private.
@@ -75,6 +77,7 @@ extension LowTalkerApp {
             case .heldUnkept(let unkept): [Line(.dictation, .fault, "held words: \(unkept)")]
             case .heldUnrestored(let unreadable): [Line(.dictation, .fault, "held words: \(unreadable)")]
             case .box(let click): [Line(.dictation, click.refused ? .error : .notice, "\(click)")]
+            case .menu(let menu): menu.lines
             }
         }
 
@@ -112,7 +115,7 @@ extension LowTalkerApp {
     /// One line of the unified log.
     public struct Line: Equatable, Sendable {
         public enum Category: String, Sendable {
-            case engine, dictation, microphone, config
+            case engine, dictation, microphone, config, login
         }
 
         public enum Level: Sendable {
