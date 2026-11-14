@@ -69,11 +69,12 @@ public struct ScratchStore: ~Copyable {
     }
 
     /// The four stub Core ML models scripts/make-parakeet-stubs builds, with the published
-    /// interface and arithmetic in place of weights.
+    /// interface and arithmetic in place of weights. Throws naming the resource looked for
+    /// when the test bundle lacks it.
     public static var parakeetStubs: URL {
         get throws {
             guard let url = Bundle.module.url(forResource: "parakeet-stub", withExtension: nil, subdirectory: "Fixtures") else {
-                throw CocoaError(.fileNoSuchFile)
+                throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: "Fixtures/parakeet-stub", NSLocalizedDescriptionKey: "TestProbes' bundle has no Fixtures/parakeet-stub"])
             }
             return url
         }

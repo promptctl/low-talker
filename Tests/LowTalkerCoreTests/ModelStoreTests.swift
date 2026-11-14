@@ -305,6 +305,9 @@ import Testing
             return
         }
         let folder = try scratch.installParakeet(files: [ParakeetModel.vocabulary: "{}"])
+        // The layout every install already on disk was written in, spelled out here alone.
+        #expect(folder.path(percentEncoded: false).hasSuffix("/models/FluidInference/parakeet-tdt-0.6b-v3-coreml"))
+        #expect(FileManager.default.fileExists(atPath: scratch.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json").path(percentEncoded: false)))
         let vocabulary = folder.appending(path: ParakeetModel.vocabulary)
         #expect(try store.installedModel(parakeet).folder.standardizedFileURL == folder.standardizedFileURL)
         try FileManager.default.removeItem(at: vocabulary)

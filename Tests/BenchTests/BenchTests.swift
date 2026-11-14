@@ -315,6 +315,7 @@ private final class Picked: Sendable {
         let held = rows.withLock { $0 }
         #expect(held.map { $0.cells.first { $0.name == "model" }?.value } == ["parakeet-tdt-0.6b-v3"])
         let row = try #require(held.first)
+        #expect(row.cells.first { $0.name == "wer" }?.value == "0.000")
         #expect(row.narration.hasPrefix("second batch idle: heard \" \(heard)\","))
     }
 }
