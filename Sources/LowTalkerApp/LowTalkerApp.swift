@@ -36,8 +36,6 @@ public final class LowTalkerApp {
     /// What the engine is doing. The status icon's face too, since a first load runs for minutes
     /// and an icon that looks ready through them reads as an app that is not answering.
     public private(set) var engineReadiness: EngineReadiness
-    /// The engine's readiness in words, read now on the app's clock.
-    public var engineReadout: String { engineReadiness.readout(at: ports.clock.now) }
     /// What the menu says after "Hotkey: ".
     public private(set) var hotkeyStatus: HotkeyStatus = .starting(step: nil)
     /// What the loop is doing with presses, which the icon shows over the engine's readiness.
@@ -60,8 +58,6 @@ public final class LowTalkerApp {
 
     /// What the microphone is doing.
     public var microphone: AudioCapture.Doing { capture.doing }
-    /// The transcription server's switch, in a build that can serve.
-    public var serving: ServerSwitch? { ports.server }
     /// Whether a quit has been asked for.
     public var quitting: Bool { lifecycle.quitting }
 
@@ -174,6 +170,27 @@ public final class LowTalkerApp {
     /// Takes up a reading of the requirements: the loop comes up or is rebuilt when it should.
     public func settle(_ readiness: Readiness) {
         lifecycle.settle(requirementsMet: readiness.ready)
+    }
+
+    /// The menu, from a reading of everything it says taken now: an `LSUIElement` app has no
+    /// window to activate, so opening the menu is the moment to re-read. Its reading of the
+    /// requirements is taken up as any other is. `openAtLogin` and `globeKey` are the readings
+    /// only the app's edge can take.
+    public func menu(openAtLogin: LoginItemStatus, globeKey: GlobeKeyAction) -> Menu {
+        let readiness = readiness()
+        settle(readiness)
+        let menu = Menu(Menu.Readings(
+            engine: engineReadiness, now: ports.clock.now,
+            serving: ports.server.map { (state: $0.state, chosen: $0.chosen) },
+            microphone: microphone, hotkey: hotkeyStatus, inputMethodSelected: ports.inputMethod.isSelected,
+            globeKey: globeKey, running: running, lastFailure: lastFailure, lastReplacement: lastReplacement,
+            heldTroubles: [hold.unrestored?.description, hold.unkept?.description].compactMap { $0 },
+            dismissedWords: hold.dismissed?.allWords.words.count,
+            keptSpeech: (lines: keptSpeech.lines, seconds: keptSpeech.keptSeconds),
+            benchRunning: benchRuns.isRunning, readiness: readiness, openAtLogin: openAtLogin,
+            returnHolds: ports.returnHolds()))
+        ports.told(.menu(menu))
+        return menu
     }
 
     /// The app's microphone authorization as it stands now.
@@ -656,15 +673,7 @@ public final class LowTalkerApp {
     /// whatever build. `InputMethodWatch` decides when the line is written and when the log hears it.
     private func showInputMethod(_ showing: InputMethodWatch.Showing) {
         if showing.isNew { ports.told(.inputMethod(showing.standing)) }
-        let status: HotkeyStatus = switch showing.standing {
-        case .running: .listening(listeningStatus)
-        case .ended: .off("the input method ended; \(AppIdentity.displayName) is starting it again")
-        case .overMemoryCeiling(_, let overrun):
-            .off("the input method is ending itself, \(overrun); \(AppIdentity.displayName) will start it again")
-        case .notOpened(let reason):
-            .off("the input method could not be started: \(reason); trying again every \(InputMethodSupervisor.throttleInterval.formatted(.units(width: .wide)))")
-        }
-        showHotkeyStatus(status)
+        showHotkeyStatus(.showing(showing.standing, listening: listeningStatus))
     }
 
     /// The status line of a hotkey that is listening, and the input method that last ended itself

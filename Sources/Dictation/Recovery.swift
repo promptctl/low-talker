@@ -98,8 +98,8 @@ public final class Recovery {
         unread = [:]
     }
 
-    /// Whole seconds of speech kept, as the menu counts them.
-    public var keptSeconds: Int { Self.seconds(kept) }
+    /// Whole seconds of speech kept, as the menu counts them, while any is kept.
+    public var keptSeconds: Int? { kept.isEmpty ? nil : Self.seconds(kept) }
 
     /// What the menu says: how much speech is kept and why it is not yet words, then every
     /// trouble with the store. Never the words, which are not yet words.
