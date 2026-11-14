@@ -66,6 +66,14 @@ class CheckLicensesTests(unittest.TestCase):
         self.assertRefused(self.check(model),
                            "check-licenses: openai/whisper is under CC-BY-NC-4.0, which is not an accepted license")
 
+    def test_attribution_only_passes_and_its_share_alike_and_non_commercial_kin_do_not(self):
+        model = {"type": "machine-learning-model", "group": "FluidInference", "name": "parakeet", "licenses": [spdx("CC-BY-4.0")]}
+        self.assertEqual(self.check(model).returncode, 0)
+        for refused in ("CC-BY-SA-4.0", "CC-BY-NC-4.0"):
+            model["licenses"] = [spdx(refused)]
+            self.assertRefused(self.check(model),
+                               f"check-licenses: FluidInference/parakeet is under {refused}, which is not an accepted license")
+
     def test_every_refusal_is_named(self):
         result = self.check(library("one", "1", spdx("GPL-2.0-only")), library("two", "2"))
         self.assertRefused(result, "check-licenses: one 1 is under GPL-2.0-only, which is not an accepted license")

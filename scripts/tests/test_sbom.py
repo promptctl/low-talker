@@ -52,8 +52,46 @@ the Free Software Foundation, either version 3 of the License, or
 """
 
 
+def shortest(expression):
+    """The shortest text a var's expression accepts, as far as the List's expressions go:
+    literals, classes, repeats and groups, the first branch of an alternation."""
+    def text(parsed):
+        out = []
+        for op, value in parsed:
+            name = str(op)
+            if name == "LITERAL":
+                out.append(chr(value))
+            elif name == "ANY":
+                out.append("a")
+            elif name == "IN":
+                for kind, member in value:
+                    if str(kind) == "LITERAL":
+                        out.append(chr(member)); break
+                    if str(kind) == "RANGE":
+                        out.append(chr(member[0])); break
+                    if str(kind) == "CATEGORY":
+                        out.append({"CATEGORY_DIGIT": "0", "CATEGORY_SPACE": " "}.get(str(member), "a")); break
+                else:
+                    raise ValueError(f"no member of {value} to render")
+            elif name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+                low, _, inner = value
+                out.append(text(inner) * low)
+            elif name == "SUBPATTERN":
+                out.append(text(value[-1]))
+            elif name == "BRANCH":
+                out.append(text(value[1][0]))
+            elif name in ("AT", "ASSERT", "ASSERT_NOT"):
+                continue
+            else:
+                raise ValueError(f"cannot render {name} of {expression!r}")
+        return "".join(out)
+    return text(re._parser.parse(expression))
+
+
 def rendered(template, optional):
-    """A template's own text: each var as its `original`, each optional part kept or dropped."""
+    """A template's own text: each var as its `original`, each optional part kept or dropped. A
+    var whose `original` its own expression refuses, as CC-BY-4.0's section hyphens with an
+    empty original and `-{1,2}` are, renders as the shortest text its expression accepts."""
     out, dropped, position = [], 0, 0
     for mark in sbom.TEMPLATE_MARKUP.finditer(template):
         if not dropped:
@@ -65,7 +103,9 @@ def rendered(template, optional):
             dropped -= 1 if dropped else 0
         elif not dropped:
             original = re.search(r'original="((?:[^"\\]|\\.)*)"', tag)
-            out.append(original.group(1) if original else "")
+            text = original.group(1) if original else ""
+            expression = sbom.VAR_MATCH.search(tag).group(1)
+            out.append(text if re.fullmatch(expression, text, re.DOTALL) else shortest(expression))
         position = mark.end()
     return "".join(out + [template[position:]])
 
@@ -95,6 +135,13 @@ class LicenseTextTests(unittest.TestCase):
             for optional in (True, False):
                 with self.subTest(template=path.name, optional=optional):
                     self.assertIsNotNone(sbom.template_pattern(template).search(sbom.comparable(rendered(template, optional))))
+
+    def test_every_dash_reads_as_a_hyphen(self):
+        self.assertEqual(sbom.comparable("Section 1 \u2013 Definitions, \u2014 and \u2212 more"), "Section 1 - Definitions, - and - more")
+
+    def test_the_cc_by_text_the_list_publishes_is_held(self):
+        text = (sbom.repository / "sbom" / "licenses" / "parakeet-tdt-0.6b-v3-coreml.txt").read_text()
+        self.assertHeld("CC-BY-4.0", text)
 
     def test_every_accepted_license_has_a_template(self):
         self.assertEqual({spdx.casefold() for spdx in check_licenses.ACCEPTED}, set(sbom.license_templates))

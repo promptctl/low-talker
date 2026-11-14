@@ -50,6 +50,29 @@ import Testing
         #expect(try Manifest(contentsOf: destination.tokenizerManifestURL) == Manifest(contentsOf: source.tokenizerManifestURL))
     }
 
+    /// A Parakeet model is copied as its weights alone, under the one manifest that proves it
+    /// whole, and a revision of WhisperKit's shape is refused for it before anything is fetched.
+    @Test func aParakeetModelIsInstalledAsItsWeightsAlone() async throws {
+        let source = try ScratchStore(files: [:])
+        let folder = source.root.appending(components: "models", "FluidInference", "parakeet-tdt-0.6b-v3-coreml")
+        for path in [ParakeetModel.vocabulary, "\(ParakeetModel.joint)/model.mil"] {
+            try FileManager.default.createDirectory(at: folder.appending(path: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "parakeet".write(to: folder.appending(path: path), atomically: true, encoding: .utf8)
+        }
+        try Manifest(recording: folder, relativeTo: source.root).write(to: source.root.appending(components: "installed", "parakeet-tdt-0.6b-v3.json"))
+        let destination = try ScratchStore(files: [:])
+        let store = ModelStore(directory: destination.root)
+        let installed = try await store.install(.parakeet(.tdtV3), from: .store(ModelStore(directory: source.root))) { _ in }
+        #expect(installed.folder.path.hasSuffix("models/FluidInference/parakeet-tdt-0.6b-v3-coreml"))
+        #expect(!FileManager.default.fileExists(atPath: destination.root.appending(components: "installed", "tokenizer", "parakeet-tdt-0.6b-v3.json").path))
+
+        let empty = try ScratchStore(files: [:])
+        let whisperShaped = try #require(ModelRevisions("parakeet-tdt-0.6b-v3@\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))"))
+        await #expect(throws: ModelInstallError.revisionNotFor(model: .parakeet(.tdtV3), revision: whisperShaped.revisions[.parakeet(.tdtV3)]!)) {
+            try await ModelStore(directory: empty.root).install(.parakeet(.tdtV3), from: .huggingFace(whisperShaped)) { _ in }
+        }
+    }
+
     /// A folder standing where a listed file belongs is removed before the copy, so
     /// the copy can be renamed into its place and the store is repaired.
     @Test func installFromAStoreReplacesAFolderInAFilesPlace() async throws {

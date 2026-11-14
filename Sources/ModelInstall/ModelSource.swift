@@ -10,10 +10,11 @@ import WhisperKit
 /// is a store in a zip, so it is fetched, unpacked, and then read as `.store`; nothing
 /// but Hugging Face needs a layout of its own.
 public enum ModelSource: Sendable, CustomStringConvertible {
-    /// argmaxinc/whisperkit-coreml and the openai tokenizer repos on huggingface.co,
-    /// through WhisperKit's hub client, at a revision; with none, at the one `main`
-    /// names when the install starts.
-    case huggingFace(ModelRevision?)
+    /// Each model's repos on huggingface.co (argmaxinc/whisperkit-coreml and an openai
+    /// tokenizer repo for a Whisper model, FluidInference's for Parakeet), through WhisperKit's
+    /// hub client, at the revision named for it; with none, at the one `main` names when the
+    /// install starts.
+    case huggingFace(ModelRevisions?)
     /// Another store holding the model installed: its manifests say which files to
     /// take, and that they are whole before anything is taken.
     case store(ModelStore)
@@ -42,8 +43,8 @@ public enum ModelSource: Sendable, CustomStringConvertible {
 /// [LAW:no-ambient-temporal-coupling] The unpacked copy lives exactly as long as the
 /// `with` body, so no caller can read a part out of an archive that was cleaned up.
 enum OpenSource {
-    /// Both parts are fetched at this one revision, so the tokenizer is the one the
-    /// weights were named with even if `main` moves between them.
+    /// Every part is fetched at this one revision, so a tokenizer is the one the weights
+    /// were named with even if `main` moves between them.
     case huggingFace(ModelRevision)
     case store(ModelStore)
 
@@ -55,7 +56,8 @@ enum OpenSource {
         _ body: (OpenSource) async throws -> T
     ) async throws -> T {
         switch source {
-        case .huggingFace(let revision?):
+        case .huggingFace(let revisions?):
+            guard let revision = revisions.revisions[model] else { throw ModelInstallError.noRevision(model: model, revisions: revisions) }
             return try await body(.huggingFace(revision))
         case .huggingFace(nil):
             return try await body(.huggingFace(ModelRevision.upstream(of: model)))

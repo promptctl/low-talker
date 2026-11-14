@@ -1,7 +1,7 @@
-# Keeps the model a release carries in the Actions cache, saved from master: a run for a tag
+# Keeps the models a release carries in the Actions cache, saved from master: a run for a tag
 # can restore a cache saved on the default branch, but never one saved for another tag. So
-# release.yml only restores, and this saves, under the name of the model master's model-tool
-# names as its default and the Hugging Face commits `main` names for it, once per pair.
+# release.yml only restores, and this saves, under the names of the models master's model-tool
+# names as carried and the Hugging Face commits `main` names for each, once per set.
 name: Model cache
 
 on:
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   cache:
-    name: Cache the default model
+    name: Cache the carried models
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -30,22 +30,21 @@ jobs:
         with:
           persist-credentials: false
 
-      # [LAW:one-source-of-truth] The same questions release.yml asks: the default is the
-      # source's, and the commits `main` names for it are the hub's, asked through model-tool.
-      - name: Name the default model
+      # [LAW:one-source-of-truth] The same questions release.yml asks: the carried models are the
+      # source's, and the commits `main` names for them are the hub's, asked through model-tool.
+      - name: Name the carried models
         id: model
         run: |
           set -euo pipefail
           tool=$(make model-tool | tail -n 1)
-          model=$("$tool" default)
-          revision=$("$tool" revision --model "$model")
+          revision=$("$tool" revision)
           {
             echo "tool=$tool"
             echo "revision=$revision"
-            echo "key=model-store-$model-$revision"
+            echo "key=model-store-$revision"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Look the model up
+      - name: Look the models up
         id: lookup
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -55,14 +54,14 @@ jobs:
 
       # A cache entry is never overwritten, so a saved key is left as it is. The fetch is
       # at the commits the key names, so what is saved under it is what it says.
-      - name: Fetch the model
+      - name: Fetch the models
         if: steps.lookup.outputs.cache-hit != 'true'
         env:
           TOOL: ${{ steps.model.outputs.tool }}
           REVISION: ${{ steps.model.outputs.revision }}
         run: '"$TOOL" download --models-dir "$RUNNER_TEMP/model-store" --from "$REVISION"'
 
-      - name: Save the model
+      - name: Save the models
         if: steps.lookup.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -71,7 +70,7 @@ jobs:
 
       # actions/cache/save only warns when it cannot reserve or upload, so the entry is looked
       # for rather than assumed.
-      - name: Check master's cache holds the model
+      - name: Check master's cache holds the models
         env:
           GH_TOKEN: ${{ github.token }}
           KEY: ${{ steps.model.outputs.key }}

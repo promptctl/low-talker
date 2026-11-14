@@ -15,10 +15,12 @@ it and nothing else. [LAW:single-enforcer]
 import json
 import sys
 
-# The permissive set the tree sits in, and the public-domain equivalents. GPL, LGPL, AGPL,
-# MPL, SSPL and source-available licenses stay out: they ask for source, or restrict use,
-# on distribution, and every release distributes. SPDX ids match without regard to case.
-ACCEPTED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "CC0-1.0", "0BSD"}
+# The permissive set the tree sits in, and the public-domain equivalents, and CC-BY-4.0, which
+# Parakeet's weights are under and which asks only for the attribution the notices carry. GPL,
+# LGPL, AGPL, MPL, SSPL, share-alike, non-commercial and source-available licenses stay out:
+# they ask for source, or restrict use, on distribution, and every release distributes. SPDX
+# ids match without regard to case.
+ACCEPTED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "CC0-1.0", "0BSD", "CC-BY-4.0"}
 ACCEPTED_IDS = {spdx.casefold() for spdx in ACCEPTED}
 
 REMEDY = ("Drop the component, replace it with one under an accepted license, or reimplement "

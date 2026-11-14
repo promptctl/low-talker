@@ -115,20 +115,18 @@ jobs:
           source scripts/developer-id
           xcrun notarytool store-credentials "$NOTARY_PROFILE" --apple-id "$NOTARY_APPLE_ID" --team-id "$developer_team" --password "$NOTARY_PASSWORD" --keychain "$RELEASE_KEYCHAIN"
 
-      # [LAW:one-source-of-truth] The model the release carries is the one model-tool built from
-      # this tag names as its default, at the Hugging Face commits `main` names for it now.
-      - name: Name the default model
+      # [LAW:one-source-of-truth] The models the release carries are the ones model-tool built from
+      # this tag names as carried, at the Hugging Face commits `main` names for them now.
+      - name: Name the carried models
         id: model
         run: |
           set -euo pipefail
           tool=$(make model-tool | tail -n 1)
-          model=$("$tool" default)
-          revision=$("$tool" revision --model "$model")
+          revision=$("$tool" revision)
           {
             echo "tool=$tool"
-            echo "default=$model"
             echo "revision=$revision"
-            echo "key=model-store-$model-$revision"
+            echo "key=model-store-$revision"
           } >> "$GITHUB_OUTPUT"
 
       # [LAW:no-ambient-temporal-coupling] The tag usually follows its commit's push to master
@@ -148,7 +146,7 @@ jobs:
           deadline=$((SECONDS + 2400))
           until saved; do
             if idle || [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::warning::master's cache holds no $KEY; the model comes from huggingface.co"
+              echo "::warning::master's cache holds no $KEY; the models come from huggingface.co"
               exit 0
             fi
             sleep 30
@@ -165,7 +163,7 @@ jobs:
 
       # [LAW:dataflow-not-control-flow] Run whether the cache hit or not: it fetches from
       # huggingface.co whatever the store's manifests find missing or of the wrong size, so a
-      # hit fetches nothing and a miss fetches the whole model. Nothing here hashes contents.
+      # hit fetches nothing and a miss fetches every model. Nothing here hashes contents.
       # Either way it fetches at the commits the key names, so the store is the key's.
       - name: Fill the model store
         env:
@@ -188,7 +186,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          MODEL: ${{ steps.model.outputs.default }}
           REVISION: ${{ steps.model.outputs.revision }}
           CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
@@ -204,7 +201,7 @@ jobs:
           {
             echo "## $TAG"
             echo
-            echo "Model: \`$MODEL\` at \`$REVISION\` (cache hit: ${CACHE_HIT:-false})"
+            echo "Models: \`$REVISION\` (cache hit: ${CACHE_HIT:-false})"
             echo
             echo '```'
             shasum -a 256 "${pkgs[@]}"

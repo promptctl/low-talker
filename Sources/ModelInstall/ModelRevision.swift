@@ -2,28 +2,41 @@ import Foundation
 import LowTalkerCore
 import WhisperKit
 
-/// Which Hugging Face commits a model's two parts come from: the whisperkit-coreml commit
-/// of its weights and the openai commit of the tokenizer they decode with.
+/// Which Hugging Face commits a model's parts come from: for a Whisper model, the
+/// whisperkit-coreml commit of its weights and the openai commit of the tokenizer they decode
+/// with; for Parakeet, the commit of its repo, whose weights ship their vocabulary.
 ///
-/// An install from huggingface.co fetches both parts at one of these, so a store filled
+/// An install from huggingface.co fetches every part at one of these, so a store filled
 /// from the hub holds exactly the revision it was given. `upstream(of:)` names the one
 /// `main` points at now; a release keys its cached store by it and fetches at it.
-public struct ModelRevision: Hashable, Sendable, LosslessStringConvertible {
-    public let weights: Commit
-    public let tokenizer: Commit
+///
+/// [LAW:types-are-the-program] The shape is the engine's: a Whisper revision cannot be made
+/// without its tokenizer's commit, and a Parakeet one has none to give.
+public enum ModelRevision: Hashable, Sendable, LosslessStringConvertible {
+    case weightsAndTokenizer(weights: Commit, tokenizer: Commit)
+    case weights(Commit)
 
-    public init(weights: Commit, tokenizer: Commit) {
-        self.weights = weights
-        self.tokenizer = tokenizer
+    public var weights: Commit {
+        switch self {
+        case .weightsAndTokenizer(let weights, _), .weights(let weights): weights
+        }
     }
 
-    /// `<weights commit>-<tokenizer commit>`, the form a cache key takes it in.
-    public var description: String { "\(weights)-\(tokenizer)" }
+    /// `<weights commit>-<tokenizer commit>`, or the one commit, the form a cache key takes it in.
+    public var description: String {
+        switch self {
+        case .weightsAndTokenizer(let weights, let tokenizer): "\(weights)-\(tokenizer)"
+        case .weights(let weights): "\(weights)"
+        }
+    }
 
     public init?(_ description: String) {
         let commits = description.split(separator: "-", omittingEmptySubsequences: false).map { Commit(String($0)) }
-        guard commits.count == 2, let weights = commits[0], let tokenizer = commits[1] else { return nil }
-        self.init(weights: weights, tokenizer: tokenizer)
+        switch commits.count {
+        case 1: guard let weights = commits[0] else { return nil }; self = .weights(weights)
+        case 2: guard let weights = commits[0], let tokenizer = commits[1] else { return nil }; self = .weightsAndTokenizer(weights: weights, tokenizer: tokenizer)
+        default: return nil
+        }
     }
 
     /// A git commit hash as the hub writes it: 40 lowercase hex digits.
@@ -36,12 +49,9 @@ public struct ModelRevision: Hashable, Sendable, LosslessStringConvertible {
         }
     }
 
-    /// The repo whisperkit-coreml weights come from.
-    static let weightsRepo = "argmaxinc/whisperkit-coreml"
-
-    /// The revision `main` names now: the commit it points at in the weights repo, and in
-    /// the tokenizer repo those weights' config picks. Asks the hub three small questions
-    /// and downloads no weights.
+    /// The revision `main` names now: the commit it points at in the weights repo, and, for a
+    /// Whisper model, in the tokenizer repo those weights' config picks. Asks the hub at most
+    /// three small questions and downloads no weights.
     public static func upstream(of model: Model) async throws -> ModelRevision {
         try await upstream(of: model, asking: Hub.get)
     }
@@ -49,11 +59,16 @@ public struct ModelRevision: Hashable, Sendable, LosslessStringConvertible {
     /// [LAW:effects-at-boundaries] The questions and what is made of the answers, with
     /// the asking handed in, so the answers can be ones captured from the hub.
     static func upstream(of model: Model, asking get: (URL) async throws -> Data) async throws -> ModelRevision {
-        let weights = try await Hub.Revision.asking(get, for: "main", of: weightsRepo)
-        let folder = try variantFolder(of: model, among: weights.files.map(\.path))
-        let config = try await get(Hub.file("\(folder)/config.json", in: weightsRepo, at: weights.commit))
-        let tokenizer = try await Hub.Revision.asking(get, for: "main", of: ModelVariant(modelConfig: config).tokenizerRepo)
-        return ModelRevision(weights: weights.commit, tokenizer: tokenizer.commit)
+        let weights = try await Hub.Revision.asking(get, for: "main", of: model.repo)
+        switch model {
+        case .parakeet:
+            return .weights(weights.commit)
+        case .whisperKit:
+            let folder = try variantFolder(of: model, among: weights.files.map(\.path))
+            let config = try await get(Hub.file("\(folder)/config.json", in: model.repo, at: weights.commit))
+            let tokenizer = try await Hub.Revision.asking(get, for: "main", of: ModelVariant(modelConfig: config).tokenizerRepo)
+            return .weightsAndTokenizer(weights: weights.commit, tokenizer: tokenizer.commit)
+        }
     }
 
     /// The repo folder that holds `model`, chosen from `files` as `WhisperKit.download`
@@ -71,6 +86,41 @@ public struct ModelRevision: Hashable, Sendable, LosslessStringConvertible {
             throw ModelInstallError.noVariantFolder(model: model, matches: candidates[0].sorted())
         }
         return folder
+    }
+}
+
+/// The revision of each model an install takes from huggingface.co, written
+/// `<model>@<revision>` and joined by `+`: the form `model-tool revision` prints, a cache key
+/// names a store by, and `download --from` takes back.
+///
+/// [LAW:one-source-of-truth] One text for all three, so the commits a store is keyed by are the
+/// commits it is fetched at.
+public struct ModelRevisions: Hashable, Sendable, LosslessStringConvertible {
+    public let revisions: [Model: ModelRevision]
+
+    public init(_ revisions: [Model: ModelRevision]) {
+        self.revisions = revisions
+    }
+
+    public var description: String {
+        revisions.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key)@\($0.value)" }.joined(separator: "+")
+    }
+
+    public init?(_ description: String) {
+        var revisions: [Model: ModelRevision] = [:]
+        for entry in description.split(separator: "+", omittingEmptySubsequences: false) {
+            let parts = entry.split(separator: "@", omittingEmptySubsequences: false)
+            guard parts.count == 2, let model = Model(rawValue: String(parts[0])), let revision = ModelRevision(String(parts[1])), revisions[model] == nil else { return nil }
+            revisions[model] = revision
+        }
+        self.init(revisions)
+    }
+
+    /// The revisions `main` names now for each of `models`.
+    public static func upstream(of models: [Model]) async throws -> ModelRevisions {
+        var revisions: [Model: ModelRevision] = [:]
+        for model in models { revisions[model] = try await ModelRevision.upstream(of: model) }
+        return ModelRevisions(revisions)
     }
 }
 

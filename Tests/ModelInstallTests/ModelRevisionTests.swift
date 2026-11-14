@@ -9,20 +9,34 @@ import Testing
 @Suite struct ModelRevisionTests {
     static let weights = ModelRevision.Commit(String(repeating: "a", count: 40))!
     static let tokenizer = ModelRevision.Commit(String(repeating: "b", count: 40))!
-    static let revision = ModelRevision(weights: weights, tokenizer: tokenizer)
+    static let revision = ModelRevision.weightsAndTokenizer(weights: weights, tokenizer: tokenizer)
 
     @Test func revisionReadsBackFromItsDescription() {
         #expect(ModelRevision(Self.revision.description) == Self.revision)
+        #expect(ModelRevision(Self.weights.description) == .weights(Self.weights))
+    }
+
+    /// The revisions of several models read back from the one text a cache key and
+    /// `download --from` share, in name order whatever order they were given in.
+    @Test func revisionsReadBackFromTheirDescription() {
+        let revisions = ModelRevisions([.parakeet(.tdtV3): .weights(Self.weights), .default: Self.revision])
+        #expect("\(revisions)" == "large-v3-v20240930_turbo_632MB@\(Self.weights)-\(Self.tokenizer)+parakeet-tdt-0.6b-v3@\(Self.weights)")
+        #expect(ModelRevisions(revisions.description) == revisions)
+    }
+
+    @Test(arguments: ["", "base.en", "base.en@", "@\(String(repeating: "a", count: 40))", "../x@\(String(repeating: "a", count: 40))", "base.en@\(String(repeating: "a", count: 40))+base.en@\(String(repeating: "a", count: 40))"])
+    func revisionsRefuseWhatIsNotModelsAtCommits(text: String) {
+        #expect(ModelRevisions(text) == nil)
     }
 
     @Test(arguments: [
-        "", String(repeating: "a", count: 40),
+        "",
         "\(String(repeating: "a", count: 40))-\(String(repeating: "B", count: 40))",
         "\(String(repeating: "a", count: 39))-\(String(repeating: "b", count: 40))",
         "\(String(repeating: "a", count: 40))-\(String(repeating: "ｂ", count: 40))",
         "\(String(repeating: "a", count: 40))-\(String(repeating: "b", count: 40))-\(String(repeating: "c", count: 40))",
     ])
-    func revisionRefusesWhatIsNotTwoCommits(text: String) {
+    func revisionRefusesWhatIsNotOneOrTwoCommits(text: String) {
         #expect(ModelRevision(text) == nil)
     }
 
@@ -51,6 +65,50 @@ import Testing
             try Data(#require(answers[url.absoluteString], "asked \(url)").utf8)
         }
         #expect(revision == ModelRevision("\(weights)-\(tokenizer)"))
+    }
+
+    /// Parakeet's revision is its repo's one commit, asked once.
+    @Test func upstreamOfParakeetIsItsRepoCommit() async throws {
+        let commit = "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe"
+        let answers = [
+            "https://huggingface.co/api/models/FluidInference/parakeet-tdt-0.6b-v3-coreml/revision/main?blobs=true": """
+                {"id": "FluidInference/parakeet-tdt-0.6b-v3-coreml", "sha": "\(commit)", "siblings": [{"rfilename": "parakeet_v3_vocab.json", "size": 151122}]}
+                """,
+        ]
+        let revision = try await ModelRevision.upstream(of: .parakeet(.tdtV3)) { url in
+            try Data(#require(answers[url.absoluteString], "asked \(url)").utf8)
+        }
+        #expect(revision == ModelRevision(commit))
+    }
+
+    /// Parakeet's manifest is the files of the four models the engine loads and its vocabulary,
+    /// at the repo's top, and none of the repo's other conversions; the listing is cut from
+    /// huggingface.co's at 7dd20fe6 on 2026-11-14.
+    @Test func parakeetsManifestTakesOnlyTheFilesTheEngineLoads() throws {
+        let listing = try JSONDecoder().decode(Hub.Revision.self, from: Data("""
+            {"sha": "\(Self.weights)", "siblings": [
+              {"rfilename": "README.md", "size": 4285},
+              {"rfilename": "Decoder.mlmodelc/weights/weight.bin", "size": 23604992},
+              {"rfilename": "Encoder.mlmodelc/weights/weight.bin", "size": 445187200},
+              {"rfilename": "Encoder_v2.mlmodelc/model.mil", "size": 1002653},
+              {"rfilename": "Encoder_v2.mlmodelc/weights/weight.bin", "size": 594211328},
+              {"rfilename": "JointDecision.mlmodelc/coremldata.bin", "size": 534},
+              {"rfilename": "JointDecisionv2.mlmodelc/coremldata.bin", "size": 591},
+              {"rfilename": "Preprocessor.mlmodelc/metadata.json", "size": 2841},
+              {"rfilename": "mlpackages/Decoder.mlpackage/Manifest.json", "size": 617},
+              {"rfilename": "parakeet_v3_vocab.json", "size": 151122},
+              {"rfilename": "parakeet_vocab.json", "size": 151122}]}
+            """.utf8))
+        let store = URL(filePath: "/store")
+        let manifest = try listing.manifest(of: nil, in: store.appending(path: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml"), store: store, matching: ParakeetModel.hubGlobs)
+        #expect(manifest == (try Manifest(folder: "models/FluidInference/parakeet-tdt-0.6b-v3-coreml", files: [
+            .init(path: "Decoder.mlmodelc/weights/weight.bin", size: 23604992),
+            .init(path: "Encoder_v2.mlmodelc/model.mil", size: 1002653),
+            .init(path: "Encoder_v2.mlmodelc/weights/weight.bin", size: 594211328),
+            .init(path: "JointDecision.mlmodelc/coremldata.bin", size: 534),
+            .init(path: "Preprocessor.mlmodelc/metadata.json", size: 2841),
+            .init(path: "parakeet_v3_vocab.json", size: 151122),
+        ])))
     }
 
     @Test func variantFolderIsTheOneFolderMatchingTheModel() throws {

@@ -4,13 +4,16 @@ import LowTalkerCore
 import ModelInstall
 import Synchronization
 
-/// Which model and which store, for every subcommand that works one model.
+/// Which models and which store, for every subcommand that works on models.
 ///
 /// [LAW:one-source-of-truth] The default store is the one `make app` copies each bundle's
-/// model out of, so a download here is what the next build carries.
+/// models out of, and the default models are the ones a bundle carries, so a download here is
+/// what the next build carries.
 struct ModelOptions: ParsableArguments {
-    @Option(help: "A model folder name in the whisperkit-coreml repo.")
-    var model: Model = .default
+    @Option(help: "One model: a folder name in the whisperkit-coreml repo, or a Parakeet model. Defaults to every model a bundle carries.")
+    var model: Model?
+
+    var models: [Model] { model.map { [$0] } ?? Model.carried }
 
     @Option(name: .customLong("models-dir"), help: "Where models are stored. Defaults to low-talker's store under Application Support, which `make app` copies a bundle's model out of.", transform: URL.init(fileURLWithPath:))
     var modelsDirectory: URL?
@@ -22,13 +25,13 @@ struct ModelOptions: ParsableArguments {
 
 extension Model: ExpressibleByArgument {}
 
-/// [LAW:parse-dont-validate] Two commits are a revision on huggingface.co, a URL with an
+/// [LAW:parse-dont-validate] Models at commits are revisions on huggingface.co, a URL with an
 /// http or https scheme is a published base, and anything else is a path to a store, so
 /// the one flag cannot be read two ways and a revision cannot be asked of a copy.
 extension ModelSource: ExpressibleByArgument {
     public init?(argument: String) {
-        if let revision = ModelRevision(argument) {
-            self = .huggingFace(revision)
+        if let revisions = ModelRevisions(argument) {
+            self = .huggingFace(revisions)
         } else if let url = URL(string: argument), ["http", "https"].contains(url.scheme) {
             self = .published(url)
         } else {

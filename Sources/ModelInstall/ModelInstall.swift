@@ -31,38 +31,63 @@ extension ModelStore {
                 // [LAW:one-source-of-truth] The host `upstream(of:)` named the revision on,
                 // rather than HF_ENDPOINT, which the client would read otherwise.
                 let hub = HubApiWrapper(downloadBase: directory, endpoint: Hub.endpoint.absoluteString)
-                let weights = try await whole(.weights, of: model) {
-                    switch source {
-                    case .huggingFace(let revision):
-                        return try await fromHub(ModelRevision.weightsRepo, at: revision.weights, through: hub, phase: phase) { listing in
-                            (try ModelRevision.variantFolder(of: model, among: listing.files.map(\.path)), ["*"])
-                        }
-                    case .store(let store):
-                        return try await copy(.weights, of: model, from: store, phase: phase)
-                    }
+                switch model {
+                case .whisperKit: return try await installWhisperKit(model, from: source, through: hub, phase: phase)
+                case .parakeet: return try await installParakeet(model, from: source, through: hub, phase: phase)
                 }
-                let folder = directory.appending(path: weights.folder)
-                _ = try await whole(.tokenizer, of: model) {
-                    switch source {
-                    case .huggingFace(let revision):
-                        // WhisperKit fetches the tokenizer on first load, from the hub,
-                        // when it is not already here; taking it now is what lets that
-                        // load, and every one after, run with the network off.
-                        //
-                        // [LAW:one-source-of-truth] exception: the files are the ones that
-                        // load takes (`Hub.loadConfig` in ArgmaxCore, internal), fetched
-                        // here at the revision, which the load cannot be given.
-                        let variant = try ModelVariant(modelConfig: Data(contentsOf: folder.appending(path: "config.json")))
-                        return try await fromHub(variant.tokenizerRepo, at: revision.tokenizer, through: hub, phase: phase) { _ in
-                            (nil, ["config.json", "tokenizer_config.json", "chat_template.jinja", "chat_template.json", "tokenizer.json"])
-                        }
-                    case .store(let store):
-                        return try await copy(.tokenizer, of: model, from: store, phase: phase)
-                    }
-                }
-                return InstalledModel(model: model, folder: folder, hub: directory)
             }
         }
+    }
+
+    /// A Whisper model: its weights, a folder of the whisperkit-coreml repo, and the tokenizer
+    /// their config names, from an openai repo.
+    private func installWhisperKit(_ model: Model, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
+        let weights = try await whole(.weights, of: model) {
+            switch source {
+            case .huggingFace(let revision):
+                return try await fromHub(model.repo, at: revision.weights, through: hub, phase: phase) { listing in
+                    (try ModelRevision.variantFolder(of: model, among: listing.files.map(\.path)), ["*"])
+                }
+            case .store(let store):
+                return try await copy(.weights, of: model, from: store, phase: phase)
+            }
+        }
+        let folder = directory.appending(path: weights.folder)
+        _ = try await whole(.tokenizer, of: model) {
+            switch source {
+            case .huggingFace(let revision):
+                guard case .weightsAndTokenizer(_, let tokenizer) = revision else { throw ModelInstallError.revisionNotFor(model: model, revision: revision) }
+                // WhisperKit fetches the tokenizer on first load, from the hub,
+                // when it is not already here; taking it now is what lets that
+                // load, and every one after, run with the network off.
+                //
+                // [LAW:one-source-of-truth] exception: the files are the ones that
+                // load takes (`Hub.loadConfig` in ArgmaxCore, internal), fetched
+                // here at the revision, which the load cannot be given.
+                let variant = try ModelVariant(modelConfig: Data(contentsOf: folder.appending(path: "config.json")))
+                return try await fromHub(variant.tokenizerRepo, at: tokenizer, through: hub, phase: phase) { _ in
+                    (nil, ["config.json", "tokenizer_config.json", "chat_template.jinja", "chat_template.json", "tokenizer.json"])
+                }
+            case .store(let store):
+                return try await copy(.tokenizer, of: model, from: store, phase: phase)
+            }
+        }
+        return InstalledModel(model: model, folder: folder, hub: directory)
+    }
+
+    /// A Parakeet model: the files of its repo the engine loads, at the repo's top, its
+    /// vocabulary among them.
+    private func installParakeet(_ model: Model, from source: OpenSource, through hub: HubApiWrapper, phase: @escaping @Sendable (InstallPhase) -> Void) async throws -> InstalledModel {
+        let weights = try await whole(.weights, of: model) {
+            switch source {
+            case .huggingFace(let revision):
+                guard case .weights(let commit) = revision else { throw ModelInstallError.revisionNotFor(model: model, revision: revision) }
+                return try await fromHub(model.repo, at: commit, through: hub, phase: phase) { _ in (nil, ParakeetModel.hubGlobs) }
+            case .store(let store):
+                return try await copy(.weights, of: model, from: store, phase: phase)
+            }
+        }
+        return InstalledModel(model: model, folder: directory.appending(path: weights.folder), hub: directory)
     }
 
     /// Writes `<directory>/<model>.zip`, the archive a published source serves: a
@@ -245,6 +270,12 @@ private enum InstallLock {
     }
 }
 
+extension ParakeetModel {
+    /// The globs that take the engine's files from the repo's top and nothing else: a
+    /// `.mlmodelc` is a folder, and the hub client's globs cross `/`, so one glob takes it whole.
+    static let hubGlobs = files.map { $0.hasSuffix(".mlmodelc") ? "\($0)/*" : $0 }
+}
+
 public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
     case lockUnavailable(lock: URL, errno: Int32)
     /// A source store that does not hold the part whole, so there is nothing to take.
@@ -258,6 +289,11 @@ public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
     /// A download or copy finished without putting every file its manifest lists in place,
     /// at its size.
     case incomplete(folder: URL, faults: [Manifest.Fault])
+    /// Revisions given for an install that name none for the model being installed.
+    case noRevision(model: Model, revisions: ModelRevisions)
+    /// A revision of the other engine's shape: a Whisper model needs its tokenizer's commit,
+    /// and Parakeet has none.
+    case revisionNotFor(model: Model, revision: ModelRevision)
 
     public var description: String {
         switch self {
@@ -268,13 +304,17 @@ public enum ModelInstallError: Error, Equatable, CustomStringConvertible {
         case .downloadRefused(let url, let status):
             "\(url.absoluteString) answered \(status.map { "HTTP \($0)" } ?? "with no HTTP status")"
         case .noVariantFolder(let model, let matches):
-            "no single folder in \(ModelRevision.weightsRepo) holds \(model): \(matches.isEmpty ? "none match" : matches.joined(separator: ", "))"
+            "no single folder in \(model.repo) holds \(model): \(matches.isEmpty ? "none match" : matches.joined(separator: ", "))"
         case .dittoFailed(let arguments, let status, let message):
             "ditto \(arguments.joined(separator: " ")) exited \(status): \(message)"
         case .renameFailed(let from, let to, let errno):
             "cannot move \(from.path) to \(to.path): \(String(cString: strerror(errno)))"
         case .incomplete(let folder, let faults):
             "\(folder.path) came up short after the install: \(faults.map(\.description).joined(separator: "; "))"
+        case .noRevision(let model, let revisions):
+            "the revisions \(revisions) name none for \(model)"
+        case .revisionNotFor(let model, let revision):
+            "\(revision) is not a revision of \(model), whose \(model.parts.count == 1 ? "repo is one commit" : "weights and tokenizer are two commits")"
         }
     }
 }

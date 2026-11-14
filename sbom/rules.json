@@ -11,7 +11,9 @@
     "for the license id, or the build fails: a typed id is held to the text it names.",
     "`licenseMatch`, where given, is a regular expression whose first group is the",
     "license's part of a file that holds more than its license. A",
-    "model's `licenseFile` is in this repository, since Hugging Face repos ship none. A",
+    "model's `licenseFile` is in this repository, since Hugging Face repos ship none, and",
+    "its weights' `layout` says where in their repo they are: `model-folder`, a folder named",
+    "for the model in a repo holding many, or `repo`, the repo itself. A",
     "vendored component's `version` names the file to read it from and a regular expression",
     "whose first group is the version (and second, if any, the revision), so a re-vendoring",
     "moves the SBOM."
@@ -62,6 +64,7 @@
     "large-v3-v20240930_turbo_632MB": {
       "weights": {
         "repo": "argmaxinc/whisperkit-coreml",
+        "layout": "model-folder",
         "license": "MIT",
         "licenseFile": "sbom/licenses/whisperkit-coreml.txt"
       },
@@ -69,6 +72,14 @@
         "repo": "openai/whisper-large-v3",
         "license": "Apache-2.0",
         "licenseFile": "sbom/licenses/whisper-large-v3.txt"
+      }
+    },
+    "parakeet-tdt-0.6b-v3": {
+      "weights": {
+        "repo": "FluidInference/parakeet-tdt-0.6b-v3-coreml",
+        "layout": "repo",
+        "license": "CC-BY-4.0",
+        "licenseFile": "sbom/licenses/parakeet-tdt-0.6b-v3-coreml.txt"
       }
     }
   }
