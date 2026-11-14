@@ -38,8 +38,9 @@ struct ScriptedNetwork: ParakeetNetwork {
     func joint(_ frame: EncodedFrame, _ prediction: Prediction) throws -> JointStep {
         log.handed.withLock { $0.append(prediction.features[0]) }
         let start = Int(frame.features[0])
-        // A word already said is not said again by the frame after it.
-        guard let said = spoken.first(where: { (start..<start + ParakeetWindow.frameSamples).contains($0.key) })?.value, prediction.features[0] != Float(said.token) else {
+        // A frame says its tokens in the order of their samples, and a token already said is not
+        // said again by the frame after it.
+        guard let said = spoken.sorted(by: { $0.key < $1.key }).first(where: { (start..<start + ParakeetWindow.frameSamples).contains($0.key) && prediction.features[0] != Float($0.value.token) })?.value else {
             return silence
         }
         return JointStep(token: said.token, probability: probability, duration: said.duration)
@@ -141,6 +142,22 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
         try decoding.decode(Self.window(frames: 4, from: 2_560), over: Self.span(frames: 4, from: 2_560))
         // Frame 1 emits and covers frames 2 through 4, the second window's first three.
         #expect(network.log.handed.withLock { $0.count } == 3)
+    }
+
+    /// A hold that wants the engine cancels a decode between frames.
+    @Test func aCancelledDecodeStopsBetweenFrames() async throws {
+        let network = ScriptedNetwork()
+        let decoding = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            var decoding = try TDTDecoding(network: network)
+            try decoding.decode(Self.window(frames: 4), over: Self.span(frames: 4))
+        }
+        await #expect {
+            try await decoding.value
+        } throws: { error in
+            if case TranscriptionFailure.cancelled = error { true } else { false }
+        }
+        #expect(network.log.handed.withLock { $0.count } == 0)
     }
 
     /// A duration index past the model's durations fails the reading by name.
@@ -259,6 +276,13 @@ let vocabulary = try! ParakeetVocabulary(pieces: (0..<ParakeetWindow.blank).map 
     @Test func thePrefixTakesThePunctuationThisPassHears() throws {
         let words = try Self.read([Self.cut: (301, 1), Self.cut + ParakeetWindow.frameSamples: (305, 1), Self.cut + 3 * ParakeetWindow.frameSamples: (302, 1)])
         #expect(words.map(\.text) == [" two.", " three"])
+    }
+
+    /// A new word the joint emits on the prefix's last frame, after the prefix's last word, is a
+    /// new word and not a hearing of the prefix.
+    @Test func aWordOnThePrefixsLastFrameAfterItIsNew() throws {
+        let words = try Self.read([Self.cut: (301, 0), Self.cut + 1: (302, 1)])
+        #expect(words.map(\.text) == [" two", " three"])
     }
 
     /// A pass that starts at the utterance's first sample has no lead-in to read before it, and

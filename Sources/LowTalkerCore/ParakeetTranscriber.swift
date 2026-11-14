@@ -48,11 +48,9 @@ public struct ParakeetTranscriber: Transcriber {
         expecting vocabulary: Vocabulary,
         partial: @escaping @Sendable (Partial) -> Void
     ) async throws(TranscriptionFailure) -> Transcription {
+        // The refusal reads nothing on the compute units, so it takes no turn.
+        do throws(VocabularyError) { _ = try PromptEncoder.takingNone(model).prompt(for: vocabulary) } catch { throw .vocabulary(error) }
         let reader = reader
-        let prompts = PromptEncoder.takingNone(model)
-        _ = try await turns.decode(as: caller) { () throws(TranscriptionFailure) in
-            do throws(VocabularyError) { return try prompts.prompt(for: vocabulary) } catch { throw .vocabulary(error) }
-        }
         return try await Hearing.transcribe(audio, margin: ParakeetReader.margin, context: ParakeetReader.context, pass: { pass async throws(TranscriptionFailure) in
             try await turns.decode(as: caller) { () throws(TranscriptionFailure) in try reader.read(pass) }
         }, partial: partial)
@@ -95,10 +93,13 @@ struct ParakeetReader: Sendable {
         let words: [Transcript.Word]
         do throws(ParakeetReadingError) { words = try vocabulary.words(tokens, from: pass.cut) } catch { throw .unreadable(.parakeet(error)) }
         guard let last = pass.prefix.last else { return words }
-        let end = AudioClip.sampleCount(for: last.time.upperBound)
-        // A word that starts before the prefix's last frame ends is a hearing of the prefix, its
-        // punctuation running on past that end or not.
-        let over = words.prefix { AudioClip.sampleCount(for: $0.time.lowerBound) < end }
+        // The words that start before the last prefix word are hearings of the words before it,
+        // and the next is the last's if it starts before that word's last frame ends, its
+        // punctuation running on past that end or not. Only that one: a word emitted after it
+        // on the same frame is a new word.
+        let before = words.prefix { $0.time.lowerBound < last.time.lowerBound }
+        let lastHeard = words.dropFirst(before.count).first.map { $0.time.lowerBound < last.time.upperBound } ?? false
+        let over = words.prefix(before.count + (lastHeard ? 1 : 0))
         // `Hearing` keeps a confirmed word's time and takes only the text a pass reads for it.
         let reheard = over.last.flatMap { Hearing.sameWord(last, $0) ? $0 : nil } ?? last
         return pass.prefix.dropLast() + [reheard] + words.dropFirst(over.count)
@@ -111,9 +112,6 @@ struct ParakeetReader: Sendable {
         do {
             decoding = try TDTDecoding(network: network)
             for span in spans {
-                // A hold that wants the engine cancels the decode between windows, and the
-                // turns run it again; a window already on the compute units finishes.
-                if Task.isCancelled { throw TranscriptionFailure.cancelled }
                 try decoding.decode(network.encode(samples[span]), over: span)
             }
         } catch let failure as TranscriptionFailure {

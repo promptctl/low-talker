@@ -46,6 +46,9 @@ struct TDTDecoding {
         var frame = covered
         var emittedHere = 0
         while frame < frames.count {
+            // A hold that wants the engine cancels the decode between frames, and the turns run it
+            // again; a call already on the compute units finishes.
+            if Task.isCancelled { throw TranscriptionFailure.cancelled }
             let step = try network.joint(frames[frame], prediction)
             guard ParakeetWindow.durations.indices.contains(step.duration) else {
                 throw ParakeetReadingError.durationOutOfRange(step.duration)
