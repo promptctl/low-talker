@@ -7,7 +7,14 @@ import Testing
 /// directory of the test's own. [LAW:one-source-of-truth] The fakes every loop test stands on
 /// keep what the files keep.
 @MainActor
-@Suite struct StoreContractTests {
+final class StoreContractTests {
+    /// Each test's own, removed when it ends.
+    let directory = FileManager.default.temporaryDirectory.appending(path: "store-contract-\(UUID())")
+
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     static let fakeHeld = HeldStoreContract {
         let store = FakeHeldStore()
         return HeldStoreContract.Subject(
@@ -17,19 +24,20 @@ import Testing
         )
     }
 
-    /// `HeldFile` in a directory of its own, which the run leaves behind in the temporary folder.
-    static let heldFile = HeldStoreContract {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "held-contract-\(UUID())")
-        let file = HeldFile(url: directory.appending(path: "held.json"))
-        return HeldStoreContract.Subject(
-            store: file,
-            spoil: { try Data("not json".utf8).write(to: file.url) },
-            // A directory where the file goes: the atomic rename cannot replace it, and removal can.
-            obstruct: {
-                try FileManager.default.removeItem(at: file.url)
-                try FileManager.default.createDirectory(at: file.url.appending(path: "in-the-way"), withIntermediateDirectories: true)
-            }
-        )
+    /// `HeldFile` in the test's directory.
+    var heldFile: HeldStoreContract {
+        HeldStoreContract { [directory] in
+            let file = HeldFile(url: directory.appending(path: "held.json"))
+            return HeldStoreContract.Subject(
+                store: file,
+                spoil: { try Data("not json".utf8).write(to: file.url) },
+                // A directory where the file goes: the atomic rename cannot replace it, and removal can.
+                obstruct: {
+                    try FileManager.default.removeItem(at: file.url)
+                    try FileManager.default.createDirectory(at: file.url.appending(path: "in-the-way"), withIntermediateDirectories: true)
+                }
+            )
+        }
     }
 
     static let fakeUnheard = UnheardStoreContract {
@@ -37,12 +45,13 @@ import Testing
         return UnheardStoreContract.Subject(store: store, damage: { store.damage($0.id) })
     }
 
-    /// `UnheardFiles` in a directory of its own, which the run leaves behind in the temporary folder.
-    static let unheardFiles = UnheardStoreContract {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "unheard-contract-\(UUID())")
-        return UnheardStoreContract.Subject(store: UnheardFiles(directory: directory), damage: { entry in
-            try Data([1, 2, 3]).write(to: directory.appending(path: entry.id))
-        })
+    /// `UnheardFiles` in the test's directory.
+    var unheardFiles: UnheardStoreContract {
+        UnheardStoreContract { [directory] in
+            UnheardStoreContract.Subject(store: UnheardFiles(directory: directory), damage: { entry in
+                try Data([1, 2, 3]).write(to: directory.appending(path: entry.id))
+            })
+        }
     }
 
     @Test(arguments: HeldStoreContract.Statement.allCases)
@@ -52,7 +61,7 @@ import Testing
 
     @Test(arguments: HeldStoreContract.Statement.allCases)
     func theHeldFileKeepsTheStatement(_ statement: HeldStoreContract.Statement) throws {
-        #expect(try Self.heldFile.disagreements(with: statement) == [])
+        #expect(try heldFile.disagreements(with: statement) == [])
     }
 
     @Test(arguments: UnheardStoreContract.Statement.allCases)
@@ -62,6 +71,6 @@ import Testing
 
     @Test(arguments: UnheardStoreContract.Statement.allCases)
     func theUnheardFilesKeepTheStatement(_ statement: UnheardStoreContract.Statement) throws {
-        #expect(try Self.unheardFiles.disagreements(with: statement) == [])
+        #expect(try unheardFiles.disagreements(with: statement) == [])
     }
 }

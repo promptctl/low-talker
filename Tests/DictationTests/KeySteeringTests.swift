@@ -98,8 +98,8 @@ private struct BadBuffer: Error {}
             return await reply.said()
         }
 
-        /// Now, as a Return's stamp: on the host clock the press is ended against.
-        var typedNow: TimeInterval { HostTime.now.uptime / .seconds(1) }
+        /// Now, as a Return's stamp: on the rig's clock, which the press is ended against.
+        var typedNow: TimeInterval { rig.now.uptime / .seconds(1) }
     }
 
     /// The case this exists for: a Return typed into a latched press ends it, and the app says
