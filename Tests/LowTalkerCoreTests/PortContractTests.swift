@@ -51,7 +51,11 @@ import Testing
         let host = InputMethodNotices.Host(portName: name) { () throws(PortNotHosted) in
             do throws(PeerIdentity.Unreadable) { return try PeerIdentity.ofThisProcess() } catch { throw .noRequirement(error) }
         }
-        return (host, { _ = NoticeSender(portName: name, build: nil).tellCursorArrived() }, { @Sendable in
+        return (host, {
+            // A send that failed would leave the hearing waiting out the time limit instead.
+            let told = NoticeSender(portName: name, build: nil).tellCursorArrived()
+            precondition(told == .told, "the cursor arrival was not sent: \(told)")
+        }, { @Sendable in
             // Asked from a thread of its own, as the input method asks: the round trip blocks.
             await onAThreadOfItsOwn {
                 Asker(portName: name, answerer: Result { () throws(PeerIdentity.Unreadable) in try .ofThisProcess() })
