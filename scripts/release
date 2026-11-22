@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The whole release: the installer packages, offline and network, each app signed with the
-# model inside, then each package notarized and stapled.
+# model inside, then each package notarized and stapled. Nothing is built, notarized or
+# published until the suite CI runs passes on the tree about to be built.
 #
 #   NOTARY_PROFILE=<profile> scripts/release <output directory> [model source]
 #     # prints <output directory>/LowTalker-offline.pkg and <output directory>/LowTalker-network.pkg
@@ -9,7 +10,9 @@
 # signed bundle inside it and issues one ticket, which is stapled to the package. The model
 # source is scripts/sign-release's.
 #
-# [LAW:composability] Each step is its own script, runnable alone; this one only orders them.
+# [LAW:composability] Each step is its own script, runnable alone; this one orders them, behind
+# the checks that make a tree releasable, the suite among them. Run alone, neither step makes
+# those checks.
 set -euo pipefail
 
 out=${1:?usage: NOTARY_PROFILE=<profile> scripts/release <output directory> [model source]}
@@ -32,9 +35,16 @@ fail() {
 # [LAW:no-silent-failure]
 root="$scripts/.."
 head=$(git -C "$root" rev-parse HEAD)
-# The build reads the working tree, so the commit is what is built only when the tree is clean.
-dirty=$(git -C "$root" status --porcelain)
-[ -z "$dirty" ] || fail "the working tree differs from $head, and the build would ship the difference: $dirty"
+# The build reads the working tree, so the commit is what is tested and built only while the
+# tree is the commit. Every file git does not ignore counts, as in the revision
+# scripts/source-revision stamps; --untracked-files=all overrides a person's
+# status.showUntrackedFiles, which would hide one. [LAW:no-silent-failure]
+require_commit_tree() {
+  local difference
+  difference=$(git -C "$root" status --porcelain --untracked-files=all)
+  [ -z "$difference" ] || fail "$1, and the build would ship the difference: $difference"
+}
+require_commit_tree "the working tree differs from $head"
 git -C "$root" fetch --quiet origin master
 git -C "$root" merge-base --is-ancestor "$head" FETCH_HEAD \
   || fail "$head is not on origin/master, and releases are cut from master"
@@ -64,6 +74,14 @@ read -r released own <<<"$(awk -v head="$head" '
   || fail "project.yml's CURRENT_PROJECT_VERSION is '$build', not a whole number above zero"
 [ "$build" -gt "$released" ] \
   || fail "this is build $build, but $released releases are already tagged; raise CURRENT_PROJECT_VERSION in project.yml"
+
+# [LAW:single-enforcer] A release is built, notarized and published only once its commit's tests
+# pass, proved here on the tree about to be built, with the toolchain that builds it, rather
+# than looked up from another run. The suite is the one CI runs. Its output goes to stderr:
+# stdout is the package list.
+make -C "$root" test-watchdog >&2 || fail "the suite fails on $head; its output is above"
+# A test can leave a file behind, which the build would ship.
+require_commit_tree "the suite left the working tree differing from $head"
 
 # Every package signed before any is sent, so a variant that fails to build stops the release
 # before the notary service has seen the other.
