@@ -27,7 +27,7 @@ echo '{"settings":{"base":{"MARKETING_VERSION":"%s","CURRENT_PROJECT_VERSION":"%
 """ % (MARKETING, BUILD)
 
 # The suite, as $SUITE says it goes: passing, failing with a test's failure on stdout as swift test
-# prints it, or passing having left a file behind in the tree.
+# prints it, or passing having left a new file behind or rewritten a committed one.
 FAKE_MAKE = """#!/bin/bash
 set -euo pipefail
 [ "$#" = 3 ] && [ "$1" = -C ] && [ "$3" = test-watchdog ] \\
@@ -41,6 +41,7 @@ case "$SUITE" in
   pass) ;;
   fail) echo "%s"; exit 2 ;;
   leaves-a-file) echo "written by a test" > left-behind.txt ;;
+  rewrites-a-file) echo "rewritten by a test" >> scripts/notary-credentials ;;
   *) echo "fake make: unmodelled suite '$SUITE'" >&2; exit 2 ;;
 esac
 """ % FAILURE
@@ -137,10 +138,24 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.recorded("revision").strip(), self.git("rev-parse", "--short=12", "HEAD"))
         self.assertEqual(self.recorded("notarized").splitlines(), packages)
 
-    def test_a_suite_that_leaves_a_file_behind_is_not_signed(self):
-        result = self.release("leaves-a-file")
+    def test_a_suite_that_changes_the_tree_is_not_signed(self):
+        for suite, changed in (("leaves-a-file", "left-behind.txt"),
+                               ("rewrites-a-file", "scripts/notary-credentials")):
+            with self.subTest(suite):
+                result = self.release(suite)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(changed, result.stderr)
+                self.assertIsNone(self.recorded("revision"))
+                self.git("reset", "--quiet", "--hard")
+                self.git("clean", "--quiet", "-fd")
+
+    def test_a_tree_git_cannot_read_is_not_signed(self):
+        index = self.repo / ".git" / "index"
+        index.chmod(0)
+        self.addCleanup(index.chmod, 0o644)
+        result = self.release("pass")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("left-behind.txt", result.stderr)
+        self.assertIsNone(self.recorded("suite"))
         self.assertIsNone(self.recorded("revision"))
 
     def test_a_tree_that_differs_from_the_commit_is_refused_before_the_suite(self):

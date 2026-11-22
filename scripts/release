@@ -11,7 +11,8 @@
 # source is scripts/sign-release's.
 #
 # [LAW:composability] Each step is its own script, runnable alone; this one orders them, behind
-# the checks that make a tree releasable, the suite among them, which only this one makes.
+# the checks that make a tree releasable, the suite among them. Run alone, neither step makes
+# those checks.
 set -euo pipefail
 
 out=${1:?usage: NOTARY_PROFILE=<profile> scripts/release <output directory> [model source]}
@@ -35,12 +36,13 @@ fail() {
 root="$scripts/.."
 head=$(git -C "$root" rev-parse HEAD)
 # The build reads the working tree, so the commit is what is tested and built only while the
-# tree is the commit. [LAW:one-source-of-truth] That is decided by the revision the build
-# stamps into the bundles, scripts/source-revision's; git status only names the difference,
-# since what it lists follows a person's status.showUntrackedFiles.
+# tree is the commit. Every file git does not ignore counts, as in the revision
+# scripts/source-revision stamps; --untracked-files=all overrides a person's
+# status.showUntrackedFiles, which would hide one. [LAW:no-silent-failure]
 require_commit_tree() {
-  [[ "$(cd "$root" && scripts/source-revision)" != *-dirty-* ]] \
-    || fail "$1, and the build would ship the difference: $(git -C "$root" status --porcelain --untracked-files=all)"
+  local difference
+  difference=$(git -C "$root" status --porcelain --untracked-files=all)
+  [ -z "$difference" ] || fail "$1, and the build would ship the difference: $difference"
 }
 require_commit_tree "the working tree differs from $head"
 git -C "$root" fetch --quiet origin master
