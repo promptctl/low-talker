@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Succeeds only for a commit whose CI passed: ci.yml's run on that commit's push to master,
+# waited on until it ends, concluded success.
+#
+#   scripts/ci-passed <commit>
+#
+# [LAW:no-ambient-temporal-coupling] A tag usually follows its commit's push to master by
+# seconds, while that push's run is still going, so the answer is read once the run has ended,
+# never partway through it.
+set -euo pipefail
+
+commit=${1:?usage: scripts/ci-passed <commit>}
+
+fail() {
+  echo "ci-passed: $1" >&2
+  exit 1
+}
+
+run=$(gh run list --workflow ci.yml --branch master --event push --commit "$commit" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+[ -n "$run" ] || fail "ci.yml has no run for $commit's push to master"
+# Its progress goes to stderr, since a caller's stdout is its own: scripts/release prints the
+# packages on it.
+gh run watch "$run" --interval 30 >&2
+read -r conclusion url <<<"$(gh run view "$run" --json conclusion,url --jq '"\(.conclusion) \(.url)"')"
+[ "$conclusion" = success ] || fail "ci.yml's run for $commit concluded '$conclusion': $url"

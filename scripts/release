@@ -64,6 +64,10 @@ read -r released own <<<"$(awk -v head="$head" '
   || fail "project.yml's CURRENT_PROJECT_VERSION is '$build', not a whole number above zero"
 [ "$build" -gt "$released" ] \
   || fail "this is build $build, but $released releases are already tagged; raise CURRENT_PROJECT_VERSION in project.yml"
+# [LAW:single-enforcer] A release ships only a commit whose tests passed, and this is where that
+# is required: ci.yml's run on the commit's push to master, which make test runs on the runner a
+# release builds on.
+"$scripts/ci-passed" "$head"
 
 # Every package signed before any is sent, so a variant that fails to build stops the release
 # before the notary service has seen the other.
