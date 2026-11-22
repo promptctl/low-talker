@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 /// The keys that steer dictation: the one place that says which keys those are. Every other key is
 /// declined as it always was.
@@ -22,13 +23,19 @@ public nonisolated enum SteeringKey: Equatable, Sendable, CustomStringConvertibl
         }
     }
 
-    /// The steering key typed, from the command the text input system bound it to and the modifiers
-    /// held with it, or nil for every other key, which is declined as typed. [LAW:single-enforcer]
-    /// The one place a command becomes a steering key; the input method asks here and nowhere else.
-    public init?(command: Selector?, holding modifiers: NSEvent.ModifierFlags) {
-        switch command.map(NSStringFromSelector) {
-        case "insertNewline:" where modifiers.isDisjoint(with: Self.makeAnotherKey): self = .return
-        case "cancelOperation:": self = .escape
+    /// The steering key typed, from the key and the modifiers held with it, or nil for every other
+    /// key, which is declined as typed. [LAW:single-enforcer] The one place a key becomes a steering
+    /// key; the input method asks here and nowhere else.
+    ///
+    /// Known by the key, not the command a key binding names it: AppKit binds Option+Escape to
+    /// `complete:` and a person's own key bindings can bind Escape to anything, and an Escape under
+    /// the chord is still the Escape that cancels the press.
+    public init?(keyCode: UInt16, holding modifiers: NSEvent.ModifierFlags) {
+        let bare = modifiers.isDisjoint(with: Self.makeAnotherKey)
+        switch Int(keyCode) {
+        // Each pattern carries its own condition: a `where` binds only to the pattern it follows.
+        case kVK_Return where bare, kVK_ANSI_KeypadEnter where bare: self = .return
+        case kVK_Escape: self = .escape
         default: return nil
         }
     }

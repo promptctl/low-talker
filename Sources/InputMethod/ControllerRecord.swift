@@ -24,11 +24,11 @@ public nonisolated struct ControllerRecord: Equatable, Sendable {
     /// exactly one of them, a callback that decided nothing included. Each says the client the
     /// controller holds as `FocusedClient` spells it.
     public enum Decision: Equatable, Sendable {
-        /// `inputText`: a key typed as text, declined. What was typed is never recorded.
-        case declinedText(holding: String)
-        /// `didCommand`: the command bound to a key, and the gate's decision when it was a
-        /// steering key; a command that is none is declined.
-        case command(String, steered: Steered?, holding: String)
+        /// `handle` with a key: the gate's decision when it was a steering key; any other key is
+        /// declined. Which key it was is never recorded, as it names what was typed.
+        case key(steered: Steered?, holding: String)
+        /// `handle` with no event, or one that is no key, declined.
+        case handedNoKey(holding: String)
         /// `activateServer` with a client a cursor was made of, which `holding` names.
         case activated(holding: String)
         /// `activateServer` with no client, or one that would not name its app.
@@ -48,7 +48,7 @@ public nonisolated struct ControllerRecord: Equatable, Sendable {
     /// What the unified log receives for this record.
     ///
     /// Everything said is public, because a redacted line is no line, and no record holds a
-    /// character anyone typed. A command or a typed key is made for every key typed anywhere, so
+    /// character anyone typed. A key's record is made for every key typed anywhere, so
     /// it is said at debug, which the log does not keep by default: the log is not a record of
     /// when a person typed. A steering key the gate kept or waited on is the exception, said at
     /// the default level, because a Return that did nothing is what a person asks the log about.
@@ -66,19 +66,19 @@ nonisolated extension ControllerRecord.Decision {
     /// A key typed anywhere that nothing held: nearly every key.
     var isRoutineKey: Bool {
         switch self {
-        case .declinedText: true
-        case let .command(_, steered, _): steered?.decision.routine ?? true
+        case let .key(steered, _): steered?.decision.routine ?? true
+        case .handedNoKey: true
         case .activated, .activatedWithoutUsableClient, .overMemoryCeiling, .deactivated: false
         }
     }
 
     func line(controller: UInt) -> String {
         switch self {
-        case let .declinedText(holding):
-            controllerLine(controller: controller, "declined a key typed as text", client: holding)
-        case let .command(command, steered, holding):
-            controllerLine(controller: controller, "was handed \(command), "
-                + (steered.map { "a steering key, \($0.key), that \($0.decision)" } ?? "not a steering key"), client: holding)
+        case let .key(steered, holding):
+            controllerLine(controller: controller, "was handed "
+                + (steered.map { "a steering key, \($0.key), that \($0.decision)" } ?? "a key, not a steering key"), client: holding)
+        case let .handedNoKey(holding):
+            controllerLine(controller: controller, "was handed no key", client: holding)
         case let .activated(holding):
             controllerLine(controller: controller, "activated", client: holding)
         case let .activatedWithoutUsableClient(holding):

@@ -1,11 +1,12 @@
 import AppKit
+import Carbon.HIToolbox
 @testable import InputMethod
 import Insertion
 import Testing
 
-/// Which steering key a command is, by the modifiers it is held with: a Return held with a modifier is
-/// another key that passes as typed, and an Escape is an Escape whatever is held.
-/// [LAW:behavior-not-structure] Asked of the command and modifiers a key arrives with, not of how the rule is written.
+/// Which steering key a key is, by the modifiers it is held with: a Return held with a modifier is
+/// another key that passes as typed, an Escape is an Escape whatever is held, and every other key is none.
+/// [LAW:behavior-not-structure] Asked of the key and modifiers a key-down carries, not of how the rule is written.
 @Suite struct SteeringKeyTests {
     struct Held: Sendable, CustomStringConvertible {
         let description: String
@@ -32,14 +33,25 @@ import Testing
         .init(description: "the numeric pad and Option", flags: [.numericPad, .option], anotherKey: true),
     ]
 
-    @Test(arguments: held)
-    func aReturnHeldWithAModifierIsAnotherKey(held: Held) {
-        let key = SteeringKey(command: NSSelectorFromString("insertNewline:"), holding: held.flags)
-        #expect(key == (held.anotherKey ? nil : .return), "\(held)")
+    /// Return and the keypad's Enter, which both send a Return.
+    static let returns: [UInt16] = [UInt16(kVK_Return), UInt16(kVK_ANSI_KeypadEnter)]
+    /// Keys that are no steering key under anything held: a letter, Tab, Delete, and F5, which AppKit
+    /// binds to `complete:` as it binds Option+Escape.
+    static let others: [UInt16] = [UInt16(kVK_ANSI_A), UInt16(kVK_Tab), UInt16(kVK_Delete), UInt16(kVK_F5)]
+
+    @Test(arguments: returns, held)
+    func aReturnHeldWithAModifierIsAnotherKey(keyCode: UInt16, held: Held) {
+        #expect(SteeringKey(keyCode: keyCode, holding: held.flags) == (held.anotherKey ? nil : .return), "\(held)")
     }
 
+    /// Option+Escape included, which AppKit binds to `complete:` rather than `cancelOperation:`.
     @Test(arguments: held)
     func anEscapeIsAnEscapeWhateverIsHeld(held: Held) {
-        #expect(SteeringKey(command: NSSelectorFromString("cancelOperation:"), holding: held.flags) == .escape, "\(held)")
+        #expect(SteeringKey(keyCode: UInt16(kVK_Escape), holding: held.flags) == .escape, "\(held)")
+    }
+
+    @Test(arguments: others, held)
+    func anyOtherKeyIsNoSteeringKey(keyCode: UInt16, held: Held) {
+        #expect(SteeringKey(keyCode: keyCode, holding: held.flags) == nil, "\(keyCode) with \(held)")
     }
 }
