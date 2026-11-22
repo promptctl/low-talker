@@ -97,11 +97,14 @@ public nonisolated extension ContractCase {
         overflowing(.webKitLimitedTextAreaKeepingNone, answers: reads(caret: 0, text: nil), holds: ""),
         overflowing(.webKitLimitedTextAreaBlind, answers: blind, holds: "alpha brav"),
         overflowing(.webKitLimitedTextAreaAnsweringAll, answers: reads(caret: 30, text: "alpha"), holds: "alpha brav"),
-        // bem read no document access where sk9 read it with a real selection, and the text over a
-        // range under document access is unmeasured.
+        // bem read no document access where sk9 read it with a real selection. Under document
+        // access, the input method's log of 2026-11-22 shows its reads blank where its own words
+        // had just gone (low-voice-edit-1jf.jwr).
         typed(into: .iTerm2Blind, answers: blind),
         typed(into: .iTerm2SelectionOnly, answers: Answers(documentAccess: true, selection: NSRange(location: 13, length: 0), text: nil)),
-        typed(into: .iTerm2, answers: reads(caret: 13, text: "alpha")),
+        // Read across the words it was just handed, which its screen shows blank.
+        ContractCase(profile: .iTerm2, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint), reads: NSRange(location: 9, length: 4),
+                     answers: reads(caret: 13, text: "vo  "), holds: "alpha bravo x"),
         // Nobody measured a client giving document access and answering NSNotFound for its selection.
         typed(into: .documentAccessWithoutSelection,
               answers: Answers(documentAccess: true, selection: NSRange(location: NSNotFound, length: NSNotFound), text: nil)),

@@ -30,7 +30,8 @@ import Testing
 
         #expect(field.text == "🫠 hello")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 7, into: cursor.application, landed: "🫠 hello", replaced: 0), seen: Self.seenLine))
-        guard case .committed(7, cursor.application, .fitted([]), 0, _, _, late: false) = did else { Issue.record("\(did)"); return }
+        let filled = NSRange(location: 0, length: "🫠 hello".utf16.count)
+        guard case .committed(7, cursor.application, .read(Commit.Read(filled: filled, replaced: 0, before: .field, rules: [])), _, _, late: false) = did else { Issue.record("\(did)"); return }
     }
 
     private static let atTheSelection = NSRange(location: NSNotFound, length: 0)
@@ -48,7 +49,8 @@ import Testing
         #expect(field.calls.last == .insertText(" Hello there.", replacementRange: Self.atTheSelection))
         #expect(field.text == "Dear Sam. Hello there.")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 13, into: cursor.application, landed: " Hello there.", replaced: 0), seen: Self.seenLine))
-        guard case .committed(13, cursor.application, .fitted([.trimmed, .capitalized, .spacedBefore]), 0, _, _, late: false) = did else {
+        guard case .committed(13, cursor.application, .read(Commit.Read(filled: NSRange(location: 9, length: 13), replaced: 0, before: .field,
+                                                                    rules: [.trimmed, .capitalized, .spacedBefore])), _, _, late: false) = did else {
             Issue.record("\(did)"); return
         }
     }
@@ -67,7 +69,8 @@ import Testing
         #expect(field.calls.last == .insertText("today", replacementRange: Self.atTheSelection))
         #expect(field.text == "Call me today, please")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 5, into: cursor.application, landed: "today", replaced: 8), seen: Self.seenLine))
-        guard case .committed(5, cursor.application, .fitted([.trimmed, .periodDropped]), 8, _, _, late: false) = did else {
+        guard case .committed(5, cursor.application, .read(Commit.Read(filled: NSRange(location: 8, length: 5), replaced: 8, before: .field,
+                                                                   rules: [.trimmed, .periodDropped])), _, _, late: false) = did else {
             Issue.record("\(did)"); return
         }
     }
@@ -85,7 +88,7 @@ import Testing
         #expect(field.calls.last == .insertText(" hello.", replacementRange: Self.atTheSelection))
         #expect(field.text == "say hello.")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 7, into: cursor.application, landed: " hello.", replaced: nil), seen: Self.seenLine))
-        guard case .committed(7, cursor.application, .unfitted(.selectionNotFound), nil, _, _, late: false) = did else {
+        guard case .committed(7, cursor.application, .unreadable(.selectionNotFound), _, _, late: false) = did else {
             Issue.record("\(did)"); return
         }
     }
@@ -103,8 +106,91 @@ import Testing
 
         #expect(field.calls.last == .insertText(" Earlier words", replacementRange: NSRange(location: 5, length: 23)))
         #expect(field.text == "Done. Earlier words")
-        guard case .committed(14, cursor.application, .fitted([.trimmed, .capitalized, .spacedBefore]), 23, _, _, late: false) = did else {
+        guard case .committed(14, cursor.application, .read(Commit.Read(filled: NSRange(location: 5, length: 14), replaced: 23, before: .field,
+                                                                    rules: [.trimmed, .capitalized, .spacedBefore])), _, _, late: false) = did else {
             Issue.record("\(did)"); return
+        }
+    }
+
+    /// Each of `requests` placed through `cursor` in turn, as a press's commits, or successive
+    /// presses', reach it.
+    @MainActor
+    private static func place(_ requests: [InsertRequest], into cursor: Client) -> [Ended.Did] {
+        requests.map { Committer.place($0, turn: Turn(), inFront: { InFront.seen(.success(cursor)) }) }
+    }
+
+    /// Where the text before a commit's words was taken from, or nil for anything but a commit
+    /// into a field that was read.
+    private static func before(_ did: Ended.Did) -> Commit.Before? {
+        guard case .committed(_, _, .read(let read), _, _, _) = did else { return nil }
+        return read.before
+    }
+
+    private static let readToTheField = ClientProfile.all.filter { $0.access == .toTheField }
+
+    /// Words continued from the caret the cursor's last commit left are spaced from its words, and
+    /// not capitalized mid-sentence, whether the field reads them back or, as iTerm2 does, reads
+    /// blanks where they went: within one dictation, and in the next one begun there.
+    @MainActor
+    @Test(arguments: readToTheField, [Destination.app("com.example.editor"), .cursorInFront])
+    func wordsContinuedFromTheLastCommitAreSpacedFromItsWords(_ profile: ClientProfile, next: Destination) throws {
+        let field = FakeTextInputClient(profile, holding: "Dear Sam.")
+        let cursor = try field.cursor()
+
+        let did = Self.place([InsertRequest(" hello", into: .cursorInFront), InsertRequest(" there", into: next)], into: cursor)
+
+        #expect(field.text == "Dear Sam. Hello there")
+        #expect(did.map(Self.before) == [.field, .lastCommit(NSRange(location: 9, length: 6))])
+    }
+
+    /// The last commit's own sentence end starts a sentence, so the words after it are capitalized
+    /// wherever the field reads blank.
+    @MainActor
+    @Test(arguments: readToTheField)
+    func aCapitalStillComesAfterTheLastCommitsSentenceEnd(_ profile: ClientProfile) throws {
+        let field = FakeTextInputClient(profile, holding: "Dear Sam.")
+        let cursor = try field.cursor()
+
+        _ = Self.place([InsertRequest(" hello there.", into: .cursorInFront), InsertRequest(" how are you", into: .app(cursor.application))],
+                       into: cursor)
+
+        #expect(field.text == "Dear Sam. Hello there. How are you")
+    }
+
+    /// Once the person moves the caret off where the last commit left it, the field decides: the
+    /// words are fitted to the text at the new caret, here the field's start.
+    @MainActor
+    @Test func aMovedCaretIsFittedToTheTextAtIt() throws {
+        let field = FakeTextInputClient(holding: "Dear Sam.")
+        let cursor = try field.cursor()
+        _ = Self.place([InsertRequest(" hello", into: .cursorInFront)], into: cursor)
+        field.select(NSRange(location: 0, length: 0))
+
+        let did = Self.place([InsertRequest(" my", into: .app(cursor.application))], into: cursor)
+
+        #expect(field.text == "My Dear Sam. Hello")
+        #expect(did.map(Self.before) == [.field])
+    }
+
+    /// A take-back is proved against what the field reads, at the caret the last commit left as
+    /// anywhere: iTerm2, reading blanks where the words went, refuses it and keeps them, and a
+    /// field that reads them back has them taken out.
+    @MainActor
+    @Test(arguments: [ClientProfile.iTerm2, .appKit])
+    func aTakeBackIsProvedAgainstWhatTheFieldReads(_ profile: ClientProfile) throws {
+        let field = FakeTextInputClient(profile, holding: "say")
+        let cursor = try field.cursor()
+
+        let did = Self.place([InsertRequest(" hello", into: .cursorInFront), InsertRequest("", into: .app(cursor.application), replacing: "hello")],
+                             into: cursor)
+
+        switch profile.inserted {
+        case .blank:
+            #expect(field.text == "say hello")
+            guard case .refused(.wordsCannotBeTakenBack, _, late: false) = did.last else { Issue.record("\(did)"); return }
+        case .readBack:
+            #expect(field.text == "say ")
+            #expect(did.map(Self.before) == [.field, .field])
         }
     }
 
@@ -227,7 +313,7 @@ import Testing
 
         #expect(answered == .notYetTaken(characters: 7, into: cursor.application, seen: Self.seenLine))
         #expect(field.text == "🫠 hello")
-        guard case .committed(7, cursor.application, _, _, _, _, late: true) = did else { Issue.record("\(did)"); return }
+        guard case .committed(7, cursor.application, _, _, _, late: true) = did else { Issue.record("\(did)"); return }
     }
 
     /// Through the main queue, as the insert port asks: answered in time, the words land in
@@ -248,7 +334,7 @@ import Testing
         #expect(await field.text == "One two three")
         let said = ends.withLock { $0 }
         #expect(said.map(\.insert) == [1, 2, 3])
-        #expect(said.allSatisfy { if case .committed(_, _, _, _, _, _, late: false) = $0.did { true } else { false } })
+        #expect(said.allSatisfy { if case .committed(_, _, _, _, _, late: false) = $0.did { true } else { false } })
     }
 
     /// Through the main queue while something else holds it - another app's stalled commit, or
@@ -401,10 +487,16 @@ import Testing
         #expect(line(.refused(.noTextFieldHasFocus, deciding: .microseconds(1500), late: false)) == main + "refused noClientHasFocus after 1.5 ms deciding")
         #expect(line(.refused(.noTextFieldHasFocus, deciding: .microseconds(1500), late: true))
             == main + "refused noClientHasFocus after 1.5 ms deciding, after the port had answered that the input method is busy")
-        #expect(line(.committed(characters: 7, into: "com.apple.TextEdit", fitting: .fitted([.capitalized, .spacedBefore]), replaced: 5,
+        let fromTheField = Commit.Read(filled: NSRange(location: 3, length: 7), replaced: 5, before: .field, rules: [.capitalized, .spacedBefore])
+        #expect(line(.committed(characters: 7, into: "com.apple.TextEdit", field: .read(fromTheField),
                                 deciding: .milliseconds(2), committing: .milliseconds(12), late: false))
-            == main + "2.0 ms deciding, then 12.0 ms committing 7 characters into com.apple.TextEdit in place of 5 characters, fitted: capitalized, space before")
-        #expect(line(.committed(characters: 7, into: "com.apple.TextEdit", fitting: .unfitted(.noDocumentAccess), replaced: nil,
+            == main + "2.0 ms deciding, then 12.0 ms committing 7 characters into com.apple.TextEdit in place of 5 characters, fitted: capitalized, space before; the text before it from the field")
+        let fromTheLastCommit = Commit.Read(filled: NSRange(location: 15, length: 6), replaced: 0, before: .lastCommit(NSRange(location: 9, length: 6)),
+                                            rules: [])
+        #expect(line(.committed(characters: 6, into: "com.googlecode.iterm2", field: .read(fromTheLastCommit),
+                                deciding: .milliseconds(2), committing: .milliseconds(12), late: false))
+            == main + "2.0 ms deciding, then 12.0 ms committing 6 characters into com.googlecode.iterm2 in place of 0 characters, fitted, unchanged; the text before it from the last commit, its 6 units at {9, 6}")
+        #expect(line(.committed(characters: 7, into: "com.apple.TextEdit", field: .unreadable(.noDocumentAccess),
                                 deciding: .milliseconds(2), committing: .milliseconds(2950), late: true))
             == main + "2.0 ms deciding, then 2950.0 ms committing 7 characters into com.apple.TextEdit, unfitted, because it gives no document access, finishing after the port had answered that they were not yet taken")
     }

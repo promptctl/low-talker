@@ -5,26 +5,12 @@ import Foundation
 /// sentence. One fit for the dictation commit and the marked-text preview alike, so that a final
 /// does not jump from the partials before it.
 ///
-/// [LAW:effects-at-boundaries] Pure: the field was read once, by `FieldReading.read`, and this
-/// decides from that reading alone.
+/// [LAW:effects-at-boundaries] Pure over the text around where it goes, which `Commit` takes from
+/// one reading of the field and the cursor's last commit.
 public nonisolated struct Fitting: Equatable, Sendable {
     public let text: String
-    public let outcome: Outcome
-
-    /// What fitting did, as an event says it: the rules that changed the text, or why the field
-    /// could not be read. No text, which is the person's words.
-    public enum Outcome: Equatable, Sendable, CustomStringConvertible {
-        case fitted(Set<Rule>)
-        case unfitted(Unreadable)
-
-        public var description: String {
-            switch self {
-            case let .fitted(rules) where rules.isEmpty: "fitted, unchanged"
-            case let .fitted(rules): "fitted: \(Rule.allCases.filter(rules.contains).map(\.description).joined(separator: ", "))"
-            case let .unfitted(reason): "unfitted, because \(reason)"
-            }
-        }
-    }
+    /// The rules that changed the text.
+    public let rules: Set<Rule>
 
     /// One change fitting can make, in the order fitting applies them: the edges are trimmed first,
     /// the period goes before the capital is judged, and all of them before the spaces go on.
@@ -141,27 +127,21 @@ public nonisolated struct Fitting: Equatable, Sendable {
         }
     }
 
-    /// `transcript` fitted to the text either side of where it goes. A field that cannot be read
-    /// gets it back verbatim, saying why.
+    /// `transcript` fitted to the text either side of where it goes.
     ///
     /// A rule has fired when it changed the text. The selection is what the transcript replaces,
     /// so it is never looked at.
     ///
     /// [LAW:dataflow-not-control-flow] Every rule runs, in `Rule.allCases` order; the text around
     /// it decides whether one changes anything.
-    public static func fit(_ transcript: String, to reading: FieldReading) -> Fitting {
-        switch reading {
-        case let .unreadable(reason):
-            return Fitting(text: transcript, outcome: .unfitted(reason))
-        case let .readable(context):
-            var (text, fired) = (transcript, Set<Rule>())
-            for rule in Rule.allCases {
-                let changed = rule.apply(to: text, between: context.before, and: context.after)
-                if changed != text { fired.insert(rule) }
-                text = changed
-            }
-            return Fitting(text: text, outcome: .fitted(fired))
+    public static func fit(_ transcript: String, to context: DocumentContext) -> Fitting {
+        var (text, fired) = (transcript, Set<Rule>())
+        for rule in Rule.allCases {
+            let changed = rule.apply(to: text, between: context.before, and: context.after)
+            if changed != text { fired.insert(rule) }
+            text = changed
         }
+        return Fitting(text: text, rules: fired)
     }
 }
 

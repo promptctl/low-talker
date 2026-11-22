@@ -46,16 +46,29 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
         case answersWhatIsThere
     }
 
+    /// What a client with document access answers where the words it took through `insertText`
+    /// went.
+    public enum Inserted: Sendable {
+        /// The words, as the field holds them.
+        case readBack
+        /// One blank per UTF-16 unit, as a terminal reading its screen grid answers before the
+        /// words are drawn there.
+        case blank
+    }
+
     public let description: String
     public let access: Access
     public let overflow: Overflow?
     public let pastTheEnd: PastTheEnd
+    public let inserted: Inserted
 
-    init(_ description: String, access: Access, overflow: Overflow? = nil, pastTheEnd: PastTheEnd = .answersNothing) {
+    init(_ description: String, access: Access, overflow: Overflow? = nil, pastTheEnd: PastTheEnd = .answersNothing,
+         inserted: Inserted = .readBack) {
         self.description = description
         self.access = access
         self.overflow = overflow
         self.pastTheEnd = pastTheEnd
+        self.inserted = inserted
     }
 
     /// TextEdit and Notes: the full tier.
@@ -108,8 +121,13 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
     public static let iTerm2Blind = ClientProfile("iTerm2's terminal giving no document access", access: .none)
     /// As sk9 read it, document access and a real selection, if it says no text is in a range.
     public static let iTerm2SelectionOnly = ClientProfile("iTerm2's terminal giving a selection and no text", access: .selectionOnly)
-    /// As sk9 read it, if it says what is in a range.
-    public static let iTerm2 = ClientProfile("iTerm2's terminal reading as the field", access: .toTheField)
+    /// As sk9 read it, saying what is in a range, which it reads off its screen grid
+    /// (`attributedSubstringForProposedRange:` falling back to `screenTextInNSRange:`,
+    /// `PTYTextView.m`): blank where the words it was just handed went. The input method's log of
+    /// 2026-11-22 shows it so, its commits fitted after blanks where its own last words had gone
+    /// (low-voice-edit-1jf.jwr).
+    public static let iTerm2 = ClientProfile("iTerm2's terminal reading its screen, blank where words just went", access: .toTheField,
+                                             inserted: .blank)
 
     /// Every answer nobody measured, so a behavior run under all of them holds whichever the
     /// client gives.
@@ -131,7 +149,8 @@ public nonisolated struct ClientProfile: Sendable, Equatable, CustomStringConver
 /// [LAW:one-source-of-truth] What the field holds is `text` and `selection`, and `insertText`
 /// really changes them. What each call answers is the profile's reading of that state, never a
 /// canned answer, so a field that keeps less than it was handed, or a client whose reads say
-/// nothing of what is there, is seen by every suite built on this as it is.
+/// nothing of what is there, is seen by every suite built on this as it is. The field and its
+/// reads part in two places only, each one a profile's answer: `shown`, and `unkept`.
 public final class FakeTextInputClient: TextInputClient {
     public let application: String?
     /// How the client answers. Changed where the person moves focus within the client: a page whose
@@ -141,10 +160,13 @@ public final class FakeTextInputClient: TextInputClient {
     public private(set) var text: String
     /// The selection, in UTF-16 units as `NSRange` counts; a caret is a selection of length 0.
     public private(set) var selection: NSRange
+    /// `text` as the reads show it where the profile's inserted words read blank: every unit
+    /// `insertText` put in a blank, and what the field held before untouched. Changed by the same
+    /// replacement as `text`, so the two always count the same units.
+    private var shown: String
     /// What an overflow dropped that the client still answers as there, just after the caret, while
-    /// its profile is the one that answers it; or nil.
-    /// The field and its reads part here and nowhere else; nobody said what such a client does with
-    /// a later selection or insert, so the fake fails the case that makes one.
+    /// its profile is the one that answers it; or nil. Nobody said what such a client does with a
+    /// later selection or insert, so the fake fails the case that makes one.
     private var unkept: String?
     /// The most UTF-16 units the field holds, as an HTML `maxlength` counts them. What an insert past
     /// it keeps is the profile's `overflow`.
@@ -179,6 +201,7 @@ public final class FakeTextInputClient: TextInputClient {
         self.application = application
         self.profile = profile
         self.text = text
+        shown = text
         selection = NSRange(location: text.utf16.count, length: 0)
         self.maxLength = maxLength
         self.caretLine = caretLine
@@ -233,11 +256,15 @@ public final class FakeTextInputClient: TextInputClient {
         }
     }
 
-    /// The field and selection the client's reads answer: what it holds, with any unkept words put
-    /// back at the caret and the caret after them.
+    /// The field and selection the client's reads answer: what it holds, or what it shows, with any
+    /// unkept words put back at the caret and the caret after them.
     private var answered: (field: String, selection: NSRange) {
-        guard let unkept, profile.overflow == .keepsWhatFitsAnsweringAll else { return (text, selection) }
-        return ((text as NSString).replacingCharacters(in: selection, with: unkept),
+        let field = switch profile.inserted {
+        case .readBack: text
+        case .blank: shown
+        }
+        guard let unkept, profile.overflow == .keepsWhatFitsAnsweringAll else { return (field, selection) }
+        return ((field as NSString).replacingCharacters(in: selection, with: unkept),
                 NSRange(location: selection.location + unkept.utf16.count, length: 0))
     }
 
@@ -290,6 +317,7 @@ public final class FakeTextInputClient: TextInputClient {
             }
         }
         text = (text as NSString).replacingCharacters(in: replaced, with: kept)
+        shown = (shown as NSString).replacingCharacters(in: replaced, with: String(repeating: " ", count: kept.utf16.count))
         selection = NSRange(location: replaced.location + kept.utf16.count, length: 0)
         unkept = dropped
     }

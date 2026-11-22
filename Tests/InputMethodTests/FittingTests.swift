@@ -15,9 +15,9 @@ import Testing
 
         var testDescription: String { name }
 
-        var reading: FieldReading {
-            .readable(DocumentContext(selection: NSRange(location: before.utf16.count, length: selected.utf16.count),
-                                      selected: selected, before: before, after: after))
+        var context: DocumentContext {
+            DocumentContext(selection: NSRange(location: before.utf16.count, length: selected.utf16.count), selected: selected, before: before,
+                            after: after)
         }
     }
 
@@ -89,22 +89,7 @@ import Testing
 
     @Test(arguments: cases)
     func aTranscriptIsFittedToTheTextAroundIt(_ fitting: Case) {
-        #expect(Fitting.fit(fitting.transcript, to: fitting.reading) == Fitting(text: fitting.fitted, outcome: .fitted(fitting.rules)))
+        #expect(Fitting.fit(fitting.transcript, to: fitting.context) == Fitting(text: fitting.fitted, rules: fitting.rules))
     }
 
-    /// A field that cannot be read gets the transcript back verbatim, its whitespace included, with
-    /// the client's reason.
-    @Test(arguments: [Unreadable.noDocumentAccess, .selectionNotFound, .impossibleSelection(NSRange(location: -1, length: 0)),
-                      .contradicted(asked: NSRange(location: 0, length: 4), answered: nil)])
-    func anUnreadableFieldGetsTheTranscriptUnchanged(_ reason: Unreadable) {
-        #expect(Fitting.fit(" hello.", to: .unreadable(reason)) == Fitting(text: " hello.", outcome: .unfitted(reason)))
-    }
-
-    /// What the commit's event says: the rules in the order they apply, or the reason.
-    @Test func theOutcomeSaysWhatFittingDid() {
-        #expect(Fitting.Outcome.fitted([.spacedAfter, .periodDropped, .capitalized, .spacedBefore, .trimmed]).description
-            == "fitted: edge whitespace trimmed, closing period dropped, capitalized, space before, space after")
-        #expect(Fitting.Outcome.fitted([]).description == "fitted, unchanged")
-        #expect(Fitting.Outcome.unfitted(.noDocumentAccess).description == "unfitted, because it gives no document access")
-    }
 }

@@ -4,7 +4,8 @@ import Foundation
 ///
 /// [LAW:parse-dont-validate] `read(from:)` checks a client's answers about the text around its
 /// selection. Past it, a `DocumentContext` is text the client said is there, at the place its own
-/// selection puts it, and nothing downstream asks again.
+/// selection puts it, and nothing downstream asks again. `Commit` makes the one other: the field's,
+/// with the input method's last commit standing before the caret it left.
 public nonisolated enum FieldReading: Equatable, Sendable {
     case readable(DocumentContext)
     case unreadable(Unreadable)
