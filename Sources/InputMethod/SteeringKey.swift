@@ -1,11 +1,13 @@
 import AppKit
+import Carbon.HIToolbox
 
 /// The keys that steer dictation: the one place that says which keys those are. Every other key is
 /// declined as it always was.
 ///
 /// [LAW:parse-dont-validate] A key either is one of these, with the proof in the type, or is nil
-/// here and nothing downstream asks again. [LAW:one-source-of-truth] Adding a case is the one
-/// change: the compiler then asks each switch over it what the new key does.
+/// here and nothing downstream asks again. [LAW:one-source-of-truth] `init` is the one map from
+/// a key typed to a case, and the compiler does not check it: a new case needs its key there, and
+/// a test that types it, as well as the switches over it the compiler does ask about.
 public nonisolated enum SteeringKey: Equatable, Sendable, CustomStringConvertible {
     /// Return, or the keypad's Enter, with no modifier.
     case `return`
@@ -22,13 +24,18 @@ public nonisolated enum SteeringKey: Equatable, Sendable, CustomStringConvertibl
         }
     }
 
-    /// The steering key typed, from the command the text input system bound it to and the modifiers
-    /// held with it, or nil for every other key, which is declined as typed. [LAW:single-enforcer]
-    /// The one place a command becomes a steering key; the input method asks here and nowhere else.
-    public init?(command: Selector?, holding modifiers: NSEvent.ModifierFlags) {
-        switch command.map(NSStringFromSelector) {
-        case "insertNewline:" where modifiers.isDisjoint(with: Self.makeAnotherKey): self = .return
-        case "cancelOperation:": self = .escape
+    /// The steering key typed, from the key and the modifiers held with it, or nil for every other
+    /// key, which is declined as typed. [LAW:single-enforcer] The one place a key becomes a steering
+    /// key; the input method asks here and nowhere else.
+    ///
+    /// Known by the key, not the command a key binding names it: AppKit binds Option+Escape to
+    /// `complete:` and a person's own key bindings can bind Escape to anything, and an Escape under
+    /// the chord is still the Escape that cancels the press. So the keys AppKit also binds to
+    /// `cancelOperation:`, Command+Period and Control+[, are other keys, and reach the app as typed.
+    public init?(keyCode: UInt16, holding modifiers: NSEvent.ModifierFlags) {
+        switch (Int(keyCode), modifiers.isDisjoint(with: Self.makeAnotherKey)) {
+        case (kVK_Return, true), (kVK_ANSI_KeypadEnter, true): self = .return
+        case (kVK_Escape, _): self = .escape
         default: return nil
         }
     }

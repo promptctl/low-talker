@@ -3,7 +3,7 @@ import Insertion
 import InputMethodKit
 
 /// The controller macOS gives each client to while this input method is the selected source,
-/// which declines every key it is offered but a bare Return and an Escape, and holds those only
+/// which declines every key it is offered but a bare Return, the keypad's Enter and an Escape, and holds those only
 /// against words the app owes.
 ///
 /// An input method sits between the keyboard and whatever the person is typing into, so the
@@ -12,16 +12,17 @@ import InputMethodKit
 /// have seen under the person's own layout, dead keys and shortcuts included, because the text
 /// input system delivers them itself once the controller says it did not.
 ///
-/// The keys it looks at are a Return typed bare and an Escape. Dictation is words on their way to
+/// The keys it looks at are a Return or Enter typed bare and an Escape. Dictation is words on their way to
 /// the cursor, and a Return typed meanwhile would reach the app ahead of them and send the message
 /// without them; the only grant-free way for it to arrive after is this process declining it once
 /// the words are committed, so `SteeringGate` holds it here until the app says they have landed. An
 /// Escape is kept when the app took it, putting its word box away and cancelling the press it
 /// showed in the turn it answered; the words already at the cursor are taken back by the app
 /// afterwards. The verdict is the gate's for either key, and this answers with it, so there is no
-/// key whose answer is a decision made here.
+/// key whose answer is a decision made here. A key is known by the key typed, never by the command
+/// a key binding names it.
 /// [LAW:dataflow-not-control-flow] A swallowed key is invisible - the person sees a Return that did
-/// nothing - so every one the gate keeps is on the command's record, with the gate's reason.
+/// nothing - so every one the gate keeps is on the key's record, with the gate's reason.
 /// [LAW:no-silent-failure]
 ///
 /// `@objc` with an explicit name because `InputMethodServerControllerClass` in the bundle's
@@ -102,47 +103,36 @@ public final class DictationInputController: IMKInputController, InputController
     private var holding: String { process.focused.holding(self) }
 
     /// The events this controller is handed: key-downs (0x400, the value `super` returned on
-    /// studious, 2026-09-27), which the text input system binds to actions for `didCommand`. The app
-    /// hears the modifier keys itself. [LAW:dataflow-not-control-flow]
+    /// studious, 2026-09-27), each to `handle`. The app hears the modifier keys itself.
+    /// [LAW:dataflow-not-control-flow]
     nonisolated override public func recognizedEvents(_: Any!) -> Int {
         Int(NSEvent.EventTypeMask.keyDown.rawValue)
     }
 
-    /// The key-binding style: the text input system binds each key-down to an action and asks here
-    /// for that action. Return is bound to `insertNewline:`, which is held for the words the app owes
-    /// and kept when the gate keeps it. Escape is bound to `cancelOperation:`, and is kept when the
-    /// app took it to put its word box away and cancel the press it showed. Every other action is declined.
+    /// The event style: IMK hands each key-down here, and this is the only key callback. IMK
+    /// delivers keys to an input method in one of three ways, by the methods it implements:
+    /// `handle(_:client:)` for the event, `inputText(_:key:modifiers:client:)` for text with its key,
+    /// or key binding (`inputText(_:client:)` and `didCommand(by:client:)`) for the action a key is
+    /// bound to (Apple's IMKServerInput reference). The event is the one that carries all a steering
+    /// key is decided by: the key (`SteeringKey` says why the key and not its binding), the moment it
+    /// went down, and whether it is a press or the key's repeat. A bare Return is held for the words
+    /// the app owes and kept when the gate keeps it; an Escape is kept when the app took it to put
+    /// its word box away and cancel the press it showed. Every other key is declined.
     ///
-    /// Overridden with an optional selector, as IMK may call with none.
-    nonisolated override public func didCommand(by selector: Selector!, client _: Any!) -> Bool {
-        // IMK hands the command while the key is still down, so the modifiers held as it arrives are
-        // the key's own. Read before the hop, which can wait out a Return the main thread is holding,
-        // and handed on as a value: a read of the window server's modifier state, not a call on the
-        // client, so off the main actor is where it belongs. The moment IMK handed it over is read beside
-        // them, the moment the app's questions are asked about. [LAW:effects-at-boundaries]
-        didCommand(by: selector, holding: NSEvent.modifierFlags, typedAt: ProcessInfo.processInfo.systemUptime)
+    /// Overridden with an optional event, as IMK also calls with none (low-input-method-8vv: the call
+    /// after an activate trapped on the implicitly unwrapped event the inherited signature has).
+    nonisolated override public func handle(_ event: NSEvent?, client _: Any?) -> Bool {
+        entered(Handed(event)) { handed in self.answer(handed) }
     }
 
-    /// The answer to the command `selector`, bound to a key typed with `modifiers` held at
-    /// `typedAt` (system uptime).
-    nonisolated public func didCommand(by selector: Selector?, holding modifiers: NSEvent.ModifierFlags,
-                                       typedAt timestamp: TimeInterval) -> Bool {
-        entered((selector: selector, modifiers: modifiers, timestamp: timestamp)) { command in
-            self.process.focused.typedInto(self)
-            let named = command.selector.map(NSStringFromSelector) ?? "no command"
-            let steered = SteeringKey(command: command.selector, holding: command.modifiers).map { key in
-                ControllerRecord.Steered(key: key, decision: self.process.steering.decide(key, typedAt: command.timestamp))
-            }
-            return (steered?.decision.verdict == .keep, .command(named, steered: steered, holding: self.holding))
-        }
-    }
-
-    /// A key typed as text, which is declined, so it reaches the app as the person typed it.
-    /// Entered on the main actor like every callback, to say which client the key went to.
-    nonisolated override public func inputText(_: String!, client _: Any!) -> Bool {
-        entered(()) {
-            self.process.focused.typedInto(self)
-            return (false, .declinedText(holding: self.holding))
+    private func answer(_ handed: Handed) -> (Bool, ControllerRecord.Decision) {
+        switch handed {
+        case .noEvent: return (false, .handedNoEvent(holding: holding))
+        case .noKey: return (false, .handedNoKey(holding: holding))
+        case let .key(key):
+            process.focused.typedInto(self)
+            let steered = process.steering.decide(key)
+            return (steered?.decision.verdict == .keep, .key(steered: steered, holding: holding))
         }
     }
 

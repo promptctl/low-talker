@@ -27,21 +27,23 @@ import Testing
     /// [LAW:no-ambient-temporal-coupling] A floor is the one timing claim a loaded machine
     /// cannot break. A stall, a busy scheduler, a slow disk can each only push the tick
     /// *later*, and what is asserted is that it did not come *sooner* - which is why the
-    /// clock is read before the change, where every hazard that follows lands inside the
-    /// measured span instead of shortening it.
+    /// clock is read before the directory and its stream are made, where every hazard that
+    /// follows lands inside the measured span instead of shortening it. Read after them, the
+    /// span missed the directory's own creation and the stream's start, either of which can
+    /// open the window the latency is counted from: a tick 39 ms after the write.
     ///
     /// Half the latency and not all of it, so that a coalescing timer firing a hair early
     /// is not a failure. Measured: the flag put back lands the tick in 5 ms and off again
     /// in 105 ms, so neither margin is near the half.
     @Test(.timeLimit(.minutes(1)))
     func aChangeIsNotReportedBeforeTheLatencyHasRun() async throws {
+        let before = ContinuousClock.now
         let directory = URL(filePath: NSTemporaryDirectory())
             .appending(path: "low-talker-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
         var ticks = DirectoryChanges.ticks(under: directory).makeAsyncIterator()
-        let before = ContinuousClock.now
         try "a change".write(to: directory.appending(path: "note.txt"), atomically: true, encoding: .utf8)
 
         try #require(await ticks.next())
