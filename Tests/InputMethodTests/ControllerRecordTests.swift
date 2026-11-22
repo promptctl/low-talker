@@ -68,9 +68,7 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
     /// A key that is no steering key is declined, and the record says so and nothing of the key: not
     /// what it types, which a record never holds.
     @Test(.timeLimit(.minutes(1))) func aKeyThatIsNoSteeringKeyIsDeclinedAndNotRecorded() async throws {
-        let secret = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 1, windowNumber: 0,
-                                                   context: nil, characters: "secret", charactersIgnoringModifiers: "secret",
-                                                   isARepeat: false, keyCode: UInt16(kVK_ANSI_S)))
+        let secret = Keys.down(kVK_ANSI_S, typing: "secret")
         let said = try await events(of: { AssembledProcess().controller() }) { controller in
             #expect(controller.handle(secret, client: nil) == false)
         }
@@ -79,13 +77,18 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
         #expect(!said.map { ControllerRecord(controller: 0xab, event: $0).rendering.line }.joined().contains("secret"))
     }
 
-    /// A call with no key, which IMK makes after an activate, is declined, and the record says so.
-    @Test(.timeLimit(.minutes(1))) func aCallWithNoKeySaysSo() async throws {
+    /// A call with no event, which IMK makes after an activate, and one with an event that is no key are
+    /// declined, and each record says which arrived.
+    @Test(.timeLimit(.minutes(1))) func aCallWithNoKeySaysWhatItWasHanded() async throws {
+        let click = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 1,
+                                                    windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         let said = try await events(of: { AssembledProcess().controller() }) { controller in
             #expect(controller.handle(nil, client: nil) == false)
+            #expect(controller.handle(click, client: nil) == false)
         }
-        try #require(said.count == 3)
-        #expect(said[1] == .callback(.inline, .handedNoKey(holding: "holding no client")))
+        try #require(said.count == 4)
+        #expect(said[1] == .callback(.inline, .handedNoEvent(holding: "holding no client")))
+        #expect(said[2] == .callback(.inline, .handedNoKey(holding: "holding no client")))
     }
 }
 
@@ -109,10 +112,16 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
     @Test func aKeyNothingHeldIsSaidAtDebug() {
         #expect(ControllerRecord(controller: 0xab, event: .callback(.inline, .key(steered: nil, holding: "holding no client"))).rendering
             == (.debug, "controller 0xab was handed a key, not a steering key, holding no client; reached the main actor \(Hop.inline)"))
-        #expect(ControllerRecord(controller: 0xab, event: .callback(.inline, .handedNoKey(holding: "holding no client"))).rendering
-            == (.debug, "controller 0xab was handed no key, holding no client; reached the main actor \(Hop.inline)"))
+        #expect(ControllerRecord(controller: 0xab, event: .callback(.inline, .handedNoEvent(holding: "holding no client"))).rendering
+            == (.debug, "controller 0xab was handed no event, holding no client; reached the main actor \(Hop.inline)"))
         let routine = ControllerRecord(controller: 0xab, event: .callback(.inline, .key(steered: Self.routineReturn, holding: "holding no client")))
         #expect(routine.rendering == (.debug, "controller 0xab was handed a steering key, Return, that passes: the app owes nothing, holding no client; reached the main actor \(Hop.inline)"))
+    }
+
+    /// An event nothing asked for is said where the log keeps it.
+    @Test func anEventThatIsNoKeyIsSaidAtTheDefaultLevel() {
+        #expect(ControllerRecord(controller: 0xab, event: .callback(.inline, .handedNoKey(holding: "holding no client"))).rendering
+            == (.default, "controller 0xab was handed an event that is no key-down, holding no client; reached the main actor \(Hop.inline)"))
     }
 
     /// A Return the gate kept is what a person asks the log about, so it is kept by the log, with

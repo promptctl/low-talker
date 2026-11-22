@@ -27,7 +27,10 @@ public nonisolated struct ControllerRecord: Equatable, Sendable {
         /// `handle` with a key: the gate's decision when it was a steering key; any other key is
         /// declined. Which key it was is never recorded, as it names what was typed.
         case key(steered: Steered?, holding: String)
-        /// `handle` with no event, or one that is no key, declined.
+        /// `handle` with no event, as IMK calls it after an activate, declined.
+        case handedNoEvent(holding: String)
+        /// `handle` with an event that is no key-down, which `recognizedEvents` asks for none of,
+        /// declined.
         case handedNoKey(holding: String)
         /// `activateServer` with a client a cursor was made of, which `holding` names.
         case activated(holding: String)
@@ -67,7 +70,9 @@ nonisolated extension ControllerRecord.Decision {
     var isRoutineKey: Bool {
         switch self {
         case let .key(steered, _): steered?.decision.routine ?? true
-        case .handedNoKey: true
+        case .handedNoEvent: true
+        // [LAW:nothing-unseen] An event nothing asked for is said where the log keeps it.
+        case .handedNoKey: false
         case .activated, .activatedWithoutUsableClient, .overMemoryCeiling, .deactivated: false
         }
     }
@@ -77,8 +82,10 @@ nonisolated extension ControllerRecord.Decision {
         case let .key(steered, holding):
             controllerLine(controller: controller, "was handed "
                 + (steered.map { "a steering key, \($0.key), that \($0.decision)" } ?? "a key, not a steering key"), client: holding)
+        case let .handedNoEvent(holding):
+            controllerLine(controller: controller, "was handed no event", client: holding)
         case let .handedNoKey(holding):
-            controllerLine(controller: controller, "was handed no key", client: holding)
+            controllerLine(controller: controller, "was handed an event that is no key-down", client: holding)
         case let .activated(holding):
             controllerLine(controller: controller, "activated", client: holding)
         case let .activatedWithoutUsableClient(holding):

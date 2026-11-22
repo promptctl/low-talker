@@ -17,12 +17,6 @@ import Testing
 /// On the main actor because the controller is an `IMKInputController`, which is built and answered there.
 /// Each case builds its controller in a process of its own, whose gate asks what the case gave it.
 @Suite @MainActor struct DictationInputControllerTests {
-    /// The key-down a key makes with `modifiers` held, as IMK hands it to `handle`.
-    nonisolated static func keyDown(_ keyCode: Int, holding modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 1, windowNumber: 0, context: nil,
-                         characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(keyCode))!
-    }
-
     /// A controller of a process whose gate asks `app`, and the process.
     private func controller(asking app: FakeApp = FakeApp()) -> (DictationInputController, AssembledProcess) {
         let assembled = AssembledProcess(asking: app)
@@ -34,7 +28,7 @@ import Testing
     private func answer(_ keyCode: Int, holding modifiers: NSEvent.ModifierFlags = [],
                         asking app: FakeApp) -> (kept: Bool, beeps: Int) {
         let (controller, assembled) = controller(asking: app)
-        let kept = controller.handle(Self.keyDown(keyCode, holding: modifiers), client: nil)
+        let kept = controller.handle(Keys.down(keyCode, holding: modifiers), client: nil)
         return (kept, assembled.beeps)
     }
 
@@ -44,45 +38,33 @@ import Testing
         #expect(controller.recognizedEvents(nil) == 0x400)
     }
 
-    /// What an Escape is typed with. Option first: it is the chord's modifier, so the Escape a person
-    /// types mid-press, and AppKit binds Option+Escape to `complete:`, not `cancelOperation:`.
-    nonisolated static let escapeHeld: [UInt] = [
-        NSEvent.ModifierFlags.option.rawValue,
-        0x80140, // Right Option, the default chord, as a real event carries it
-        0, NSEvent.ModifierFlags.shift.rawValue, NSEvent.ModifierFlags.control.rawValue,
-        NSEvent.ModifierFlags.command.rawValue, NSEvent.ModifierFlags.function.rawValue,
-    ]
-
-    /// An Escape passes when the app had no word box to put away with it.
-    @Test(arguments: escapeHeld)
-    func escapePassesWhenNoBoxWasShown(held: UInt) {
-        let answered = answer(kVK_Escape, holding: .init(rawValue: held), asking: FakeApp(dismissing: { .success(.nothingShown) }))
+    /// An Escape passes when the app had no word box to put away with it, whatever is held.
+    @Test(arguments: Keys.held)
+    func escapePassesWhenNoBoxWasShown(held: Keys.Held) {
+        let answered = answer(kVK_Escape, holding: held.flags, asking: FakeApp(dismissing: { .success(.nothingShown) }))
         #expect(answered.kept == false)
         #expect(answered.beeps == 0)
     }
 
-    /// An Escape is kept, silently, when the app put its word box away with it, whatever is held.
-    @Test(arguments: escapeHeld)
-    func escapeIsKeptWhenTheAppDismissedTheBox(held: UInt) {
-        let answered = answer(kVK_Escape, holding: .init(rawValue: held), asking: FakeApp(dismissing: { .success(.dismissed) }))
+    /// An Escape is kept, silently, when the app put its word box away with it, whatever is held:
+    /// Option, the chord's modifier, among them.
+    @Test(arguments: Keys.held)
+    func escapeIsKeptWhenTheAppDismissedTheBox(held: Keys.Held) {
+        let answered = answer(kVK_Escape, holding: held.flags, asking: FakeApp(dismissing: { .success(.dismissed) }))
         #expect(answered.kept == true)
         #expect(answered.beeps == 0)
     }
 
     /// An Escape passes when no app answers, as it does with no app running.
-    @Test(arguments: escapeHeld)
-    func escapePassesWhenNoAppAnswers(held: UInt) {
-        let answered = answer(kVK_Escape, holding: .init(rawValue: held),
-                              asking: FakeApp(dismissing: { .failure(.wire(.nobodyIsListening(port: "port"))) }))
+    @Test(arguments: Keys.held)
+    func escapePassesWhenNoAppAnswers(held: Keys.Held) {
+        let answered = answer(kVK_Escape, holding: held.flags, asking: FakeApp(dismissing: { .failure(.wire(.nobodyIsListening(port: "port"))) }))
         #expect(answered.kept == false)
         #expect(answered.beeps == 0)
     }
 
-    /// Return and the keypad's Enter.
-    nonisolated static let returns = [kVK_Return, kVK_ANSI_KeypadEnter]
-
     /// A Return passes, silently, when the app owes nothing and when the words it owes have landed.
-    @Test(arguments: returns, [Owing.nothing, .words])
+    @Test(arguments: Keys.returns, [Owing.nothing, .words])
     func aReturnPassesWhenNothingIsLeftOwing(keyCode: Int, owing: Owing) {
         let answered = answer(keyCode, asking: FakeApp(owing: { .success(owing) }, settling: { .success(.landed) }))
         #expect(answered.kept == false)
@@ -90,35 +72,40 @@ import Testing
     }
 
     /// A bare Return is kept when the words the app owes did not all reach a cursor, and is heard.
-    @Test(arguments: returns)
+    @Test(arguments: Keys.returns)
     func aReturnIsKeptWhenTheOwedWordsDoNotLand(keyCode: Int) {
         let answered = answer(keyCode, asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
         #expect(answered.kept == true)
         #expect(answered.beeps == 1)
     }
 
-    /// Each modifier that makes a Return another key, named here rather than read from
-    /// `SteeringKey`, so one dropped from its set fails a case instead of removing it.
-    nonisolated static let modifiersThatMakeAnotherKey: [UInt] =
-        [NSEvent.ModifierFlags.shift, .control, .option, .command, .function].map(\.rawValue)
-
     /// A Return typed with a modifier is another key: it passes even when the owed words did not land.
-    @Test(arguments: modifiersThatMakeAnotherKey)
-    func aReturnWithAModifierPassesWhenTheOwedWordsDoNotLand(modifier: UInt) {
-        let answered = answer(kVK_Return, holding: NSEvent.ModifierFlags(rawValue: modifier),
-                              asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
+    @Test(arguments: Keys.held.filter(\.anotherKey))
+    func aReturnWithAModifierPassesWhenTheOwedWordsDoNotLand(held: Keys.Held) {
+        let answered = answer(kVK_Return, holding: held.flags, asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
         #expect(answered.kept == false)
         #expect(answered.beeps == 0)
     }
 
-    /// A key the input method does not decide is declined, so it reaches the app, Option or not; F5 is
-    /// bound to `complete:` as Option+Escape is.
-    @Test(arguments: [kVK_ANSI_A, kVK_Tab, kVK_Delete, kVK_F5], [0, NSEvent.ModifierFlags.option.rawValue])
-    func anOtherKeyIsDeclined(keyCode: Int, held: UInt) {
-        let answered = answer(keyCode, holding: .init(rawValue: held),
-                              asking: FakeApp(owing: { .success(.words) }, dismissing: { .success(.dismissed) }))
-        #expect(answered.kept == false, "key \(keyCode) was claimed")
+    /// A key the input method does not decide is declined, so it reaches the app, whatever is held:
+    /// Command+Period and Control+[ among them.
+    @Test(arguments: Keys.others, Keys.held)
+    func anOtherKeyIsDeclined(keyCode: Int, held: Keys.Held) {
+        let answered = answer(keyCode, holding: held.flags, asking: FakeApp(owing: { .success(.words) }, dismissing: { .success(.dismissed) }))
+        #expect(answered.kept == false, "key \(keyCode) with \(held) was claimed")
         #expect(answered.beeps == 0)
+    }
+
+    /// The app is asked about a key at the moment the key went down, the event's own, which is the
+    /// moment a latched press is ended at.
+    @Test(arguments: [kVK_Escape, kVK_Return])
+    func theAppIsAskedAboutAKeyAtTheMomentItWentDown(keyCode: Int) {
+        let app = FakeApp(owing: { .success(.words) }, settling: { .success(.landed) }, dismissing: { .success(.nothingShown) })
+        let (controller, _) = controller(asking: app)
+        _ = controller.handle(Keys.down(keyCode, at: 4321.5), client: nil)
+        let asked = app.askedAt.withLock { $0 }
+        #expect(!asked.isEmpty)
+        #expect(asked.allSatisfy { $0 == 4321.5 }, "asked at \(asked)")
     }
 
     /// A call carrying no event, which IMK makes after an activate, is declined rather than trapping and
@@ -131,21 +118,27 @@ import Testing
         #expect(controller.handle(click, client: nil) == false)
     }
 
-    /// Every key typed says which client has the keyboard, steering key or not: of two live cursors in one
-    /// app, the one a key is typed into is the one left live. A call with no key says nothing.
+    /// Every key typed says which client has the keyboard, steering key or not: of two cursors in the app
+    /// in front, words are refused until a key is typed into one, and then go to it. A call with no key
+    /// says nothing.
     @Test(arguments: [kVK_ANSI_A, kVK_Escape])
     func aKeyTypedSaysWhichClientHasTheKeyboard(keyCode: Int) {
         let assembled = AssembledProcess(asking: FakeApp(dismissing: { .success(.nothingShown) }))
         let typedInto = assembled.controller(), behind = assembled.controller()
         typedInto.activate(FakeTextInputClient())
         behind.activate(FakeTextInputClient())
+        let cursor = {
+            assembled.process.focused.inFront(for: .cursorInFront, whileInFrontIs: assembled.frontmost,
+                                              selected: assembled.selected, screens: assembled.screens).cursor
+        }
+        #expect(throws: Refusal.cursorIsNotSettled) { try cursor().get() }
 
         _ = typedInto.handle(nil, client: nil)
-        #expect(!assembled.process.focused.holding(behind).hasSuffix(", not live"), "a call with no key moved the keyboard")
+        #expect(throws: Refusal.cursorIsNotSettled, "a call with no key settled the keyboard") { try cursor().get() }
 
-        _ = typedInto.handle(Self.keyDown(keyCode, holding: .option), client: nil)
-        #expect(!assembled.process.focused.holding(typedInto).hasSuffix(", not live"))
-        #expect(assembled.process.focused.holding(behind).hasSuffix(", not live"))
+        _ = typedInto.handle(Keys.down(keyCode, holding: .option), client: nil)
+        #expect(throws: Never.self) { try cursor().get() }
+        withExtendedLifetime(behind) {}
     }
 
     /// A cursor given focus is told to the app, which offers it words no cursor took.

@@ -5,8 +5,9 @@ import Carbon.HIToolbox
 /// declined as it always was.
 ///
 /// [LAW:parse-dont-validate] A key either is one of these, with the proof in the type, or is nil
-/// here and nothing downstream asks again. [LAW:one-source-of-truth] Adding a case is the one
-/// change: the compiler then asks each switch over it what the new key does.
+/// here and nothing downstream asks again. [LAW:one-source-of-truth] A new case is named here
+/// twice: in the key typed that is it, in `init`, and then in each switch over it, which the
+/// compiler asks what the new key does.
 public nonisolated enum SteeringKey: Equatable, Sendable, CustomStringConvertible {
     /// Return, or the keypad's Enter, with no modifier.
     case `return`
@@ -29,13 +30,12 @@ public nonisolated enum SteeringKey: Equatable, Sendable, CustomStringConvertibl
     ///
     /// Known by the key, not the command a key binding names it: AppKit binds Option+Escape to
     /// `complete:` and a person's own key bindings can bind Escape to anything, and an Escape under
-    /// the chord is still the Escape that cancels the press.
+    /// the chord is still the Escape that cancels the press. So the keys AppKit also binds to
+    /// `cancelOperation:`, Command+Period and Control+[, are other keys, and reach the app as typed.
     public init?(keyCode: UInt16, holding modifiers: NSEvent.ModifierFlags) {
-        let bare = modifiers.isDisjoint(with: Self.makeAnotherKey)
-        switch Int(keyCode) {
-        // Each pattern carries its own condition: a `where` binds only to the pattern it follows.
-        case kVK_Return where bare, kVK_ANSI_KeypadEnter where bare: self = .return
-        case kVK_Escape: self = .escape
+        switch (Int(keyCode), modifiers.isDisjoint(with: Self.makeAnotherKey)) {
+        case (kVK_Return, true), (kVK_ANSI_KeypadEnter, true): self = .return
+        case (kVK_Escape, _): self = .escape
         default: return nil
         }
     }

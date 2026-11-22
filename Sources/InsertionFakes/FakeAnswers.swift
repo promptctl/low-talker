@@ -1,5 +1,6 @@
 import Foundation
 import Insertion
+import os
 
 /// The app as the input method's gate asks it, answering each question with what the test gave
 /// it, and with no port and no app. The one `SteeringAsking` fake: `QuestionsContract` holds it
@@ -12,6 +13,8 @@ public struct FakeApp: SteeringAsking {
     public var owing: @Sendable () -> Result<Owing, NotAnswered>
     public var settling: @Sendable () -> Result<Settlement, NotAnswered>
     public var dismissing: @Sendable () -> Result<Dismissal, NotAnswered>
+    /// The moment each question was asked about, in order: the key's, as the gate passes it on.
+    public let askedAt = OSAllocatedUnfairLock(initialState: [TimeInterval]())
 
     public init(
         owing: @escaping @Sendable () -> Result<Owing, NotAnswered> = { .success(.nothing) },
@@ -21,9 +24,14 @@ public struct FakeApp: SteeringAsking {
         (self.owing, self.settling, self.dismissing) = (owing, settling, dismissing)
     }
 
-    public func owed(at _: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { owing() }
-    public func settled(at _: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { settling() }
-    public func dismiss(at _: TimeInterval, within _: Duration) -> Result<Dismissal, NotAnswered> { dismissing() }
+    public func owed(at moment: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { asked(at: moment, owing) }
+    public func settled(at moment: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { asked(at: moment, settling) }
+    public func dismiss(at moment: TimeInterval, within _: Duration) -> Result<Dismissal, NotAnswered> { asked(at: moment, dismissing) }
+
+    private func asked<Answer>(at moment: TimeInterval, _ answer: () -> Answer) -> Answer {
+        askedAt.withLock { $0.append(moment) }
+        return answer()
+    }
 }
 
 /// The right to answer one question, as the app's steering holds it, which hands the answer to the

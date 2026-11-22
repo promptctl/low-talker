@@ -11,7 +11,7 @@ import Testing
     /// on, so a callback can never wait out its own thread.
     @Test(.timeLimit(.minutes(1))) func aCallbackOnTheMainThreadRunsInline() async throws {
         let said = try await events(of: { AssembledProcess().controller() }) { controller in
-            #expect(controller.handle(DictationInputControllerTests.keyDown(kVK_ANSI_A), client: nil) == false)
+            #expect(controller.handle(Keys.down(kVK_ANSI_A), client: nil) == false)
         }
         try #require(said.count == 3)
         #expect(said[1] == .callback(.inline, .key(steered: nil, holding: "holding no client")))
@@ -24,7 +24,7 @@ import Testing
         let said = try await events(of: { AssembledProcess().controller() }) { controller in
             nonisolated(unsafe) let controller = controller
             let answer = await withCheckedContinuation { done in
-                Thread.detachNewThread { done.resume(returning: controller.handle(DictationInputControllerTests.keyDown(kVK_LeftArrow), client: nil)) }
+                Thread.detachNewThread { done.resume(returning: controller.handle(Keys.down(kVK_LeftArrow), client: nil)) }
             }
             #expect(answer == false)
         }

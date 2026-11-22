@@ -3,7 +3,7 @@ import Insertion
 import InputMethodKit
 
 /// The controller macOS gives each client to while this input method is the selected source,
-/// which declines every key it is offered but a bare Return and an Escape, and holds those only
+/// which declines every key it is offered but a bare Return, the keypad's Enter and an Escape, and holds those only
 /// against words the app owes.
 ///
 /// An input method sits between the keyboard and whatever the person is typing into, so the
@@ -12,7 +12,7 @@ import InputMethodKit
 /// have seen under the person's own layout, dead keys and shortcuts included, because the text
 /// input system delivers them itself once the controller says it did not.
 ///
-/// The keys it looks at are a Return typed bare and an Escape. Dictation is words on their way to
+/// The keys it looks at are a Return or Enter typed bare and an Escape. Dictation is words on their way to
 /// the cursor, and a Return typed meanwhile would reach the app ahead of them and send the message
 /// without them; the only grant-free way for it to arrive after is this process declining it once
 /// the words are committed, so `SteeringGate` holds it here until the app says they have landed. An
@@ -22,7 +22,7 @@ import InputMethodKit
 /// key whose answer is a decision made here. A key is known by the key typed, never by the command
 /// a key binding names it.
 /// [LAW:dataflow-not-control-flow] A swallowed key is invisible - the person sees a Return that did
-/// nothing - so every one the gate keeps is on the command's record, with the gate's reason.
+/// nothing - so every one the gate keeps is on the key's record, with the gate's reason.
 /// [LAW:no-silent-failure]
 ///
 /// `@objc` with an explicit name because `InputMethodServerControllerClass` in the bundle's
@@ -110,27 +110,31 @@ public final class DictationInputController: IMKInputController, InputController
     }
 
     /// The event style: IMK hands each key-down here, the key with the modifiers held with it, and
-    /// this is the only key callback, as IMK calls only the methods of the one style a controller
-    /// implements. A steering key is known by the key, which a key binding cannot rename: AppKit binds
-    /// Option+Escape to `complete:`, and Option is held for the chord. A bare Return is held for the
-    /// words the app owes and kept when the gate keeps it; an Escape is kept when the app took it to
-    /// put its word box away and cancel the press it showed. Every other key is declined.
+    /// this is the only key callback. IMK delivers keys to an input method in one of three ways, by
+    /// the methods it implements: `handle(_:client:)` for the event, `inputText(_:key:modifiers:client:)`
+    /// for text with its key, or key binding (`inputText(_:client:)` and `didCommand(by:client:)`)
+    /// for the action a key is bound to (Apple's IMKServerInput reference). Only the event has the
+    /// key: AppKit binds Option+Escape to `complete:`, and Option is held for the chord. A bare
+    /// Return is held for the words the app owes and kept when the gate keeps it; an Escape is kept
+    /// when the app took it to put its word box away and cancel the press it showed. Every other key
+    /// is declined.
     ///
     /// Overridden with an optional event, as IMK also calls with none (low-input-method-8vv: the call
     /// after an activate trapped on the implicitly unwrapped event the inherited signature has).
     nonisolated override public func handle(_ event: NSEvent?, client _: Any?) -> Bool {
-        // [LAW:parse-dont-validate] The one place an event becomes a key. Read here, off the main
-        // actor, before the hop, which can wait out a Return the main thread is holding: the event is
-        // a value, and its key, modifiers and moment are the key's own. `keyCode` raises on an event
-        // that is no key, so nothing else is asked of one. [LAW:effects-at-boundaries]
-        guard let event, event.type == .keyDown else {
-            return entered(()) { (false, .handedNoKey(holding: self.holding)) }
-        }
-        let key = (code: event.keyCode, modifiers: event.modifierFlags, timestamp: event.timestamp)
+        // [LAW:parse-dont-validate] The one place an event becomes a key: the steering key it is,
+        // if any, and the moment it went down, read here before the hop, which can wait out a Return
+        // the main thread is holding. Both are read from the event and are the key's own, never the
+        // keyboard's state when the call came; `keyCode` raises on an event that is no key, so
+        // nothing is read from one. Which key it was does not cross, so nothing past here can say
+        // what was typed. [LAW:effects-at-boundaries]
+        guard let event else { return entered(()) { (false, .handedNoEvent(holding: self.holding)) } }
+        guard event.type == .keyDown else { return entered(()) { (false, .handedNoKey(holding: self.holding)) } }
+        let key = (steering: SteeringKey(keyCode: event.keyCode, holding: event.modifierFlags), typedAt: event.timestamp)
         return entered(key) { key in
             self.process.focused.typedInto(self)
-            let steered = SteeringKey(keyCode: key.code, holding: key.modifiers).map { steering in
-                ControllerRecord.Steered(key: steering, decision: self.process.steering.decide(steering, typedAt: key.timestamp))
+            let steered = key.steering.map { steering in
+                ControllerRecord.Steered(key: steering, decision: self.process.steering.decide(steering, typedAt: key.typedAt))
             }
             return (steered?.decision.verdict == .keep, .key(steered: steered, holding: self.holding))
         }
