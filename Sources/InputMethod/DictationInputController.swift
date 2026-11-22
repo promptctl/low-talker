@@ -125,35 +125,15 @@ public final class DictationInputController: IMKInputController, InputController
         entered(Handed(event)) { handed in self.answer(handed) }
     }
 
-    /// The steering key this controller last decided, while it may still repeat: a repeat follows
-    /// the key-down it repeats, with no other key between.
-    private var pressed: ControllerRecord.Steered?
-
     private func answer(_ handed: Handed) -> (Bool, ControllerRecord.Decision) {
         switch handed {
         case .noEvent: return (false, .handedNoEvent(holding: holding))
         case .noKey: return (false, .handedNoKey(holding: holding))
         case let .key(key):
             process.focused.typedInto(self)
-            let steered = key.steering.map { steering in
-                ControllerRecord.Steered(key: steering, decision: decide(steering, typedAt: key.typedAt, repeats: key.repeats))
-            }
-            pressed = steered
+            let steered = process.steering.decide(key)
             return (steered?.decision.verdict == .keep, .key(steered: steered, holding: holding))
         }
-    }
-
-    /// The gate's decision of a press. A held key's repeat takes the verdict of the press it repeats,
-    /// unasked: once an Escape has put the box away, its repeats would otherwise find nothing shown
-    /// and reach the app, where Option+Escape's run `complete:`, and a Return kept for owed words
-    /// would be asked again, and beep, at every repeat. [LAW:one-source-of-truth]
-    private func decide(_ key: SteeringKey, typedAt: TimeInterval, repeats: Bool) -> SteeringDecision {
-        guard repeats, let pressed, pressed.key == key else { return process.steering.decide(key, typedAt: typedAt) }
-        let was = switch pressed.decision.verdict {
-        case .keep: "kept"
-        case .pass: "passed"
-        }
-        return SteeringDecision(verdict: pressed.decision.verdict, because: "it repeats the \(key) before it, which was \(was)", routine: true)
     }
 
     /// The text input system gave this controller's client focus, which is the only way

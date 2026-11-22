@@ -135,16 +135,40 @@ import Testing
         #expect(assembled.beeps == 1)
     }
 
-    /// A repeat whose press this controller did not decide, as when the press went to another client, is
-    /// decided as a press: an Escape repeating after a kept Return, or after another key, is asked about.
-    @Test(arguments: [kVK_Return, kVK_ANSI_A])
-    func aRepeatOfAKeyNotPressedHereIsDecidedAsAPress(before: Int) {
-        let app = FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }, dismissing: { .success(.nothingShown) })
+    /// A held key repeats wherever focus goes: an Escape kept in one client, whose repeats reach
+    /// another, follows its press there, unasked.
+    @Test func aHeldEscapesRepeatsFollowItsPressIntoAnotherClient() {
+        let answers = Mutex([Dismissal.dismissed, .nothingShown])
+        let app = FakeApp(dismissing: { .success(answers.withLock { $0.removeFirst() }) })
+        let assembled = AssembledProcess(asking: app)
+        let pressedIn = assembled.controller(), repeatedIn = assembled.controller()
+        #expect(pressedIn.handle(Keys.down(kVK_Escape, holding: .option), client: nil) == true)
+        #expect(repeatedIn.handle(Keys.down(kVK_Escape, holding: .option, repeating: true), client: nil) == true)
+        #expect(app.askedAt.count == 1, "the repeat was asked about")
+    }
+
+    /// A repeat is said at its press's level, so a kept repeat is on the record as its press is, and
+    /// says it is a repeat.
+    @Test(arguments: [Settlement.landed, .notLanded])
+    func aRepeatIsSaidAtItsPresssLevel(settled: Settlement) throws {
+        let steering = AssembledProcess(asking: FakeApp(owing: { .success(.words) }, settling: { .success(settled) })).process.steering
+        let press = try #require(steering.decide(KeyDown(steering: .return, typedAt: 1, repeats: false)))
+        let repeated = try #require(steering.decide(KeyDown(steering: .return, typedAt: 2, repeats: true)))
+        #expect(repeated.decision.verdict == press.decision.verdict)
+        #expect(repeated.decision.routine == press.decision.routine)
+        #expect(repeated.decision.because.contains("repeats"))
+    }
+
+    /// A repeat after another key went down is no repeat of the steering key pressed before it, and is
+    /// decided as a press: an Escape kept, then a letter or a Return, then an Escape repeat, is asked about.
+    @Test(arguments: [kVK_ANSI_A, kVK_Return])
+    func aRepeatAfterAnotherKeyIsDecidedAsAPress(between: Int) {
+        let answers = Mutex([Dismissal.dismissed, .nothingShown])
+        let app = FakeApp(dismissing: { .success(answers.withLock { $0.removeFirst() }) })
         let (controller, _) = controller(asking: app)
-        _ = controller.handle(Keys.down(before), client: nil)
-        let asked = app.askedAt.count
+        #expect(controller.handle(Keys.down(kVK_Escape), client: nil) == true)
+        _ = controller.handle(Keys.down(between), client: nil)
         #expect(controller.handle(Keys.down(kVK_Escape, repeating: true), client: nil) == false)
-        #expect(app.askedAt.count == asked + 1)
     }
 
     /// A call carrying no event, which IMK makes after an activate, is declined rather than trapping and
