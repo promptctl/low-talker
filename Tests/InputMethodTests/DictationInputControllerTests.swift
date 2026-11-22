@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 import InputMethodFakes
 import Insertion
 import InsertionFakes
+import Synchronization
 import Testing
 
 /// The controller answers the key-downs IMK hands it. Return and Escape are the two it decides: a
@@ -38,27 +39,31 @@ import Testing
         #expect(controller.recognizedEvents(nil) == 0x400)
     }
 
-    /// An Escape passes when the app had no word box to put away with it, whatever is held.
-    @Test(arguments: Keys.held)
-    func escapePassesWhenNoBoxWasShown(held: Keys.Held) {
-        let answered = answer(kVK_Escape, holding: held.flags, asking: FakeApp(dismissing: { .success(.nothingShown) }))
+    /// An Escape bare, and under Option and Right Option, the chord's modifier: `SteeringKeyTests` holds
+    /// every other modifier to the same key.
+    nonisolated static let escapes: [UInt] = [0, NSEvent.ModifierFlags.option.rawValue, 0x80140]
+
+    /// An Escape passes when the app had no word box to put away with it.
+    @Test(arguments: escapes)
+    func escapePassesWhenNoBoxWasShown(held: UInt) {
+        let answered = answer(kVK_Escape, holding: .init(rawValue: held), asking: FakeApp(dismissing: { .success(.nothingShown) }))
         #expect(answered.kept == false)
         #expect(answered.beeps == 0)
     }
 
-    /// An Escape is kept, silently, when the app put its word box away with it, whatever is held:
-    /// Option, the chord's modifier, among them.
-    @Test(arguments: Keys.held)
-    func escapeIsKeptWhenTheAppDismissedTheBox(held: Keys.Held) {
-        let answered = answer(kVK_Escape, holding: held.flags, asking: FakeApp(dismissing: { .success(.dismissed) }))
+    /// An Escape is kept, silently, when the app put its word box away with it.
+    @Test(arguments: escapes)
+    func escapeIsKeptWhenTheAppDismissedTheBox(held: UInt) {
+        let answered = answer(kVK_Escape, holding: .init(rawValue: held), asking: FakeApp(dismissing: { .success(.dismissed) }))
         #expect(answered.kept == true)
         #expect(answered.beeps == 0)
     }
 
     /// An Escape passes when no app answers, as it does with no app running.
-    @Test(arguments: Keys.held)
-    func escapePassesWhenNoAppAnswers(held: Keys.Held) {
-        let answered = answer(kVK_Escape, holding: held.flags, asking: FakeApp(dismissing: { .failure(.wire(.nobodyIsListening(port: "port"))) }))
+    @Test(arguments: escapes)
+    func escapePassesWhenNoAppAnswers(held: UInt) {
+        let answered = answer(kVK_Escape, holding: .init(rawValue: held),
+                              asking: FakeApp(dismissing: { .failure(.wire(.nobodyIsListening(port: "port"))) }))
         #expect(answered.kept == false)
         #expect(answered.beeps == 0)
     }
@@ -79,20 +84,20 @@ import Testing
         #expect(answered.beeps == 1)
     }
 
-    /// A Return typed with a modifier is another key: it passes even when the owed words did not land.
-    @Test(arguments: Keys.held.filter(\.anotherKey))
-    func aReturnWithAModifierPassesWhenTheOwedWordsDoNotLand(held: Keys.Held) {
-        let answered = answer(kVK_Return, holding: held.flags, asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
+    /// A Return typed with Option is another key: it passes even when the owed words did not land.
+    @Test func aReturnWithAModifierPassesWhenTheOwedWordsDoNotLand() {
+        let answered = answer(kVK_Return, holding: .option, asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
         #expect(answered.kept == false)
         #expect(answered.beeps == 0)
     }
 
-    /// A key the input method does not decide is declined, so it reaches the app, whatever is held:
-    /// Command+Period and Control+[ among them.
-    @Test(arguments: Keys.others, Keys.held)
-    func anOtherKeyIsDeclined(keyCode: Int, held: Keys.Held) {
-        let answered = answer(keyCode, holding: held.flags, asking: FakeApp(owing: { .success(.words) }, dismissing: { .success(.dismissed) }))
-        #expect(answered.kept == false, "key \(keyCode) with \(held) was claimed")
+    /// A key the input method does not decide is declined, so it reaches the app: a letter under Option,
+    /// and Command+Period and Control+[, which AppKit binds to `cancelOperation:` as it binds Escape.
+    @Test(arguments: [(kVK_ANSI_A, NSEvent.ModifierFlags.option.rawValue), (kVK_ANSI_Period, NSEvent.ModifierFlags.command.rawValue),
+                      (kVK_ANSI_LeftBracket, NSEvent.ModifierFlags.control.rawValue)])
+    func anOtherKeyIsDeclined(keyCode: Int, held: UInt) {
+        let answered = answer(keyCode, holding: .init(rawValue: held), asking: FakeApp(owing: { .success(.words) }, dismissing: { .success(.dismissed) }))
+        #expect(answered.kept == false, "key \(keyCode) was claimed")
         #expect(answered.beeps == 0)
     }
 
@@ -103,19 +108,51 @@ import Testing
         let app = FakeApp(owing: { .success(.words) }, settling: { .success(.landed) }, dismissing: { .success(.nothingShown) })
         let (controller, _) = controller(asking: app)
         _ = controller.handle(Keys.down(keyCode, at: 4321.5), client: nil)
-        let asked = app.askedAt.withLock { $0 }
-        #expect(!asked.isEmpty)
-        #expect(asked.allSatisfy { $0 == 4321.5 }, "asked at \(asked)")
+        #expect(!app.askedAt.isEmpty)
+        #expect(app.askedAt.allSatisfy { $0 == 4321.5 }, "asked at \(app.askedAt)")
+    }
+
+    /// A held Escape's repeats follow its press, unasked: kept with it once the box is put away, which
+    /// would otherwise find nothing shown and reach the app, and passed with it when there was no box.
+    @Test(arguments: [Dismissal.dismissed, .nothingShown])
+    func aHeldEscapesRepeatsFollowItsPress(first: Dismissal) {
+        let answers = Mutex([first, .nothingShown, .nothingShown])
+        let app = FakeApp(dismissing: { .success(answers.withLock { $0.removeFirst() }) })
+        let (controller, _) = controller(asking: app)
+        let pressed = controller.handle(Keys.down(kVK_Escape, holding: .option), client: nil)
+        let repeats = (0..<2).map { _ in controller.handle(Keys.down(kVK_Escape, holding: .option, repeating: true), client: nil) }
+        #expect(pressed == (first == .dismissed))
+        #expect(repeats == [pressed, pressed])
+        #expect(app.askedAt.count == 1, "the repeats were asked about")
+    }
+
+    /// A held Return kept for owed words stays kept at each repeat, and is heard once.
+    @Test func aHeldReturnsRepeatsFollowItsPressUnheard() {
+        let (controller, assembled) = controller(asking: FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }))
+        let pressed = controller.handle(Keys.down(kVK_Return), client: nil)
+        let repeated = controller.handle(Keys.down(kVK_Return, repeating: true), client: nil)
+        #expect(pressed && repeated)
+        #expect(assembled.beeps == 1)
+    }
+
+    /// A repeat whose press this controller did not decide, as when the press went to another client, is
+    /// decided as a press: an Escape repeating after a kept Return, or after another key, is asked about.
+    @Test(arguments: [kVK_Return, kVK_ANSI_A])
+    func aRepeatOfAKeyNotPressedHereIsDecidedAsAPress(before: Int) {
+        let app = FakeApp(owing: { .success(.words) }, settling: { .success(.notLanded) }, dismissing: { .success(.nothingShown) })
+        let (controller, _) = controller(asking: app)
+        _ = controller.handle(Keys.down(before), client: nil)
+        let asked = app.askedAt.count
+        #expect(controller.handle(Keys.down(kVK_Escape, repeating: true), client: nil) == false)
+        #expect(app.askedAt.count == asked + 1)
     }
 
     /// A call carrying no event, which IMK makes after an activate, is declined rather than trapping and
     /// taking the input method down, and so is an event that is no key.
     @Test func aCallWithNoKeyIsDeclined() throws {
         let controller = try #require(DictationInputController(server: nil, delegate: nil, client: nil))
-        let click = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 1,
-                                                    windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         #expect(controller.handle(nil, client: nil) == false)
-        #expect(controller.handle(click, client: nil) == false)
+        #expect(controller.handle(Keys.click(), client: nil) == false)
     }
 
     /// Every key typed says which client has the keyboard, steering key or not: of two cursors in the app

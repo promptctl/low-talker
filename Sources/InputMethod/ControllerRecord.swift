@@ -24,8 +24,8 @@ public nonisolated struct ControllerRecord: Equatable, Sendable {
     /// exactly one of them, a callback that decided nothing included. Each says the client the
     /// controller holds as `FocusedClient` spells it.
     public enum Decision: Equatable, Sendable {
-        /// `handle` with a key: the gate's decision when it was a steering key; any other key is
-        /// declined. Which key it was is never recorded, as it names what was typed.
+        /// `handle` with a key: the steering key it was and the gate's decision, or that it was
+        /// another key, declined. Another key is never named, as it says what was typed.
         case key(steered: Steered?, holding: String)
         /// `handle` with no event, as IMK calls it after an activate, declined.
         case handedNoEvent(holding: String)

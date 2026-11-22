@@ -109,35 +109,51 @@ public final class DictationInputController: IMKInputController, InputController
         Int(NSEvent.EventTypeMask.keyDown.rawValue)
     }
 
-    /// The event style: IMK hands each key-down here, the key with the modifiers held with it, and
-    /// this is the only key callback. IMK delivers keys to an input method in one of three ways, by
-    /// the methods it implements: `handle(_:client:)` for the event, `inputText(_:key:modifiers:client:)`
-    /// for text with its key, or key binding (`inputText(_:client:)` and `didCommand(by:client:)`)
-    /// for the action a key is bound to (Apple's IMKServerInput reference). Only the event has the
-    /// key: AppKit binds Option+Escape to `complete:`, and Option is held for the chord. A bare
-    /// Return is held for the words the app owes and kept when the gate keeps it; an Escape is kept
-    /// when the app took it to put its word box away and cancel the press it showed. Every other key
-    /// is declined.
+    /// The event style: IMK hands each key-down here, and this is the only key callback. IMK
+    /// delivers keys to an input method in one of three ways, by the methods it implements:
+    /// `handle(_:client:)` for the event, `inputText(_:key:modifiers:client:)` for text with its key,
+    /// or key binding (`inputText(_:client:)` and `didCommand(by:client:)`) for the action a key is
+    /// bound to (Apple's IMKServerInput reference). The event is the one that carries all a steering
+    /// key is decided by: the key (`SteeringKey` says why the key and not its binding), the moment it
+    /// went down, and whether it is a press or the key's repeat. A bare Return is held for the words
+    /// the app owes and kept when the gate keeps it; an Escape is kept when the app took it to put
+    /// its word box away and cancel the press it showed. Every other key is declined.
     ///
     /// Overridden with an optional event, as IMK also calls with none (low-input-method-8vv: the call
     /// after an activate trapped on the implicitly unwrapped event the inherited signature has).
     nonisolated override public func handle(_ event: NSEvent?, client _: Any?) -> Bool {
-        // [LAW:parse-dont-validate] The one place an event becomes a key: the steering key it is,
-        // if any, and the moment it went down, read here before the hop, which can wait out a Return
-        // the main thread is holding. Both are read from the event and are the key's own, never the
-        // keyboard's state when the call came; `keyCode` raises on an event that is no key, so
-        // nothing is read from one. Which key it was does not cross, so nothing past here can say
-        // what was typed. [LAW:effects-at-boundaries]
-        guard let event else { return entered(()) { (false, .handedNoEvent(holding: self.holding)) } }
-        guard event.type == .keyDown else { return entered(()) { (false, .handedNoKey(holding: self.holding)) } }
-        let key = (steering: SteeringKey(keyCode: event.keyCode, holding: event.modifierFlags), typedAt: event.timestamp)
-        return entered(key) { key in
-            self.process.focused.typedInto(self)
+        entered(Handed(event)) { handed in self.answer(handed) }
+    }
+
+    /// The steering key this controller last decided, while it may still repeat: a repeat follows
+    /// the key-down it repeats, with no other key between.
+    private var pressed: ControllerRecord.Steered?
+
+    private func answer(_ handed: Handed) -> (Bool, ControllerRecord.Decision) {
+        switch handed {
+        case .noEvent: return (false, .handedNoEvent(holding: holding))
+        case .noKey: return (false, .handedNoKey(holding: holding))
+        case let .key(key):
+            process.focused.typedInto(self)
             let steered = key.steering.map { steering in
-                ControllerRecord.Steered(key: steering, decision: self.process.steering.decide(steering, typedAt: key.typedAt))
+                ControllerRecord.Steered(key: steering, decision: decide(steering, typedAt: key.typedAt, repeats: key.repeats))
             }
-            return (steered?.decision.verdict == .keep, .key(steered: steered, holding: self.holding))
+            pressed = steered
+            return (steered?.decision.verdict == .keep, .key(steered: steered, holding: holding))
         }
+    }
+
+    /// The gate's decision of a press. A held key's repeat takes the verdict of the press it repeats,
+    /// unasked: once an Escape has put the box away, its repeats would otherwise find nothing shown
+    /// and reach the app, where Option+Escape's run `complete:`, and a Return kept for owed words
+    /// would be asked again, and beep, at every repeat. [LAW:one-source-of-truth]
+    private func decide(_ key: SteeringKey, typedAt: TimeInterval, repeats: Bool) -> SteeringDecision {
+        guard repeats, let pressed, pressed.key == key else { return process.steering.decide(key, typedAt: typedAt) }
+        let was = switch pressed.decision.verdict {
+        case .keep: "kept"
+        case .pass: "passed"
+        }
+        return SteeringDecision(verdict: pressed.decision.verdict, because: "it repeats the \(key) before it, which was \(was)", routine: true)
     }
 
     /// The text input system gave this controller's client focus, which is the only way

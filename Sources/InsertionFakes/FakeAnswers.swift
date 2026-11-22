@@ -1,6 +1,6 @@
 import Foundation
 import Insertion
-import os
+import Synchronization
 
 /// The app as the input method's gate asks it, answering each question with what the test gave
 /// it, and with no port and no app. The one `SteeringAsking` fake: `QuestionsContract` holds it
@@ -9,12 +9,14 @@ import os
 ///
 /// An app that is asked nothing in particular owes nothing, has settled, and has no box to dismiss,
 /// which is the app on any key typed while no one is dictating.
-public struct FakeApp: SteeringAsking {
-    public var owing: @Sendable () -> Result<Owing, NotAnswered>
-    public var settling: @Sendable () -> Result<Settlement, NotAnswered>
-    public var dismissing: @Sendable () -> Result<Dismissal, NotAnswered>
+public final class FakeApp: SteeringAsking, Sendable {
+    private let owing: @Sendable () -> Result<Owing, NotAnswered>
+    private let settling: @Sendable () -> Result<Settlement, NotAnswered>
+    private let dismissing: @Sendable () -> Result<Dismissal, NotAnswered>
+    private let asked = Mutex([TimeInterval]())
+
     /// The moment each question was asked about, in order: the key's, as the gate passes it on.
-    public let askedAt = OSAllocatedUnfairLock(initialState: [TimeInterval]())
+    public var askedAt: [TimeInterval] { asked.withLock { $0 } }
 
     public init(
         owing: @escaping @Sendable () -> Result<Owing, NotAnswered> = { .success(.nothing) },
@@ -24,13 +26,13 @@ public struct FakeApp: SteeringAsking {
         (self.owing, self.settling, self.dismissing) = (owing, settling, dismissing)
     }
 
-    public func owed(at moment: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { asked(at: moment, owing) }
-    public func settled(at moment: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { asked(at: moment, settling) }
-    public func dismiss(at moment: TimeInterval, within _: Duration) -> Result<Dismissal, NotAnswered> { asked(at: moment, dismissing) }
+    public func owed(at moment: TimeInterval, within _: Duration) -> Result<Owing, NotAnswered> { answer(at: moment, owing) }
+    public func settled(at moment: TimeInterval, within _: Duration) -> Result<Settlement, NotAnswered> { answer(at: moment, settling) }
+    public func dismiss(at moment: TimeInterval, within _: Duration) -> Result<Dismissal, NotAnswered> { answer(at: moment, dismissing) }
 
-    private func asked<Answer>(at moment: TimeInterval, _ answer: () -> Answer) -> Answer {
-        askedAt.withLock { $0.append(moment) }
-        return answer()
+    private func answer<Answer>(at moment: TimeInterval, _ answering: () -> Answer) -> Answer {
+        asked.withLock { $0.append(moment) }
+        return answering()
     }
 }
 

@@ -23,7 +23,7 @@ enum Keys {
         // and a Return under the Fn chord is the chord's.
         .init(description: "Shift", flags: [.shift], anotherKey: true),
         .init(description: "Control", flags: [.control], anotherKey: true),
-        // Option is the chord's modifier, and AppKit binds Option+Escape to `complete:`.
+        // Option is the chord's modifier.
         .init(description: "Option", flags: [.option], anotherKey: true),
         .init(description: "Right Option, the default chord, device bits included", flags: NSEvent.ModifierFlags(rawValue: 0x80140), anotherKey: true),
         .init(description: "Command", flags: [.command], anotherKey: true),
@@ -39,11 +39,18 @@ enum Keys {
     /// binds to `cancelOperation:` as it binds Escape.
     static let others = [kVK_ANSI_A, kVK_Tab, kVK_Delete, kVK_F5, kVK_ANSI_Period, kVK_ANSI_LeftBracket]
 
-    /// The key-down `keyCode` makes with `modifiers` held, at `timestamp`, typing `characters`.
+    /// The key-down `keyCode` makes with `modifiers` held, at `timestamp`, typing `characters`: a press,
+    /// or the key's auto-repeat while it is held.
     static func down(_ keyCode: Int, holding modifiers: NSEvent.ModifierFlags = [], at timestamp: TimeInterval = 1,
-                     typing characters: String = "") -> NSEvent {
+                     typing characters: String = "", repeating: Bool = false) -> NSEvent {
         NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: timestamp, windowNumber: 0,
-                         context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
+                         context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: repeating,
                          keyCode: UInt16(keyCode))!
+    }
+
+    /// A click, an event that is no key.
+    static func click() -> NSEvent {
+        NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 1, windowNumber: 0,
+                           context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
     }
 }

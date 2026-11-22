@@ -80,11 +80,9 @@ func events(of make: () -> DictationInputController?, _ drive: (DictationInputCo
     /// A call with no event, which IMK makes after an activate, and one with an event that is no key are
     /// declined, and each record says which arrived.
     @Test(.timeLimit(.minutes(1))) func aCallWithNoKeySaysWhatItWasHanded() async throws {
-        let click = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 1,
-                                                    windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         let said = try await events(of: { AssembledProcess().controller() }) { controller in
             #expect(controller.handle(nil, client: nil) == false)
-            #expect(controller.handle(click, client: nil) == false)
+            #expect(controller.handle(Keys.click(), client: nil) == false)
         }
         try #require(said.count == 4)
         #expect(said[1] == .callback(.inline, .handedNoEvent(holding: "holding no client")))

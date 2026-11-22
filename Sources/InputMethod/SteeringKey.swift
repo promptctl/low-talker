@@ -5,9 +5,9 @@ import Carbon.HIToolbox
 /// declined as it always was.
 ///
 /// [LAW:parse-dont-validate] A key either is one of these, with the proof in the type, or is nil
-/// here and nothing downstream asks again. [LAW:one-source-of-truth] A new case is named here
-/// twice: in the key typed that is it, in `init`, and then in each switch over it, which the
-/// compiler asks what the new key does.
+/// here and nothing downstream asks again. [LAW:one-source-of-truth] `init` is the one map from
+/// a key typed to a case, and the compiler does not check it: a new case needs its key there, and
+/// a test that types it, as well as the switches over it the compiler does ask about.
 public nonisolated enum SteeringKey: Equatable, Sendable, CustomStringConvertible {
     /// Return, or the keypad's Enter, with no modifier.
     case `return`
