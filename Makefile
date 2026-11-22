@@ -136,8 +136,9 @@ variants:
 # would be doing it underneath any build already running in this tree.
 # [LAW:effects-at-boundaries] Unconditional and idempotent, for the reason given above
 # `build_app`, and it is the same command. The script tests read what it writes too
-# (`test_variant` signs App/Generated's entitlements), so they run here, in the suite, and not
-# in `check-licenses`, which `scripts/sign-release` runs on a tree nothing has generated.
+# (`test_variant` signs App/Generated's entitlements), so they run after it, and before
+# `check-licenses`, since they hold its gates' own tests: a gate that passes everything looks
+# exactly like a clean tree.
 test: signing-identity
 	xcodegen generate
 	swift test
@@ -200,9 +201,8 @@ check-sbom: sbom
 # Refuses a pull request that ships a component under a license we have not accepted, or
 # one whose license nobody identified. It reads the committed SBOM, which `check-sbom` has
 # just held to the build, so a dependency cannot reach the tree without passing it. The
-# gate's own tests run before it, in `make test`: a gate that passes everything looks exactly
-# like a clean tree. The notices are written as the app build writes them, so an SBOM they
-# cannot be made from fails here, on the pull request, and not in the next release's build.
+# notices are written as the app build writes them, so an SBOM they cannot be made from
+# fails here, on the pull request, and not in the next release's build.
 check-licenses: check-sbom
 	scripts/check-licenses sbom/lowtalker.cdx.json
 	scripts/notices sbom/lowtalker.cdx.json .build/notices.txt

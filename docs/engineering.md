@@ -301,7 +301,7 @@ Every build is signed without `get-task-allow`, which Xcode would otherwise add 
 
     NOTARY_PROFILE=<profile> scripts/release dist ~/Library/Application\ Support/low-talker/hub   # dist/LowTalker-offline.pkg, dist/LowTalker-network.pkg
 
-`scripts/release` is the whole release: the suite, then two scripts run in order, each of which also runs alone:
+`scripts/release` is the whole release, ending in two scripts run in order, each of which also runs alone:
 
     scripts/sign-release dist ~/Library/Application\ Support/low-talker/hub   # both packages, Developer ID signed
     NOTARY_PROFILE=<profile> scripts/notarize dist/LowTalker-offline.pkg        # notarized and stapled, one package at a time
