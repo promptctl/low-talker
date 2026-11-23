@@ -1,0 +1,27 @@
+# [LAW:one-source-of-truth] The models a release carries are the ones model-tool built from the
+# checkout names as carried, at the Hugging Face commits `main` names for them now. Their cache
+# key is named here once, for model-cache.yml, which saves under it, and release.yml, which
+# restores from it.
+name: Name the carried models
+description: model-tool, the revision it names for the carried models, and their cache key
+outputs:
+  tool:
+    value: ${{ steps.model.outputs.tool }}
+  revision:
+    value: ${{ steps.model.outputs.revision }}
+  key:
+    value: ${{ steps.model.outputs.key }}
+runs:
+  using: composite
+  steps:
+    - id: model
+      shell: bash
+      run: |
+        set -euo pipefail
+        tool=$(make model-tool | tail -n 1)
+        revision=$("$tool" revision)
+        {
+          echo "tool=$tool"
+          echo "revision=$revision"
+          echo "key=model-store-$revision"
+        } >> "$GITHUB_OUTPUT"

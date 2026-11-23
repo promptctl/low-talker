@@ -30,19 +30,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # [LAW:one-source-of-truth] The same questions release.yml asks: the carried models are the
-      # source's, and the commits `main` names for them are the hub's, asked through model-tool.
       - name: Name the carried models
         id: model
-        run: |
-          set -euo pipefail
-          tool=$(make model-tool | tail -n 1)
-          revision=$("$tool" revision)
-          {
-            echo "tool=$tool"
-            echo "revision=$revision"
-            echo "key=model-store-$revision"
-          } >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/carried-models
 
       - name: Look the models up
         id: lookup

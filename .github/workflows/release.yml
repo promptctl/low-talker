@@ -3,9 +3,10 @@
 # signed with Developer ID, notarized and stapled.
 #
 # [LAW:one-source-of-truth] The recipe is scripts/release's, the same one a release made on a
-# Mac runs. This file only provisions a runner with the credentials and the model, runs it,
-# and publishes what it prints. The credentials are repository secrets that
-# scripts/release-secrets checks and sets.
+# Mac runs. This file provisions a runner with the credentials and the model, runs it,
+# publishes what it prints, and has scripts/move-cask move the tap's cask to it. What it
+# decides itself is how long to wait for the model cache and which tags are prereleases. The
+# credentials are repository secrets that scripts/release-secrets checks and sets.
 name: Release
 
 on:
@@ -115,19 +116,9 @@ jobs:
           source scripts/developer-id
           xcrun notarytool store-credentials "$NOTARY_PROFILE" --apple-id "$NOTARY_APPLE_ID" --team-id "$developer_team" --password "$NOTARY_PASSWORD" --keychain "$RELEASE_KEYCHAIN"
 
-      # [LAW:one-source-of-truth] The models the release carries are the ones model-tool built from
-      # this tag names as carried, at the Hugging Face commits `main` names for them now.
       - name: Name the carried models
         id: model
-        run: |
-          set -euo pipefail
-          tool=$(make model-tool | tail -n 1)
-          revision=$("$tool" revision)
-          {
-            echo "tool=$tool"
-            echo "revision=$revision"
-            echo "key=model-store-$revision"
-          } >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/carried-models
 
       # [LAW:no-ambient-temporal-coupling] The tag usually follows its commit's push to master
       # by seconds, and that push's model-cache.yml run may still be saving. What the restore
@@ -218,32 +209,15 @@ jobs:
           repositories: homebrew-tap
           permission-actions: write
 
-      # The tap's low-talker workflow (cask.yml here) is the one writer of the cask, with the
-      # tap's own token; this starts it and waits until the cask is at this release. The cask
-      # is the verdict, not the run: a run the tap's concurrency group cancelled leaves the
-      # cask to the run that replaced it. The release is published by now, so if this fails,
-      # `gh workflow run low-talker.yaml --repo promptctl/homebrew-tap` moves the cask without
-      # re-running this job.
-      - name: The tap's cask is at this release
+      # The release is published by now, so if the cask does not move, `gh workflow run
+      # low-talker.yaml --repo promptctl/homebrew-tap` moves it without re-running this job.
+      - name: The tap's cask is at the newest release
         env:
           GH_TOKEN: ${{ steps.tap.outputs.token }}
           READ_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          trap '[ $? -eq 0 ] || echo "::error::$TAG is published; move the cask with \`gh workflow run low-talker.yaml --repo promptctl/homebrew-tap\` rather than re-running this job"' EXIT
-          run=$(gh api --method POST repos/promptctl/homebrew-tap/actions/workflows/low-talker.yaml/dispatches -f ref=main -F return_run_details=true \
-            --jq '.workflow_run_id // error("the dispatch named no run")')
-          url=https://github.com/promptctl/homebrew-tap/actions/runs/$run
-          echo "moving the cask in $url"
-          while :; do
-            fields=$(gh run view "$run" --repo promptctl/homebrew-tap --json status,conclusion --jq '"\(.status) \(.conclusion)"')
-            read -r status conclusion <<<"$fields"
-            was=$(GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/low-talker.rb | sed -n 's/^  version "\(.*\)"$/\1/p')
-            [ "$was" = "${TAG#v}" ] && break
-            [ "$status" != completed ] || [ "$conclusion" = cancelled ] \
-              || { echo "::error::the tap's run ended $conclusion and left the cask at $was: $url"; exit 1; }
-            [ "$SECONDS" -lt 600 ] || { echo "::error::after ${SECONDS}s the cask is at $was and the tap's run is $status $conclusion: $url"; exit 1; }
-            sleep 10
-          done
-          echo "the tap's cask is low-talker $was; run $url" | tee -a "$GITHUB_STEP_SUMMARY"
+          scripts/move-cask 600 10 | tee "$RUNNER_TEMP/move-cask.log" \
+            || { echo "::error::$TAG is published; move the cask with \`gh workflow run low-talker.yaml --repo promptctl/homebrew-tap\` rather than re-running this job"; exit 1; }
+          tail -n 1 "$RUNNER_TEMP/move-cask.log" >> "$GITHUB_STEP_SUMMARY"

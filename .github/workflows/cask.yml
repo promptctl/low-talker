@@ -1,8 +1,8 @@
 # Moves the low-talker cask in promptctl/homebrew-tap to this repository's newest release.
 # The tap calls this from its own .github/workflows/low-talker.yaml, so the write to the tap
 # is the tap's own token: the promptctl org admits no deploy keys. release.yml starts that
-# workflow once a release is published and fails when the cask is not at that release
-# afterward.
+# workflow through scripts/move-cask once a release is published, and fails when the cask is
+# not at the newest release afterward.
 #
 # A caller gives the job contents: write on itself, the tap; this repository is public and
 # only read.
@@ -30,10 +30,9 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: low-talker
 
-      # [LAW:one-source-of-truth] The newest release is the latest one published, not a
-      # draft, read off the Releases each run: the cask holds no other record of it. Every
-      # release so far is a pre-release, so unlike a stable-only tap this takes those too.
-      # update-cask reads the sha256 GitHub recorded for the package, so nothing is downloaded,
+      # [LAW:one-source-of-truth] The newest release is newest-release's, read off the Releases
+      # each run: the cask holds no other record of it, and scripts/move-cask waits for the
+      # same one. update-cask reads the sha256 GitHub recorded for the package, so nothing is downloaded,
       # and it leaves a cask already at that release unchanged, so a run that finds nothing
       # to move pushes nothing.
       - name: The cask is low-talker's newest release
@@ -41,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag=$(gh release list --repo promptctl/low-talker --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // error("promptctl/low-talker has published no release")')
+          tag=$(low-talker/scripts/newest-release)
           git -C tap config user.name 'github-actions[bot]'
           git -C tap config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           low-talker/scripts/update-cask tap "${tag#v}" | tee -a "$GITHUB_STEP_SUMMARY"

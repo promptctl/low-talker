@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Prints the tag of low-talker's newest release: the latest one published, not a draft. It is
+# the release cask.yml moves the tap's cask to and the one scripts/move-cask waits for. Every
+# release so far is a pre-release, so unlike a stable-only tap this takes those too.
+set -euo pipefail
+gh release list --repo promptctl/low-talker --exclude-drafts --limit 1 --json tagName \
+  --jq '.[0].tagName // error("promptctl/low-talker has published no release")'
