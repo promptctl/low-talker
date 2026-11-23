@@ -237,10 +237,13 @@ jobs:
           url=https://github.com/promptctl/homebrew-tap/actions/runs/$run
           echo "moving the cask in $url"
           while :; do
-            fields=$(gh run view "$run" --repo promptctl/homebrew-tap --json status,conclusion --jq '"\(.status) \(.conclusion)"')
-            read -r status conclusion <<<"$fields"
             was=$(GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/low-talker.rb | sed -n 's/^  version "\(.*\)"$/\1/p')
             [ "$was" = "${TAG#v}" ] && break
+            # The run the dispatch names reads 404 for a moment after it (alpha.11, alpha.12),
+            # so a run not yet readable is waited on as one not yet finished.
+            fields=$(gh run view "$run" --repo promptctl/homebrew-tap --json status,conclusion --jq '"\(.status) \(.conclusion)"') \
+              || fields="unreadable -"
+            read -r status conclusion <<<"$fields"
             [ "$status" != completed ] || [ "$conclusion" = cancelled ] \
               || { echo "::error::the tap's run ended $conclusion and left the cask at $was: $url"; exit 1; }
             [ "$SECONDS" -lt 600 ] || { echo "::error::after ${SECONDS}s the cask is at $was and the tap's run is $status $conclusion: $url"; exit 1; }
