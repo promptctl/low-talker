@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Moves the low-talker cask in promptctl/homebrew-tap to the newest release, and waits until the
+# cask names it. It starts the tap's .github/workflows/low-talker.yaml, which calls this
+# repository's cask.yml, the one writer of the cask.
+#
+#   scripts/move-cask <seconds to wait> <seconds between reads>
+#
+# GH_TOKEN starts the tap's workflows and reads their runs; READ_TOKEN reads the tap's contents
+# and this repository's releases.
+#
+# [LAW:one-source-of-truth] The cask is the verdict, not the run: a run the tap's concurrency
+# group cancelled leaves the cask to the run that replaced it, and the run a dispatch names can
+# be unreadable for a while after it. So the run is read only once the wait has run out, to say
+# what it did. The release waited for is newest-release's, the one cask.yml writes.
+set -euo pipefail
+
+usage="usage: scripts/move-cask <seconds to wait> <seconds between reads>"
+bound=${1:?$usage}
+interval=${2:?$usage}
+here=$(dirname "$0")
+tap=promptctl/homebrew-tap
+
+run=$(gh api --method POST "repos/$tap/actions/workflows/low-talker.yaml/dispatches" -f ref=main -F return_run_details=true \
+  --jq '.workflow_run_id // error("the dispatch named no run")')
+url=https://github.com/$tap/actions/runs/$run
+echo "move-cask: moving the cask in $url"
+while :; do
+  want=$(GH_TOKEN=$READ_TOKEN "$here/newest-release")
+  cask=$(GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' "repos/$tap/contents/Casks/low-talker.rb")
+  # [LAW:parse-dont-validate] The version line as update-cask writes it, and exactly one.
+  was=$(sed -n 's/^  version "\(.*\)"$/\1/p' <<<"$cask")
+  [[ -n $was && $was != *$'\n'* ]] || { echo "move-cask: the tap's cask has no one version line as update-cask writes it" >&2; exit 1; }
+  echo "move-cask: after ${SECONDS}s the cask is at $was; the newest release is $want"
+  [ "$was" = "${want#v}" ] && break
+  [ "$SECONDS" -lt "$bound" ] || {
+    echo "move-cask: after ${SECONDS}s the cask is at $was, not ${want#v}: $url" >&2
+    gh run view "$run" --repo "$tap" >&2
+    exit 1
+  }
+  sleep "$interval"
+done
+echo "move-cask: the tap's cask is low-talker $was; run $url"
