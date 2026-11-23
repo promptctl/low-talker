@@ -3,8 +3,8 @@ import Foundation
 import Insertion
 import Testing
 
-/// What a request comes to against a reading of the field and the cursor's last commit, with no
-/// client at all.
+/// What a request comes to against a reading of the field and the input method's last words in it,
+/// with no client at all.
 /// [LAW:behavior-not-structure]
 @Suite struct CommitTests {
     private static let atTheSelection = NSRange(location: NSNotFound, length: 0)
@@ -14,82 +14,104 @@ import Testing
                                   before: before, after: after))
     }
 
-    /// The commit a dictation of `text` made at `location`, fitted to nothing in particular.
-    private static func committed(_ text: String, at location: Int) -> Commit {
-        Commit(text: text, replacementRange: atTheSelection,
-               field: .read(Commit.Read(filled: NSRange(location: location, length: text.utf16.count), replaced: 0, before: .field, rules: [])))
+    private static func blanks(_ count: Int) -> String { String(repeating: " ", count: count) }
+
+    /// " Hello", put in after "Dear Sam." and so ending at 15.
+    private static let hello = Commit.Run(" Hello", endingAt: 15)
+
+    /// Where the text before a commit's words came from, or nil for a commit into a field that
+    /// could not be read.
+    private static func source(_ commit: Commit) -> Commit.Before? {
+        guard case .fitted(let fitted) = commit.placement else { return nil }
+        return fitted.before
     }
 
-    /// "Dear Sam." and then " Hello", which went in at 9, as a field reads it that shows blanks
-    /// where the words it was just handed went.
-    private static let hello = committed(" Hello", at: 9)
-    private static let blanksAfterHello = reading(before: "Dear Sam." + String(repeating: " ", count: 6))
+    private static func dictating(_ text: String, against reading: FieldReading, after run: Commit.Run?) throws -> Commit {
+        try Commit.decide(InsertRequest(text, into: .cursorInFront), against: reading, after: run).get()
+    }
 
-    /// A dictation into a field that could not be read goes in as heard, at the selection, and
-    /// nothing says what it replaced, whatever the last commit was.
-    @Test(arguments: [nil, hello])
-    func aDictationIntoAnUnreadableFieldGoesInAsHeard(after last: Commit?) throws {
-        let commit = try Commit.decide(InsertRequest(" hello.", into: .cursorInFront), against: .unreadable(.noDocumentAccess), after: last).get()
-        #expect(commit == Commit(text: " hello.", replacementRange: Self.atTheSelection, field: .unreadable(.noDocumentAccess)))
-        #expect(commit.caret == nil)
+    /// A dictation into a field that could not be read goes in as heard, at the selection, nothing
+    /// says what it replaced, and it leaves no run, whatever the reason and whatever run was there.
+    @Test(arguments: [Unreadable.noDocumentAccess, .selectionNotFound, .impossibleSelection(NSRange(location: -1, length: 0)),
+                      .contradicted(asked: NSRange(location: 0, length: 4), answered: nil)], [nil, hello])
+    func aDictationIntoAnUnreadableFieldGoesInAsHeard(_ reason: Unreadable, after run: Commit.Run?) throws {
+        let commit = try Self.dictating(" hello.", against: .unreadable(reason), after: run)
+        #expect(commit == Commit(text: " hello.", replacementRange: Self.atTheSelection, placement: .unfitted(reason)))
+        #expect(commit.run == nil)
     }
 
     /// A dictation replaces the selection, counted in characters as a person counts them, and
-    /// fills as many UTF-16 units from the selection's start as its words take.
+    /// leaves its words as the run ending where they do.
     @Test func aDictationCountsTheSelectionItReplaces() throws {
-        let commit = try Commit.decide(InsertRequest(" smile", into: .cursorInFront), against: Self.reading(before: "a ", selected: "🫠🫠"),
-                                       after: nil).get()
+        let commit = try Self.dictating(" smile", against: Self.reading(before: "a ", selected: "🫠🫠"), after: nil)
         #expect(commit == Commit(text: "smile", replacementRange: Self.atTheSelection,
-                                 field: .read(Commit.Read(filled: NSRange(location: 2, length: 5), replaced: 2, before: .field, rules: [.trimmed]))))
-        #expect(commit.caret == NSRange(location: 7, length: 0))
+                                 placement: .fitted(Commit.Fitted(replaced: 2, before: .field, rules: [.trimmed], run: Commit.Run("smile", endingAt: 7)))))
     }
 
-    /// At the caret the last commit left, its words are the text before the caret, whatever the
-    /// field reads there: words continuing it are spaced from it, and not capitalized because the
-    /// field read blank.
-    @Test func aDictationAtTheLastCommitsCaretIsFittedAfterItsWords() throws {
-        let commit = try Commit.decide(InsertRequest(" there", into: .cursorInFront), against: Self.blanksAfterHello, after: Self.hello).get()
+    /// Where the run ends, a field showing blanks over it, as iTerm2 does before the words are
+    /// echoed, has the run's words stand before the caret: words continuing them are spaced from
+    /// them, not capitalized, and join the run.
+    @Test func aDictationWhereTheRunEndsIsFittedAfterItsWords() throws {
+        let commit = try Self.dictating(" there", against: Self.reading(before: "Dear Sam." + Self.blanks(6)), after: Self.hello)
         #expect(commit == Commit(text: " there", replacementRange: Self.atTheSelection,
-                                 field: .read(Commit.Read(filled: NSRange(location: 15, length: 6), replaced: 0,
-                                                          before: .lastCommit(NSRange(location: 9, length: 6)), rules: [.trimmed, .spacedBefore]))))
+                                 placement: .fitted(Commit.Fitted(replaced: 0, before: .run(NSRange(location: 9, length: 6), blanks: 6),
+                                                                  rules: [.trimmed, .spacedBefore], run: Commit.Run(" Hello there", endingAt: 21)))))
     }
 
-    /// The last commit's own sentence end still starts a sentence.
-    @Test func aCapitalStillComesAfterTheLastCommitsSentenceEnd() throws {
-        let last = Self.committed(" Hello there.", at: 9)
-        let reading = Self.reading(before: "Dear Sam." + String(repeating: " ", count: 13))
-        let commit = try Commit.decide(InsertRequest(" how are you", into: .cursorInFront), against: reading, after: last).get()
+    /// A field that shows some of the run as written and the rest blank, as a terminal echoing it
+    /// does, still has the run stand.
+    @Test func aRunPartlyShownStillStands() throws {
+        let commit = try Self.dictating(" there", against: Self.reading(before: "Dear Sam. He" + Self.blanks(3)), after: Self.hello)
+        #expect(commit.text == " there")
+        #expect(Self.source(commit) == .run(NSRange(location: 9, length: 6), blanks: 4))
+    }
+
+    /// The run's own sentence end still starts a sentence.
+    @Test func aCapitalStillComesAfterTheRunsSentenceEnd() throws {
+        let commit = try Self.dictating(" how are you", against: Self.reading(before: "Dear Sam." + Self.blanks(13)),
+                                        after: Commit.Run(" Hello there.", endingAt: 22))
         #expect(commit.text == " How are you")
-        #expect(commit.field == .read(Commit.Read(filled: NSRange(location: 22, length: 12), replaced: 0,
-                                                  before: .lastCommit(NSRange(location: 9, length: 13)), rules: [.trimmed, .capitalized, .spacedBefore])))
     }
 
-    /// Anywhere but the caret the last commit left - short of it, past it, or a selection there -
-    /// the field decides, as it reads.
-    @Test(arguments: [
-        DocumentContext(selection: NSRange(location: 14, length: 0), selected: "", before: "Dear Sam." + String(repeating: " ", count: 5), after: " "),
-        DocumentContext(selection: NSRange(location: 16, length: 0), selected: "", before: "Dear Sam." + String(repeating: " ", count: 7), after: ""),
-        DocumentContext(selection: NSRange(location: 15, length: 1), selected: "x", before: "Dear Sam." + String(repeating: " ", count: 6), after: ""),
-    ])
-    func aDictationAnywhereElseIsFittedToTheField(_ context: DocumentContext) throws {
-        let commit = try Commit.decide(InsertRequest(" there", into: .cursorInFront), against: .readable(context), after: Self.hello).get()
-        let field = try Commit.decide(InsertRequest(" there", into: .cursorInFront), against: .readable(context), after: nil).get()
-        #expect(commit == field)
+    /// A commit that leaves nothing, a transcript of whitespace, continues the run, so the words
+    /// after it are still fitted after the run's words.
+    @Test func aCommitLeavingNothingKeepsTheRun() throws {
+        let reading = Self.reading(before: "Dear Sam." + Self.blanks(6))
+        let nothing = try Self.dictating(" ", against: reading, after: Self.hello)
+        #expect(nothing.text == "")
+
+        let commit = try Self.dictating(" there", against: reading, after: nothing.run)
+        #expect(commit.text == " there")
+        #expect(Self.source(commit) == .run(NSRange(location: 9, length: 6), blanks: 6))
+    }
+
+    /// Where the run ends but the field shows other text over it - an edit to the same length in a
+    /// field that reads its text, or another field with its caret at the same place - the field's
+    /// text stands, as it would with no run at all, and the event says the run was there.
+    @Test(arguments: [("Dear Sam. Hello,", Commit.Run(" Hello.", endingAt: 16)),
+                      ("Meeting notes for Sam, part", Commit.Run(" Hello there.", endingAt: 27))])
+    func aRunTheFieldShowsOtherTextOverIsNotFittedAfter(_ before: String, _ run: Commit.Run) throws {
+        let commit = try Self.dictating(" two", against: Self.reading(before: before), after: run)
+        let field = try Self.dictating(" two", against: Self.reading(before: before), after: nil)
+        #expect(commit.text == " two")
+        #expect(commit.text == field.text)
+        #expect(Self.source(commit) == .fieldOverRun(run.range))
+    }
+
+    /// Anywhere but where the run ends, the field decides, as it reads.
+    @Test(arguments: [14, 16])
+    func aDictationAnywhereElseIsFittedToTheField(_ caret: Int) throws {
+        let reading = Self.reading(before: "Dear Sam." + Self.blanks(caret - 9))
+        let commit = try Self.dictating(" there", against: reading, after: Self.hello)
+        #expect(commit == (try Self.dictating(" there", against: reading, after: nil)))
         #expect(commit.text == "There")
-        guard case .read(let read) = commit.field else { Issue.record("\(commit)"); return }
-        #expect(read.before == .field)
     }
 
-    /// A last commit that left nothing stands over nothing, so the field's own text before the
-    /// caret is what the words are fitted to.
-    @Test func anEmptyLastCommitLeavesTheFieldsTextBeforeIt() throws {
-        let reading = Self.reading(before: "Dear Sam. Hello ")
-        let request = InsertRequest(" there", into: .cursorInFront)
-        let commit = try Commit.decide(request, against: reading, after: Self.committed("", at: 16)).get()
-        #expect(commit.text == "there")
-        #expect(commit.text == (try Commit.decide(request, against: reading, after: nil).get().text))
-        guard case .read(let read) = commit.field else { Issue.record("\(commit)"); return }
-        #expect(read.before == .lastCommit(NSRange(location: 16, length: 0)))
+    /// A run keeps as many of its last units as a read reaches back, in whole characters.
+    @Test func aRunKeepsTheUnitsAReadReaches() {
+        let run = Commit.Run("🫠" + String(repeating: "a", count: FieldReading.bound - 1), endingAt: 2_000)
+        #expect(run.words == String(repeating: "a", count: FieldReading.bound - 1))
+        #expect(run.range == NSRange(location: 2_000 - (FieldReading.bound - 1), length: FieldReading.bound - 1))
     }
 
     /// A take-back from a field that could not be read, or whose caret is a selection, is not
@@ -102,21 +124,23 @@ import Testing
         #expect(Commit.decide(request, against: Self.reading(before: "say goodbye"), after: nil) == .failure(.unfound(.differs)))
     }
 
-    /// A take-back is proved against what the field reads, never the last commit: at the caret
-    /// the last commit left, a field reading blanks there has no words to take back.
-    @Test func aTakeBackAtTheLastCommitsCaretIsProvedAgainstTheField() {
+    /// A take-back is proved against what the field reads, never the run: where the run ends, a
+    /// field reading blanks there has no words to take back.
+    @Test func aTakeBackWhereTheRunEndsIsProvedAgainstTheField() {
         let request = InsertRequest("", into: .app("com.example.editor"), replacing: "Hello")
-        #expect(Commit.decide(request, against: Self.blanksAfterHello, after: Self.hello) == .failure(.unfound(.differs)))
+        #expect(Commit.decide(request, against: Self.reading(before: "Dear Sam." + Self.blanks(6)), after: Self.hello) == .failure(.unfound(.differs)))
     }
 
     /// What the commit's event says: the rules in the order they apply, and where the text before
     /// the words came from.
-    @Test func theFieldReadSaysWhatFittingDid() {
-        let filled = NSRange(location: 3, length: 7)
-        #expect(Commit.Read(filled: filled, replaced: 0, before: .field, rules: [.spacedAfter, .periodDropped, .capitalized, .spacedBefore, .trimmed])
+    @Test func thePlacementSaysWhatFittingDid() {
+        let run = Commit.Run("", endingAt: 3)
+        #expect(Commit.Fitted(replaced: 0, before: .field, rules: [.spacedAfter, .periodDropped, .capitalized, .spacedBefore, .trimmed], run: run)
             .description == "fitted: edge whitespace trimmed, closing period dropped, capitalized, space before, space after; the text before it from the field")
-        #expect(Commit.Read(filled: filled, replaced: 0, before: .lastCommit(NSRange(location: 0, length: 3)), rules: []).description
-            == "fitted, unchanged; the text before it from the last commit, its 3 units at {0, 3}")
-        #expect(Commit.Field.unreadable(.noDocumentAccess).description == "unfitted, because it gives no document access")
+        #expect(Commit.Fitted(replaced: 0, before: .run(NSRange(location: 0, length: 3), blanks: 2), rules: [], run: run).description
+            == "fitted, unchanged; the text before it from the input method's run, its 3 units at {0, 3}, 2 of them read blank")
+        #expect(Commit.Fitted(replaced: 0, before: .fieldOverRun(NSRange(location: 0, length: 3)), rules: [], run: run).description
+            == "fitted, unchanged; the text before it from the field, which reads other text over the input method's run, its 3 units at {0, 3}")
+        #expect(Commit.Placement.unfitted(.noDocumentAccess).description == "unfitted, because it gives no document access")
     }
 }

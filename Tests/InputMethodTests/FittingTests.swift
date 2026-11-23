@@ -7,18 +7,12 @@ import Testing
     struct Case: Sendable, CustomTestStringConvertible {
         let name: String
         let before: String
-        var selected = ""
         let after: String
         let transcript: String
         let fitted: String
         let rules: Set<Fitting.Rule>
 
         var testDescription: String { name }
-
-        var context: DocumentContext {
-            DocumentContext(selection: NSRange(location: before.utf16.count, length: selected.utf16.count), selected: selected, before: before,
-                            after: after)
-        }
     }
 
     static let cases: [Case] = [
@@ -83,13 +77,11 @@ import Testing
         Case(name: "already capital", before: "", after: "", transcript: "Hello", fitted: "Hello", rules: []),
         Case(name: "after an emoji", before: "👍", after: "", transcript: "nice", fitted: " nice", rules: [.spacedBefore]),
         Case(name: "blank", before: "Hi", after: "there", transcript: "  ", fitted: "", rules: [.trimmed]),
-        Case(name: "a selection replaced, judged by what is around it", before: "Hi. ", selected: "world", after: "", transcript: "there", fitted: "There", rules: [.capitalized]),
-        Case(name: "a selection replaced mid-sentence", before: "a", selected: "big", after: "dog", transcript: "small.", fitted: " small ", rules: [.periodDropped, .spacedBefore, .spacedAfter]),
     ]
 
     @Test(arguments: cases)
     func aTranscriptIsFittedToTheTextAroundIt(_ fitting: Case) {
-        #expect(Fitting.fit(fitting.transcript, to: fitting.context) == Fitting(text: fitting.fitted, rules: fitting.rules))
+        #expect(Fitting.fit(fitting.transcript, between: fitting.before, and: fitting.after) == Fitting(text: fitting.fitted, rules: fitting.rules))
     }
 
 }

@@ -103,8 +103,7 @@ public nonisolated extension ContractCase {
         typed(into: .iTerm2Blind, answers: blind),
         typed(into: .iTerm2SelectionOnly, answers: Answers(documentAccess: true, selection: NSRange(location: 13, length: 0), text: nil)),
         // Read across the words it was just handed, which its screen shows blank.
-        ContractCase(profile: .iTerm2, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint), reads: NSRange(location: 9, length: 4),
-                     answers: reads(caret: 13, text: "vo  "), holds: "alpha bravo x"),
+        typed(into: .iTerm2, reads: NSRange(location: 9, length: 4), answers: reads(caret: 13, text: "vo  ")),
         // Nobody measured a client giving document access and answering NSNotFound for its selection.
         typed(into: .documentAccessWithoutSelection,
               answers: Answers(documentAccess: true, selection: NSRange(location: NSNotFound, length: NSNotFound), text: nil)),
@@ -127,8 +126,9 @@ public nonisolated extension ContractCase {
     }
 
     /// Words typed at the end of a terminal's line.
-    private static func typed(into profile: ClientProfile, answers: Answers) -> ContractCase {
-        ContractCase(profile: profile, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint), answers: answers, holds: "alpha bravo x")
+    private static func typed(into profile: ClientProfile, reads: NSRange = readRange, answers: Answers) -> ContractCase {
+        ContractCase(profile: profile, holding: "alpha bravo", act: .insert(" x", replacementRange: atThePoint), reads: reads, answers: answers,
+                     holds: "alpha bravo x")
     }
 
     private init(profile: ClientProfile, holding: String, selected: NSRange? = nil, maxLength: Int? = nil, act: Act, reads: NSRange = readRange,

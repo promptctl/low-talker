@@ -2,11 +2,10 @@ import Foundation
 
 /// A transcript shaped to the text around where it goes: spaced from its neighbours, capitalised
 /// where a sentence starts, and without a closing period where the field's text continues the
-/// sentence. One fit for the dictation commit and the marked-text preview alike, so that a final
-/// does not jump from the partials before it.
+/// sentence.
 ///
-/// [LAW:effects-at-boundaries] Pure over the text around where it goes, which `Commit` takes from
-/// one reading of the field and the cursor's last commit.
+/// [LAW:effects-at-boundaries] Pure over the text either side of where it goes, which `Commit`
+/// takes from one reading of the field.
 public nonisolated struct Fitting: Equatable, Sendable {
     public let text: String
     /// The rules that changed the text.
@@ -127,17 +126,17 @@ public nonisolated struct Fitting: Equatable, Sendable {
         }
     }
 
-    /// `transcript` fitted to the text either side of where it goes.
+    /// `transcript` fitted between `before` and `after`, the text either side of where it goes.
+    /// The selection is what the transcript replaces, so it is not asked for.
     ///
-    /// A rule has fired when it changed the text. The selection is what the transcript replaces,
-    /// so it is never looked at.
+    /// A rule has fired when it changed the text.
     ///
     /// [LAW:dataflow-not-control-flow] Every rule runs, in `Rule.allCases` order; the text around
     /// it decides whether one changes anything.
-    public static func fit(_ transcript: String, to context: DocumentContext) -> Fitting {
+    public static func fit(_ transcript: String, between before: String, and after: String) -> Fitting {
         var (text, fired) = (transcript, Set<Rule>())
         for rule in Rule.allCases {
-            let changed = rule.apply(to: text, between: context.before, and: context.after)
+            let changed = rule.apply(to: text, between: before, and: after)
             if changed != text { fired.insert(rule) }
             text = changed
         }
