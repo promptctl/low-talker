@@ -30,7 +30,7 @@ import Testing
 
         #expect(field.text == "🫠 hello")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 7, into: cursor.application, landed: "🫠 hello", replaced: 0), seen: Self.seenLine))
-        let fitted = Commit.Fitted(replaced: 0, before: .field, rules: [], run: Commit.Run("🫠 hello", endingAt: "🫠 hello".utf16.count))
+        let fitted = Commit.Fitted(replaced: 0, before: .field, rules: [])
         guard case .committed(7, cursor.application, .fitted(fitted), _, _, late: false) = did else { Issue.record("\(did)"); return }
     }
 
@@ -49,8 +49,7 @@ import Testing
         #expect(field.calls.last == .insertText(" Hello there.", replacementRange: Self.atTheSelection))
         #expect(field.text == "Dear Sam. Hello there.")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 13, into: cursor.application, landed: " Hello there.", replaced: 0), seen: Self.seenLine))
-        let fitted = Commit.Fitted(replaced: 0, before: .field, rules: [.trimmed, .capitalized, .spacedBefore],
-                                   run: Commit.Run(" Hello there.", endingAt: 22))
+        let fitted = Commit.Fitted(replaced: 0, before: .field, rules: [.trimmed, .capitalized, .spacedBefore])
         guard case .committed(13, cursor.application, .fitted(fitted), _, _, late: false) = did else {
             Issue.record("\(did)"); return
         }
@@ -70,7 +69,7 @@ import Testing
         #expect(field.calls.last == .insertText("today", replacementRange: Self.atTheSelection))
         #expect(field.text == "Call me today, please")
         #expect(turn.wait(.zero) == .answered(.inserted(characters: 5, into: cursor.application, landed: "today", replaced: 8), seen: Self.seenLine))
-        let fitted = Commit.Fitted(replaced: 8, before: .field, rules: [.trimmed, .periodDropped], run: Commit.Run("today", endingAt: 13))
+        let fitted = Commit.Fitted(replaced: 8, before: .field, rules: [.trimmed, .periodDropped])
         guard case .committed(5, cursor.application, .fitted(fitted), _, _, late: false) = did else {
             Issue.record("\(did)"); return
         }
@@ -107,8 +106,7 @@ import Testing
 
         #expect(field.calls.last == .insertText(" Earlier words", replacementRange: NSRange(location: 5, length: 23)))
         #expect(field.text == "Done. Earlier words")
-        let fitted = Commit.Fitted(replaced: 23, before: .field, rules: [.trimmed, .capitalized, .spacedBefore],
-                                   run: Commit.Run(" Earlier words", endingAt: 19))
+        let fitted = Commit.Fitted(replaced: 23, before: .field, rules: [.trimmed, .capitalized, .spacedBefore])
         guard case .committed(14, cursor.application, .fitted(fitted), _, _, late: false) = did else {
             Issue.record("\(did)"); return
         }
@@ -510,8 +508,7 @@ import Testing
         #expect(line(.refused(.noTextFieldHasFocus, deciding: .microseconds(1500), late: false)) == main + "refused noClientHasFocus after 1.5 ms deciding")
         #expect(line(.refused(.noTextFieldHasFocus, deciding: .microseconds(1500), late: true))
             == main + "refused noClientHasFocus after 1.5 ms deciding, after the port had answered that the input method is busy")
-        let fitted = Commit.Fitted(replaced: 5, before: .run(NSRange(location: 0, length: 3), blanks: 3), rules: [.capitalized, .spacedBefore],
-                                   run: Commit.Run("abc", endingAt: 3))
+        let fitted = Commit.Fitted(replaced: 5, before: .run(NSRange(location: 0, length: 3), blanks: 3), rules: [.capitalized, .spacedBefore])
         #expect(line(.committed(characters: 7, into: "com.apple.TextEdit", placement: .fitted(fitted),
                                 deciding: .milliseconds(2), committing: .milliseconds(12), late: false))
             == main + "2.0 ms deciding, then 12.0 ms committing 7 characters into com.apple.TextEdit in place of 5 characters, fitted: capitalized, space before; the text before it from the input method's run, its 3 units at {0, 3}, 3 of them read blank")

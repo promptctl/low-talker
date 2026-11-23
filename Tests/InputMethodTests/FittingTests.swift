@@ -77,6 +77,8 @@ import Testing
         Case(name: "already capital", before: "", after: "", transcript: "Hello", fitted: "Hello", rules: []),
         Case(name: "after an emoji", before: "👍", after: "", transcript: "nice", fitted: " nice", rules: [.spacedBefore]),
         Case(name: "blank", before: "Hi", after: "there", transcript: "  ", fitted: "", rules: [.trimmed]),
+        Case(name: "after a sentence end and its space", before: "Hi. ", after: "", transcript: "there", fitted: "There", rules: [.capitalized]),
+        Case(name: "mid-sentence between two words", before: "a", after: "dog", transcript: "small.", fitted: " small ", rules: [.periodDropped, .spacedBefore, .spacedAfter]),
     ]
 
     @Test(arguments: cases)

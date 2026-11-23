@@ -381,7 +381,8 @@ public final class Client: CustomStringConvertible {
     /// written or blank (`Commit.Run`). A reactivation makes a new cursor without one.
     ///
     /// [LAW:one-source-of-truth] exception: iTerm2 reads its screen, blank where the words just
-    /// went (low-voice-edit-1jf.jwr), so for those units the field holds no copy to agree with.
+    /// went (low-voice-edit-1jf.jwr), so where the field shows a blank the run's unit is taken over
+    /// it. A blank the person typed over the run's words reads the same, and is taken over too.
     private var run: Commit.Run?
 
     /// Nothing at all when the client will not name its app. [LAW:parse-dont-validate] The

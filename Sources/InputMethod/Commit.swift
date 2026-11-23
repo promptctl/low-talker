@@ -14,6 +14,9 @@ public nonisolated struct Commit: Equatable, Sendable {
     /// take back were proved to fill, which only a client that was read is sent.
     let replacementRange: NSRange
     public let placement: Placement
+    /// The input method's words before the caret this commit leaves, its own last among them: what
+    /// the client keeps for the next commit, and never part of an event, being the person's words.
+    let run: Run?
 
     /// How the words were placed: fitted to a field that was read, or as the engine wrote them,
     /// because the field could not be read.
@@ -47,8 +50,6 @@ public nonisolated struct Commit: Equatable, Sendable {
         let replaced: Int
         let before: Before
         let rules: Set<Fitting.Rule>
-        /// The input method's words before the caret this commit leaves, its own last among them.
-        let run: Run
 
         public var description: String {
             let fitted = rules.isEmpty ? "fitted, unchanged"
@@ -62,7 +63,8 @@ public nonisolated struct Commit: Equatable, Sendable {
         /// No run of the input method's words ends where these go.
         case field
         /// The run ends where these go, over its range, and the field shows each of its units as
-        /// the run wrote it or blank, `blanks` of them blank: the run stands there.
+        /// the run wrote it or blank, `blanks` of them blank where the run wrote otherwise: the run
+        /// stands there.
         case run(NSRange, blanks: Int)
         /// The run ends where these go, over its range, and the field shows other text in it: the
         /// field's text stands.
@@ -81,16 +83,20 @@ public nonisolated struct Commit: Equatable, Sendable {
 
     /// The words the input method put before a caret, over as many of its commits as followed one
     /// another there, ending at the caret they left: the last `FieldReading.bound` units of them,
-    /// as many as a read reaches back.
+    /// as many as a read reaches back. Never empty: commits that left nothing leave no run.
     public struct Run: Equatable, Sendable {
         let words: String
         /// The caret they left, in UTF-16 units.
         let end: Int
 
-        init(_ words: String, endingAt end: Int) {
-            var words = words
-            while words.utf16.count > FieldReading.bound { words.removeFirst() }
-            (self.words, self.end) = (words, end)
+        init?(_ words: String, endingAt end: Int) {
+            guard !words.isEmpty else { return nil }
+            var (start, excess) = (words.startIndex, words.utf16.count - FieldReading.bound)
+            while excess > 0 {
+                excess -= words[start].utf16.count
+                start = words.index(after: start)
+            }
+            (self.words, self.end) = (String(words[start...]), end)
         }
 
         var range: NSRange { NSRange(location: end - words.utf16.count, length: words.utf16.count) }
@@ -106,14 +112,6 @@ public nonisolated struct Commit: Equatable, Sendable {
             case .unreadable(let reason): "the field could not be read, because \(reason)"
             case .unfound(let unfound): "\(unfound)"
             }
-        }
-    }
-
-    /// The run this commit leaves before the caret, where the field was read.
-    var run: Run? {
-        switch placement {
-        case .fitted(let fitted): fitted.run
-        case .unfitted: nil
         }
     }
 
@@ -151,7 +149,7 @@ public nonisolated struct Commit: Equatable, Sendable {
     static func decide(_ request: InsertRequest, against reading: FieldReading, after run: Run?) -> Result<Commit, Untaken> {
         switch (Act(request), reading) {
         case (.dictation, .unreadable(let reason)):
-            .success(Commit(text: request.text, replacementRange: NSRange(location: NSNotFound, length: 0), placement: .unfitted(reason)))
+            .success(Commit(text: request.text, replacementRange: NSRange(location: NSNotFound, length: 0), placement: .unfitted(reason), run: nil))
         case (.takingBack, .unreadable(let reason)):
             .failure(.unreadable(reason))
         case (.dictation, .readable(let context)):
@@ -163,9 +161,9 @@ public nonisolated struct Commit: Equatable, Sendable {
 
     private static func fitted(_ transcript: String, at place: Place) -> Commit {
         let fitting = Fitting.fit(transcript, between: place.before, and: place.after)
-        let run = Run(place.continuing + fitting.text, endingAt: place.location + fitting.text.utf16.count)
         return Commit(text: fitting.text, replacementRange: place.range,
-                      placement: .fitted(Fitted(replaced: place.replaced, before: place.source, rules: fitting.rules, run: run)))
+                      placement: .fitted(Fitted(replaced: place.replaced, before: place.source, rules: fitting.rules)),
+                      run: Run(place.continuing + fitting.text, endingAt: place.location + fitting.text.utf16.count))
     }
 
     /// A dictation's place: the selection, after the field's text, or after `run` where it ends
@@ -190,8 +188,8 @@ public nonisolated struct Commit: Equatable, Sendable {
         guard shown.count == written.count, zip(shown, written).allSatisfy({ $0 == $1 || $0 == blank }) else {
             return (context.before, .fieldOverRun(run.range), "")
         }
-        return (context.before.droppingLast(units: written.count) + run.words, .run(run.range, blanks: shown.count { $0 == blank }),
-                run.words)
+        let blanks = zip(shown, written).count { $0 != $1 }
+        return (context.before.droppingLast(units: written.count) + run.words, .run(run.range, blanks: blanks), run.words)
     }
 
     private static let blank = UTF16.CodeUnit(UInt8(ascii: " "))
