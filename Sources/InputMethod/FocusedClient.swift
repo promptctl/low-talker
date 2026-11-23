@@ -104,9 +104,9 @@ public protocol InputController: AnyObject {}
 /// it, since a key reaches only the controller of the client it is typed into. A cursor stays held
 /// while it is not live - an activation in another app, or a key typed into another of its app,
 /// ruled it out - because a key typed into it later is still proof that it has the keyboard, and
-/// macOS need not activate it again first. [FRAMING:representation] Nothing is remembered about
-/// text already inserted - the client is the document, and a second copy of what it holds could
-/// only disagree.
+/// macOS need not activate it again first. [FRAMING:representation] The client is the document,
+/// and the one thing remembered of text already inserted is each cursor's last words, which stand
+/// only where the field shows nothing else in their place (`Client.run`).
 public final class FocusedClient {
     /// Each controller's cursor, by the controller. Keyed by the controller rather than by the
     /// client's own identifier, because that identifier is minted anew at activation: in this Mac's
@@ -376,6 +376,14 @@ public final class Client: CustomStringConvertible {
     /// The identifier the log says this client by, read once here and only ever said: nothing
     /// is decided from it (`ClientName`).
     private let identifier: String?
+    /// The words the input method last put into this client, ending at the caret they left: the
+    /// only text remembered of it, which stands only where the field shows each of its units as
+    /// written or blank (`Commit.Run`). A reactivation makes a new cursor without one.
+    ///
+    /// [LAW:one-source-of-truth] exception: iTerm2 reads its screen, blank where the words just
+    /// went (low-voice-edit-1jf.jwr), so where the field shows a blank the run's unit is taken over
+    /// it. A blank the person typed over the run's words reads the same, and is taken over too.
+    private var run: Commit.Run?
 
     /// Nothing at all when the client will not name its app. [LAW:parse-dont-validate] The
     /// one place the question is asked, and past it there is a cursor whose app is known
@@ -436,7 +444,7 @@ public final class Client: CustomStringConvertible {
     /// [LAW:no-silent-failure] A take-back that cannot be proved is refused with what was found,
     /// said in the log beside the refusal the app is told.
     func decide(_ request: InsertRequest) -> Result<Commit, Refusal> {
-        Commit.decide(request, against: read(reaching: request.replacing.utf16.count)).mapError { untaken in
+        Commit.decide(request, against: read(reaching: request.replacing.utf16.count), after: run).mapError { untaken in
             insertLog.notice("words could not be taken back from \(self.application, privacy: .public): \(untaken.description, privacy: .public)")
             return .wordsCannotBeTakenBack
         }
@@ -445,6 +453,7 @@ public final class Client: CustomStringConvertible {
     /// Makes `commit`: its text into the client, at its range.
     func commit(_ commit: Commit) {
         client.insertText(commit.text, replacementRange: commit.replacementRange)
+        run = commit.run
     }
 }
 

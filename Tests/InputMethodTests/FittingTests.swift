@@ -7,18 +7,12 @@ import Testing
     struct Case: Sendable, CustomTestStringConvertible {
         let name: String
         let before: String
-        var selected = ""
         let after: String
         let transcript: String
         let fitted: String
         let rules: Set<Fitting.Rule>
 
         var testDescription: String { name }
-
-        var reading: FieldReading {
-            .readable(DocumentContext(selection: NSRange(location: before.utf16.count, length: selected.utf16.count),
-                                      selected: selected, before: before, after: after))
-        }
     }
 
     static let cases: [Case] = [
@@ -83,28 +77,13 @@ import Testing
         Case(name: "already capital", before: "", after: "", transcript: "Hello", fitted: "Hello", rules: []),
         Case(name: "after an emoji", before: "👍", after: "", transcript: "nice", fitted: " nice", rules: [.spacedBefore]),
         Case(name: "blank", before: "Hi", after: "there", transcript: "  ", fitted: "", rules: [.trimmed]),
-        Case(name: "a selection replaced, judged by what is around it", before: "Hi. ", selected: "world", after: "", transcript: "there", fitted: "There", rules: [.capitalized]),
-        Case(name: "a selection replaced mid-sentence", before: "a", selected: "big", after: "dog", transcript: "small.", fitted: " small ", rules: [.periodDropped, .spacedBefore, .spacedAfter]),
+        Case(name: "after a sentence end and its space", before: "Hi. ", after: "", transcript: "there", fitted: "There", rules: [.capitalized]),
+        Case(name: "mid-sentence between two words", before: "a", after: "dog", transcript: "small.", fitted: " small ", rules: [.periodDropped, .spacedBefore, .spacedAfter]),
     ]
 
     @Test(arguments: cases)
     func aTranscriptIsFittedToTheTextAroundIt(_ fitting: Case) {
-        #expect(Fitting.fit(fitting.transcript, to: fitting.reading) == Fitting(text: fitting.fitted, outcome: .fitted(fitting.rules)))
+        #expect(Fitting.fit(fitting.transcript, between: fitting.before, and: fitting.after) == Fitting(text: fitting.fitted, rules: fitting.rules))
     }
 
-    /// A field that cannot be read gets the transcript back verbatim, its whitespace included, with
-    /// the client's reason.
-    @Test(arguments: [Unreadable.noDocumentAccess, .selectionNotFound, .impossibleSelection(NSRange(location: -1, length: 0)),
-                      .contradicted(asked: NSRange(location: 0, length: 4), answered: nil)])
-    func anUnreadableFieldGetsTheTranscriptUnchanged(_ reason: Unreadable) {
-        #expect(Fitting.fit(" hello.", to: .unreadable(reason)) == Fitting(text: " hello.", outcome: .unfitted(reason)))
-    }
-
-    /// What the commit's event says: the rules in the order they apply, or the reason.
-    @Test func theOutcomeSaysWhatFittingDid() {
-        #expect(Fitting.Outcome.fitted([.spacedAfter, .periodDropped, .capitalized, .spacedBefore, .trimmed]).description
-            == "fitted: edge whitespace trimmed, closing period dropped, capitalized, space before, space after")
-        #expect(Fitting.Outcome.fitted([]).description == "fitted, unchanged")
-        #expect(Fitting.Outcome.unfitted(.noDocumentAccess).description == "unfitted, because it gives no document access")
-    }
 }
